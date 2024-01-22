@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"  ?>
+<robot name="red_intangible_ball" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+	<xacro:arg name="size_x" default="0.20" />
+	<xacro:arg name="size_y" default="0.50" />
+	<xacro:arg name="size_z" default="0.025" />
+
+	<xacro:property name="size_x" default="$(arg size_x)" />
+	<xacro:property name="size_y" default="$(arg size_y)" />
+	<xacro:property name="size_z" default="$(arg size_z)" />
+	<xacro:property name="color_rgba" default="0.3 0.3 0.3 1.0" />
+
+
+	<material name="support_color">
+		<color rgba="${color_rgba}"/>
+	</material>
+
+	<xacro:macro name="box_inertial" params="mass x y z pose_xyz pose_rpy">
+		<inertial>
+			<origin xyz="${pose_xyz}" rpy="${pose_rpy}"/>
+			<mass value="${mass}" />
+			<inertia ixx="${0.083 * mass * (y*y + z*z)}" ixy="0.0" ixz="0.0" iyy="${0.083 * mass * (x*x + z*z)}" iyz="0.0" izz="${0.083 * mass * (x*x + y*y)}"/>
+		</inertial>
+	</xacro:macro>
+
+    <link name="world"/>
+
+
+
+
+	<link name="box_link">
+		<!-- The shin is made of a cylinder plus a sphere, the total length, is shin_height, so the length  of the two are detemrined accordingly -->
+        <visual>
+			<origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="${size_x} ${size_y} ${size_z}" />
+            </geometry>
+			<material name="support_color"/>
+        </visual>
+		<collision>
+			<origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="${size_x} ${size_y} ${size_z}" />
+            </geometry>
+        </collision>
+		<xacro:box_inertial mass="0.001" x="${size_x}" y="${size_y}" z="${size_z}" pose_xyz="0 0 0" pose_rpy="0 0 0"/>
+	</link>
+	<gazebo reference="box_link">
+		<visual name="visual">
+			<material>
+			<ambient>"${color_rgba}"</ambient>
+			<diffuse>"${color_rgba}"</diffuse>
+			<!--
+			<specular>1 0 0 1</specular>
+			<emissive>1 0 0 1</emissive>
+			-->
+			</material>
+      	</visual>
+    </gazebo>
+
+	<joint name="world_to_sphere" type="fixed">
+        <parent link="world"/>
+        <child link="box_link"/>
+    </joint>
+
+
+</robot>

@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="utf-8"  ?>
+<robot name="leg" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+	<!-- <xacro:arg name="hip_y_offset" default="0.2146" />  -->
+	<xacro:arg name="hip_y_offset" default="0.3" />
+
+	<xacro:arg name="thigh_width" default="0.05" />
+	<xacro:arg name="thigh_height" default="0.3" />
+	<xacro:arg name="thigh_mass" default="3.3712777" />
+	<xacro:arg name="thigh_color" default="1 0.5088 0.0468 1" />
+
+	<xacro:arg name="knee_y_offset" default="-0.1182" />
+
+	<xacro:arg name="shin_width" default="0.05" />
+	<xacro:arg name="shin_height" default="0.451" />
+	<xacro:arg name="shin_mass" default="1.3106594" />
+	<xacro:arg name="shin_color" default="1 0.5088 0.0468 1" />
+
+	<xacro:arg name="rail_color" default="1 1 1 1" /> 
+	<xacro:arg name="rail_width" default="0.08" />
+	<xacro:arg name="rail_length" default="0.1" />
+	<xacro:arg name="rail_height" default="2" />
+	<xacro:arg name="rail_mass" default="1000" />
+
+	<xacro:arg name="hip_friction" default="0.1" />
+	<xacro:arg name="rail_friction" default="0.0" />
+	<xacro:arg name="knee_friction" default="0.1" />
+
+	<xacro:arg name="rail_x" default="0.0" />
+	<xacro:arg name="rail_y" default="0.0" />
+	<xacro:arg name="rail_z" default="0.0" />
+	<xacro:arg name="rail_roll" default="0.0" />
+	<xacro:arg name="rail_pitch" default="0.0" />
+	<xacro:arg name="rail_yaw" default="0.0" />
+
+
+	<xacro:property name="hip_y_offset"  default="$(arg hip_y_offset)" /> 
+
+	<xacro:property name="thigh_width"  default="$(arg thigh_width)" />
+	<xacro:property name="thigh_height" default="$(arg thigh_height)" />
+	<xacro:property name="thigh_mass"   default="$(arg thigh_mass)" />
+	<xacro:property name="thigh_color"  default="$(arg thigh_color)" /> 
+
+	<xacro:property name="knee_y_offset"  default="$(arg knee_y_offset)" /> 
+
+	<xacro:property name="shin_width"  default="$(arg shin_width)" />
+	<xacro:property name="shin_height" default="$(arg shin_height)" />
+	<xacro:property name="shin_mass"   default="$(arg shin_mass)" />
+	<xacro:property name="shin_color"  default="$(arg shin_color)" /> 
+
+	<xacro:property name="rail_color" default="$(arg rail_color)" />
+	<xacro:property name="rail_width" default="$(arg rail_width)" />
+	<xacro:property name="rail_length" default="$(arg rail_length)" />
+	<xacro:property name="rail_height" default="$(arg rail_height)" />
+	<xacro:property name="rail_mass" default="$(arg rail_mass)" />
+	<xacro:property name="knee_friction" default="$(arg knee_friction)" />
+	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
+	<xacro:property name="rail_friction" default="$(arg rail_friction)" />
+	<xacro:property name="rail_x" default="$(arg rail_x)" />
+	<xacro:property name="rail_y" default="$(arg rail_y)" />
+	<xacro:property name="rail_z" default="$(arg rail_z)" />
+	<xacro:property name="rail_roll" default="$(arg rail_roll)" />
+	<xacro:property name="rail_pitch" default="$(arg rail_pitch)" />
+	<xacro:property name="rail_yaw" default="$(arg rail_yaw)" />
+
+
+	<material name="almost_white">
+		<color rgba="0.9 0.9 0.9 1"/>
+	</material>
+
+	<xacro:macro name="box_inertial" params="mass x y z pose_xyz pose_rpy">
+		<inertial>
+			<origin xyz="${pose_xyz}" rpy="${pose_rpy}"/>
+			<mass value="${mass}" />
+			<inertia ixx="${0.083 * mass * (y*y + z*z)}" ixy="0.0" ixz="0.0" iyy="${0.083 * mass * (x*x + z*z)}" iyz="0.0" izz="${0.083 * mass * (x*x + y*y)}"/>
+		</inertial>
+	</xacro:macro>
+
+    <xacro:macro name="cylinder_z_inertial" params="mass height radius pose_xyz pose_rpy">
+		<inertial>
+			<origin xyz="${pose_xyz}" rpy="${pose_rpy}"/>
+			<mass value="${mass}" />
+            <inertia    ixx="${1/12.0 * mass * (3*radius*radius + height*height)}" ixy="0.0"  ixz="0.0"
+                        iyy="${1/12.0 * mass * (3*radius*radius + height*height)}" iyz="0.0"
+                        izz="${1/12.0 * mass * radius*radius}" />
+		</inertial>
+    </xacro:macro>
+
+
+
+
+
+
+    <link name="world"/>
+
+    <link name="rail_link">
+		<origin xyz="${rail_x}    ${rail_y}     ${rail_z}"
+                rpy="${rail_roll} ${rail_pitch} ${rail_yaw}"/>
+		<visual name = "rail_link_v">
+			<origin xyz="0 0 ${rail_height/2}" rpy="0 0 0"/>
+			<geometry>
+				<box size="${rail_width} ${rail_length} ${rail_height}"/>
+			</geometry>
+			<material name="almost_white"/>
+	   	</visual>
+  		<collision name = "rail_link_c">
+			<origin xyz="0 0 ${rail_height/2}" rpy="0 0 0"/>
+			<geometry>
+				<box size="${rail_width} ${rail_length} ${rail_height}"/>
+			</geometry>
+	   	</collision>
+		<visual>
+			<geometry>
+				<box size="${1.0} ${1.0} 0.005"/>
+			</geometry>
+			<material name="almost_white"/>
+		</visual>
+
+		<xacro:box_inertial mass="${rail_mass}"
+                            x="${rail_width}" y="${rail_length}" z="${rail_height}"
+                            pose_xyz = "0 0 ${rail_height/2}"
+                            pose_rpy = "0 0 0"/>
+	</link>
+	<gazebo reference="rail_link">
+		<visual name="visual">
+			<material>
+                <ambient>$(arg rail_color)</ambient>
+                <diffuse>$(arg rail_color)</diffuse>
+                <!--
+                <specular>1 0 0 1</specular>
+                <emissive>1 0 0 1</emissive>
+                -->
+			</material>
+      	</visual>
+    </gazebo>
+
+    <link name="slider_link"/>
+
+	<link name="thigh_link">
+		<visual name = "thigh_link_v">
+			<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
+			<geometry>
+                <cylinder length="${thigh_height}" radius="${thigh_width/2}" />
+			</geometry>
+	   </visual>
+		<collision name = "thigh_link_c">
+			<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
+			<geometry>
+                <cylinder length="${thigh_height}" radius="${thigh_width/2}" />
+			</geometry>
+	   </collision>
+		<xacro:cylinder_z_inertial mass="${thigh_mass}" height="${thigh_height}" radius="${thigh_width/2}" pose_xyz="0 0 -${thigh_height/2}" pose_rpy="0 0 0"/>
+	</link>
+	<gazebo reference="thigh_link">
+		<visual name="thigh_link_v">
+			<material>
+			<ambient>$(arg thigh_color)</ambient>
+			<diffuse>$(arg thigh_color)</diffuse>
+			<!--
+			<specular>1 0 0 1</specular>
+			<emissive>1 0 0 1</emissive>
+			-->
+			</material>
+      	</visual>
+    </gazebo>
+
+
+
+
+	<link name="shin_link">
+		<!-- The shin is made of a cylinder plus a sphere, the total length, is shin_height, so the length  of the two are detemrined accordingly -->
+		<visual name = "shin_link_v">
+			<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
+			<geometry>
+                <cylinder length="${shin_height-shin_width}" radius="${shin_width/2}" />
+			</geometry>
+	   </visual>
+        <visual>
+			<origin xyz="0 0 -${shin_height-shin_width}" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="${shin_width}" />
+            </geometry>
+        </visual>
+		<collision name = "shin_link_c">
+			<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
+			<geometry>
+                <cylinder length="${shin_height-shin_width}" radius="${shin_width/2}" />
+			</geometry>
+	   </collision>
+        <collision>
+			<origin xyz="0 0 -${shin_height-shin_width}" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="${shin_width}" />
+            </geometry>
+        </collision>
+		<xacro:cylinder_z_inertial mass="${shin_mass}" height="${shin_height}" radius="${shin_width/2}" pose_xyz="0 0 -${shin_height/2}" pose_rpy="0 0 0"/>
+	</link>
+	<gazebo reference="shin_link">
+		<visual name="visual">
+			<material>
+			<ambient>$(arg shin_color)</ambient>
+			<diffuse>$(arg shin_color)</diffuse>
+			<!--
+			<specular>1 0 0 1</specular>
+			<emissive>1 0 0 1</emissive>
+			-->
+			</material>
+      	</visual>
+    </gazebo>
+
+    <link name="foot_link"/>
+
+
+
+	
+
+
+
+
+
+
+
+	<joint name="world_to_rail" type="fixed">
+        <parent link="world"/>
+        <child link="rail_link"/>
+    </joint>
+	<joint name="rail_joint" type="prismatic">
+    	<parent link="rail_link"/>
+    	<child link="slider_link"/>
+		<dynamics damping="0.0" friction="${rail_friction}"/>
+       	<limit lower="0.0" upper="2.0" effort="2000000" velocity="100000"/>
+        <axis xyz="0 0 1"/>
+	</joint>
+    <joint name="hip_joint" type="revolute">
+    	<parent link="slider_link"/>
+    	<child link="thigh_link"/>
+    	<origin xyz="0 ${hip_y_offset} 0" rpy="0 0 0"/>
+		<dynamics damping="0.0" friction="${hip_friction}"/>
+       	<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
+        <axis xyz="0 1 0"/>
+	</joint>
+
+
+ 	<joint name="knee_joint" type="revolute">
+    	<parent link="thigh_link"/>
+    	<child link="shin_link"/>
+    	<origin xyz="0 ${knee_y_offset} -${thigh_height}" rpy="0 0 0"/>
+		<dynamics damping="0.0" friction="${knee_friction}"/>
+       	<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
+        <axis xyz="0 1 0"/>
+	</joint>
+
+	<joint name="foot_joint" type="fixed">
+        <parent link="shin_link"/>
+        <child link="foot_link"/>
+    	<origin xyz="0 0 -${shin_height}" rpy="0 0 0"/>
+    </joint>
+
+
+</robot>

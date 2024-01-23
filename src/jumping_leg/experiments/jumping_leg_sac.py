@@ -6,7 +6,8 @@ import numpy as np
 
 from stable_baselines3.sac.policies import MultiInputPolicy
 # from stable_baselines3 import SAC
-from jumping_leg.utils.original_sac_with_timing import SAC
+# from jumping_leg.utils.original_sac_with_timing import SAC
+from jumping_leg.utils.modded_sac import SAC
 from stable_baselines3.common.noise import NormalActionNoise
 from lr_gym.envs.GymEnvWrapper import GymEnvWrapper
 import lr_gym.utils.dbg.ggLog as ggLog

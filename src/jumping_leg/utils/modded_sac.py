@@ -215,10 +215,10 @@ class SAC(OffPolicyAlgorithm):
         if self.ent_coef_optimizer is None or self.log_ent_coef is None:
             raise RuntimeError(f"Must use automatic entropy coefficient")
         
-        ent_coefs = th.empty((gradient_steps,), dtype=th.float32)
-        ent_coef_losses = th.empty((gradient_steps,), dtype=th.float32)
-        critic_losses = th.empty((gradient_steps,), dtype=th.float32)
-        actor_losses = th.empty((gradient_steps,), dtype=th.float32)
+        ent_coefs = th.empty((gradient_steps,), dtype=th.float32, device = self.device)
+        ent_coef_losses = th.empty((gradient_steps,), dtype=th.float32, device = self.device)
+        critic_losses = th.empty((gradient_steps,), dtype=th.float32, device = self.device)
+        actor_losses = th.empty((gradient_steps,), dtype=th.float32, device = self.device)
 
 
         for gradient_step in range(gradient_steps):
@@ -264,7 +264,7 @@ class SAC(OffPolicyAlgorithm):
             # Compute critic loss
             critic_loss = 0.5 * sum(F.mse_loss(current_q, target_q_values) for current_q in current_q_values)
             assert isinstance(critic_loss, th.Tensor)  # for type checker
-            critic_losses[gradient_step] = critic_loss.item()  # type: ignore[union-attr]
+            critic_losses[gradient_step] = critic_loss  # type: ignore[union-attr]
 
             # Optimize the critic
             self.critic.optimizer.zero_grad(set_to_none=True)
@@ -277,7 +277,7 @@ class SAC(OffPolicyAlgorithm):
             q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
             min_qf_pi, _ = th.min(q_values_pi, dim=1, keepdim=True)
             actor_loss = (ent_coef * log_prob - min_qf_pi).mean()
-            actor_losses[gradient_step] = actor_loss.item()
+            actor_losses[gradient_step] = actor_loss
 
             # Optimize the actor
             self.actor.optimizer.zero_grad(set_to_none=True)

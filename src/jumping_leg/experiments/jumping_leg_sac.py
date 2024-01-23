@@ -5,7 +5,8 @@ import inspect
 import numpy as np
 
 from stable_baselines3.sac.policies import MultiInputPolicy
-from stable_baselines3 import SAC
+# from stable_baselines3 import SAC
+from jumping_leg.utils.original_sac_with_timing import SAC
 from stable_baselines3.common.noise import NormalActionNoise
 from lr_gym.envs.GymEnvWrapper import GymEnvWrapper
 import lr_gym.utils.dbg.ggLog as ggLog
@@ -24,7 +25,7 @@ from jumping_leg.experiments.build_jumping_leg_env import env_builder
 from wandb.integration.sb3 import WandbCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from lr_gym.envs.VecEnvLogger import VecEnvLogger
-from lr_gym.utils.sb3_callbacks import EvalCallback_ep
+from lr_gym.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback
 
 
 
@@ -55,7 +56,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #setup seeds for reproducibility
 
     parallel_envs = 8
-    if parallel_envs == 1:
+    if False: #parallel_envs == 1:
         env = env_builder(log_folder=log_folder, seed = seed, env_builder_args = {"th_device" : th.device("cpu"),
                                                                                 "video_save_freq" : 0})
         
@@ -101,6 +102,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                             n_eval_episodes = 1))
     callbacks.append(WandbCallback( model_save_path=f"{folderName}/wandb/save",
                                     verbose=2))
+    callbacks.append(SigintHaltCallback())
     ggLog.info("Learning...")
     t_preLearn = time.time()
     model.learn(total_timesteps=10_000_000,

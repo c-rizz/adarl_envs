@@ -9,7 +9,7 @@ Based on ControlledEnv
 
 import lr_gym.utils.spaces as spaces
 import numpy as np
-from typing import Tuple, Dict, Any, Union, Optional
+from typing import Tuple, Dict, Any, Union, Optional, List
 import lr_gym.utils.dbg.ggLog as ggLog
 import random
 import lr_gym.utils.spaces as spaces
@@ -166,9 +166,12 @@ class LegJumpEnv(ControlledEnv):
         goal_dist = th.abs(vstate[LegJumpEnv.HIP_GOAL_Z] - vstate[LegJumpEnv.HIP_POS_Z])
         # tracking_reward = (1 - th.abs(vstate[LegJumpEnv.HIP_GOAL_Z] - vstate[LegJumpEnv.HIP_POS_Z]))
         tracking_reward = 1/(1+(goal_dist/0.1)**2) # halves at 0.1m
-        torque_reward   = -(vstate[LegJumpEnv.HIP_JOINT_EFFORT]**2 + vstate[LegJumpEnv.KNEE_JOINT_EFFORT]**2)/2
-        velocity_reward = -(vstate[LegJumpEnv.HIP_JOINT_VEL]**2 + vstate[LegJumpEnv.KNEE_JOINT_VEL]**2)/2
-        position_reward = -(vstate[LegJumpEnv.HIP_JOINT_POS]**10 + vstate[LegJumpEnv.KNEE_JOINT_POS]**10)/2
+        torques = [vstate[k] for k in [LegJumpEnv.HIP_JOINT_EFFORT,LegJumpEnv.KNEE_JOINT_EFFORT]]
+        velocities = [vstate[k] for k in [LegJumpEnv.HIP_JOINT_VEL,LegJumpEnv.KNEE_JOINT_VEL]]
+        positions = [vstate[k] for k in [LegJumpEnv.HIP_JOINT_POS,LegJumpEnv.KNEE_JOINT_POS]]
+        torque_reward : th.Tensor = -(sum([t**2 + 10*t**50 for t in torques])/len(torques)) # type: ignore
+        velocity_reward : th.Tensor = -(sum([t**2 for t in velocities])/len(velocities)) # type: ignore
+        position_reward : th.Tensor = -(sum([t**10 for t in positions])/len(positions)) # type: ignore
         if sub_rewards is not None:
             sub_rewards["tracking_reward"] = tracking_reward
             sub_rewards["torque_reward"] = torque_reward
@@ -218,7 +221,7 @@ class LegJumpEnv(ControlledEnv):
             raise RuntimeError("Cannot reset joint state")
         self._environmentController.setJointsEffortCommand([(self._hip_joint,0),(self._knee_joint,0)])
         self._max_hip_height_reached = 0
-        self._hip_goal_z = 0.2 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*0.5
+        self._hip_goal_z = 0.3 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*0.8
         self._last_step_got_state = -1
         self._cumulative_dist_to_goal = 0
         if self._show_goal:

@@ -19,7 +19,7 @@ def env_builder(seed, log_folder, env_builder_args):
         env_controller = GazeboController(stepLength_sec=stepLength_sec)
     elif mode == "PyBulletController":
         from lr_gym.env_controllers.PyBulletController import PyBulletController
-        env_controller = PyBulletController(stepLength_sec=stepLength_sec, restore_on_reset=False)
+        env_controller = PyBulletController(stepLength_sec=stepLength_sec, restore_on_reset=False, debug_gui=False)
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)

@@ -22,6 +22,12 @@
 	<xacro:arg name="rail_height" default="2" />
 	<xacro:arg name="rail_mass" default="1000" />
 
+	<xacro:arg name="slider_width" default="0.15" />
+	<xacro:arg name="slider_length" default="0.01" />
+	<xacro:arg name="slider_height" default="0.15" />
+	<xacro:arg name="slider_y_offset" default="0.01" />
+	<xacro:arg name="slider_mass" default="8" />
+
 	<xacro:arg name="hip_friction" default="0.1" />
 	<xacro:arg name="rail_friction" default="0.0" />
 	<xacro:arg name="knee_friction" default="0.1" />
@@ -53,6 +59,13 @@
 	<xacro:property name="rail_length" default="$(arg rail_length)" />
 	<xacro:property name="rail_height" default="$(arg rail_height)" />
 	<xacro:property name="rail_mass" default="$(arg rail_mass)" />
+	
+	<xacro:property name="slider_width" default="$(arg slider_width)" />
+	<xacro:property name="slider_length" default="$(arg slider_length)" />
+	<xacro:property name="slider_height" default="$(arg slider_height)" />
+	<xacro:property name="slider_mass" default="$(arg slider_mass)" />
+	<xacro:property name="slider_y_offset" default="$(arg slider_y_offset)" />
+	
 	<xacro:property name="knee_friction" default="$(arg knee_friction)" />
 	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
 	<xacro:property name="rail_friction" default="$(arg rail_friction)" />
@@ -134,7 +147,24 @@
       	</visual>
     </gazebo>
 
-    <link name="slider_link"/>
+    <link name="slider_link">
+		<visual name = "slider_link_v">
+			<origin xyz="0 ${slider_y_offset} 0" rpy="0 0 0"/>
+			<geometry>
+				<box size="${slider_width} ${slider_length} ${slider_height}"/>
+			</geometry>
+	   	</visual>
+  		<collision name = "slider_link_c">
+			<origin xyz="0 ${slider_y_offset} 0" rpy="0 0 0"/>
+			<geometry>
+				<box size="${slider_width} ${slider_length} ${slider_height}"/>
+			</geometry>
+	   	</collision>
+		<xacro:box_inertial mass="${slider_mass}"
+                            x="${slider_width}" y="${slider_length}" z="${slider_height}"
+                            pose_xyz = "0 0 ${slider_height}"
+                            pose_rpy = "0 0 0"/>
+	</link>
 
 	<link name="thigh_link">
 		<visual name = "thigh_link_v">

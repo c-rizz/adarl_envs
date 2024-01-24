@@ -85,8 +85,8 @@ class LegJumpEnv(ControlledEnv):
         self._th_device = th_device
         self._rendering_enabled = True
         self._max_hip_height_reached = 0
-        self._hip_torque_scale = 50
-        self._knee_torque_scale = 50
+        self._hip_torque_scale = 100
+        self._knee_torque_scale = 100
         self._hip_goal_z = th.tensor(0.5,dtype=th.float32, device=self._th_device)
 
         self._torque_limits =   {self._knee_joint : [-112,112],

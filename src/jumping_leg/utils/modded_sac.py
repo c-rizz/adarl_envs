@@ -154,6 +154,9 @@ class SAC(OffPolicyAlgorithm):
         self.target_update_interval = target_update_interval
         self.ent_coef_optimizer: Optional[th.optim.Adam] = None
 
+        self._predict_count = 0
+        self._tot_predict_time = 0
+
         if _init_setup_model:
             self._setup_model()
 
@@ -330,3 +333,30 @@ class SAC(OffPolicyAlgorithm):
         else:
             saved_pytorch_variables = ["ent_coef_tensor"]
         return state_dicts, saved_pytorch_variables
+
+    def predict(
+            self,
+            observation: Union[np.ndarray, Dict[str, np.ndarray]],
+            state: Optional[Tuple[np.ndarray, ...]] = None,
+            episode_start: Optional[np.ndarray] = None,
+            deterministic: bool = False,
+        ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, ...]]]:
+            """
+            Get the policy action from an observation (and optional hidden state).
+            Includes sugar-coating to handle different observations (e.g. normalizing images).
+
+            :param observation: the input observation
+            :param state: The last hidden states (can be None, used in recurrent policies)
+            :param episode_start: The last masks (can be None, used in recurrent policies)
+                this correspond to beginning of episodes,
+                where the hidden states of the RNN must be reset.
+            :param deterministic: Whether or not to return deterministic actions.
+            :return: the model's action and the next hidden state
+                (used in recurrent policies)
+            """
+            self._predict_count += 1
+            t0 = time.monotonic()
+            ret = super().predict(observation,state,episode_start,deterministic)
+            self._tot_predict_time += time.monotonic() - t0
+            self.logger.record("train/avg_predict_time", self._tot_predict_time/self._predict_count)
+            return ret

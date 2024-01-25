@@ -211,6 +211,11 @@ class LegJumpEnv(ControlledEnv):
                                                     model_name="support",
                                                     pose=Pose(-0.1-0.125,0.3,0.2,0,0,0,1),
                                                     model_format="urdf.xacro")
+            
+            self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
+                                                    model_name="support2",
+                                                    pose=Pose(-0.1-0.125,0.3,0.4,0,0,0,1),
+                                                    model_format="urdf.xacro")
 
         
         if isinstance(self._environmentController, SimulatedEnvController):

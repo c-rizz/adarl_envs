@@ -56,7 +56,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     #setup seeds for reproducibility
 
-    parallel_envs = 8
+    parallel_envs = 16
     if False: #parallel_envs == 1:
         env = env_builder(log_folder=log_folder, seed = seed, env_builder_args = {"th_device" : th.device("cpu"),
                                                                                 "video_save_freq" : 0})
@@ -79,14 +79,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     max_steps = 500
 
     model = SAC("MultiInputPolicy", env, verbose=1,
-                    batch_size=1024,
+                    batch_size=4096,
                     buffer_size=10_000_000,
                     gamma=0.99,
-                    learning_rate=0.0025,
+                    learning_rate=0.005,
                     ent_coef="auto",
                     learning_starts=10_000,
                     tau=0.005,
-                    gradient_steps=max_steps,
+                    gradient_steps=int(max_steps),
                     train_freq=max_steps,
                     target_entropy="auto",
                     seed = seed,

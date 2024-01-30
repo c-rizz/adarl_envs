@@ -25,6 +25,7 @@ import lr_gym.utils.session
 from jumping_leg.experiments.build_jumping_leg_env import env_builder
 from wandb.integration.sb3 import WandbCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv
+# from lr_gym.utils.subproc_vec_env import SubprocVecEnv
 from lr_gym.envs.VecEnvLogger import VecEnvLogger
 from lr_gym.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback
 

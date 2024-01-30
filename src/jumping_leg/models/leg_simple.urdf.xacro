@@ -181,6 +181,7 @@
 	   </collision>
 		<xacro:cylinder_z_inertial mass="${thigh_mass}" height="${thigh_height}" radius="${thigh_width/2}" pose_xyz="0 0 -${thigh_height/2}" pose_rpy="0 0 0"/>
 	</link>
+	<link name="thigh_link_base"/>
 	<gazebo reference="thigh_link">
 		<visual name="thigh_link_v">
 			<material>
@@ -225,6 +226,7 @@
         </collision>
 		<xacro:cylinder_z_inertial mass="${shin_mass}" height="${shin_height}" radius="${shin_width/2}" pose_xyz="0 0 -${shin_height/2}" pose_rpy="0 0 0"/>
 	</link>
+	<link name="shin_link_base"/>
 	<gazebo reference="shin_link">
 		<visual name="visual">
 			<material>
@@ -269,6 +271,10 @@
        	<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
         <axis xyz="0 1 0"/>
 	</joint>
+	<joint name="thigh_link_base" type="fixed">
+        <parent link="thigh_link"/>
+        <child link="thigh_link_base"/>
+    </joint>
 
 
  	<joint name="knee_joint" type="revolute">
@@ -279,6 +285,10 @@
        	<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
         <axis xyz="0 1 0"/>
 	</joint>
+	<joint name="shin_link_base" type="fixed">
+        <parent link="shin_link"/>
+        <child link="shin_link_base"/>
+    </joint>
 
 	<joint name="foot_joint" type="fixed">
         <parent link="shin_link"/>

@@ -118,7 +118,6 @@ class LegJumpEnv(ControlledEnv):
                          environmentController = environmentController,
                          startSimulation = startSimulation,
                          simulationBackend = "")
-        
         if self._obs_only_vec:
             vec_obs_size = 8
         else:
@@ -129,6 +128,9 @@ class LegJumpEnv(ControlledEnv):
         self._img_channels = 3 if rgb else 1
         img_shape_chw = (self._img_channels,self._obs_img_height,self._obs_img_width)
         img_observation_space = spaces.gym_spaces.Box(low=0, high=255, shape=img_shape_chw, dtype=np.uint8)
+
+        self.state_space = spaces.gym_spaces.Dict({self.VECTOR_PART: spaces.gym_spaces.Box(low=-float("inf"), high=float("inf"), shape=(14,)),
+                                                   self.IMAGE_PART: img_observation_space})
         
         if self._obs_only_vec:
             self.observation_space = spaces.gym_spaces.Dict({ self.VECTOR_PART : vec_obs_space})     
@@ -388,6 +390,6 @@ class LegJumpEnv(ControlledEnv):
     def getInfo(self,state=None) -> Dict[Any,Any]:
         i = super().getInfo(state=state)
         i["hip_goal_z"] = self._hip_goal_z
-        i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter
+        i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter if self._stepCounter else float("NaN")
         # ggLog.info(f"Setting success_ratio to {i['success_ratio']}")
         return i

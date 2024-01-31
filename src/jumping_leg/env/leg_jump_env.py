@@ -110,6 +110,10 @@ class LegJumpEnv(ControlledEnv):
         self._rng = th.Generator(device=self._th_device)
         self._last_step_got_state = -1
         self._cumulative_dist_to_goal = 0
+        self._cumulative_knee_torque = 0
+        self._cumulative_hip_torque = 0
+        self._max_knee_torque = 0
+        self._max_hip_torque = 0
 
         self._show_goal = True
 
@@ -157,8 +161,10 @@ class LegJumpEnv(ControlledEnv):
 
     def submitAction(self, action : th.Tensor) -> None:
         super().submitAction(action)
-        self._environmentController.setJointsEffortCommand(jointTorques = [(self._hip_joint,  action[0]*self._hip_torque_scale),
-                                                                           (self._knee_joint, action[1]*self._knee_torque_scale)])
+        htorque = action[0]*self._hip_torque_scale
+        ktorque = action[1]*self._knee_torque_scale
+        self._environmentController.setJointsEffortCommand(jointTorques = [(self._hip_joint,  htorque),
+                                                                           (self._knee_joint, ktorque)])
 
 
 
@@ -266,6 +272,11 @@ class LegJumpEnv(ControlledEnv):
         self._hip_goal_z = 0.3 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*1.0
         self._last_step_got_state = -1
         self._cumulative_dist_to_goal = 0
+        self._cumulative_knee_torque = 0
+        self._cumulative_hip_torque = 0
+        self._max_knee_torque = 0
+        self._max_hip_torque = 0
+
         if self._show_goal:
             ls = LinkState( position_xyz = th.tensor((0.,0.2,self._hip_goal_z)),
                             orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
@@ -341,6 +352,10 @@ class LegJumpEnv(ControlledEnv):
 
         if self._last_step_got_state < self._stepCounter:
             self._cumulative_dist_to_goal += abs(vstate[self.HIP_GOAL_Z]-vstate[self.HIP_POS_Z])
+            self._cumulative_knee_torque += abs(vstate[self.KNEE_JOINT_EFFORT])
+            self._cumulative_hip_torque += abs(vstate[self.HIP_JOINT_EFFORT])
+            self._max_knee_torque = max(self._max_knee_torque, abs(vstate[self.KNEE_JOINT_EFFORT]))
+            self._max_hip_torque = max(self._max_hip_torque, abs(vstate[self.HIP_JOINT_EFFORT]))
 
         self._last_step_got_state = self._stepCounter
         return {self.VECTOR_PART : vstate,
@@ -390,6 +405,15 @@ class LegJumpEnv(ControlledEnv):
     def getInfo(self,state=None) -> Dict[Any,Any]:
         i = super().getInfo(state=state)
         i["hip_goal_z"] = self._hip_goal_z
-        i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter if self._stepCounter else float("NaN")
+        if self._stepCounter:
+            i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter
+            i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter
+            i["avg_knee_torque"] = self._cumulative_knee_torque/self._stepCounter
+            i["avg_hip_torque"] = self._cumulative_hip_torque/self._stepCounter
+        else:
+            i["avg_dist"] = float("+inf")
+            i["avg_dist"] = float("+inf")
+            i["avg_knee_torque"] = float("+inf")
+            i["avg_hip_torque"] = float("+inf")
         # ggLog.info(f"Setting success_ratio to {i['success_ratio']}")
         return i

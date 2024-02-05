@@ -56,7 +56,12 @@ class LegJumpEnv(ControlledEnv):
                     obs_img_height = 64,
                     obs_img_width = 64,
                     rgb = True,
-                    th_device = th.device("cpu")):
+                    th_device = th.device("cpu"),
+                    reward_torque_weight = 0.0,
+                    reward_position_weight = 1.0,
+                    reward_velocity_weight = 0.0,
+                    reward_energy_weight = 0.01,
+                    reward_tracking_weight = 1.0):
         """Short summary.
 
         Parameters
@@ -76,6 +81,12 @@ class LegJumpEnv(ControlledEnv):
 
 
         """
+
+        self._configuration = dict( reward_torque_weight = reward_torque_weight,
+                                    reward_position_weight = reward_position_weight,
+                                    reward_velocity_weight = reward_velocity_weight,
+                                    reward_energy_weight = reward_energy_weight,
+                                    reward_tracking_weight = reward_tracking_weight)
 
         self._knee_joint = ("leg","knee_joint")
         self._hip_joint = ("leg","hip_joint")
@@ -114,6 +125,9 @@ class LegJumpEnv(ControlledEnv):
         self._cumulative_hip_torque = 0
         self._max_knee_torque = 0
         self._max_hip_torque = 0
+        self._cumulated_contact_forces = 0
+        self._last_abs_contact_forces_sum = 0
+        self._max_abs_contact_forces = 0
 
         self._show_goal = True
 
@@ -150,6 +164,7 @@ class LegJumpEnv(ControlledEnv):
         self._environmentController.setJointsToObserve([self._knee_joint,self._hip_joint])
         self._environmentController.setLinksToObserve([self._foot_link, self._shin_link, self._thigh_link])
         self._environmentController.setCamerasToObserve(["camera"])
+        self._environmentController.monitor_contacts([("leg",None,None,None)]) # Monitor the contacts between the leg and all the environment
 
         self._environmentController.startController()
         
@@ -190,13 +205,14 @@ class LegJumpEnv(ControlledEnv):
         return thigh_energy, shin_energy
 
     @staticmethod
-    def computeReward(previousState, state , action : int, env_conf = None, sub_rewards : Optional[Dict[str,th.Tensor]] = None) -> th.Tensor:
+    def computeReward(previousState, state , action : int, env_conf, sub_rewards : Optional[Dict[str,th.Tensor]] = None) -> th.Tensor:
         vstate = state[LegJumpEnv.VECTOR_PART]
-        torque_weight = 0.1 #0.000001
-        position_weight = 1.0 #0.000001
-        velocity_weight = 0.0 #0.00001
-        tracking_weight = 1.0
-        energy_weight = 0.001
+        torque_weight = env_conf["reward_torque_weight"]
+        position_weight = env_conf["reward_position_weight"]
+        velocity_weight = env_conf["reward_velocity_weight"]
+        tracking_weight = env_conf["reward_tracking_weight"]
+        energy_weight = env_conf["reward_energy_weight"]
+        
         goal_dist = th.abs(vstate[LegJumpEnv.HIP_GOAL_Z] - vstate[LegJumpEnv.HIP_POS_Z])
         # tracking_reward = (1 - th.abs(vstate[LegJumpEnv.HIP_GOAL_Z] - vstate[LegJumpEnv.HIP_POS_Z]))
         tracking_reward = 1/(1+(goal_dist/0.1)**2) # halves at 0.1m
@@ -276,6 +292,9 @@ class LegJumpEnv(ControlledEnv):
         self._cumulative_hip_torque = 0
         self._max_knee_torque = 0
         self._max_hip_torque = 0
+        self._cumulated_contact_forces = 0
+        self._last_abs_contact_forces_sum = 0
+        self._max_abs_contact_forces = 0
 
         if self._show_goal:
             ls = LinkState( position_xyz = th.tensor((0.,0.2,self._hip_goal_z)),
@@ -326,6 +345,12 @@ class LegJumpEnv(ControlledEnv):
                                                                               self._thigh_link_base], use_com_frame = True)
         hip_height = lstates[self._thigh_link_base].pose.position[2]
         self._max_hip_height_reached = max(self._max_hip_height_reached,hip_height)
+
+        contacts = self._environmentController.get_contacts()
+        contacts = [c for c in contacts if c[3] != 0]
+        # n = '\n'
+        # ggLog.info(f"contacts == {n.join([str(c) for c in contacts])}")
+
         vstate = th.tensor((self._normalize(jstates[self._hip_joint].position[0],   self._position_limits[self._hip_joint]),
                             self._normalize(jstates[self._hip_joint].rate[0],       self._velocity_limits[self._hip_joint]),
                             self._normalize(jstates[self._hip_joint].effort[0],     self._torque_limits[self._hip_joint]),
@@ -356,6 +381,11 @@ class LegJumpEnv(ControlledEnv):
             self._cumulative_hip_torque += abs(vstate[self.HIP_JOINT_EFFORT])
             self._max_knee_torque = max(self._max_knee_torque, abs(vstate[self.KNEE_JOINT_EFFORT]))
             self._max_hip_torque = max(self._max_hip_torque, abs(vstate[self.HIP_JOINT_EFFORT]))
+            abs_contact_forces = [abs(c[3]) for c in contacts]
+            self._last_abs_contact_forces_sum = sum(abs_contact_forces)
+            if len(abs_contact_forces)>0:
+                self._cumulated_contact_forces += self._last_abs_contact_forces_sum
+                self._max_abs_contact_forces = max(self._max_abs_contact_forces, max(abs_contact_forces))
 
         self._last_step_got_state = self._stepCounter
         return {self.VECTOR_PART : vstate,
@@ -404,16 +434,20 @@ class LegJumpEnv(ControlledEnv):
 
     def getInfo(self,state=None) -> Dict[Any,Any]:
         i = super().getInfo(state=state)
+        # ggLog.info(f"getInfo(): {self._stepCounter}")
+        # i["step_count"] = self._stepCounter
         i["hip_goal_z"] = self._hip_goal_z
-        if self._stepCounter:
-            i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter
-            i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter
-            i["avg_knee_torque"] = self._cumulative_knee_torque/self._stepCounter
-            i["avg_hip_torque"] = self._cumulative_hip_torque/self._stepCounter
-        else:
-            i["avg_dist"] = float("+inf")
-            i["avg_dist"] = float("+inf")
-            i["avg_knee_torque"] = float("+inf")
-            i["avg_hip_torque"] = float("+inf")
+        i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter if self._stepCounter!=0 else float("nan")
+        i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter if self._stepCounter!=0 else float("nan")
+        i["avg_knee_torque"] = self._cumulative_knee_torque/self._stepCounter if self._stepCounter!=0 else float("nan")
+        i["avg_hip_torque"] = self._cumulative_hip_torque/self._stepCounter if self._stepCounter!=0 else float("nan")
+        i["avg_contact_force"] = self._cumulated_contact_forces/self._stepCounter if self._stepCounter!=0 else float("nan")
+        i["max_contact_force"] = self._max_abs_contact_forces
+        i["max_knee_torque"] = self._max_knee_torque
+        i["max_hip_torque"] = self._max_hip_torque
+        i["current_contacts_sum"] = self._last_abs_contact_forces_sum
         # ggLog.info(f"Setting success_ratio to {i['success_ratio']}")
         return i
+
+    def get_configuration(self):
+        return self._configuration

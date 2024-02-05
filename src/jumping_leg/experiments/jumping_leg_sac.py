@@ -56,8 +56,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     ggLog.info("Building env...")
 
     #setup seeds for reproducibility
-
-    parallel_envs = 16
+    env_builder_args = {"th_device" : th.device("cpu"),
+                        "video_save_freq" : 0,
+                        "reward_torque_weight" : 0.0,
+                        "reward_position_weight" : 1.0,
+                        "reward_velocity_weight" : 0.0,
+                        "reward_energy_weight" : 0.01,
+                        "reward_tracking_weight" : 1.0}
+    
+    parallel_envs = 1
     if False: #parallel_envs == 1:
         env = env_builder(log_folder=log_folder, seed = seed, env_builder_args = {"th_device" : th.device("cpu"),
                                                                                 "video_save_freq" : 0})
@@ -65,14 +72,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         builders = [(lambda i: (lambda: env_builder(log_folder=log_folder,
                                                   seed=seed+100000*i,
-                                                  env_builder_args = {"th_device" : th.device("cpu"),
-                                                                      "video_save_freq" : 0})
+                                                  env_builder_args = env_builder_args)
                                 ))(i) for i in range(parallel_envs)]
         env = SubprocVecEnv(builders, start_method = "forkserver")
         env = VecEnvLogger(env)
+    eval_env_builder_args = {}
+    eval_env_builder_args.update(env_builder_args)
+    env_builder_args["video_save_freq"] = 1
     eval_env = env_builder(log_folder=log_folder+"/eval", seed = seed+100000000, 
-                         env_builder_args = {"th_device" : th.device("cpu"),
-                                            "video_save_freq" : 1})
+                         env_builder_args = env_builder_args)
 
     ggLog.info("Built")
 #    env.action_space.seed(seed)

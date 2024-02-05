@@ -33,9 +33,19 @@ def env_builder(seed, log_folder, env_builder_args):
                        obs_img_height=64,
                        obs_img_width=64,
                        rgb=True,
-                       th_device=th_device)
+                       th_device=th_device,
+                        reward_torque_weight = env_builder_args["reward_torque_weight"],
+                        reward_position_weight = env_builder_args["reward_position_weight"],
+                        reward_velocity_weight = env_builder_args["reward_velocity_weight"],
+                        reward_energy_weight = env_builder_args["reward_energy_weight"],
+                        reward_tracking_weight = env_builder_args["reward_tracking_weight"])
     env = GymEnvWrapper(env=lrenv, episodeInfoLogFile=log_folder+f"/GymEnvWrapperLog.{seed}.log")
     if video_save_freq >0:
-        env = RecorderGymWrapper(env=env, fps = 1/stepLength_sec, outFolder=log_folder+"/videos/RecorderGymWrapper", saveFrequency_ep=video_save_freq, vec_obs_key="vec")
+        env = RecorderGymWrapper(env=env,
+                                 fps = 1/stepLength_sec,
+                                 outFolder=log_folder+"/videos/RecorderGymWrapper",
+                                 saveFrequency_ep=video_save_freq,
+                                 vec_obs_key="vec",
+                                 overlay_text_func=lambda vo, a, r, te, tr, info: str(info["current_contacts_sum"]))
     env.reset(seed=seed)
     return env

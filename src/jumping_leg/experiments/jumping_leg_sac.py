@@ -64,7 +64,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         "reward_energy_weight" : 0.01,
                         "reward_tracking_weight" : 1.0}
     
-    parallel_envs = 1
+    parallel_envs = 16
     if False: #parallel_envs == 1:
         env = env_builder(log_folder=log_folder, seed = seed, env_builder_args = {"th_device" : th.device("cpu"),
                                                                                 "video_save_freq" : 0})

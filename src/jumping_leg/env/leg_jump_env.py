@@ -16,12 +16,12 @@ import lr_gym.utils.spaces as spaces
 
 from lr_gym.envs.ControlledEnv import ControlledEnv
 import lr_gym
-from lr_gym.utils.utils import Pose, JointState, LinkState
+from lr_gym.utils.utils import Pose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle
 from lr_gym.env_controllers.SimulatedEnvController import SimulatedEnvController
 import torch as th
 import lr_gym.utils.utils
 from enum import IntEnum
-
+from lr_gym.env_controllers.EnvironmentController import EnvironmentController
 
 
 
@@ -52,12 +52,14 @@ class LegJumpEnv(ControlledEnv):
                             "SHIN_VEL_Z",
                             "SHIN_ANG_VEL_Y",
                             "THIGH_POS_Z",
-                            "SHIN_POS_Z"], start=0)
+                            "THIGH_ANG_POS_Y",
+                            "SHIN_POS_Z",
+                            "SHIN_ANG_POS_Y",], start=0)
 
     def __init__(   self,
                     maxStepsPerEpisode : int = 500,
                     stepLength_sec : float = 0.01,
-                    environmentController = None,
+                    environmentController : EnvironmentController = None,
                     startSimulation : bool = True,
                     wall_sim_speed = False,
                     seed = 0,
@@ -102,10 +104,10 @@ class LegJumpEnv(ControlledEnv):
         self._hip_joint = ("leg","hip_joint")
         self._rail_joint = ("leg","rail_joint")
         self._foot_link = ("leg","foot_link")
-        self._thigh_link_base = ("leg", "thigh_link_base")
-        self._shin_link_base = ("leg", "shin_link_base")
-        self._thigh_link = ("leg", "thigh_link")
-        self._shin_link = ("leg", "shin_link")
+        self._thigh_base_link = ("leg", "thigh_link_base")
+        self._shin_base_link = ("leg", "shin_link_base")
+        self._thigh_com_link = ("leg", "thigh_link")
+        self._shin_com_link = ("leg", "shin_link")
         self._rendering_cam_name = "simple_camera"
 
         self._obs_only_vec = obs_only_vec
@@ -131,6 +133,7 @@ class LegJumpEnv(ControlledEnv):
         self._rng = th.Generator(device=self._th_device)
         self._last_step_got_state = -1
         self._cumulative_dist_to_goal = 0
+        self._dists_to_goal = th.zeros(size=(int(maxStepsPerEpisode/10),), dtype=th.float32, device=self._th_device)
         self._cumulative_knee_torque = 0
         self._cumulative_hip_torque = 0
         self._max_knee_torque = 0
@@ -172,7 +175,7 @@ class LegJumpEnv(ControlledEnv):
         self.action_space = spaces.gym_spaces.Box(-action_space_high,action_space_high)
         self.seed(seed)
         self._environmentController.setJointsToObserve([self._knee_joint,self._hip_joint])
-        self._environmentController.setLinksToObserve([self._foot_link, self._shin_link, self._thigh_link])
+        self._environmentController.setLinksToObserve([self._foot_link, self._shin_com_link, self._thigh_com_link])
         self._environmentController.setCamerasToObserve(["camera"])
         self._environmentController.monitor_contacts([("leg",None,None,None)]) # Monitor the contacts between the leg and all the environment
 
@@ -234,27 +237,36 @@ class LegJumpEnv(ControlledEnv):
         velocity_weight = env_conf["reward_velocity_weight"]
         tracking_weight = env_conf["reward_tracking_weight"]
         energy_weight = env_conf["reward_energy_weight"]
+
+        ktorque = vstate[LegJumpEnv.STATE.KNEE_JOINT_EFFORT]
+        htorque = vstate[LegJumpEnv.STATE.HIP_JOINT_EFFORT]
+        shin_rotation = vstate[LegJumpEnv.STATE.SHIN_ANG_POS_Y] - prev_vstate[LegJumpEnv.STATE.SHIN_ANG_POS_Y]
+        thigh_rotation = vstate[LegJumpEnv.STATE.THIGH_ANG_POS_Y] - prev_vstate[LegJumpEnv.STATE.THIGH_ANG_POS_Y]
+        joint_efforts = [LegJumpEnv.STATE.HIP_JOINT_EFFORT,LegJumpEnv.STATE.KNEE_JOINT_EFFORT]
+        joint_velocities = [LegJumpEnv.STATE.HIP_JOINT_VEL,LegJumpEnv.STATE.KNEE_JOINT_VEL]
+        joint_positions = [LegJumpEnv.STATE.HIP_JOINT_POS,LegJumpEnv.STATE.KNEE_JOINT_POS]
         goal_dist = th.abs(vstate[LegJumpEnv.STATE.HIP_GOAL_Z] - vstate[LegJumpEnv.STATE.HIP_POS_Z])
+
         # tracking_reward = 1 - (th.abs(vstate[LegJumpEnv.STATE.HIP_GOAL_Z] - vstate[LegJumpEnv.STATE.HIP_POS_Z]))
         tracking_reward = 1/(1+(goal_dist/0.1)**2) # halves at 0.1m
-        torques =       [vstate[k] for k in [LegJumpEnv.STATE.HIP_JOINT_EFFORT,LegJumpEnv.STATE.KNEE_JOINT_EFFORT]]
-        velocities =    [vstate[k] for k in [LegJumpEnv.STATE.HIP_JOINT_VEL,LegJumpEnv.STATE.KNEE_JOINT_VEL]]
-        positions =     [vstate[k] for k in [LegJumpEnv.STATE.HIP_JOINT_POS,LegJumpEnv.STATE.KNEE_JOINT_POS]]
+        torques =       [vstate[k] for k in joint_efforts]
+        velocities =    [vstate[k] for k in joint_velocities]
+        positions =     [vstate[k] for k in joint_positions]
         torque_reward : th.Tensor = -(sum([t**2 + 10*t**50 for t in torques])/len(torques)) # type: ignore
         velocity_reward : th.Tensor = -(sum([t**2 for t in velocities])/len(velocities)) # type: ignore
         position_reward : th.Tensor = -(sum([t**10 for t in positions])/len(positions)) # type: ignore
 
         new_thigh_energy, new_shin_energy = LegJumpEnv.compute_mechanical_energies(vstate)
         old_thigh_energy, old_shin_energy = LegJumpEnv.compute_mechanical_energies(prev_vstate)
+        # Overall energy diff on the links, due to all sources: anelastic collisions, joint torques and joint constrain forces
         thigh_work = new_thigh_energy-old_thigh_energy
         shin_work = new_shin_energy-old_shin_energy
-        
-        knee_work = vstate[LegJumpEnv.STATE.KNEE_JOINT_EFFORT]*(vstate[LegJumpEnv.STATE.KNEE_JOINT_POS] - prev_vstate[LegJumpEnv.STATE.KNEE_JOINT_POS])
-        hip_work = vstate[LegJumpEnv.STATE.HIP_JOINT_EFFORT]*(vstate[LegJumpEnv.STATE.HIP_JOINT_POS] - prev_vstate[LegJumpEnv.STATE.HIP_JOINT_POS])
-        # minimize the energy exchanged by each link
-        perlink_energy_reward = - (thigh_work**2 + shin_work**2)
-        # minimized the energy exchanged by the whole robot to the outside world
-        global_energy_reward = - (thigh_work + shin_work - knee_work -hip_work)**2
+        # work done by the joints on the degree of freedom in the fixed reference frame
+        shin_joint_work = ktorque*shin_rotation
+        thigh_joint_work = htorque*thigh_rotation + (-ktorque)*(thigh_rotation) # can we simply use the joint displacement and work on one side only?
+        # perlink_energy_reward = - (thigh_work**2 + shin_work**2)
+        external_work = thigh_work + shin_work - shin_joint_work -thigh_joint_work # this should more or less be the work coming from outside forces
+        global_energy_reward = -(external_work**2) # minimize the energy exchanged by the whole robot to the outside world
 
         # ggLog.info(f"new_thigh_energy={new_thigh_energy}, old_thigh_energy={old_thigh_energy}, new_shin_energy={new_shin_energy}, old_shin_energy={old_shin_energy}")
         # ggLog.info(f"knee_work={knee_work}\t hip_work={hip_work}\t thigh_work={thigh_work}\t shin_work={shin_work}")
@@ -317,6 +329,7 @@ class LegJumpEnv(ControlledEnv):
         self._max_hip_height_reached = 0
         self._hip_goal_z = 0.4 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*1.0
         self._last_step_got_state = -1
+        self._dists_to_goal = th.zeros(size=(int(maxStepsPerEpisode/10),), dtype=th.float32, device=self._th_device)
         self._cumulative_dist_to_goal = 0
         self._cumulative_knee_torque = 0
         self._cumulative_hip_torque = 0
@@ -370,16 +383,20 @@ class LegJumpEnv(ControlledEnv):
         """
 
         jstates = self._environmentController.getJointsState(requestedJoints=[self._knee_joint, self._hip_joint])
-        lstates : LinkState = self._environmentController.getLinksState(requestedLinks = [self._thigh_link,
-                                                                              self._shin_link,
-                                                                              self._thigh_link_base], use_com_frame = True)
-        hip_height = lstates[self._thigh_link_base].pose.position[2]
+        lstates : LinkState = self._environmentController.getLinksState(requestedLinks = [self._thigh_com_link,
+                                                                              self._shin_com_link,
+                                                                              self._thigh_base_link], use_com_frame = True)
+        hip_height = lstates[self._thigh_base_link].pose.position[2]
         self._max_hip_height_reached = max(self._max_hip_height_reached,hip_height)
 
         contacts = self._environmentController.get_contacts()
         contacts = [c for c in contacts if c[3] != 0]
         # n = '\n'
         # ggLog.info(f"contacts == {n.join([str(c) for c in contacts])}")
+        thigh_ang_pos_y = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_wxyz,
+                                                                            th.tensor([0.0,1.0,0.0], device=self._th_device))[1])
+        shin_ang_pos_y = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_wxyz,
+                                                                            th.tensor([0.0,1.0,0.0], device=self._th_device))[1])
 
         vstate = th.tensor((self._normalize(jstates[self._hip_joint].position[0],   self._position_limits[self._hip_joint]),
                             self._normalize(jstates[self._hip_joint].rate[0],       self._velocity_limits[self._hip_joint]),
@@ -389,14 +406,16 @@ class LegJumpEnv(ControlledEnv):
                             self._normalize(jstates[self._knee_joint].effort[0],    self._torque_limits[self._knee_joint]),
                             hip_height,
                             self._hip_goal_z,
-                            lstates[self._thigh_link].pos_velocity_xyz[0],
-                            lstates[self._thigh_link].pos_velocity_xyz[2],
-                            lstates[self._thigh_link].ang_velocity_xyz[1],
-                            lstates[self._shin_link].pos_velocity_xyz[0],
-                            lstates[self._shin_link].pos_velocity_xyz[2],
-                            lstates[self._shin_link].ang_velocity_xyz[1],
-                            lstates[self._thigh_link].pose.position[2],
-                            lstates[self._shin_link].pose.position[2]),
+                            lstates[self._thigh_com_link].pos_velocity_xyz[0],
+                            lstates[self._thigh_com_link].pos_velocity_xyz[2],
+                            lstates[self._thigh_com_link].ang_velocity_xyz[1],
+                            lstates[self._shin_com_link].pos_velocity_xyz[0],
+                            lstates[self._shin_com_link].pos_velocity_xyz[2],
+                            lstates[self._shin_com_link].ang_velocity_xyz[1],
+                            lstates[self._thigh_com_link].pose.position[2],
+                            thigh_ang_pos_y,
+                            lstates[self._shin_com_link].pose.position[2],
+                            shin_ang_pos_y),
                            dtype = th.float32,
                            device = self._th_device)
         # ggLog.info(f"vstate = {vstate}")
@@ -408,14 +427,15 @@ class LegJumpEnv(ControlledEnv):
             istate = th.empty(size=(0,), dtype = th.uint8, device = self._th_device)
 
         if self._last_step_got_state < self._stepCounter:
-
-            self._cumulative_dist_to_goal += abs(vstate[self.STATE.HIP_GOAL_Z]-vstate[self.STATE.HIP_POS_Z])
+            goal_dist = abs(vstate[self.STATE.HIP_GOAL_Z]-vstate[self.STATE.HIP_POS_Z])
+            self._cumulative_dist_to_goal += goal_dist
             self._cumulative_knee_torque += abs(vstate[self.STATE.KNEE_JOINT_EFFORT])
             self._cumulative_hip_torque += abs(vstate[self.STATE.HIP_JOINT_EFFORT])
             self._max_knee_torque = max(self._max_knee_torque, abs(vstate[self.STATE.KNEE_JOINT_EFFORT]))
             self._max_hip_torque = max(self._max_hip_torque, abs(vstate[self.STATE.HIP_JOINT_EFFORT]))
             abs_contact_forces = [abs(c[3]) for c in contacts]
             self._last_abs_contact_forces_sum = sum(abs_contact_forces)
+            self._dists_to_goal[self._stepCounter%len(self._dists_to_goal)] = goal_dist
             if len(abs_contact_forces)>0:
                 self._cumulated_contact_forces += self._last_abs_contact_forces_sum
                 self._max_abs_contact_forces = max(self._max_abs_contact_forces, max(abs_contact_forces))
@@ -472,7 +492,7 @@ class LegJumpEnv(ControlledEnv):
         # i["step_count"] = self._stepCounter
         i["hip_goal_z"] = self._hip_goal_z
         i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter if self._stepCounter!=0 else float("nan")
-        i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter if self._stepCounter!=0 else float("nan")
+        i["avg10_dist"] = th.mean(self._dists_to_goal)
         i["avg_knee_torque"] = self._cumulative_knee_torque/self._stepCounter if self._stepCounter!=0 else float("nan")
         i["avg_hip_torque"] = self._cumulative_hip_torque/self._stepCounter if self._stepCounter!=0 else float("nan")
         i["avg_contact_force"] = self._cumulated_contact_forces/self._stepCounter if self._stepCounter!=0 else float("nan")

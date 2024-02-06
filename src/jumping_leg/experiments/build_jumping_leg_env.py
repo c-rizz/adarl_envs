@@ -46,6 +46,6 @@ def env_builder(seed, log_folder, env_builder_args):
                                  outFolder=log_folder+"/videos/RecorderGymWrapper",
                                  saveFrequency_ep=video_save_freq,
                                  vec_obs_key="vec",
-                                 overlay_text_func=lambda vo, a, r, te, tr, info: str(info["current_contacts_sum"]))
+                                 overlay_text_func=lambda vo, a, r, te, tr, info: f"{info['current_contacts_sum']:.2f}")
     env.reset(seed=seed)
     return env

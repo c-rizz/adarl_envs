@@ -44,6 +44,33 @@
             </geometry>
         </collision>
 		<xacro:box_inertial mass="0.001" x="${size_x}" y="${size_y}" z="${size_z}" pose_xyz="0 0 0" pose_rpy="0 0 0"/>
+
+
+		<contact>
+				<!-- 
+				Pybullet defaults maybe are these (from bullet3/examples/Importers/ImportURDFDemo/URDFJointTypes.h line 33)
+				URDFLinkContactInfo()
+					: m_lateralFriction(0.5),
+					m_rollingFriction(0),
+					m_spinningFriction(0),
+					m_restitution(0),
+					m_inertiaScaling(1),
+					m_contactCfm(0),
+					m_contactErp(0),
+					m_contactStiffness(1e4),
+					m_contactDamping(1)
+				-->
+				<lateral_friction value="0.9"/>
+				<rolling_friction value="0.01"/>
+				<!-- <contact_cfm value="0.1 "/> -->
+				<!-- <contact_erp value="0.2"/> -->
+				<restitution value="0.05"/>
+				<!-- <spinning_friction value="0"/> -->
+				<!-- <friction_anchor value="0"/> -->
+				<!-- <inertia_scaling value="0"/> -->
+				<!-- <stiffness value="2500"/> -->
+				<!-- <damping value="8"/>  -->
+			</contact>
 	</link>
 	<gazebo reference="box_link">
 		<visual name="visual">

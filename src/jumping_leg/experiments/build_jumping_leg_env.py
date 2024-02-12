@@ -34,11 +34,14 @@ def env_builder(seed, log_folder, env_builder_args):
                        obs_img_width=64,
                        rgb=True,
                        th_device=th_device,
-                        reward_torque_weight = env_builder_args["reward_torque_weight"],
-                        reward_position_weight = env_builder_args["reward_position_weight"],
+                        reward_torque_limit_weight = env_builder_args["reward_torque_limit_weight"],
+                        reward_position_limit_weight = env_builder_args["reward_position_limit_weight"],
                         reward_velocity_weight = env_builder_args["reward_velocity_weight"],
                         reward_energy_weight = env_builder_args["reward_energy_weight"],
-                        reward_tracking_weight = env_builder_args["reward_tracking_weight"])
+                        reward_tracking_weight = env_builder_args["reward_tracking_weight"],
+                        reward_torque_weight = env_builder_args["reward_torque_weight"],
+                        reward_contacts_weight = env_builder_args["reward_contacts_weight"],
+                        use_velocity_control = env_builder_args["use_velocity_control"])
     env = GymEnvWrapper(env=lrenv, episodeInfoLogFile=log_folder+f"/GymEnvWrapperLog.{seed}.log")
     if video_save_freq >0:
         env = RecorderGymWrapper(env=env,
@@ -46,6 +49,18 @@ def env_builder(seed, log_folder, env_builder_args):
                                  outFolder=log_folder+"/videos/RecorderGymWrapper",
                                  saveFrequency_ep=video_save_freq,
                                  vec_obs_key="vec",
-                                 overlay_text_func=lambda vo, a, r, te, tr, info: f"{info['current_contacts_sum']:.2f}")
+                                 overlay_text_func=lambda vo, a, r, te, tr, info:   f"S   {info['step_count']: .3f}\n"+
+                                                                                    f"CF  {info['impulses_sum']: .3f}\n"+
+                                                                                    f"ExW {info['external_work']:+.3f}\n"+
+                                                                                    f"ToE {info['new_thigh_energy']+info['new_shin_energy']+info['new_slider_energy']:+.3f}\n"+
+                                                                                    f"TW  {info['thigh_work']:+.3f}\n"+
+                                                                                    f"SW  {info['shin_work']:+.3f}\n"+
+                                                                                    f"SlW {info['slider_work']:+.3f}\n"+
+                                                                                    f"ToW {info['slider_work']+info['shin_work']+info['thigh_work']:+.3f}\n"+
+                                                                                    f"TJW {info['thigh_joint_work']:+.3f}\n"+
+                                                                                    f"SJW {info['shin_joint_work']:+.3f}\n"+
+                                                                                    f"TE  {info['new_thigh_energy']:+.3f}\n"+
+                                                                                    f"SE  {info['new_shin_energy']:+.3f}\n"+
+                                                                                    f"SlE {info['new_slider_energy']:+.3f}")
     env.reset(seed=seed)
     return env

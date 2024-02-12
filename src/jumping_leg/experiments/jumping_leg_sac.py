@@ -2,24 +2,12 @@
 
 import time
 import inspect
-import numpy as np
-
-from stable_baselines3.sac.policies import MultiInputPolicy
-# from stable_baselines3 import SAC
-# from jumping_leg.utils.original_sac_with_timing import SAC
 from jumping_leg.utils.modded_sac import SAC
-from stable_baselines3.common.noise import NormalActionNoise
-from lr_gym.envs.GymEnvWrapper import GymEnvWrapper
 import lr_gym.utils.dbg.ggLog as ggLog
 import lr_gym.utils.utils
 
-from lr_gym.envs.GymToLr import GymToLr
-from lr_gym.envs.lr_wrappers.ObsToDict import ObsToDict
 import os
-from lr_gym.envs.RecorderGymWrapper import RecorderGymWrapper
 from lr_gym.utils.sb3_buffers import ThDictReplayBuffer
-from lr_gym.envs.NestedDictFlattenerGymWrapper import NestedDictFlattenerGymWrapper
-from lr_gym.envs.lr_wrappers.ObsToImgVecDict import ObsToImgVecDict
 import torch as th
 import lr_gym.utils.session
 from jumping_leg.experiments.build_jumping_leg_env import env_builder
@@ -27,21 +15,32 @@ from wandb.integration.sb3 import WandbCallback
 # from stable_baselines3.common.vec_env import SubprocVecEnv
 from lr_gym.utils.subproc_vec_env import SubprocVecEnv
 from lr_gym.envs.VecEnvLogger import VecEnvLogger
-from lr_gym.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback
+from lr_gym.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback, PrintLrRunInfo
 
 
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
-    """Solves the gazebo cartpole environment using the DQN implementation by stable-baselines.
+    env_builder_args = {
+        "reward_contacts_weight" : 1.0,
+        "reward_energy_weight" : 0.0,
+        "reward_position_limit_weight" : 10.0,
+        "reward_torque_limit_weight" : 0.0,
+        "reward_torque_weight" : 0.1,
+        "reward_tracking_weight" : 1.0,
+        "reward_velocity_weight" : 0.0,
+        "th_device" : th.device("cpu"),
+        "use_velocity_control" : False,
+        "video_save_freq" : 0
+                        }
+    args.update({
+        "batch_size" : 4096,
+        "lr" : 0.005,
+        "train_steps" : 500
+                 })
+    return solve_sac(seed, folderName, run_id, args, env_builder_args)
 
-    It does not use the rendering at all, it learns from the joint states.
-    The DQN hyperparameters have not been tuned to make this efficient.
-
-    Returns
-    -------
-    None
-
-    """
+def solve_sac(seed, folderName, run_id, args, env_builder_args):
+    
     ggLog.info(f"Starting run")
     log_folder = lr_gym.utils.session.lr_gym_startup(   __file__,
                                                         inspect.currentframe(),
@@ -55,14 +54,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     device = lr_gym.utils.utils.torch_selectBestGpu()
     ggLog.info("Building env...")
 
-    #setup seeds for reproducibility
-    env_builder_args = {"th_device" : th.device("cpu"),
-                        "video_save_freq" : 0,
-                        "reward_torque_weight" : 0.0,
-                        "reward_position_weight" : 1.0,
-                        "reward_velocity_weight" : 0.0,
-                        "reward_energy_weight" : 0.01,
-                        "reward_tracking_weight" : 1.0}
     
     parallel_envs = 16
     if False: #parallel_envs == 1:
@@ -87,15 +78,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     max_steps = 500
 
-    model = SAC("MultiInputPolicy", env, verbose=1,
-                    batch_size=4096,
+    model = SAC("MultiInputPolicy", env, verbose=0,
+                    batch_size=args["batch_size"],
                     buffer_size=10_000_000,
                     gamma=0.99,
-                    learning_rate=0.005,
+                    learning_rate=args["lr"],
                     ent_coef="auto",
                     learning_starts=10_000,
                     tau=0.005,
-                    gradient_steps=int(max_steps),
+                    gradient_steps=args["train_steps"],
                     train_freq=max_steps,
                     target_entropy="auto",
                     seed = seed,
@@ -113,6 +104,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     callbacks.append(WandbCallback( model_save_path=f"{folderName}/wandb/save",
                                     verbose=2))
     callbacks.append(SigintHaltCallback())
+    callbacks.append(PrintLrRunInfo())
     ggLog.info("Learning...")
     t_preLearn = time.time()
     model.learn(total_timesteps=10_000_000,
@@ -121,8 +113,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     ggLog.info("Learned. Took "+str(duration_learn)+" seconds.")
 
 
-    # res = lr_gym.utils.utils.evaluatePolicy(env = eval_env, model = None, episodes = 10, predict_func=model.predict)
-    # print(f"Summary:\n{res}")
 
 if __name__ == "__main__":
 
@@ -152,24 +142,6 @@ if __name__ == "__main__":
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())
 
-    # if args["real"] and args["maxProcs"]>0:
-    #     raise AttributeError("Cannot run multiple processes in the real")
-
-
-    # if args["simplified"]:
-    #     mode = "simplified"
-    # elif args["gz"]:
-    #     mode = "gz"
-    # elif args["gazebo"]:
-    #     mode = "gazebo_classic"
-    # else:
-    #     raise RuntimeError("No mode was specified, use either --gazebo --gz or --simplified")
-
-    action_repeat = 4
-    ep_duration = int(1000/action_repeat)
-    parallel_envs = 1
-
-
     
     launchRun(  seedsNum=args["seedsNum"],
                 seedsOffset=args["seedsOffset"],
@@ -178,4 +150,6 @@ if __name__ == "__main__":
                 launchFilePath=__file__,
                 resumeFolder = args["resumeFolder"],
                 args = args,
-                debug_level = -10)
+                debug_level = -10,
+                start_lr_gym=False,
+                pkgs_to_save=["lr_gym","jumping_leg"])

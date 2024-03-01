@@ -205,31 +205,19 @@
 
 
 	<link name="shin_link">
-		<!-- The shin is made of a cylinder plus a sphere, the total length, is shin_height, so the length  of the two are detemrined accordingly -->
+		<!-- shin_height is the knee to foot tip distance, so the actual shin lenght is determined accordingly-->
 		<visual name = "shin_link_v">
 			<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
 			<geometry>
                 <cylinder length="${shin_height-shin_width}" radius="${shin_width/2}" />
 			</geometry>
 	   </visual>
-        <visual>
-			<origin xyz="0 0 -${shin_height-shin_width}" rpy="0 0 0"/>
-            <geometry>
-                <sphere radius="${shin_width}" />
-            </geometry>
-        </visual>
 		<collision name = "shin_link_c">
 			<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
 			<geometry>
                 <cylinder length="${shin_height-shin_width}" radius="${shin_width/2}" />
 			</geometry>
 	   </collision>
-        <collision>
-			<origin xyz="0 0 -${shin_height-shin_width}" rpy="0 0 0"/>
-            <geometry>
-                <sphere radius="${shin_width}" />
-            </geometry>
-        </collision>
 		<xacro:cylinder_z_inertial mass="${shin_mass}" height="${shin_height}" radius="${shin_width/2}" pose_xyz="0 0 -${shin_height/2}" pose_rpy="0 0 0"/>
 
 		<contact>
@@ -246,7 +234,7 @@
 					m_contactStiffness(1e4),
 					m_contactDamping(1)
 				-->
-				<lateral_friction value="0.9"/>
+				<lateral_friction value="0.05"/>
 				<rolling_friction value="0.01"/>
 				<!-- <contact_cfm value="0.1 "/> -->
 				<!-- <contact_erp value="0.2"/> -->
@@ -277,6 +265,53 @@
 			</material>
       	</visual>
     </gazebo>
+
+
+
+    <link name="foot_center_link">
+        <visual>
+			<origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="${shin_width}" />
+            </geometry>
+        </visual>
+        <collision>
+			<origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="${shin_width}" />
+            </geometry>
+        </collision>
+		<xacro:box_inertial mass="0.0001"
+                            x="0.001" y="0.001" z="0.001"
+                            pose_xyz = "0 0 0"
+                            pose_rpy = "0 0 0"/>
+		<contact>
+				<!-- 
+				Pybullet defaults maybe are these (from bullet3/examples/Importers/ImportURDFDemo/URDFJointTypes.h line 33)
+				URDFLinkContactInfo()
+					: m_lateralFriction(0.5),
+					m_rollingFriction(0),
+					m_spinningFriction(0),
+					m_restitution(0),
+					m_inertiaScaling(1),
+					m_contactCfm(0),
+					m_contactErp(0),
+					m_contactStiffness(1e4),
+					m_contactDamping(1)
+				-->
+				<lateral_friction value="0.9"/>
+				<rolling_friction value="0.01"/>
+				<!-- <contact_cfm value="0.1 "/> -->
+				<!-- <contact_erp value="0.2"/> -->
+				<restitution value="0.05"/>
+				<!-- <spinning_friction value="0"/> -->
+				<!-- <friction_anchor value="0"/> -->
+				<!-- <inertia_scaling value="0"/> -->
+				<!-- <stiffness value="2500"/> -->
+				<!-- <damping value="8"/>  -->
+			</contact>
+	</link>
+
 
     <link name="foot_link">
 		<xacro:box_inertial mass="0.0001"
@@ -331,6 +366,12 @@
 	<joint name="shin_link_base" type="fixed">
         <parent link="shin_link"/>
         <child link="shin_link_base"/>
+    </joint>
+
+	<joint name="foot_center_joint" type="fixed">
+        <parent link="shin_link"/>
+        <child link="foot_center_link"/>
+    	<origin xyz="0 0 -${shin_height-shin_width}" rpy="0 0 0"/>
     </joint>
 
 	<joint name="foot_joint" type="fixed">

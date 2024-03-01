@@ -3,7 +3,7 @@
 
 	<xacro:arg name="size_x" default="0.20" />
 	<xacro:arg name="size_y" default="0.50" />
-	<xacro:arg name="size_z" default="0.025" />
+	<xacro:arg name="size_z" default="0.005" />
 
 	<xacro:property name="size_x" default="$(arg size_x)" />
 	<xacro:property name="size_y" default="$(arg size_y)" />

@@ -3,6 +3,7 @@
 import time
 import inspect
 from jumping_leg.utils.modded_sac import SAC
+from stable_baselines3.ppo import PPO
 import lr_gym.utils.dbg.ggLog as ggLog
 import lr_gym.utils.utils
 
@@ -21,11 +22,11 @@ from lr_gym.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback, Prin
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args = {
-        "reward_contacts_weight" : 1.0,
+        "reward_contacts_weight" : 0.0, # ("uniform", 0, 1),
         "reward_energy_weight" : 0.0,
         "reward_position_limit_weight" : 10.0,
-        "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 0.1,
+        "reward_torque_limit_weight" : 1.0,
+        "reward_torque_weight" : 1.0,
         "reward_tracking_weight" : 1.0,
         "reward_velocity_weight" : 0.0,
         "th_device" : th.device("cpu"),
@@ -55,7 +56,7 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
     ggLog.info("Building env...")
 
     
-    parallel_envs = 16
+    parallel_envs = 1
     if False: #parallel_envs == 1:
         env = env_builder(log_folder=log_folder, seed = seed, env_builder_args = {"th_device" : th.device("cpu"),
                                                                                 "video_save_freq" : 0})
@@ -70,7 +71,7 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
     eval_env_builder_args = {}
     eval_env_builder_args.update(env_builder_args)
     env_builder_args["video_save_freq"] = 1
-    eval_env = env_builder(log_folder=log_folder+"/eval", seed = seed+100000000, 
+    eval_env = env_builder(log_folder=log_folder+"/eval_env", seed = seed+100000000, 
                          env_builder_args = env_builder_args)
 
     ggLog.info("Built")
@@ -91,16 +92,30 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
                     target_entropy="auto",
                     seed = seed,
                     device=device,
-                    policy_kwargs=dict(net_arch=[256,256]),
+                    policy_kwargs=dict(net_arch=[512,256]),
                     replay_buffer_class = ThDictReplayBuffer,
                     replay_buffer_kwargs = {"storage_torch_device" : device},
                     tensorboard_log=folderName+f"/tensorboard")
+    
+    # model = PPO("MultiInputPolicy", env, verbose=0,
+    #             n_steps = max_steps,
+    #             batch_size=args["batch_size"],
+    #             seed = seed,
+    #             device=device,
+    #             policy_kwargs=dict(net_arch=[512,256]),
+    #             # replay_buffer_class = ThDictReplayBuffer,
+    #             # replay_buffer_kwargs = {"storage_torch_device" : device},
+    #             tensorboard_log=folderName+f"/tensorboard")
 
     callbacks = []
     callbacks.append(EvalCallback_ep(eval_env, best_model_save_path=log_folder+"/eval/EvalCallback",
                                             log_path=log_folder+"/eval/EvalCallback", eval_freq_ep=10,
-                                            deterministic=False, render=False, verbose=True,
+                                            deterministic=True, render=False, verbose=True,
                                             n_eval_episodes = 1))
+    callbacks.append(EvalCallback_ep(eval_env, best_model_save_path=log_folder+"/eval100/EvalCallback",
+                                            log_path=log_folder+"/eval100/EvalCallback", eval_freq_ep=100,
+                                            deterministic=True, render=False, verbose=True,
+                                            n_eval_episodes = 10))
     callbacks.append(WandbCallback( model_save_path=f"{folderName}/wandb/save",
                                     verbose=2))
     callbacks.append(SigintHaltCallback())

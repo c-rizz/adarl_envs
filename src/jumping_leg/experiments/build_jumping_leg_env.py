@@ -4,6 +4,7 @@ from lr_gym.envs.GymEnvWrapper import GymEnvWrapper
 from lr_gym.envs.RecorderGymWrapper import RecorderGymWrapper
 import lr_gym.utils.dbg.ggLog as ggLog
 import torch as th
+from gymnasium.wrappers.normalize import NormalizeObservation
 
 def env_builder(seed, log_folder, env_builder_args):
     stepLength_sec = 0.01
@@ -23,12 +24,13 @@ def env_builder(seed, log_folder, env_builder_args):
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)
+    obs_only_vec = True
 
     lrenv = LegJumpEnv(maxStepsPerEpisode=500,
                        stepLength_sec=stepLength_sec,
                        environmentController=env_controller,
                        seed=seed,
-                       obs_only_vec=True,
+                       obs_only_vec=obs_only_vec,
                        obs_only_img=False,
                        obs_img_height=64,
                        obs_img_width=64,
@@ -43,24 +45,38 @@ def env_builder(seed, log_folder, env_builder_args):
                         reward_contacts_weight = env_builder_args["reward_contacts_weight"],
                         use_velocity_control = env_builder_args["use_velocity_control"])
     env = GymEnvWrapper(env=lrenv, episodeInfoLogFile=log_folder+f"/GymEnvWrapperLog.{seed}.log")
+    
     if video_save_freq >0:
         env = RecorderGymWrapper(env=env,
                                  fps = 1/stepLength_sec,
                                  outFolder=log_folder+"/videos/RecorderGymWrapper",
                                  saveFrequency_ep=video_save_freq,
                                  vec_obs_key="vec",
-                                 overlay_text_func=lambda vo, a, r, te, tr, info:   f"S   {info['step_count']: .3f}\n"+
-                                                                                    f"CF  {info['impulses_sum']: .3f}\n"+
-                                                                                    f"ExW {info['external_work']:+.3f}\n"+
-                                                                                    f"ToE {info['new_thigh_energy']+info['new_shin_energy']+info['new_slider_energy']:+.3f}\n"+
-                                                                                    f"TW  {info['thigh_work']:+.3f}\n"+
-                                                                                    f"SW  {info['shin_work']:+.3f}\n"+
-                                                                                    f"SlW {info['slider_work']:+.3f}\n"+
-                                                                                    f"ToW {info['slider_work']+info['shin_work']+info['thigh_work']:+.3f}\n"+
-                                                                                    f"TJW {info['thigh_joint_work']:+.3f}\n"+
-                                                                                    f"SJW {info['shin_joint_work']:+.3f}\n"+
-                                                                                    f"TE  {info['new_thigh_energy']:+.3f}\n"+
-                                                                                    f"SE  {info['new_shin_energy']:+.3f}\n"+
-                                                                                    f"SlE {info['new_slider_energy']:+.3f}")
+                                 overlay_text_func=lambda vo, a, r, te, tr, info:   f"Step    {info['step_count']: .3f}\n"+
+                                                                                    f"ImpSum  {info['impulses_sum']: .3f}\n"+
+                                                                                    f"ExtWork {info['external_work']:+.3f}\n"+
+                                                                                    f"TotEner {info['new_thigh_energy']+info['new_shin_energy']+info['new_slider_energy']:+.3f}\n"+
+                                                                                    f"ThiWork {info['thigh_work']:+.3f}\n"+
+                                                                                    f"ShiWork {info['shin_work']:+.3f}\n"+
+                                                                                    f"SliWork {info['slider_work']:+.3f}\n"+
+                                                                                    f"TotWork {info['slider_work']+info['shin_work']+info['thigh_work']:+.3f}\n"+
+                                                                                    f"ThiJWor {info['thigh_joint_work']:+.3f}\n"+
+                                                                                    f"ShiJWor {info['shin_joint_work']:+.3f}\n"+
+                                                                                    f"ThiEner {info['new_thigh_energy']:+.3f}\n"+
+                                                                                    f"ShiEner {info['new_shin_energy']:+.3f}\n"+
+                                                                                    f"SliEner {info['new_slider_energy']:+.3f}\n"+
+                                                                                    f"rContac {info['vstate'][LegJumpEnv.STATE.REWARD_CONTACTS_WEIGHT]:.2f}\n"+
+                                                                                    f"rEnergy {info['vstate'][LegJumpEnv.STATE.REWARD_ENERGY_WEIGHT]:.2f}\n"+
+                                                                                    f"rImpThr {info['vstate'][LegJumpEnv.STATE.REWARD_IMPULSE_THRESHOLD]:.2f}\n"+
+                                                                                    f"rPosLim {info['vstate'][LegJumpEnv.STATE.REWARD_POSITION_LIMIT_WEIGHT]:.2f}\n"+
+                                                                                    f"rTorLim {info['vstate'][LegJumpEnv.STATE.REWARD_TORQUE_LIMIT_WEIGHT]:.2f}\n"+
+                                                                                    f"rTorque {info['vstate'][LegJumpEnv.STATE.REWARD_TORQUE_WEIGHT]:.2f}\n"+
+                                                                                    f"rTrack  {info['vstate'][LegJumpEnv.STATE.REWARD_TRACKING_WEIGHT]:.2f}\n"+
+                                                                                    f"rVeloci {info['vstate'][LegJumpEnv.STATE.REWARD_VELOCITY_WEIGHT]:.2f}\n"
+                                                                                    f"torqHip {info['vstate'][LegJumpEnv.STATE.HIP_JOINT_EFFORT]:.2f}\n"
+                                                                                    f"torqKne {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_EFFORT]:.2f}\n"
+                                                                                    f"posiHip {info['vstate'][LegJumpEnv.STATE.HIP_JOINT_POS]:.2f}\n"
+                                                                                    f"posiKne {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_POS]:.2f}\n"
+                                                                                    )
     env.reset(seed=seed)
     return env

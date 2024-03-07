@@ -118,6 +118,7 @@ class LegJumpEnv(ControlledEnv):
         velocity_command_scale_hip : float
         velocity_command_scale_knee : float
         vstate_minmax : Optional[th.Tensor]
+        reward_scale : float
 
     @staticmethod
     def _sample(value_or_dist : Union[float,Tuple[str,float,float]], generator, device):
@@ -153,7 +154,9 @@ class LegJumpEnv(ControlledEnv):
                     reward_tracking_weight = 1.0,
                     reward_torque_weight = 0.0,
                     reward_contacts_weight = 0.0,
-                    use_velocity_control = False):
+                    control_mode = "torque",
+                    reward_scale = 1.0,
+                    platform_randomization = True):
         """Short summary.
 
         Parameters
@@ -192,7 +195,21 @@ class LegJumpEnv(ControlledEnv):
         self._thigh_com_link = ("leg", "thigh_link")
         self._shin_com_link = ("leg", "shin_link")
         self._rendering_cam_name = "simple_camera"
-        self._use_velocity_control = use_velocity_control
+        self._use_velocity_control = False
+        self._use_torque_control = False
+        self._use_position_control = False
+        self._use_full_impedance_control = False
+        if control_mode.lower() == "velocity":            
+            self._use_velocity_control = True
+        elif control_mode.lower() == "position":
+            self._use_position_control = True
+        elif control_mode.lower() == "impedance":
+            self._use_full_impedance_control = True
+        elif control_mode.lower() == "torque":
+            self._use_torque_control = True
+        else:
+            raise RuntimeError(f"Invalid control mode '{control_mode}'")
+        self._platform_randomization = platform_randomization
 
         self._obs_only_vec = obs_only_vec
         self._obs_only_img = obs_only_img
@@ -230,7 +247,12 @@ class LegJumpEnv(ControlledEnv):
         # alpha = r^(1/t) where r is the residual value and t is the elapsed time. 
         # So if we want a transition from 1 to 0 to be at 0.05 after 0.1 seconds
         #   we get alpha = 0.05^(1/0.1) = 9.76e-14
-        action_exp_smoothing_1s = 0.05**(1/0.1)
+        # If we want to use the halving time as a parameter we can say:
+        #   alpha = 0.5^(1/halving_time)
+        # E.g. with a halving time of 0.01s:
+        #   alpha = 0.5^(1/0.01) = 7.88e-31
+        halflife_s = 0.01
+        action_exp_smoothing_1s = 0.5**(1/halflife_s)
 
         self._configuration = LegJumpEnv.EnvConfiguration(  reward_contacts_weight = reward_contacts_weight,
                                                             reward_energy_weight = reward_energy_weight,
@@ -252,14 +274,16 @@ class LegJumpEnv(ControlledEnv):
                                                             velocity_limits_knee = (-20, 20),
                                                             velocity_command_scale_hip = 20,
                                                             velocity_command_scale_knee = 20,
-                                                            vstate_minmax = None)
-        
+                                                            vstate_minmax = None,
+                                                            reward_scale = reward_scale)
+        action_len = 10 if self._use_full_impedance_control else 2
         self._current_episode_config = th.zeros((len(self.EPISODE_CONFIG),),dtype=th.float32,device=self._th_device)
         # max_dact_dt = 100 #max change in action, i.e. da/dt
         # self._max_act_change = th.tensor(max_dact_dt*stepLength_sec,dtype=th.float32, device=self._th_device)
         # self._hip_goal_z = th.tensor(0.5,dtype=th.float32, device=self._th_device)
-        self._last_out_action = th.zeros((2,),dtype=th.float32, device=self._th_device)
-        self._history_length = 1
+        self._last_out_action = th.zeros((action_len,),dtype=th.float32, device=self._th_device)
+        self._history_length = 2
+        self._frame_stack_length = 1
         self._vstate_history = th.zeros((self._history_length, len(self.STATE)), dtype=th.float32, device=self._th_device)
         self._new_history = th.zeros_like(self._vstate_history) # preallocate this
 
@@ -342,7 +366,7 @@ class LegJumpEnv(ControlledEnv):
 
         self._stacked_part_len = self.STATE.HIP_VEL_Z+1
         self._1step_vec_obs_size = self.STATE.REWARD_IMPULSE_THRESHOLD+1
-        self._vec_obs_size = self._stacked_part_len*self._history_length + (self._1step_vec_obs_size-self._stacked_part_len)
+        self._vec_obs_size = self._stacked_part_len*self._frame_stack_length + (self._1step_vec_obs_size-self._stacked_part_len)
 
 
 
@@ -364,7 +388,7 @@ class LegJumpEnv(ControlledEnv):
             self.observation_space = spaces.gym_spaces.Dict({ self.VECTOR_PART : vec_obs_space,
                                                               self.IMAGE_PART  : img_observation_space})
             
-        action_space_high = np.array([1, 1])
+        action_space_high = np.array([1]*action_len)
         self.action_space = spaces.gym_spaces.Box(-action_space_high,action_space_high)
 
 
@@ -407,14 +431,33 @@ class LegJumpEnv(ControlledEnv):
             kvel = action[1]*self._configuration.velocity_command_scale_knee
             self._environmentController.setJointsVelocityCommand(jointVelocities = [(self._hip_joint,  hvel),
                                                                                     (self._knee_joint, kvel)])
-
+        elif self._use_position_control:
+            hpos = self._unnormalize(action[0],self._configuration.position_limits_hip[0],self._configuration.position_limits_hip[1])
+            kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
+            self._environmentController.setJointsImpedanceCommand(jointImpedances = 
+                                                            [   (self._hip_joint,   (hpos,0,0,300,30)),
+                                                                (self._knee_joint,  (kpos,0,0,300,30))])
+        elif self._use_full_impedance_control:
+            hpos = self._unnormalize(action[0],self._configuration.position_limits_hip[0],self._configuration.position_limits_hip[1])
+            kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
+            hvel = action[2]*self._configuration.velocity_command_scale_hip
+            kvel = action[3]*self._configuration.velocity_command_scale_knee
+            htorque = action[4]*self._configuration.torque_command_scale_hip
+            ktorque = action[5]*self._configuration.torque_command_scale_knee
+            hpgain = action[6]*500
+            kpgain = action[7]*500
+            hvgain = action[8]*100
+            kvgain = action[9]*100
+            
+            self._environmentController.setJointsImpedanceCommand(jointImpedances = 
+                                                            [   (self._hip_joint,   (hpos,hvel,htorque,hpgain,hvgain)),
+                                                                (self._knee_joint,  (kpos,kvel,ktorque,kpgain,kvgain))])
         else:
             htorque = action[0]*self._configuration.torque_command_scale_hip
             ktorque = action[1]*self._configuration.torque_command_scale_knee
-            # htorque = 5 
-            # ktorque = 5
             self._environmentController.setJointsEffortCommand(jointTorques = [(self._hip_joint,  htorque),
                                                                             (self._knee_joint, ktorque)])
+            
 
 
 
@@ -473,8 +516,8 @@ class LegJumpEnv(ControlledEnv):
         pvstate_un = LegJumpEnv._unnormalize(pvstate_norm,env_conf["vstate_minmax"][:,0],env_conf["vstate_minmax"][:,1])
 
         goal_dist = th.abs(vstate_un[LegJumpEnv.STATE.HIP_GOAL_Z] - vstate_un[LegJumpEnv.STATE.HIP_POS_Z])
-        tracking_reward = 1 - goal_dist
-        # tracking_reward = 1/(1+(goal_dist/0.1)**2) # halves at 0.1m
+        # tracking_reward = 1 - goal_dist
+        tracking_reward = 1/(1+goal_dist/0.05) # halves at 0.05m
         impulse_threshold = pvstate_un[LegJumpEnv.STATE.REWARD_IMPULSE_THRESHOLD]
         contacts_reward = th.clamp(-(vstate_un[LegJumpEnv.STATE.IMPULSES_SUM]/impulse_threshold)**10, min = -1)
 
@@ -509,6 +552,15 @@ class LegJumpEnv(ControlledEnv):
             dbg_info["new_slider_energy"] = new_slider_energy
         # ggLog.info(f"new_thigh_energy={new_thigh_energy}, old_thigh_energy={old_thigh_energy}, new_shin_energy={new_shin_energy}, old_shin_energy={old_shin_energy}")
         # ggLog.info(f"knee_work={knee_work}\t hip_work={hip_work}\t thigh_work={thigh_work}\t shin_work={shin_work}")
+
+        reward_scale = env_conf["reward_scale"]
+        tracking_reward         = reward_scale * tracking_reward
+        torque_reward           = reward_scale * torque_reward
+        torque_limit_reward     = reward_scale * torque_limit_reward
+        velocity_reward         = reward_scale * velocity_reward
+        position_limit_reward   = reward_scale * position_limit_reward
+        global_energy_reward    = reward_scale * global_energy_reward
+        contacts_reward         = reward_scale * contacts_reward
 
         if sub_rewards is not None:
             sub_rewards["tracking_reward"] = tracking_reward
@@ -588,29 +640,32 @@ class LegJumpEnv(ControlledEnv):
         self._last_external_work = 0
         self._last_step_got_state = -1
 
-        
-        s1_area = th.tensor([[0.20, 0.30], # minx, maxx
-                             [0.05, 0.40]], device=self._th_device) # miny, maxy
-        s1_pos = th.rand(size=(2,), generator=self._rng, device=self._th_device)
-        s1_pos = s1_pos*(s1_area[:,1]-s1_area[:,0])+s1_area[:,0]
-        # s1_pos = th.tensor([0.0,0.0])
+        if self._platform_randomization:
+            s1_area = th.tensor([[0.20, 0.30], # minx, maxx
+                                [0.05, 0.40]], device=self._th_device) # miny, maxy
+            s1_xz = th.rand(size=(2,), generator=self._rng, device=self._th_device)
+            s1_xz = s1_xz*(s1_area[:,1]-s1_area[:,0])+s1_area[:,0]
+            # s1_pos = th.tensor([0.0,0.0])
 
 
-        s2_area = th.tensor([[0.05, 0.30], # minx, maxx
-                             [0.05, 0.45]], device=self._th_device) # miny, maxy
-        s2_pos = th.rand(size=(2,), generator=self._rng, device=self._th_device)
-        s2_pos = s1_pos + s2_pos*(s2_area[:,1]-s2_area[:,0])+s2_area[:,0]
+            s2_area = th.tensor([[0.05, 0.30], # minx, maxx
+                                [0.05, 0.45]], device=self._th_device) # miny, maxy
+            s2_xz = th.rand(size=(2,), generator=self._rng, device=self._th_device)
+            s2_xz = s1_xz + s2_xz*(s2_area[:,1]-s2_area[:,0])+s2_area[:,0]
 
-        s1_pos[0] = s1_pos[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
-        s2_pos[0] = s2_pos[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
+            s1_xz[0] = s1_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
+            s2_xz[0] = s2_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
+        else:
+            s1_xz = th.tensor([-0.1-0.125, 0.2])
+            s2_xz = th.tensor([-0.15-0.125, 0.4])
 
-        hip_goal_z = 0.4 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*(s2_pos[1]+0.6-0.4)
+        hip_goal_z = 0.4 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*(s2_xz[1]+0.8-0.4)
 
 
-        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT1_POS_X] = s1_pos[0]
-        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT1_POS_Z] = s1_pos[1]
-        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT2_POS_X] = s2_pos[0]
-        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT2_POS_Z] = s2_pos[1]
+        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT1_POS_X] = s1_xz[0]
+        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT1_POS_Z] = s1_xz[1]
+        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT2_POS_X] = s2_xz[0]
+        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT2_POS_Z] = s2_xz[1]
         self._current_episode_config[self.EPISODE_CONFIG.HIP_GOAL_Z] = hip_goal_z
         self._current_episode_config[self.EPISODE_CONFIG.REWARD_CONTACTS_WEIGHT] = self._sample(self._configuration.reward_contacts_weight,
                                                                                                 self._rng,
@@ -619,7 +674,7 @@ class LegJumpEnv(ControlledEnv):
 
 
         if isinstance(self._environmentController, SimulatedEnvController):
-            if s1_pos[0] > 0:
+            if s1_xz[0] > 0:
                 self._environmentController.setJointsStateDirect({self._rail_joint: JointState(position = [self._start_height], rate=[0], effort=[0]),
                                                                 self._hip_joint:  JointState(position = [ 3.14159/4], rate=[0], effort=[0]),
                                                                 self._knee_joint: JointState(position = [-3.14159/2], rate=[0], effort=[0])})
@@ -631,12 +686,12 @@ class LegJumpEnv(ControlledEnv):
             raise RuntimeError("Cannot reset joint state")
         self._environmentController.setJointsEffortCommand([(self._hip_joint,0),(self._knee_joint,0)])
 
-        ls = LinkState( position_xyz = th.tensor((s1_pos[0],0.3,s1_pos[1])),
+        ls = LinkState( position_xyz = th.tensor((s1_xz[0],0.3,s1_xz[1])),
                         orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
                         pos_velocity_xyz = th.tensor((0.,0.,0)),
                         ang_velocity_xyz = th.tensor((0.,0.,0.)))
         self._environmentController.setLinksStateDirect({("support1","world") : ls})
-        ls = LinkState( position_xyz = th.tensor((s2_pos[0],0.3,s2_pos[1])),
+        ls = LinkState( position_xyz = th.tensor((s2_xz[0],0.3,s2_xz[1])),
                         orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
                         pos_velocity_xyz = th.tensor((0.,0.,0)),
                         ang_velocity_xyz = th.tensor((0.,0.,0.)))
@@ -662,7 +717,7 @@ class LegJumpEnv(ControlledEnv):
 
     def getObservation(self, state) -> Dict[Any, th.Tensor]:
         if self._obs_only_vec:
-            stacked_part =  state[self.VECTOR_PART][:,:self._stacked_part_len].flatten()
+            stacked_part =  state[self.VECTOR_PART][:self._frame_stack_length,:self._stacked_part_len].flatten()
             constant_part = state[self.VECTOR_PART][0,self._stacked_part_len:self._1step_vec_obs_size]
             return {self.VECTOR_PART : th.cat([stacked_part,constant_part])}
         else:
@@ -830,33 +885,33 @@ class LegJumpEnv(ControlledEnv):
     def buildSimulation(self, backend):
         # ggLog.info("Building env")
         envCtrlName = type(self._environmentController).__name__
-        if envCtrlName in ["GazeboController", "GazeboControllerNoPlugin"]:
-            # ggLog.info(f"sim_img_width  = {sim_img_width}")
-            # ggLog.info(f"sim_img_height = {sim_img_height}")
-            if not self._rendering_enabled:
-                worldpath = "\"$(find lr_gym_ros)/worlds/ground_plane_world_plugin.world\""
-            else:
-                worldpath = "\"$(find lr_gym_ros)/worlds/fixed_camera_world_plugin.world\""
-            self._environmentController.build_scenario( launch_file_pkg_and_path=("lr_gym_ros","/launch/gazebo_server.launch"),
-                                                        launch_file_args={  "gui":"false",
-                                                                            "paused":"true",
-                                                                            "physics_engine":"bullet",
-                                                                            "limit_sim_speed":"false",
-                                                                            "world_name":worldpath,
-                                                                            "gazebo_seed":f"{self._envSeed}",
-                                                                            "wall_sim_speed":f"{self._wall_sim_speed}"})
-            self._rendering_cam_name = "camera"
-        elif envCtrlName == "GzController":
-            self._environmentController.build_scenario(sdf_file = ("lr_gym_ros2","/worlds/empty_cams.sdf"))
-            # self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("lr_gym","models/simple_camera.sdf.xacro"),
-            #                                         model_name=None,
-            #                                         pose=Pose(0,2,0.5,0,0.0,-0.707,0.707),
-            #                                         model_kwargs={"camera_width":"1920","camera_height":"1080","frame_rate":1/self._intendedStepLength_sec},
-            #                                         model_format="sdf.xacro")
-            self._rendering_cam_name = "simple_camera"
-        elif envCtrlName == "PyBulletController":
+        if envCtrlName == "PyBulletJointImpedanceController":
             self._environmentController.build_scenario(None)
             self._rendering_cam_name = "simple_camera"
+        # elif envCtrlName in ["GazeboController", "GazeboControllerNoPlugin"]:
+        #     # ggLog.info(f"sim_img_width  = {sim_img_width}")
+        #     # ggLog.info(f"sim_img_height = {sim_img_height}")
+        #     if not self._rendering_enabled:
+        #         worldpath = "\"$(find lr_gym_ros)/worlds/ground_plane_world_plugin.world\""
+        #     else:
+        #         worldpath = "\"$(find lr_gym_ros)/worlds/fixed_camera_world_plugin.world\""
+        #     self._environmentController.build_scenario( launch_file_pkg_and_path=("lr_gym_ros","/launch/gazebo_server.launch"),
+        #                                                 launch_file_args={  "gui":"false",
+        #                                                                     "paused":"true",
+        #                                                                     "physics_engine":"bullet",
+        #                                                                     "limit_sim_speed":"false",
+        #                                                                     "world_name":worldpath,
+        #                                                                     "gazebo_seed":f"{self._envSeed}",
+        #                                                                     "wall_sim_speed":f"{self._wall_sim_speed}"})
+        #     self._rendering_cam_name = "camera"
+        # elif envCtrlName == "GzController":
+        #     self._environmentController.build_scenario(sdf_file = ("lr_gym_ros2","/worlds/empty_cams.sdf"))
+        #     # self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("lr_gym","models/simple_camera.sdf.xacro"),
+        #     #                                         model_name=None,
+        #     #                                         pose=Pose(0,2,0.5,0,0.0,-0.707,0.707),
+        #     #                                         model_kwargs={"camera_width":"1920","camera_height":"1080","frame_rate":1/self._intendedStepLength_sec},
+        #     #                                         model_format="sdf.xacro")
+        #     self._rendering_cam_name = "simple_camera"
         else:
             raise NotImplementedError("environmentController "+envCtrlName+" not supported")
 

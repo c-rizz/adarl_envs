@@ -7,9 +7,10 @@ import torch as th
 from gymnasium.wrappers.normalize import NormalizeObservation
 
 def env_builder(seed, log_folder, env_builder_args):
-    stepLength_sec = 0.01
+    stepLength_sec = env_builder_args["stepLength_sec"]
     video_save_freq = env_builder_args["video_save_freq"]
     th_device = env_builder_args["th_device"]
+    max_steps = 5/stepLength_sec
 
     mode = "PyBulletController"
     if mode == "GzController":
@@ -19,14 +20,14 @@ def env_builder(seed, log_folder, env_builder_args):
         from lr_gym_ros.envControllers.GazeboController import GazeboController
         env_controller = GazeboController(stepLength_sec=stepLength_sec)
     elif mode == "PyBulletController":
-        from lr_gym.env_controllers.PyBulletController import PyBulletController
-        env_controller = PyBulletController(stepLength_sec=stepLength_sec, restore_on_reset=False, debug_gui=False)
+        from lr_gym.env_controllers.PyBulletJointImpedanceController import PyBulletJointImpedanceController
+        env_controller = PyBulletJointImpedanceController(stepLength_sec=stepLength_sec, restore_on_reset=False, debug_gui=False)
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)
     obs_only_vec = True
 
-    lrenv = LegJumpEnv(maxStepsPerEpisode=500,
+    lrenv = LegJumpEnv(maxStepsPerEpisode=max_steps,
                        stepLength_sec=stepLength_sec,
                        environmentController=env_controller,
                        seed=seed,
@@ -43,8 +44,11 @@ def env_builder(seed, log_folder, env_builder_args):
                         reward_tracking_weight = env_builder_args["reward_tracking_weight"],
                         reward_torque_weight = env_builder_args["reward_torque_weight"],
                         reward_contacts_weight = env_builder_args["reward_contacts_weight"],
-                        use_velocity_control = env_builder_args["use_velocity_control"])
-    env = GymEnvWrapper(env=lrenv, episodeInfoLogFile=log_folder+f"/GymEnvWrapperLog.{seed}.log")
+                        control_mode = env_builder_args["control_mode"],
+                        reward_scale=500/max_steps,
+                        platform_randomization = env_builder_args["platform_randomization"]) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
+    env = GymEnvWrapper(env=lrenv, episodeInfoLogFile=log_folder+f"/GymEnvWrapperLog.{seed}.log",
+                        quiet=True)
     
     if video_save_freq >0:
         env = RecorderGymWrapper(env=env,

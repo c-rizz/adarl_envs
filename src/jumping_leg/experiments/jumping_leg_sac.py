@@ -26,17 +26,21 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_energy_weight" : 0.0,
         "reward_position_limit_weight" : 10.0,
         "reward_torque_limit_weight" : 1.0,
-        "reward_torque_weight" : 1.0,
+        "reward_torque_weight" : 0.0,
         "reward_tracking_weight" : 1.0,
         "reward_velocity_weight" : 0.0,
         "th_device" : th.device("cpu"),
-        "use_velocity_control" : False,
-        "video_save_freq" : 0
+        "control_mode" : "torque",
+        "video_save_freq" : 0,
+        "stepLength_sec" : 0.01,
+        "platform_randomization" : False
                         }
     args.update({
         "batch_size" : 4096,
         "lr" : 0.005,
-        "train_steps" : 500
+        "train_steps" : 50,
+        "train_freq" : 50,
+        "algorithm" : "sac"
                  })
     return solve_sac(seed, folderName, run_id, args, env_builder_args)
 
@@ -56,7 +60,7 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
     ggLog.info("Building env...")
 
     
-    parallel_envs = 1
+    parallel_envs = 16
     if False: #parallel_envs == 1:
         env = env_builder(log_folder=log_folder, seed = seed, env_builder_args = {"th_device" : th.device("cpu"),
                                                                                 "video_save_freq" : 0})
@@ -77,35 +81,39 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
     ggLog.info("Built")
 #    env.action_space.seed(seed)
 
-    max_steps = 500
+    ep_duration = 5/env_builder_args["stepLength_sec"]
 
-    model = SAC("MultiInputPolicy", env, verbose=0,
+    if args["algorithm"] == "sac":
+        model = SAC("MultiInputPolicy", env, verbose=0,
+                        batch_size=args["batch_size"],
+                        buffer_size=10_000_000,
+                        gamma=0.99,
+                        learning_rate=args["lr"],
+                        ent_coef="auto",
+                        learning_starts=10_000,
+                        tau=0.005,
+                        gradient_steps=args["train_steps"],
+                        train_freq=args["train_freq"],
+                        target_entropy="auto",
+                        seed = seed,
+                        device=device,
+                        policy_kwargs=dict(net_arch=[512,256]),
+                        replay_buffer_class = ThDictReplayBuffer,
+                        replay_buffer_kwargs = {"storage_torch_device" : device},
+                        tensorboard_log=folderName+f"/tensorboard")
+    elif args["algorithm"] == "ppo":    
+        model = PPO("MultiInputPolicy", env, verbose=1,
+                    n_steps = args["train_freq"],
                     batch_size=args["batch_size"],
-                    buffer_size=10_000_000,
-                    gamma=0.99,
                     learning_rate=args["lr"],
-                    ent_coef="auto",
-                    learning_starts=10_000,
-                    tau=0.005,
-                    gradient_steps=args["train_steps"],
-                    train_freq=max_steps,
-                    target_entropy="auto",
                     seed = seed,
                     device=device,
                     policy_kwargs=dict(net_arch=[512,256]),
-                    replay_buffer_class = ThDictReplayBuffer,
-                    replay_buffer_kwargs = {"storage_torch_device" : device},
+                    # replay_buffer_class = ThDictReplayBuffer,
+                    # replay_buffer_kwargs = {"storage_torch_device" : device},
                     tensorboard_log=folderName+f"/tensorboard")
-    
-    # model = PPO("MultiInputPolicy", env, verbose=0,
-    #             n_steps = max_steps,
-    #             batch_size=args["batch_size"],
-    #             seed = seed,
-    #             device=device,
-    #             policy_kwargs=dict(net_arch=[512,256]),
-    #             # replay_buffer_class = ThDictReplayBuffer,
-    #             # replay_buffer_kwargs = {"storage_torch_device" : device},
-    #             tensorboard_log=folderName+f"/tensorboard")
+    else:
+        raise RuntimeError(f"Invalid algorithm '{args['algorithm']}")
 
     callbacks = []
     callbacks.append(EvalCallback_ep(eval_env, best_model_save_path=log_folder+"/eval/EvalCallback",
@@ -119,7 +127,7 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
     callbacks.append(WandbCallback( model_save_path=f"{folderName}/wandb/save",
                                     verbose=2))
     callbacks.append(SigintHaltCallback())
-    callbacks.append(PrintLrRunInfo())
+    callbacks.append(PrintLrRunInfo(print_freq_ep=parallel_envs))
     ggLog.info("Learning...")
     t_preLearn = time.time()
     model.learn(total_timesteps=10_000_000,

@@ -656,8 +656,8 @@ class LegJumpEnv(ControlledEnv):
             s1_xz[0] = s1_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
             s2_xz[0] = s2_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
         else:
-            s1_xz = th.tensor([-0.1-0.125, 0.2])
-            s2_xz = th.tensor([-0.15-0.125, 0.4])
+            s1_xz = th.tensor([-0.1-0.125, 0.3])
+            s2_xz = th.tensor([-0.15-0.125, 0.6])
 
         hip_goal_z = 0.4 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*(s2_xz[1]+0.8-0.4)
 

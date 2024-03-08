@@ -17,6 +17,52 @@ from wandb.integration.sb3 import WandbCallback
 from lr_gym.utils.subproc_vec_env import SubprocVecEnv
 from lr_gym.envs.VecEnvLogger import VecEnvLogger
 from lr_gym.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback, PrintLrRunInfo
+import stable_baselines3.common.base_class
+import stable_baselines3.common.on_policy_algorithm
+
+# def collect_rollout(env, steps_to_collect, callback):
+#     callback.on_rollout_start()
+#     rollout_data = ???
+#     num_collected_steps = 0
+#     while num_collected_steps < steps_to_collect:
+#         ... = env.step()
+#         num_collected_steps += 1
+#         # Give access to local variables
+#         callback.update_locals(locals())
+#         # Only stop training if return value is False, not when it is None.
+#         if not callback.on_step():
+#             return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training=False)
+
+#     callback.on_rollot_end()
+#     return rollout_data
+
+# def learn(model, callback, timesteps):
+#     if isinstance(model,stable_baselines3.common.on_policy_algorithm.OnPolicyAlgorithm):
+#         # In sb3's on policy algorithms collection and training are not separated in a pretty way
+#         # could go around it but it's a bit ugly
+#         # Just use their learn()
+#         model.learn(total_timesteps=timesteps,
+#                     callback=callback)
+#         return
+
+#     if isinstance(model,stable_baselines3.common.base_class.BaseAlgorithm):
+#         # If we are dealing with an sb3 model
+#         model._setup_learn(total_timesteps=timesteps, callback=callback)
+#         #define these locals
+#         log_interval: int = 4
+#         tb_log_name: str = "run"
+#         reset_num_timesteps: bool = True
+#         progress_bar: bool = False
+    
+#     callback.on_training_start(locals(), globals())
+
+#     num_collected_steps = 0
+#     while num_collected_steps <= timesteps:
+#         collected_steps = collect_rollout(env, collected_steps_per_iteration, callback)
+#         model.replay_buffer.update(collected_steps)
+#         callback.on_rollout
+#         train(gradient_steps, batch_size)
+
 
 
 
@@ -33,10 +79,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "control_mode" : "torque",
         "video_save_freq" : 0,
         "stepLength_sec" : 0.01,
-        "platform_randomization" : False
+        "platform_randomization" : "single"
                         }
     args.update({
-        "batch_size" : 4096,
+        "batch_size" : 16384,
         "lr" : 0.005,
         "train_steps" : 50,
         "train_freq" : 50,

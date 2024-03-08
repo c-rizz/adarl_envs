@@ -9,7 +9,7 @@ Based on ControlledEnv
 
 import lr_gym.utils.spaces as spaces
 import numpy as np
-from typing import Tuple, Dict, Any, Union, Optional, List
+from typing import Tuple, Dict, Any, Union, Optional, List, Literal
 import lr_gym.utils.dbg.ggLog as ggLog
 import random
 import lr_gym.utils.spaces as spaces
@@ -156,7 +156,7 @@ class LegJumpEnv(ControlledEnv):
                     reward_contacts_weight = 0.0,
                     control_mode = "torque",
                     reward_scale = 1.0,
-                    platform_randomization = True):
+                    platform_randomization : Literal["none","single","double"] = "none"):
         """Short summary.
 
         Parameters
@@ -640,9 +640,10 @@ class LegJumpEnv(ControlledEnv):
         self._last_external_work = 0
         self._last_step_got_state = -1
 
-        if self._platform_randomization:
-            s1_area = th.tensor([[0.20, 0.30], # minx, maxx
-                                [0.05, 0.40]], device=self._th_device) # miny, maxy
+        if self._platform_randomization == "duoble":
+            s1_area = th.tensor([[0.20, 0.30],  # minx, maxx
+                                 [0.05, 0.40]], # miny, maxy
+                                device=self._th_device)
             s1_xz = th.rand(size=(2,), generator=self._rng, device=self._th_device)
             s1_xz = s1_xz*(s1_area[:,1]-s1_area[:,0])+s1_area[:,0]
             # s1_pos = th.tensor([0.0,0.0])
@@ -655,9 +656,19 @@ class LegJumpEnv(ControlledEnv):
 
             s1_xz[0] = s1_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
             s2_xz[0] = s2_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
-        else:
+        elif self._platform_randomization == "single":
+            s1_xz = th.tensor([-0.1-0.125, -0.3]) # hide platform 
+            s2_area = th.tensor([[0.20, 0.30],  # minx, maxx
+                                 [0.05, 0.40]], # miny, maxy
+                                device=self._th_device)
+            s2_xz = th.rand(size=(2,), generator=self._rng, device=self._th_device)
+            s2_xz = s2_xz*(s2_area[:,1]-s2_area[:,0])+s2_area[:,0]
+            s2_xz[0] = s2_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
+        elif self._platform_randomization == "fixed":
             s1_xz = th.tensor([-0.1-0.125, 0.3])
             s2_xz = th.tensor([-0.15-0.125, 0.6])
+        else:
+            raise RuntimeError(f"Invalid platofrm_Randomization mode '{self._platform_randomization}'")
 
         hip_goal_z = 0.4 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*(s2_xz[1]+0.8-0.4)
 
@@ -674,7 +685,7 @@ class LegJumpEnv(ControlledEnv):
 
 
         if isinstance(self._environmentController, SimulatedEnvController):
-            if s1_xz[0] > 0:
+            if s2_xz[0] > 0:
                 self._environmentController.setJointsStateDirect({self._rail_joint: JointState(position = [self._start_height], rate=[0], effort=[0]),
                                                                 self._hip_joint:  JointState(position = [ 3.14159/4], rate=[0], effort=[0]),
                                                                 self._knee_joint: JointState(position = [-3.14159/2], rate=[0], effort=[0])})

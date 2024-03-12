@@ -16,7 +16,7 @@ from wandb.integration.sb3 import WandbCallback
 # from stable_baselines3.common.vec_env import SubprocVecEnv
 from lr_gym.utils.subproc_vec_env import SubprocVecEnv
 from lr_gym.envs.VecEnvLogger import VecEnvLogger
-from lr_gym.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback, PrintLrRunInfo
+from lr_gym.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback, PrintLrRunInfo, CheckpointCallbackRB
 import stable_baselines3.common.base_class
 import stable_baselines3.common.on_policy_algorithm
 
@@ -68,7 +68,7 @@ import stable_baselines3.common.on_policy_algorithm
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args = {
-        "reward_contacts_weight" : 0.0, # ("uniform", 0, 1),
+        "reward_contacts_weight" : 0.0, #("uniform", 0, 1),
         "reward_energy_weight" : 0.0,
         "reward_position_limit_weight" : 10.0,
         "reward_torque_limit_weight" : 1.0,
@@ -76,7 +76,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_tracking_weight" : 1.0,
         "reward_velocity_weight" : 0.0,
         "th_device" : th.device("cpu"),
-        "control_mode" : "torque",
+        "control_mode" : "impedance",
         "video_save_freq" : 0,
         "stepLength_sec" : 0.01,
         "platform_randomization" : "single"
@@ -170,6 +170,11 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
                                             log_path=log_folder+"/eval100/EvalCallback", eval_freq_ep=100,
                                             deterministic=True, render=False, verbose=True,
                                             n_eval_episodes = 10))
+    callbacks.append(CheckpointCallbackRB(save_freq_ep=100,
+                                          save_best=True,
+                                          save_path=log_folder+"/checkpoints",
+                                          name_prefix="model_checkpoint",
+                                          save_freq=None))
     callbacks.append(WandbCallback( model_save_path=f"{folderName}/wandb/save",
                                     verbose=2))
     callbacks.append(SigintHaltCallback())
@@ -180,6 +185,7 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
                 callback=callbacks)
     duration_learn = time.time() - t_preLearn
     ggLog.info("Learned. Took "+str(duration_learn)+" seconds.")
+    model.save(log_folder+"/trained_model")
 
 
 

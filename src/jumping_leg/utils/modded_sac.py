@@ -358,5 +358,6 @@ class SAC(OffPolicyAlgorithm):
             t0 = time.monotonic()
             ret = super().predict(observation,state,episode_start,deterministic)
             self._tot_predict_time += time.monotonic() - t0
-            self.logger.record("train/avg_predict_time", self._tot_predict_time/self._predict_count)
+            if hasattr(self,"_logger") and self._logger is not None:
+                self.logger.record("train/avg_predict_time", self._tot_predict_time/self._predict_count)
             return ret

@@ -96,6 +96,15 @@ class LegJumpEnv(ControlledEnv):
 
 
     @dataclass
+    class EpisodeConfiguration:
+        hip_goal_z : th.Tensor
+        support1_pos_x : th.Tensor
+        support1_pos_z : th.Tensor
+        support2_pos_x : th.Tensor
+        support2_pos_z : th.Tensor
+        reward_contacts_weights : th.Tensor
+
+    @dataclass
     class EnvConfiguration:
         reward_contacts_weight : float
         reward_energy_weight : float
@@ -119,9 +128,10 @@ class LegJumpEnv(ControlledEnv):
         velocity_command_scale_knee : float
         vstate_minmax : Optional[th.Tensor]
         reward_scale : float
+        platform_obs_noise_std : float
 
     @staticmethod
-    def _sample(value_or_dist : Union[float,Tuple[str,float,float]], generator, device):
+    def _sample(value_or_dist : Union[float,Tuple[str,float,float]], generator, device) -> th.Tensor:
         if type(value_or_dist) == tuple:
             if value_or_dist[0] == "uniform":
                 traj_len = th.rand((1,), generator=generator, device=device)*(value_or_dist[2]-value_or_dist[1])+value_or_dist[1]
@@ -131,7 +141,7 @@ class LegJumpEnv(ControlledEnv):
             traj_len = value_or_dist
         else:
             raise RuntimeError(f"Unexpected value_or_dist={value_or_dist}")
-        return traj_len
+        return th.as_tensor(traj_len, device=device)
 
 
     def __init__(   self,
@@ -221,6 +231,7 @@ class LegJumpEnv(ControlledEnv):
         self._show_goal = True
         self._rng = th.Generator(device=self._th_device)
         self._wall_sim_speed = wall_sim_speed
+        self._original_max_epsteps = maxStepsPerEpisode
         # self._hip_torque_scale = 100
         # self._knee_torque_scale = 100
         # self._velocity_scale = {self._knee_joint : 1,
@@ -275,9 +286,15 @@ class LegJumpEnv(ControlledEnv):
                                                             velocity_command_scale_hip = 20,
                                                             velocity_command_scale_knee = 20,
                                                             vstate_minmax = None,
-                                                            reward_scale = reward_scale)
+                                                            reward_scale = reward_scale,
+                                                            platform_obs_noise_std = 0.002)
         action_len = 10 if self._use_full_impedance_control else 2
-        self._current_episode_config = th.zeros((len(self.EPISODE_CONFIG),),dtype=th.float32,device=self._th_device)
+        self._current_episode_config = LegJumpEnv.EpisodeConfiguration(hip_goal_z=0,
+                                                                       support1_pos_x=0,
+                                                                       support1_pos_z=0,
+                                                                       support2_pos_x=0,
+                                                                       support2_pos_z=0,
+                                                                       reward_contacts_weights=0)
         # max_dact_dt = 100 #max change in action, i.e. da/dt
         # self._max_act_change = th.tensor(max_dact_dt*stepLength_sec,dtype=th.float32, device=self._th_device)
         # self._hip_goal_z = th.tensor(0.5,dtype=th.float32, device=self._th_device)
@@ -588,7 +605,7 @@ class LegJumpEnv(ControlledEnv):
                 contacts_weight * contacts_reward )
 
 
-    def initializeEpisode(self) -> None:
+    def initializeEpisode(self, options = {}) -> None:
 
 
         if not self._spawned and isinstance(self._environmentController, SimulatedEnvController):
@@ -672,20 +689,36 @@ class LegJumpEnv(ControlledEnv):
 
         hip_goal_z = 0.4 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*(s2_xz[1]+0.8-0.4)
 
-
-        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT1_POS_X] = s1_xz[0]
-        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT1_POS_Z] = s1_xz[1]
-        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT2_POS_X] = s2_xz[0]
-        self._current_episode_config[self.EPISODE_CONFIG.SUPPORT2_POS_Z] = s2_xz[1]
-        self._current_episode_config[self.EPISODE_CONFIG.HIP_GOAL_Z] = hip_goal_z
-        self._current_episode_config[self.EPISODE_CONFIG.REWARD_CONTACTS_WEIGHT] = self._sample(self._configuration.reward_contacts_weight,
+        self._current_episode_config.support1_pos_x = s1_xz[0]
+        self._current_episode_config.support1_pos_z = s1_xz[1]
+        self._current_episode_config.support2_pos_x = s2_xz[0]
+        self._current_episode_config.support2_pos_z = s2_xz[1]
+        self._current_episode_config.hip_goal_z = hip_goal_z
+        reward_contacts_weights = self._sample(self._configuration.reward_contacts_weight,
                                                                                                 self._rng,
                                                                                                 self._th_device)
-        #min 0.4, max support2_z+0.6
+        maxStepsPerEpisode = self._original_max_epsteps
+        # These override previous configs
+        if "support1_pos_x" in options: s1_xz[0] = options["support1_pos_x"]
+        if "support1_pos_z" in options: s1_xz[1] = options["support2_pos_z"]
+        if "support2_pos_x" in options: s2_xz[0] = options["support2_pos_x"]
+        if "support2_pos_z" in options: s2_xz[1] = options["support2_pos_z"]
+        if "hip_goal_z" in options: hip_goal_z = options["hip_goal_z"]
+        if "reward_contacts_weights" in options: reward_contacts_weights = options["reward_contacts_weights"]
+        if "max_ep_steps" in options: maxStepsPerEpisode = options["max_ep_steps"]
 
+        self._maxStepsPerEpisode = maxStepsPerEpisode
+            
+        #min 0.4, max support2_z+0.6
+        self._current_episode_config = LegJumpEnv.EpisodeConfiguration(hip_goal_z=hip_goal_z,
+                                                                       support1_pos_x=s1_xz[0],
+                                                                       support1_pos_z=s1_xz[1],
+                                                                       support2_pos_x=s2_xz[0],
+                                                                       support2_pos_z=s2_xz[1],
+                                                                       reward_contacts_weights=reward_contacts_weights)
 
         if isinstance(self._environmentController, SimulatedEnvController):
-            if s2_xz[0] > 0:
+            if self._current_episode_config.support2_pos_x > 0:
                 self._environmentController.setJointsStateDirect({self._rail_joint: JointState(position = [self._start_height], rate=[0], effort=[0]),
                                                                 self._hip_joint:  JointState(position = [ 3.14159/4], rate=[0], effort=[0]),
                                                                 self._knee_joint: JointState(position = [-3.14159/2], rate=[0], effort=[0])})
@@ -696,24 +729,32 @@ class LegJumpEnv(ControlledEnv):
         else:
             raise RuntimeError("Cannot reset joint state")
         self._environmentController.setJointsEffortCommand([(self._hip_joint,0),(self._knee_joint,0)])
+        self._place_objects()
 
-        ls = LinkState( position_xyz = th.tensor((s1_xz[0],0.3,s1_xz[1])),
-                        orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
-                        pos_velocity_xyz = th.tensor((0.,0.,0)),
-                        ang_velocity_xyz = th.tensor((0.,0.,0.)))
-        self._environmentController.setLinksStateDirect({("support1","world") : ls})
-        ls = LinkState( position_xyz = th.tensor((s2_xz[0],0.3,s2_xz[1])),
-                        orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
-                        pos_velocity_xyz = th.tensor((0.,0.,0)),
-                        ang_velocity_xyz = th.tensor((0.,0.,0.)))
-        self._environmentController.setLinksStateDirect({("support2","world") : ls})
-
+    def _place_objects(self):
+        # ggLog.info(f"placing: _current_episode_config {self._current_episode_config}")
+        self._environmentController.setLinksStateDirect({("support1","world") : 
+                                                         LinkState( position_xyz = th.tensor((self._current_episode_config.support1_pos_x,
+                                                                                              0.3,
+                                                                                              self._current_episode_config.support1_pos_z)),
+                                                                    orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
+                                                                    pos_velocity_xyz = th.tensor((0.,0.,0)),
+                                                                    ang_velocity_xyz = th.tensor((0.,0.,0.)))})
+        self._environmentController.setLinksStateDirect({("support2","world") :
+                                                          LinkState(position_xyz = th.tensor((self._current_episode_config.support2_pos_x,
+                                                                                              0.3,
+                                                                                              self._current_episode_config.support2_pos_z)),
+                                                                    orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
+                                                                    pos_velocity_xyz = th.tensor((0.,0.,0)),
+                                                                    ang_velocity_xyz = th.tensor((0.,0.,0.)))})
         if self._show_goal:
-            ls = LinkState( position_xyz = th.tensor((0.,0.2,hip_goal_z)),
-                            orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
-                            pos_velocity_xyz = th.tensor((0.,0.,0)),
-                            ang_velocity_xyz = th.tensor((0.,0.,0.)))
-            self._environmentController.setLinksStateDirect({("red_ball","world") : ls})
+            self._environmentController.setLinksStateDirect({("red_ball","world") :
+                                                             LinkState( position_xyz = th.tensor((0.,
+                                                                                                 0.2,
+                                                                                                 self._current_episode_config.hip_goal_z)),
+                                                                        orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
+                                                                        pos_velocity_xyz = th.tensor((0.,0.,0)),
+                                                                        ang_velocity_xyz = th.tensor((0.,0.,0.)))})
         
     def getUiRendering(self) -> Tuple[Union[np.ndarray, th.Tensor], float]:
         try:
@@ -728,7 +769,11 @@ class LegJumpEnv(ControlledEnv):
 
     def getObservation(self, state) -> Dict[Any, th.Tensor]:
         if self._obs_only_vec:
-            stacked_part =  state[self.VECTOR_PART][:self._frame_stack_length,:self._stacked_part_len].flatten()
+            stacked_part =  state[self.VECTOR_PART][:self._frame_stack_length,:self._stacked_part_len].detach().clone()
+            supp_pos = stacked_part[:,self.STATE.SUPPORT1_X:self.STATE.SUPPORT2_Z+1]
+            noise = th.randn(size=supp_pos.size(), device = self._th_device, generator=self._rng)*self._configuration.platform_obs_noise_std
+            stacked_part[:,self.STATE.SUPPORT1_X:self.STATE.SUPPORT2_Z+1] = supp_pos + noise
+            stacked_part = stacked_part.flatten()
             constant_part = state[self.VECTOR_PART][0,self._stacked_part_len:self._1step_vec_obs_size]
             return {self.VECTOR_PART : th.cat([stacked_part,constant_part])}
         else:
@@ -789,18 +834,18 @@ class LegJumpEnv(ControlledEnv):
                                     jstates[self._knee_joint].effort[0],
                                     hip_height,
                                     hip_vel_z,
-                                    self._current_episode_config[self.EPISODE_CONFIG.SUPPORT1_POS_X],
-                                    self._current_episode_config[self.EPISODE_CONFIG.SUPPORT1_POS_Z],
-                                    self._current_episode_config[self.EPISODE_CONFIG.SUPPORT2_POS_X],
-                                    self._current_episode_config[self.EPISODE_CONFIG.SUPPORT2_POS_Z],
-                                    self._current_episode_config[self.EPISODE_CONFIG.HIP_GOAL_Z],
+                                    self._current_episode_config.support1_pos_x,
+                                    self._current_episode_config.support1_pos_z,
+                                    self._current_episode_config.support2_pos_x,
+                                    self._current_episode_config.support2_pos_z,
+                                    self._current_episode_config.hip_goal_z,
                                     self._configuration.reward_torque_limit_weight,
                                     self._configuration.reward_position_limit_weight,
                                     self._configuration.reward_velocity_weight,
                                     self._configuration.reward_energy_weight,
                                     self._configuration.reward_tracking_weight,
                                     self._configuration.reward_torque_weight,
-                                    self._current_episode_config[self.EPISODE_CONFIG.REWARD_CONTACTS_WEIGHT],
+                                    self._current_episode_config.reward_contacts_weights,
                                     self._configuration.reward_max_impulse,
                                     self._configuration.torque_command_scale_knee,
                                     self._configuration.torque_command_scale_hip,
@@ -957,6 +1002,8 @@ class LegJumpEnv(ControlledEnv):
         i["shin_pos_z"] = current_vstate_unnorm[[self.STATE.SHIN_POS_Z]]
         i["vstate"] = current_vstate_unnorm
         i.update(self._dbg_info)
+        # i["config"] = dataclasses.asdict(self._configuration)
+        # i["ep_config"] = dataclasses.asdict(self._current_episode_config)
         # ggLog.info(f"Setting success_ratio to {i['success_ratio']}")
         return i
 

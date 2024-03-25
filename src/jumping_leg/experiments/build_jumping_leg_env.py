@@ -5,8 +5,11 @@ from lr_gym.envs.RecorderGymWrapper import RecorderGymWrapper
 import lr_gym.utils.dbg.ggLog as ggLog
 import torch as th
 from gymnasium.wrappers.normalize import NormalizeObservation
+import threading, os
+import traceback
 
-def env_builder(seed, log_folder, env_builder_args):
+def env_builder(seed, log_folder, env_builder_args, no_dict = False):
+    ggLog.info(f"Building env: thread={threading.current_thread()}, pid={os.getpid()}")
     stepLength_sec = env_builder_args["stepLength_sec"]
     video_save_freq = env_builder_args["video_save_freq"]
     th_device = env_builder_args["th_device"]
@@ -47,8 +50,11 @@ def env_builder(seed, log_folder, env_builder_args):
                         control_mode = env_builder_args["control_mode"],
                         reward_scale=500/max_steps,
                         platform_randomization = env_builder_args["platform_randomization"]) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
+    if no_dict:
+        from lr_gym.envs.lr_wrappers.ObsDict2FlatBox import ObsDict2FlatBox
+        lrenv = ObsDict2FlatBox(lrenv, "vec")
     env = GymEnvWrapper(env=lrenv, episodeInfoLogFile=log_folder+f"/GymEnvWrapperLog.{seed}.log",
-                        quiet=True)
+                        quiet=env_builder_args["quiet"])
     
     if video_save_freq >0:
         env = RecorderGymWrapper(env=env,
@@ -69,18 +75,18 @@ def env_builder(seed, log_folder, env_builder_args):
                                                                                     f"ThiEner {info['new_thigh_energy']:+.3f}\n"+
                                                                                     f"ShiEner {info['new_shin_energy']:+.3f}\n"+
                                                                                     f"SliEner {info['new_slider_energy']:+.3f}\n"+
-                                                                                    f"rContac {info['vstate'][LegJumpEnv.STATE.REWARD_CONTACTS_WEIGHT]:.2f}\n"+
-                                                                                    f"rEnergy {info['vstate'][LegJumpEnv.STATE.REWARD_ENERGY_WEIGHT]:.2f}\n"+
-                                                                                    f"rImpThr {info['vstate'][LegJumpEnv.STATE.REWARD_IMPULSE_THRESHOLD]:.2f}\n"+
-                                                                                    f"rPosLim {info['vstate'][LegJumpEnv.STATE.REWARD_POSITION_LIMIT_WEIGHT]:.2f}\n"+
-                                                                                    f"rTorLim {info['vstate'][LegJumpEnv.STATE.REWARD_TORQUE_LIMIT_WEIGHT]:.2f}\n"+
-                                                                                    f"rTorque {info['vstate'][LegJumpEnv.STATE.REWARD_TORQUE_WEIGHT]:.2f}\n"+
-                                                                                    f"rTrack  {info['vstate'][LegJumpEnv.STATE.REWARD_TRACKING_WEIGHT]:.2f}\n"+
-                                                                                    f"rVeloci {info['vstate'][LegJumpEnv.STATE.REWARD_VELOCITY_WEIGHT]:.2f}\n"
-                                                                                    f"torqHip {info['vstate'][LegJumpEnv.STATE.HIP_JOINT_EFFORT]:.2f}\n"
-                                                                                    f"torqKne {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_EFFORT]:.2f}\n"
-                                                                                    f"posiHip {info['vstate'][LegJumpEnv.STATE.HIP_JOINT_POS]:.2f}\n"
-                                                                                    f"posiKne {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_POS]:.2f}\n"
+                                                                                    f"rContac {info['vstate'][LegJumpEnv.STATE.REWARD_CONTACTS_WEIGHT.name]:.2f}\n"+
+                                                                                    f"rEnergy {info['vstate'][LegJumpEnv.STATE.REWARD_ENERGY_WEIGHT.name]:.2f}\n"+
+                                                                                    f"rImpThr {info['vstate'][LegJumpEnv.STATE.REWARD_IMPULSE_THRESHOLD.name]:.2f}\n"+
+                                                                                    f"rPosLim {info['vstate'][LegJumpEnv.STATE.REWARD_POSITION_LIMIT_WEIGHT.name]:.2f}\n"+
+                                                                                    f"rTorLim {info['vstate'][LegJumpEnv.STATE.REWARD_TORQUE_LIMIT_WEIGHT.name]:.2f}\n"+
+                                                                                    f"rTorque {info['vstate'][LegJumpEnv.STATE.REWARD_TORQUE_WEIGHT.name]:.2f}\n"+
+                                                                                    f"rTrack  {info['vstate'][LegJumpEnv.STATE.REWARD_TRACKING_WEIGHT.name]:.2f}\n"+
+                                                                                    f"rVeloci {info['vstate'][LegJumpEnv.STATE.REWARD_VELOCITY_WEIGHT.name]:.2f}\n"
+                                                                                    f"torqHip {info['vstate'][LegJumpEnv.STATE.HIP_JOINT_EFFORT.name]:.2f}\n"
+                                                                                    f"torqKne {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_EFFORT.name]:.2f}\n"
+                                                                                    f"posiHip {info['vstate'][LegJumpEnv.STATE.HIP_JOINT_POS.name]:.2f}\n"
+                                                                                    f"posiKne {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_POS.name]:.2f}\n"
                                                                                     )
     env.reset(seed=seed)
     return env

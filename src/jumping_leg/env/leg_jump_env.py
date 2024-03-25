@@ -85,7 +85,9 @@ class LegJumpEnv(ControlledEnv):
                             "SHIN_ANG_POS_X",
                             "SHIN_ANG_POS_Y",
                             "SHIN_ANG_POS_Z",
-                            "IMPULSES_SUM"], start=0)
+                            "IMPULSES_SUM",
+                            "FORCES_SUM",
+                            "FORCES_NUM"], start=0)
     
     EPISODE_CONFIG = IntEnum("EPISODE_CONFIG", ["HIP_GOAL_Z",
                                                 "SUPPORT1_POS_X",
@@ -205,20 +207,13 @@ class LegJumpEnv(ControlledEnv):
         self._thigh_com_link = ("leg", "thigh_link")
         self._shin_com_link = ("leg", "shin_link")
         self._rendering_cam_name = "simple_camera"
-        self._use_velocity_control = False
-        self._use_torque_control = False
-        self._use_position_control = False
-        self._use_full_impedance_control = False
-        if control_mode.lower() == "velocity":            
-            self._use_velocity_control = True
-        elif control_mode.lower() == "position":
-            self._use_position_control = True
-        elif control_mode.lower() == "impedance":
-            self._use_full_impedance_control = True
-        elif control_mode.lower() == "torque":
-            self._use_torque_control = True
-        else:
-            raise RuntimeError(f"Invalid control mode '{control_mode}'")
+
+        self._use_velocity_control = control_mode.lower() == "velocity"
+        self._use_torque_control = control_mode.lower() == "torque"
+        self._use_position_control = control_mode.lower() == "position"
+        self._use_full_impedance_control = control_mode.lower() == "impedance"
+        self._use_impedance_no_gains = control_mode.lower() == "impedance_no_gains"
+        self._use_position_and_torque_control = control_mode.lower() == "position_and_torque"
         self._platform_randomization = platform_randomization
 
         self._obs_only_vec = obs_only_vec
@@ -288,7 +283,14 @@ class LegJumpEnv(ControlledEnv):
                                                             vstate_minmax = None,
                                                             reward_scale = reward_scale,
                                                             platform_obs_noise_std = 0.002)
-        action_len = 10 if self._use_full_impedance_control else 2
+        if self._use_full_impedance_control:
+            action_len = 10 
+        elif self._use_impedance_no_gains:
+            action_len = 6
+        elif self._use_position_and_torque_control:
+            action_len = 4
+        else:
+            action_len = 2
         self._current_episode_config = LegJumpEnv.EpisodeConfiguration(hip_goal_z=0,
                                                                        support1_pos_x=0,
                                                                        support1_pos_z=0,
@@ -377,7 +379,9 @@ class LegJumpEnv(ControlledEnv):
                             self.STATE.SHIN_ANG_POS_X : [-100,100],
                             self.STATE.SHIN_ANG_POS_Y : [-100,100],
                             self.STATE.SHIN_ANG_POS_Z : [-100,100],
-                            self.STATE.IMPULSES_SUM : [0,100]}
+                            self.STATE.IMPULSES_SUM : [0,100],
+                            self.STATE.FORCES_SUM : [0,1000],
+                            self.STATE.FORCES_NUM : [0,1000]}
         
         self._configuration.vstate_minmax = th.tensor([vstate_min_max[k] for k in self.STATE], device = self._th_device)
 
@@ -454,6 +458,25 @@ class LegJumpEnv(ControlledEnv):
             self._environmentController.setJointsImpedanceCommand(jointImpedances = 
                                                             [   (self._hip_joint,   (hpos,0,0,300,30)),
                                                                 (self._knee_joint,  (kpos,0,0,300,30))])
+        elif self._use_position_and_torque_control:
+            hpos = self._unnormalize(action[0],self._configuration.position_limits_hip[0],self._configuration.position_limits_hip[1])
+            kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
+            htorque = action[2]*self._configuration.torque_command_scale_hip
+            ktorque = action[3]*self._configuration.torque_command_scale_knee
+            self._environmentController.setJointsImpedanceCommand(jointImpedances = 
+                                                            [   (self._hip_joint,   (hpos,0,htorque,300,30)),
+                                                                (self._knee_joint,  (kpos,0,ktorque,300,30))])
+        elif self._use_impedance_no_gains:
+            hpos = self._unnormalize(action[0],self._configuration.position_limits_hip[0],self._configuration.position_limits_hip[1])
+            kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
+            hvel = action[2]*self._configuration.velocity_command_scale_hip
+            kvel = action[3]*self._configuration.velocity_command_scale_knee
+            htorque = action[4]*self._configuration.torque_command_scale_hip
+            ktorque = action[5]*self._configuration.torque_command_scale_knee
+            
+            self._environmentController.setJointsImpedanceCommand(jointImpedances = 
+                                                            [   (self._hip_joint,   (hpos,hvel,htorque,300,30)),
+                                                                (self._knee_joint,  (kpos,kvel,ktorque,300,30))])
         elif self._use_full_impedance_control:
             hpos = self._unnormalize(action[0],self._configuration.position_limits_hip[0],self._configuration.position_limits_hip[1])
             kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
@@ -699,13 +722,14 @@ class LegJumpEnv(ControlledEnv):
                                                                                                 self._th_device)
         maxStepsPerEpisode = self._original_max_epsteps
         # These override previous configs
-        if "support1_pos_x" in options: s1_xz[0] = options["support1_pos_x"]
-        if "support1_pos_z" in options: s1_xz[1] = options["support2_pos_z"]
-        if "support2_pos_x" in options: s2_xz[0] = options["support2_pos_x"]
-        if "support2_pos_z" in options: s2_xz[1] = options["support2_pos_z"]
-        if "hip_goal_z" in options: hip_goal_z = options["hip_goal_z"]
-        if "reward_contacts_weights" in options: reward_contacts_weights = options["reward_contacts_weights"]
-        if "max_ep_steps" in options: maxStepsPerEpisode = options["max_ep_steps"]
+        if options is not None:
+            if "support1_pos_x" in options: s1_xz[0] = options["support1_pos_x"]
+            if "support1_pos_z" in options: s1_xz[1] = options["support2_pos_z"]
+            if "support2_pos_x" in options: s2_xz[0] = options["support2_pos_x"]
+            if "support2_pos_z" in options: s2_xz[1] = options["support2_pos_z"]
+            if "hip_goal_z" in options: hip_goal_z = options["hip_goal_z"]
+            if "reward_contacts_weights" in options: reward_contacts_weights = options["reward_contacts_weights"]
+            if "max_ep_steps" in options: maxStepsPerEpisode = options["max_ep_steps"]
 
         self._maxStepsPerEpisode = maxStepsPerEpisode
             
@@ -818,9 +842,12 @@ class LegJumpEnv(ControlledEnv):
 
                 contacts = self._environmentController.get_contacts()
                 impulses = []
+                forces = []
                 for simsteps_contacts in contacts:
+                    forces   += [contact[3] for contact in simsteps_contacts]
                     impulses += [contact[3]*contact[4] for contact in simsteps_contacts]
                 abs_impulses = [abs(i) for i in impulses]
+                abs_forces = [abs(i) for i in forces]
 
 
                 # ggLog.info(f"jstates = {jstates}")
@@ -873,7 +900,9 @@ class LegJumpEnv(ControlledEnv):
                                     shin_ang_pos_x,
                                     shin_ang_pos_y,
                                     shin_ang_pos_z,
-                                    sum(abs_impulses)),
+                                    sum(abs_impulses),
+                                    sum(abs_forces),
+                                    len(abs_forces)),
                                 dtype = th.float32,
                                 device = self._th_device)
                 
@@ -1000,7 +1029,8 @@ class LegJumpEnv(ControlledEnv):
         i["thigh_ang_vel_y"] = current_vstate_unnorm[self.STATE.THIGH_ANG_VEL_Y]
         i["thigh_pos_z"] = current_vstate_unnorm[[self.STATE.THIGH_POS_Z]]
         i["shin_pos_z"] = current_vstate_unnorm[[self.STATE.SHIN_POS_Z]]
-        i["vstate"] = current_vstate_unnorm
+        statenames = [e.name for e in self.STATE]
+        i["vstate"] = {statenames[i]:current_vstate_unnorm[i] for i in range(len(statenames))}
         i.update(self._dbg_info)
         # i["config"] = dataclasses.asdict(self._configuration)
         # i["ep_config"] = dataclasses.asdict(self._current_episode_config)

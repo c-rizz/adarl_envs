@@ -87,7 +87,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "lr" : 0.005,
         "train_steps" : 50,
         "train_freq" : 50,
-        "algorithm" : "sac"
+        "algorithm" : "sac",
+        "n_envs" : 32
                  })
     return solve_sac(seed, folderName, run_id, args, env_builder_args)
 
@@ -107,7 +108,7 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
     ggLog.info("Building env...")
 
     
-    parallel_envs = 16
+    parallel_envs = args["n_envs"]
     if False: #parallel_envs == 1:
         env = env_builder(log_folder=log_folder, seed = seed, env_builder_args = {"th_device" : th.device("cpu"),
                                                                                 "video_save_freq" : 0})

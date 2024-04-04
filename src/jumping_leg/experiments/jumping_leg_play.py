@@ -8,7 +8,7 @@ import lr_gym.utils.dbg.ggLog as ggLog
 import lr_gym.utils.utils
 
 import os
-from lr_gym.utils.sb3_buffers import ThDictReplayBuffer
+from lr_gym.utils.buffers import ThDictReplayBuffer
 import torch as th
 import lr_gym.utils.session
 from jumping_leg.experiments.build_jumping_leg_env import env_builder

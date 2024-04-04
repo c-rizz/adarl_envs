@@ -191,11 +191,6 @@ class LegJumpEnv(ControlledEnv):
 
 
 
-        super().__init__(maxStepsPerEpisode = maxStepsPerEpisode,
-                         stepLength_sec = stepLength_sec,
-                         environmentController = environmentController,
-                         startSimulation = startSimulation,
-                         simulationBackend = "")
         
 
         self._knee_joint = ("leg","knee_joint")
@@ -398,21 +393,28 @@ class LegJumpEnv(ControlledEnv):
         img_shape_chw = (self._img_channels,self._obs_img_height,self._obs_img_width)
         img_observation_space = spaces.gym_spaces.Box(low=0, high=255, shape=img_shape_chw, dtype=np.uint8)
 
-        self.state_space = spaces.gym_spaces.Dict({self.VECTOR_PART: spaces.gym_spaces.Box(low=-float("inf"), high=float("inf"), shape=(self._history_length,len(LegJumpEnv.STATE),)),
+        state_space = spaces.gym_spaces.Dict({self.VECTOR_PART: spaces.gym_spaces.Box(low=-float("inf"), high=float("inf"), shape=(self._history_length,len(LegJumpEnv.STATE),)),
                                                    self.IMAGE_PART: img_observation_space})
         
         if self._obs_only_vec:
-            self.observation_space = spaces.gym_spaces.Dict({ self.VECTOR_PART : vec_obs_space})     
+            observation_space = spaces.gym_spaces.Dict({ self.VECTOR_PART : vec_obs_space})     
         elif self._obs_only_img:
-            self.observation_space = spaces.gym_spaces.Dict({ self.IMAGE_PART  : img_observation_space})
+            observation_space = spaces.gym_spaces.Dict({ self.IMAGE_PART  : img_observation_space})
         else:
-            self.observation_space = spaces.gym_spaces.Dict({ self.VECTOR_PART : vec_obs_space,
+            observation_space = spaces.gym_spaces.Dict({ self.VECTOR_PART : vec_obs_space,
                                                               self.IMAGE_PART  : img_observation_space})
             
         action_space_high = np.array([1]*action_len)
-        self.action_space = spaces.gym_spaces.Box(-action_space_high,action_space_high)
+        action_space = spaces.gym_spaces.Box(-action_space_high,action_space_high)
 
 
+        super().__init__(maxStepsPerEpisode = maxStepsPerEpisode,
+                         stepLength_sec = stepLength_sec,
+                         environmentController = environmentController,
+                         startSimulation = startSimulation,
+                         observation_space=observation_space,
+                         action_space = action_space,
+                         state_space=state_space)
 
         self.seed(seed)
         self._environmentController.setJointsToObserve([self._knee_joint,self._hip_joint])
@@ -967,7 +969,7 @@ class LegJumpEnv(ControlledEnv):
 
 
 
-    def buildSimulation(self, backend):
+    def buildSimulation(self):
         # ggLog.info("Building env")
         envCtrlName = type(self._environmentController).__name__
         if envCtrlName == "PyBulletJointImpedanceController":

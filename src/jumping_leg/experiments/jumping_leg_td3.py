@@ -15,7 +15,7 @@ from lr_gym.envs.GymToLr import GymToLr
 from lr_gym.envs.lr_wrappers.ObsToDict import ObsToDict
 import os
 from lr_gym.envs.RecorderGymWrapper import RecorderGymWrapper
-from lr_gym.utils.buffers import ThDictReplayBuffer
+from lr_gym.utils.buffers import ThDReplayBuffer
 from lr_gym.envs.NestedDictFlattenerGymWrapper import NestedDictFlattenerGymWrapper
 from lr_gym.envs.lr_wrappers.ObsToImgVecDict import ObsToImgVecDict
 import torch as th
@@ -35,7 +35,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     """
     ggLog.info(f"Starting run")
-    log_folder = lr_gym.utils.session.lr_gym_startup(   __file__,
+    log_folder, session = lr_gym.utils.session.lr_gym_startup(   __file__,
                                                         inspect.currentframe(),
                                                         seed=seed,
                                                         folderName=folderName,
@@ -67,7 +67,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 buffer_size=1000000, gamma=0.99, gradient_steps=1000,
                 learning_rate=0.0005, learning_starts=5000, policy_kwargs=dict(net_arch=[64,64]), train_freq=max_steps,
                 seed = seed, device = "cuda",
-                replay_buffer_class = ThDictReplayBuffer,
+                replay_buffer_class = ThDReplayBuffer,
                 replay_buffer_kwargs = {"storage_torch_device":device},
                 tensorboard_log=folderName+"/tensorboard")
 

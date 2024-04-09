@@ -8,7 +8,7 @@ import lr_gym.utils.dbg.ggLog as ggLog
 import lr_gym.utils.utils
 
 import os
-from lr_gym.utils.buffers import ThDictReplayBuffer
+from lr_gym.utils.buffers import ThDReplayBuffer
 import torch as th
 import lr_gym.utils.session
 from jumping_leg.experiments.build_jumping_leg_env import env_builder
@@ -95,7 +95,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 def solve_sac(seed, folderName, run_id, args, env_builder_args):
     
     ggLog.info(f"Starting run")
-    log_folder = lr_gym.utils.session.lr_gym_startup(   __file__,
+    log_folder, session = lr_gym.utils.session.lr_gym_startup(   __file__,
                                                         inspect.currentframe(),
                                                         seed=seed,
                                                         folderName=folderName,
@@ -146,7 +146,7 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
                         seed = seed,
                         device=device,
                         policy_kwargs=dict(net_arch=[512,256]),
-                        replay_buffer_class = ThDictReplayBuffer,
+                        replay_buffer_class = ThDReplayBuffer,
                         replay_buffer_kwargs = {"storage_torch_device" : device},
                         tensorboard_log=folderName+f"/tensorboard")
     elif args["algorithm"] == "ppo":    

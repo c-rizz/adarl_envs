@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
 
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
 import os
 import random
 import time
@@ -20,15 +18,20 @@ import inspect
 import lr_gym.utils.session
 from lr_gym.envs.vector_env_logger import VectorEnvLogger
 from lr_gym.utils.ThDictEpReplayBuffer import ThDictEpReplayBuffer
-from lr_gym.utils.buffers import ThDictReplayBuffer
+from lr_gym.utils.buffers import ThDReplayBuffer
 from lr_gym.utils.ObsConverter import ObsConverter
-from typing import List, Union, NamedTuple, Dict, Optional
+from typing import List, Union, NamedTuple, Dict, Optional, Callable
 from autoencoding_rl.utils import build_mlp_net
 from lr_gym.utils.tensor_trees import map_tensor_tree
 import lr_gym.utils.dbg.ggLog as ggLog
 import copy
 import threading
 import lr_gym.utils.sigint_handler
+from lr_gym.utils.buffers import BasicStorage
+import torch.multiprocessing as mp
+from lr_gym.utils.shared_env_data import SimpleCommander
+import ctypes
+import lr_gym.utils.session as session
 
 class TransitionBatch(NamedTuple):
     observations : Union[th.Tensor, Dict]
@@ -268,92 +271,51 @@ class SAC(nn.Module):
         if self._value_func_updates % self._hp.targets_update_freq == 0:
             self._update_target_nets()
 
-class ExperienceCollector():
-    def __init__(self, vec_env):
-        self._vec_env = vec_env
-        self._last_obs = None
 
-    def reset(self):
-        self._last_obs, info = self._vec_env.reset()
+    
 
-    def collect_experience(self, policy, vsteps_to_collect, global_vstep_count, random_vsteps, policy_device, buffer):
-        if  self._last_obs is None:
-            raise RuntimeError(f"last_obs is not set. reset() should be called before running collect_experience the first time")
-        obs = self._last_obs
-        num_envs = self._vec_env.unwrapped.num_envs
-        for step in range(vsteps_to_collect):
-            if global_vstep_count < random_vsteps:
-                actions = np.array([self._vec_env.single_action_space.sample() for _ in range(num_envs)])
-            else:
-                th_obs = map_tensor_tree(obs, lambda a: th.as_tensor(a, device = policy_device))
-                actions = policy.sample_actions(th_obs)
-                actions = actions.detach().cpu().numpy()
-
-            next_obs, rewards, terminations, truncations, infos = self._vec_env.step(actions)
-
-            real_next_obs = next_obs.copy()
-            for idx, trunc in enumerate(truncations):
-                if trunc:
-                    real_next_obs[idx] = infos["final_observation"][idx]
-            buffer.add(obs, real_next_obs, actions, rewards, terminations, infos)
-
-            obs = next_obs
-            self._last_obs = obs
-
-
-
-def train(vec_env : gym.vector.VectorEnv,
+def train(collector,
           model : SAC,
-          buffer : ThDictEpReplayBuffer,
+          buffer : ThDReplayBuffer,
           total_timesteps : int,
           train_freq : int,
           learning_starts : int,
           grad_steps : int,
           batch_size : int,
-          log_freq : int = -1,
-          parallelize_collection : bool = True):
+          log_freq : int = -1):
     if log_freq == -1: log_freq = train_freq
-    num_envs = vec_env.num_envs
-    collector = ExperienceCollector(vec_env)
+    num_envs = collector.num_envs()
+
     collector.reset()
     global_step = 0
     t_coll_sl = 0
     t_train_sl = 0
     t_tot_sl = 0
-    if parallelize_collection:
-        collection_model = copy.deepcopy(model)
-    else:
-        collection_model = model
-    while global_step < total_timesteps:
+    
+    while global_step < total_timesteps and not session.default_session.is_shutting_down():
         s0b = buffer.stored_frames()
         t0 = time.monotonic()
         steps_to_collect = train_freq*num_envs
         vsteps_to_collect = train_freq
-        def collector_func():
-            collector.collect_experience(collection_model,
-                                     vsteps_to_collect=vsteps_to_collect,
-                                     global_vstep_count=int(global_step/num_envs),
-                                     random_vsteps=learning_starts,
-                                     policy_device=model.device,
-                                     buffer=buffer)
-            t_coll = time.monotonic()
-            nonlocal t_coll_sl
-            t_coll_sl += t_coll - t0
-        if parallelize_collection:
-            collection_model.load_state_dict(model.state_dict())
-            collector_thread = threading.Thread(target=collector_func)
-            collector_thread.start()
-        else:
-            collector_func()
+        collector.collect_experience_async(model_state_dict=model.state_dict(),
+                                            vsteps_to_collect=vsteps_to_collect,
+                                            global_vstep_count=global_step//num_envs,
+                                            random_vsteps=learning_starts)
 
         t_before_train = time.monotonic()
         if global_step > learning_starts:
             for _ in range(grad_steps):
                 data = buffer.sample(batch_size)
                 model.update(transitions = data)
-        
-        if parallelize_collection:
-            collector_thread.join()
+
+        tmp_buff = collector.wait_collection(timeout = 120.0)
+        t_coll_sl += collector.collection_duration()
+        s = 0
+        for (obs, next_obs, action, reward, terminated, truncated) in tmp_buff.replay():
+            # ggLog.info(f"replaying step {s} ")
+            s+=1
+            buffer.add(obs=obs, next_obs=next_obs, action=action, reward=reward,
+                        truncated=truncated, terminated=terminated)
 
         if buffer.stored_frames()-s0b != steps_to_collect and not buffer.full:
             raise RuntimeError(f"Expected to collect {steps_to_collect} but got {buffer.stored_frames()-s0b}")
@@ -366,101 +328,3 @@ def train(vec_env : gym.vector.VectorEnv,
             ggLog.info(f"TRAIN: stps:{global_step} coll={t_coll_sl:.2f}s train={t_train_sl:.2f}s tot={t_tot_sl:.2f}")
             t_train_sl, t_coll_sl, t_tot_sl = 0,0,0
             lr_gym.utils.sigint_handler.haltOnSigintReceived()
-
-
-
-def main():
-
-
-    seed = 0
-    log_folder = lr_gym.utils.session.lr_gym_startup(   __file__,
-                                                        inspect.currentframe(),
-                                                        seed=seed,
-                                                        experiment_name=os.path.basename(__file__),
-                                                        run_comment="")
-
-    seed = 0
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-    # env setup
-    num_envs = 16
-    env_builder_args = {
-        "reward_contacts_weight" : 0.1,
-        "reward_energy_weight" : 0.0,
-        "reward_position_limit_weight" : 10.0,
-        "reward_torque_limit_weight" : 1.0,
-        "reward_torque_weight" : 0.1,
-        "reward_tracking_weight" : 1.0,
-        "reward_velocity_weight" : 0.0,
-        "th_device" : th.device("cpu"),
-        "control_mode" : "torque",
-        "video_save_freq" : 0,
-        "stepLength_sec" : 0.01,
-        "platform_randomization" : "single",
-        "quiet" : False}
-    builders = [(lambda i: (lambda: env_builder(log_folder=log_folder,
-                                                  seed=seed+100000*i,
-                                                  env_builder_args = env_builder_args)
-                                ))(i) for i in range(num_envs)]
-    envs = AsyncVectorEnvShmem(builders, context="forkserver")
-    envs = VectorEnvLogger(env = envs)
-
-    model = SAC(observation_space=envs.single_observation_space,
-                action_size=int(np.prod(envs.single_action_space.shape)),
-                q_network_arch=[256,256],
-                q_lr=0.005,
-                policy_arch=[256,256],
-                action_min = th.as_tensor(envs.single_action_space.low),
-                action_max = th.as_tensor(envs.single_action_space.high),
-                torch_device=device,
-                auto_entropy_temperature=True,
-                constant_entropy_temperature=None,
-                gamma=0.99,
-                target_tau = 0.005,
-                policy_update_freq=2,
-                target_update_freq=1)
-
-    compiled_model = th.compile(model)
-    envs.single_observation_space.dtype = np.float32
-    # rb = ThDictReplayBuffer(
-    #     buffer_size=1000_000,
-    #     observation_space=envs.single_observation_space,
-    #     action_space=envs.single_action_space,
-    #     device=device,
-    #     storage_torch_device=device,
-    #     handle_timeout_termination=False,
-    #     n_envs=num_envs,
-    #     disable_validation_set=True)
-    rb = ThDictReplayBuffer(
-        buffer_size=1000_000,
-        observation_space=envs.single_observation_space,
-        action_space=envs.single_action_space,
-        device=device,
-        storage_torch_device=device,
-        handle_timeout_termination=False,
-        n_envs=num_envs)
-    start_time = time.time()
-
-
-    train(vec_env=envs,
-          model = compiled_model,
-          buffer = rb,
-          total_timesteps=10_000_000,
-          train_freq = 50,
-          learning_starts=500*32,
-          grad_steps=50,
-          batch_size=16384,
-          log_freq=500,
-          parallelize_collection = False)
-
-    envs.close()
-    # writer.close()
-
-
-if __name__ == "__main__":
-    main()

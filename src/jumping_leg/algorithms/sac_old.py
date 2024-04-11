@@ -1,52 +1,61 @@
 
+import os
+import random
 import time
 from dataclasses import dataclass
 
 import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from stable_baselines3.common.buffers import ReplayBuffer
 import torch as th
+from jumping_leg.experiments.build_jumping_leg_env import env_builder
+from lr_gym.utils.async_vector_env import AsyncVectorEnvShmem
+import inspect
 import lr_gym.utils.session
-from lr_gym.utils.buffers import ThDReplayBuffer, TransitionBatch
+from lr_gym.envs.vector_env_logger import VectorEnvLogger
+from lr_gym.utils.ThDictEpReplayBuffer import ThDictEpReplayBuffer
+from lr_gym.utils.buffers import ThDReplayBuffer
 from lr_gym.utils.ObsConverter import ObsConverter
 from typing import List, Union, NamedTuple, Dict, Optional, Callable
 from autoencoding_rl.utils import build_mlp_net
+from lr_gym.utils.tensor_trees import map_tensor_tree
 import lr_gym.utils.dbg.ggLog as ggLog
+import copy
+import threading
 import lr_gym.utils.sigint_handler
+from lr_gym.utils.buffers import BasicStorage
+import torch.multiprocessing as mp
+from lr_gym.utils.shared_env_data import SimpleCommander
+import ctypes
 import lr_gym.utils.session as session
 
+class TransitionBatch(NamedTuple):
+    observations : Union[th.Tensor, Dict]
+    actions : th.Tensor
+    next_observations : Union[th.Tensor, Dict]
+    dones : th.Tensor
+    rewards : th.Tensor
 
 class QNetwork(nn.Module):
     def __init__(self, observation_space : gym.spaces.Space,
                  action_size : int,
                  q_network_arch : List[int],
-                 torch_device : Union[str,th.device] = "cuda",
-                 nets_num : int = 1):
+                 torch_device : Union[str,th.device] = "cuda"):
         super().__init__()
-        self._nets_num = nets_num
         self._obs_converter = ObsConverter(observation_shape=observation_space)
         if self._obs_converter.has_image_part():
             raise NotImplementedError(f"Not implemented yet")
-        self._q_nets = build_mlp_net(arch=q_network_arch,
+        self._q_net = build_mlp_net(arch=q_network_arch,
                                      input_size=action_size + self._obs_converter.vector_part_size(),
-                                     output_size=1,
-                                     ensemble_size=self._nets_num,
-                                     return_ensemble_mean=False).to(device=torch_device)
-    
-    def get_min_qval(self, observations, actions):
-        qvals = self(observations, actions)
-        # ggLog.info(f"qvals.size() = {qvals.size()}")
-        min_q = th.min(qvals,dim=1).values
-        # min_q = min_q.squeeze(1)
-        # ggLog.info(f"min_q.size() = {min_q.size()}")
-        return min_q
-    
+                                     output_size=1).to(device=torch_device)
+
     def forward(self, observations, actions):
         observations = self._obs_converter.getVectorPart(observation_batch=observations)
-        qvals = self._q_nets(torch.cat([observations, actions], 1))
-        return qvals
+        return self._q_net(torch.cat([observations, actions], 1))
 
 
 
@@ -68,10 +77,10 @@ class Actor(nn.Module):
         if len(policy_arch)<1:
             raise RuntimeError(f"Invalid policy arch {policy_arch}, must have at least 1 layer")
         else:
-            self.act_fc = build_mlp_net(arch=policy_arch[:-1],input_size=self._obs_converter.vector_part_size(), output_size=policy_arch[-1],
+            self.fc = build_mlp_net(arch=policy_arch[:-1],input_size=self._obs_converter.vector_part_size(), output_size=policy_arch[-1],
                                     last_activation_class=th.nn.LeakyReLU).to(device=torch_device)
-        self.act_fc_mean = nn.Linear(policy_arch[-1], action_size, device=torch_device)
-        self.act_fc_logstd = nn.Linear(policy_arch[-1], action_size, device=torch_device)
+        self.fc_mean = nn.Linear(policy_arch[-1], action_size, device=torch_device)
+        self.fc_logstd = nn.Linear(policy_arch[-1], action_size, device=torch_device)
 
         if isinstance(action_max, int): action_max = float(action_max)
         if isinstance(action_min, int): action_min = float(action_min)
@@ -83,9 +92,9 @@ class Actor(nn.Module):
 
     def forward(self, observations):
         observations = self._obs_converter.getVectorPart(observation_batch=observations)
-        observations = self.act_fc(observations)
-        mean = self.act_fc_mean(observations)
-        log_std = self.act_fc_logstd(observations)
+        observations = self.fc(observations)
+        mean = self.fc_mean(observations)
+        log_std = self.fc_logstd(observations)
         log_std = (torch.tanh(log_std)+1)*0.5*(self._log_std_max - self._log_std_min) + self._log_std_min
         return mean, log_std
 
@@ -160,18 +169,25 @@ class SAC(nn.Module):
         self.device = torch_device
         self._value_func_updates = 0
         self._policy_updates = 0
-        self._q_net = QNetwork(observation_space=observation_space,
+        self._q_net1 = QNetwork(observation_space=observation_space,
                                 action_size=self._hp.action_size,
                                 q_network_arch=q_network_arch,
-                                torch_device=self._hp.torch_device,
-                                nets_num=2)
-        self._q_net_target = QNetwork(observation_space=observation_space,
+                                torch_device=self._hp.torch_device)
+        self._q_net2 = QNetwork(observation_space=observation_space,
                                 action_size=self._hp.action_size,
                                 q_network_arch=q_network_arch,
-                                torch_device=self._hp.torch_device,
-                                nets_num=2)
-        self._q_net_target.load_state_dict(self._q_net.state_dict())
-        self._q_optimizer = optim.Adam(self._q_net.parameters(), lr=self._hp.q_lr)
+                                torch_device=self._hp.torch_device)
+        self._q_net1_target = QNetwork(observation_space=observation_space,
+                                action_size=self._hp.action_size,
+                                q_network_arch=q_network_arch,
+                                torch_device=self._hp.torch_device)
+        self._q_net2_target = QNetwork(observation_space=observation_space,
+                                action_size=self._hp.action_size,
+                                q_network_arch=q_network_arch,
+                                torch_device=self._hp.torch_device)
+        self._q_net1_target.load_state_dict(self._q_net1.state_dict())
+        self._q_net2_target.load_state_dict(self._q_net2.state_dict())
+        self._q_optimizer = optim.Adam(list(self._q_net1.parameters()) + list(self._q_net2.parameters()), lr=self._hp.q_lr)
         self._actor = Actor(observation_space = observation_space,
                             policy_arch=policy_arch,
                             action_size = self._hp.action_size,
@@ -198,33 +214,27 @@ class SAC(nn.Module):
         with torch.no_grad():
             # Compute next-values for TD
             next_state_actions, next_state_log_pi, _ = self._actor.sample_action(transitions.next_observations)
-            q_next = self._q_net_target.get_min_qval(transitions.next_observations, next_state_actions)
-            # ggLog.info(f"next_state_log_pi.size() = {next_state_log_pi.size()}")
+            q_next = torch.min( self._q_net1_target(transitions.next_observations, next_state_actions),
+                                self._q_net1_target(transitions.next_observations, next_state_actions))
             soft_q_next = q_next - self._alpha * next_state_log_pi
-            # ggLog.info(f"soft_q_next.size() = {soft_q_next.size()}")
-            td_q_values = transitions.rewards.flatten() + (1 - transitions.terminated.flatten()) * self._hp.gamma * (soft_q_next).view(-1)
+            td_q_values = transitions.rewards.flatten() + (1 - transitions.dones.flatten()) * self._hp.gamma * (soft_q_next).view(-1)
 
-        # ggLog.info(f"td_q_values.size() = {td_q_values.size()}")
-        q_values = self._q_net(transitions.observations, transitions.actions)
-        # ggLog.info(f"q_values.size() = {q_values.size()}")
-        td_q_values = td_q_values.unsqueeze(1).unsqueeze(2)
-        assert td_q_values.size() == (q_values.size()[0], 1, 1)
-        # ggLog.info(f"td_q_values.size() = {td_q_values.size()}")
-        td_q_values = td_q_values.expand(-1,2,1)
-        # ggLog.info(f"td_q_values.size() = {td_q_values.size()}")
-        qf_loss = F.mse_loss(q_values, td_q_values)
+        q_values1 = self._q_net1(transitions.observations, transitions.actions).view(-1)
+        q_values2 = self._q_net2(transitions.observations, transitions.actions).view(-1)
+        qf1_loss = F.mse_loss(q_values1, td_q_values)
+        qf2_loss = F.mse_loss(q_values2, td_q_values)
+        qf_loss = qf1_loss + qf2_loss
 
         self._q_optimizer.zero_grad(set_to_none=True)
         qf_loss.backward()
         self._q_optimizer.step()
         self._value_func_updates += 1
+        return qf_loss
 
     def _update_policy(self, transitions : TransitionBatch):
-        act, act_log_prob, _ = self._actor.sample_action(transitions.observations)
-        min_q_pi = self._q_net.get_min_qval(transitions.observations, act)
-        # ggLog.info(f"min_q_pi.size() = {min_q_pi.size()}")
-        # ggLog.info(f"act_log_prob.size() = {act_log_prob.size()}")
-        actor_loss = ((self._alpha * act_log_prob) - min_q_pi).mean()
+        pi, log_pi, _ = self._actor.sample_action(transitions.observations)
+        min_q_pi = torch.min(self._q_net1(transitions.observations, pi), self._q_net2(transitions.observations, pi))
+        actor_loss = ((self._alpha * log_pi) - min_q_pi).mean()
 
         self._actor_optimizer.zero_grad(set_to_none=True)
         actor_loss.backward()
@@ -232,14 +242,17 @@ class SAC(nn.Module):
 
         if self._hp.auto_entropy_temperature:
             with torch.no_grad():
-                _, act_log_prob, _ = self._actor.sample_action(transitions.observations)
-            alpha_loss = (-self._log_alpha.exp() * (act_log_prob + self._target_entropy)).mean()
+                _, log_pi, _ = self._actor.sample_action(transitions.observations)
+            alpha_loss = (-self._log_alpha.exp() * (log_pi + self._target_entropy)).mean()
 
             self._alpha_optimizer.zero_grad(set_to_none=True)
             alpha_loss.backward()
             self._alpha_optimizer.step()
             self._alpha = self._log_alpha.exp().item()
+        else:
+            alpha_loss = th.tensor(0.0, device=self.device)
         self._policy_updates += 1
+        return actor_loss, alpha_loss
 
     @staticmethod
     def _target_update(param, target_param, tau):
@@ -249,16 +262,26 @@ class SAC(nn.Module):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
         
     def _update_target_nets(self):
-        for param, target_param in zip(self._q_net.parameters(), self._q_net_target.parameters()):
+        for param, target_param in zip(self._q_net1.parameters(), self._q_net1_target.parameters()):
+            self._target_update(param, target_param, self._hp.target_tau)
+        for param, target_param in zip(self._q_net2.parameters(), self._q_net2_target.parameters()):
             self._target_update(param, target_param, self._hp.target_tau)
 
     def update(self, transitions : TransitionBatch):
-        self._update_value_func(transitions = transitions)
+        q_loss = self._update_value_func(transitions = transitions)
+        avg_actor_loss = None
+        avg_alpha_loss = None
         if self._value_func_updates % self._hp.policy_update_freq == 0:
+            avg_actor_loss = th.tensor(0.0, device=self.device)
+            avg_alpha_loss = th.tensor(0.0, device=self.device)
             for _ in range(self._hp.policy_update_freq):
-                self._update_policy(transitions=transitions)
+                actor_loss, alpha_loss = self._update_policy(transitions=transitions)
+                with th.no_grad():
+                    avg_actor_loss += actor_loss/self._hp.policy_update_freq
+                    avg_alpha_loss += alpha_loss/self._hp.policy_update_freq
         if self._value_func_updates % self._hp.targets_update_freq == 0:
             self._update_target_nets()
+        return q_loss, avg_actor_loss, avg_alpha_loss
 
 
     

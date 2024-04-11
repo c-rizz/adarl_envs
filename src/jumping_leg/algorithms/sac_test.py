@@ -17,13 +17,16 @@ from lr_gym.utils.buffers import ThDReplayBuffer
 import lr_gym.utils.sigint_handler
 from jumping_leg.algorithms.sac import SAC, train
 from jumping_leg.algorithms.collector import AsyncProcessExperienceCollector, AsyncThreadExperienceCollector
+import wandb 
+import torchexplorer
+import threading
 
 def build_env(env_builder_args, log_folder, seed, num_envs):
     builders = [(lambda i: (lambda: env_builder(log_folder=log_folder,
                                                   seed=seed+100000*i,
                                                   env_builder_args = env_builder_args)
                                 ))(i) for i in range(num_envs)]
-    envs = AsyncVectorEnvShmem(builders, context="forkserver")
+    envs = AsyncVectorEnvShmem(builders, context="forkserver", purely_numpy=False, shared_mem_device = th.device("cpu"), copy_data=False)
     envs = VectorEnvLogger(env = envs)
     return envs
 
@@ -43,26 +46,8 @@ def build_sac(obs_space, act_space, hyperparams):
                 policy_update_freq=2,
                 target_update_freq=1)
 
-def main():
+def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
-
-    seed = 0
-    log_folder, session = lr_gym.utils.session.lr_gym_startup(   __file__,
-                                                        inspect.currentframe(),
-                                                        seed=seed,
-                                                        experiment_name=os.path.basename(__file__),
-                                                        run_comment="")
-
-    seed = 0
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-    # env setup
-    num_envs = 16
     env_builder_args = {
         "reward_contacts_weight" : 0.1,
         "reward_energy_weight" : 0.0,
@@ -78,30 +63,67 @@ def main():
         "platform_randomization" : "single",
         "quiet" : False}
 
-    hyperparams = {"device" : device,
-                   "train_freq" : 50,
+    hyperparams = {"train_freq" : 50,
                    "grad_steps" : 25}
-    vec_env_builder = lambda: build_env(env_builder_args=env_builder_args, log_folder=log_folder, seed=seed, num_envs=num_envs)
-    collector = AsyncProcessExperienceCollector(vec_env_builder=vec_env_builder, 
-                                         base_model_builder=lambda o,a: build_sac(o,a,hyperparams),
-                                         storage_torch_device=device,
-                                         buffer_size=hyperparams["train_freq"]*num_envs,
-                                         session=session)
-    observation_space = collector.observation_space()
-    action_space = collector.action_space()
-    model = build_sac(collector.observation_space(), collector.action_space(), hyperparams)
+    main(seed, folderName, run_id, args, env_builder_args, hyperparams)
 
-    # vec_env = build_env(env_builder_args=env_builder_args,
-    #                     log_folder=log_folder,
-    #                     seed=seed,
-    #                     num_envs=num_envs)
-    # model = build_sac(vec_env.single_observation_space, vec_env.single_action_space, hyperparams)
-    # collector = AsyncThreadExperienceCollector(vec_env=vec_env,
-    #                                base_model=model,
-    #                                buffer_size=hyperparams["train_freq"]*num_envs,
-    #                                storage_torch_device=device)
-    # observation_space = vec_env.single_observation_space
-    # action_space = vec_env.single_action_space
+import traceback
+t = threading.Thread.__init__
+def threadwrapper(self : threading.Thread, *args, **kwargs):
+    t(self, *args, **kwargs)
+    print(f" created thread {self.name}")
+    traceback.print_stack()
+
+def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
+
+    print(f"active threads = {threading.enumerate()}")
+    threading.Thread.__init__ = threadwrapper
+    # torchexplorer.setup()
+    seed = 0
+    log_folder, session = lr_gym.utils.session.lr_gym_startup(   __file__,
+                                                        inspect.currentframe(),
+                                                        seed=seed,
+                                                        experiment_name=os.path.basename(__file__),
+                                                        run_id=run_id,
+                                                        run_comment=args["comment"],
+                                                        folderName=folderName)
+
+    seed = 0
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    hyperparams["device"] = device
+    # env setup
+    num_envs = 16
+    use_processes = True
+    if use_processes:
+        vec_env_builder = lambda: build_env(env_builder_args=env_builder_args, log_folder=log_folder, seed=seed, num_envs=num_envs)
+        collector = AsyncProcessExperienceCollector(vec_env_builder=vec_env_builder, 
+                                            base_model_builder=lambda o,a: build_sac(o,a,hyperparams),
+                                            storage_torch_device=device,
+                                            buffer_size=hyperparams["train_freq"]*num_envs,
+                                            session=session)
+        observation_space = collector.observation_space()
+        action_space = collector.action_space()
+        model = build_sac(observation_space, action_space, hyperparams)
+    else:
+        vec_env = build_env(env_builder_args=env_builder_args,
+                            log_folder=log_folder,
+                            seed=seed,
+                            num_envs=num_envs)
+        observation_space = vec_env.single_observation_space
+        action_space = vec_env.single_action_space
+        model = build_sac(observation_space, action_space, hyperparams)
+        collector = AsyncThreadExperienceCollector(vec_env=vec_env,
+                                    base_model=model,
+                                    buffer_size=hyperparams["train_freq"]*num_envs,
+                                    storage_torch_device=device)
+
+    # torchexplorer.watch(model, backend="wandb")
+    wandb.watch((model, model._actor, model._q_net), log="all", log_freq=1000, log_graph=True)
 
     # compiled_model = th.compile(model)
     # envs.single_observation_space.dtype = np.float32
@@ -130,7 +152,7 @@ def main():
           buffer = rb,
           total_timesteps=10_000_000,
           train_freq = hyperparams["train_freq"],
-          learning_starts=500*32,
+          learning_starts=500*num_envs*5,
           grad_steps=hyperparams["grad_steps"],
           batch_size=16384,
           log_freq=500)
@@ -139,5 +161,31 @@ def main():
     # writer.close()
 
 
+
 if __name__ == "__main__":
-    main()
+
+    import os
+    import argparse
+    import multiprocessing
+    from lr_gym.utils.session import launchRun
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seedsNum", default=1, type=int, help="Number of seeds to test with")
+    ap.add_argument("--seedsOffset", default=0, type=int, help="Offset the used seeds by this amount")
+    ap.add_argument("--maxProcs", default=int(multiprocessing.cpu_count()/2), type=int, help="Maximum number of parallel runs")
+    ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
+
+    ap.set_defaults(feature=True)
+    args = vars(ap.parse_args())
+
+    
+    launchRun(  seedsNum=args["seedsNum"],
+                seedsOffset=args["seedsOffset"],
+                runFunction=runFunction,
+                maxProcs=args["maxProcs"],
+                launchFilePath=__file__,
+                resumeFolder = None,
+                args = args,
+                debug_level = -10,
+                start_lr_gym=False,
+                pkgs_to_save=["lr_gym","jumping_leg"])

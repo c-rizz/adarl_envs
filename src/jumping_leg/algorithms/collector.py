@@ -1,32 +1,15 @@
 
 import os
-import random
 import time
-from dataclasses import dataclass
 
 import gymnasium as gym
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from stable_baselines3.common.buffers import ReplayBuffer
 import torch as th
-from jumping_leg.experiments.build_jumping_leg_env import env_builder
-from lr_gym.utils.async_vector_env import AsyncVectorEnvShmem
-import inspect
-import lr_gym.utils.session
-from lr_gym.envs.vector_env_logger import VectorEnvLogger
-from lr_gym.utils.ThDictEpReplayBuffer import ThDictEpReplayBuffer
-from lr_gym.utils.buffers import ThDReplayBuffer
-from lr_gym.utils.ObsConverter import ObsConverter
-from typing import List, Union, NamedTuple, Dict, Optional, Callable
-from autoencoding_rl.utils import build_mlp_net
-from lr_gym.utils.tensor_trees import map_tensor_tree
+from typing import List, Union, NamedTuple, Dict, Optional, Callable, Literal
+from lr_gym.utils.tensor_trees import map_tensor_tree, unstack_tensor_tree, stack_tensor_tree
 import lr_gym.utils.dbg.ggLog as ggLog
 import copy
 import threading
-import lr_gym.utils.sigint_handler
 from lr_gym.utils.buffers import BasicStorage
 import torch.multiprocessing as mp
 from lr_gym.utils.shared_env_data import SimpleCommander
@@ -39,42 +22,69 @@ import lr_gym.utils.session as session
 class ExperienceCollector():
     def __init__(self, vec_env : gym.vector.VectorEnv):
         self._vec_env = vec_env
-        self._last_obs = None
+        self._current_obs = None
 
     def reset(self):
         if self._vec_env is not None:
-            self._last_obs, info = self._vec_env.reset()
+            self._current_obs, info = self._vec_env.reset()
 
     def collect_experience(self, policy, vsteps_to_collect, global_vstep_count, random_vsteps, policy_device,
                            buffer):
-        if  self._last_obs is None:
-            raise RuntimeError(f"last_obs is not set. reset() should be called before running collect_experience the first time")
-        obs = self._last_obs
-        num_envs = self._vec_env.unwrapped.num_envs
-        for step in range(vsteps_to_collect):
-            if global_vstep_count < random_vsteps:
-                actions = th.as_tensor(np.stack([self._vec_env.single_action_space.sample() for _ in range(num_envs)]))
-            else:
-                th_obs = map_tensor_tree(obs, lambda a: th.as_tensor(a, device = policy_device))
-                actions = policy.sample_actions(th_obs)
-                actions = actions.detach().cpu().numpy()
+        with th.no_grad(): #just to be sure
+            if  self._current_obs is None:
+                raise RuntimeError(f"last_obs is not set. reset() should be called before running collect_experience the first time")
+            num_envs = self._vec_env.unwrapped.num_envs
+            t_act = 0.
+            t_step = 0.
+            t_copy = 0.
+            t_final_obs = 0.
+            t_add = 0.
+            for step in range(vsteps_to_collect):
+                t_pre_act = time.monotonic()
+                obs = self._current_obs
+                if global_vstep_count < random_vsteps:
+                    actions = th.as_tensor(np.stack([self._vec_env.single_action_space.sample() for _ in range(num_envs)]))
+                else:
+                    th_obs = map_tensor_tree(obs, lambda a: th.as_tensor(a, device = policy_device))
+                    actions = policy.sample_actions(th_obs)
+                    actions = actions.detach().cpu().numpy()
+                t_post_act = time.monotonic()
 
-            next_obs, rewards, terminations, truncations, infos = self._vec_env.step(actions)
+                next_obs, rewards, terminations, truncations, infos = self._vec_env.step(actions)
+                t_post_step = time.monotonic()
 
-            real_next_obs = next_obs.copy()
-            for idx, trunc in enumerate(truncations):
-                if trunc:
-                    real_next_obs[idx] = infos["final_observation"][idx]
-            buffer.add(obs=obs,
-                        next_obs=real_next_obs,
-                        action=actions,
-                        reward=rewards,
-                        terminated=terminations,
-                        truncated=truncations)
-            # ggLog.info(f"added step {step} to buffer")
+                # real_next_obs = copy.deepcopy(next_obs) #copy because we are going to modify it based on truncations
+                t_post_copy = time.monotonic()
+                # for idx, trunc in enumerate(truncations):
+                #     if trunc:
+                #         ggLog.info(f"Truncation happened")
+                #         real_next_obs[idx] = infos["final_observation"][idx]
+                # # truncated_envs = truncations.nonzero(as_tuple=True)
+                # # map_tensor_tree(real_next_obs, lambda t : th.Tensor: t.index_copy_(dim=0,truncated_envs,))                
 
-            obs = next_obs
-            self._last_obs = obs
+                # Just take the real_next_observstion from info
+                # if it wasn't available we could take it from final_observation/terminal_observation by masking with
+                # (truncated or terminated)
+                real_next_obs = stack_tensor_tree([info["real_next_observation"] for info in unstack_tensor_tree(infos)])
+                t_post_final_obs = time.monotonic()
+                buffer.add(obs=obs,
+                            next_obs=real_next_obs,
+                            action=actions,
+                            reward=rewards,
+                            terminated=terminations,
+                            truncated=truncations)
+                t_post_add = time.monotonic()
+                # ggLog.info(f"added step {step} to buffer")
+                self._current_obs = copy.deepcopy(next_obs) # copy it because it may get overwritten by the env during the next step
+                # self._current_obs = next_obs
+                obs, next_obs, rewards, terminations, truncations, infos = None, None, None, None, None, None # to avoid inadvertly using them
+
+                t_act += t_post_act-t_pre_act
+                t_step += t_post_step-t_post_act
+                t_copy +=t_post_copy-t_post_step
+                t_final_obs += t_post_final_obs-t_post_copy
+                t_add += t_post_add-t_post_final_obs
+            # ggLog.info(f"collection times = {t_act} {t_step} {t_copy} {t_final_obs} {t_add}")
 
 class AsyncThreadExperienceCollector(ExperienceCollector):
     def __init__(self, vec_env : gym.vector.VectorEnv,
@@ -96,7 +106,7 @@ class AsyncThreadExperienceCollector(ExperienceCollector):
                                     storage_torch_device=self._storage_torch_device,
                                     share_mem=True,
                                     allow_rollover=False)
-        self._collector_thread = threading.Thread(target=self._worker)
+        self._collector_thread = threading.Thread(target=self._worker, name="AsyncThreadExperienceCollector_worker")
         self._collector_thread.start()
 
     def _worker(self):
@@ -146,7 +156,7 @@ class AsyncThreadExperienceCollector(ExperienceCollector):
 class AsyncProcessExperienceCollector(ExperienceCollector):
     def __init__(self, vec_env_builder,
                  base_model_builder : Callable[[gym.spaces.Space, gym.spaces.Space],th.nn.Module],
-                 buffer_size, storage_torch_device, start_method = "forkserver",
+                 buffer_size, storage_torch_device, start_method : Literal['fork', 'spawn', 'forkserver']= "forkserver",
                  session : session.Session = None):
         super().__init__(vec_env=None)
         self._buffer_size = buffer_size

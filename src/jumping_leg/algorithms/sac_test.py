@@ -3,7 +3,6 @@
 import os
 import random
 import time
-from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -18,10 +17,8 @@ import lr_gym.utils.sigint_handler
 from jumping_leg.algorithms.sac import SAC, train
 from jumping_leg.algorithms.collector import AsyncProcessExperienceCollector, AsyncThreadExperienceCollector
 import wandb 
-import torchexplorer
-import threading
 
-def build_env(env_builder_args, log_folder, seed, num_envs):
+def build_vec_env(env_builder_args, log_folder, seed, num_envs):
     builders = [(lambda i: (lambda: env_builder(log_folder=log_folder,
                                                   seed=seed+100000*i,
                                                   env_builder_args = env_builder_args)
@@ -67,17 +64,18 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                    "grad_steps" : 25}
     main(seed, folderName, run_id, args, env_builder_args, hyperparams)
 
-import traceback
-t = threading.Thread.__init__
-def threadwrapper(self : threading.Thread, *args, **kwargs):
-    t(self, *args, **kwargs)
-    print(f" created thread {self.name}")
-    traceback.print_stack()
+# import traceback
+# import threading
+# t = threading.Thread.__init__
+# def threadwrapper(self : threading.Thread, *args, **kwargs):
+#     t(self, *args, **kwargs)
+#     print(f" created thread {self.name}")
+#     traceback.print_stack()
 
 def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
 
-    print(f"active threads = {threading.enumerate()}")
-    threading.Thread.__init__ = threadwrapper
+    # print(f"active threads = {threading.enumerate()}")
+    # threading.Thread.__init__ = threadwrapper
     # torchexplorer.setup()
     seed = 0
     log_folder, session = lr_gym.utils.session.lr_gym_startup(   __file__,
@@ -100,7 +98,7 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
     num_envs = 16
     use_processes = True
     if use_processes:
-        vec_env_builder = lambda: build_env(env_builder_args=env_builder_args, log_folder=log_folder, seed=seed, num_envs=num_envs)
+        vec_env_builder = lambda: build_vec_env(env_builder_args=env_builder_args, log_folder=log_folder, seed=seed, num_envs=num_envs)
         collector = AsyncProcessExperienceCollector(vec_env_builder=vec_env_builder, 
                                             base_model_builder=lambda o,a: build_sac(o,a,hyperparams),
                                             storage_torch_device=device,
@@ -110,7 +108,7 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
         action_space = collector.action_space()
         model = build_sac(observation_space, action_space, hyperparams)
     else:
-        vec_env = build_env(env_builder_args=env_builder_args,
+        vec_env = build_vec_env(env_builder_args=env_builder_args,
                             log_folder=log_folder,
                             seed=seed,
                             num_envs=num_envs)

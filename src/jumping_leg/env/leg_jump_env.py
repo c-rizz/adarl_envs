@@ -405,7 +405,7 @@ class LegJumpEnv(ControlledEnv):
                                                               self.IMAGE_PART  : img_observation_space})
             
         action_space_high = np.array([1]*action_len)
-        action_space = spaces.gym_spaces.Box(-action_space_high,action_space_high)
+        action_space = spaces.gym_spaces.Box(-action_space_high,action_space_high, seed=seed)
 
 
         super().__init__(maxStepsPerEpisode = maxStepsPerEpisode,
@@ -427,6 +427,8 @@ class LegJumpEnv(ControlledEnv):
     def seed(self, seed : int) -> None:
         super().seed(seed)
         self._rng = self._rng.manual_seed(seed)
+        self.action_space.seed(seed)
+        self.observation_space.seed(seed)
 
     @staticmethod
     def _unnormalize(v, min, max):

@@ -18,7 +18,7 @@ from stable_baselines3.common.vec_env.base_vec_env import CloudpickleWrapper
 import gymnasium as gym
 import lr_gym.utils.mp_helper as mp_helper
 import lr_gym.utils.session as session
-
+from lr_gym.utils.utils import pyTorch_makeDeterministic
 class ExperienceCollector():
     def __init__(self, vec_env : gym.vector.VectorEnv):
         self._vec_env = vec_env
@@ -157,7 +157,8 @@ class AsyncProcessExperienceCollector(ExperienceCollector):
     def __init__(self, vec_env_builder,
                  base_model_builder : Callable[[gym.spaces.Space, gym.spaces.Space],th.nn.Module],
                  buffer_size, storage_torch_device, start_method : Literal['fork', 'spawn', 'forkserver']= "forkserver",
-                 session : session.Session = None):
+                 session : session.Session = None,
+                 seed : int = 0):
         super().__init__(vec_env=None)
         self._buffer_size = buffer_size
         self._storage_torch_device = storage_torch_device
@@ -174,6 +175,7 @@ class AsyncProcessExperienceCollector(ExperienceCollector):
         self._collector_process : mp.Process = ctx.Process(target = self._worker, args=(p2,session))
         self._collector_process.start()
         self._pipe = p1
+        self._seed = seed
         p2.close()
 
         time.sleep(5)
@@ -197,6 +199,7 @@ class AsyncProcessExperienceCollector(ExperienceCollector):
         session.default_session = parent_session
         session.default_session.reapply_globals()
         self._pipe = pipe
+        pyTorch_makeDeterministic(seed = session.default_session.run_info["seed"])
         while self._running.value:
             # ggLog.info(f"waiting command")
             cmd = self._commander.wait_command()

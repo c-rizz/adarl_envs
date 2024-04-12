@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass
 
 import gymnasium as gym
+import lr_gym.utils.callbacks
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,8 +17,10 @@ from autoencoding_rl.utils import build_mlp_net
 import lr_gym.utils.dbg.ggLog as ggLog
 import lr_gym.utils.sigint_handler
 import lr_gym.utils.session as session
-
-
+from lr_gym.utils.wandb_wrapper import wandb_log
+from lr_gym.utils.callbacks import TrainingCallback, CallbackList
+from jumping_leg.algorithms.collectors import ExperienceCollector
+from jumping_leg.algorithms.rl_policy import RLPolicy
 class QNetwork(nn.Module):
     def __init__(self, observation_space : gym.spaces.Space,
                  action_size : int,
@@ -94,18 +97,20 @@ class Actor(nn.Module):
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
-        y_t = torch.tanh(x_t)
-        log_prob = normal.log_prob(x_t)
-        # Enforcing Action Bound
-        log_prob = log_prob - torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        log_prob = log_prob.sum(1, keepdim=True)
+        y_t = torch.tanh(x_t) # squash the action in [-1,1]
+        log_prob = normal.log_prob(x_t) # get the probability of the actions that we sampled
 
+        # scale mean and action to the proper bounds
         mean = torch.tanh(mean) * self.action_scale + self.action_bias
         action = y_t * self.action_scale + self.action_bias
+
+        log_prob = log_prob - torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6) # correct the probability for the squashing
+        log_prob = log_prob.sum(1, keepdim=True) # get probability per each multidimensional action, not for each action component
+
         return action, log_prob, mean
 
 
-class SAC(nn.Module):
+class SAC(RLPolicy):
     @dataclass
     class Hyperparams():
         q_lr : float
@@ -190,9 +195,18 @@ class SAC(nn.Module):
         else:
             self._alpha = constant_entropy_temperature
 
-    def sample_actions(self, observation):
+        self._last_q_loss = th.as_tensor(float("nan"), device=self.device)
+        self._last_actor_loss = th.as_tensor(float("nan"), device=self.device)
+        self._last_alpha_loss = th.as_tensor(float("nan"), device=self.device)
+
+    def predict(self, observation, deterministic = False):
+        # s = {k:v.size() for k,v in observation.items()}
+        # ggLog.info(f"predict: observation = {s}")
         action, log_prob, mean = self._actor.sample_action(observation)
-        return action
+        if deterministic:
+            return mean
+        else:
+            return action
 
     def _update_value_func(self, transitions : TransitionBatch):
         with torch.no_grad():
@@ -208,20 +222,21 @@ class SAC(nn.Module):
         q_values = self._q_net(transitions.observations, transitions.actions)
         # ggLog.info(f"q_values.size() = {q_values.size()}")
         td_q_values = td_q_values.unsqueeze(1).unsqueeze(2)
-        assert td_q_values.size() == (q_values.size()[0], 1, 1)
+        # assert td_q_values.size() == (q_values.size()[0], 1, 1)
         # ggLog.info(f"td_q_values.size() = {td_q_values.size()}")
         td_q_values = td_q_values.expand(-1,2,1)
         # ggLog.info(f"td_q_values.size() = {td_q_values.size()}")
-        qf_loss = F.mse_loss(q_values, td_q_values)
+        q_loss = F.mse_loss(q_values, td_q_values)
 
         self._q_optimizer.zero_grad(set_to_none=True)
-        qf_loss.backward()
+        q_loss.backward()
         self._q_optimizer.step()
         self._value_func_updates += 1
+        self._last_q_loss = q_loss.detach()
 
     def _update_policy(self, transitions : TransitionBatch):
         act, act_log_prob, _ = self._actor.sample_action(transitions.observations)
-        min_q_pi = self._q_net.get_min_qval(transitions.observations, act)
+        min_q_pi = self._q_net.get_min_qval(transitions.observations, act) # cannot reuse those from _update_value_func, the value function has changed
         # ggLog.info(f"min_q_pi.size() = {min_q_pi.size()}")
         # ggLog.info(f"act_log_prob.size() = {act_log_prob.size()}")
         actor_loss = ((self._alpha * act_log_prob) - min_q_pi).mean()
@@ -240,6 +255,8 @@ class SAC(nn.Module):
             self._alpha_optimizer.step()
             self._alpha = self._log_alpha.exp().item()
         self._policy_updates += 1
+        self._last_actor_loss = actor_loss.detach()
+        self._last_alpha_loss = alpha_loss.detach()
 
     @staticmethod
     def _target_update(param, target_param, tau):
@@ -259,11 +276,11 @@ class SAC(nn.Module):
                 self._update_policy(transitions=transitions)
         if self._value_func_updates % self._hp.targets_update_freq == 0:
             self._update_target_nets()
-
+        return self._last_q_loss, self._last_actor_loss, self._last_alpha_loss
 
     
 
-def train(collector,
+def train_off_policy(collector : ExperienceCollector,
           model : SAC,
           buffer : ThDReplayBuffer,
           total_timesteps : int,
@@ -271,7 +288,8 @@ def train(collector,
           learning_starts : int,
           grad_steps : int,
           batch_size : int,
-          log_freq : int = -1):
+          log_freq : int = -1,
+          callbacks : Optional[Union[TrainingCallback, List[TrainingCallback]]] = None):
     if log_freq == -1: log_freq = train_freq
     num_envs = collector.num_envs()
 
@@ -282,11 +300,22 @@ def train(collector,
     t_train_sl = 0
     t_tot_sl = 0
     
+    if callbacks is None:
+        callbacks = []
+    if not isinstance(callbacks, CallbackList):
+        if not isinstance(callbacks, list):
+            callbacks = [callbacks]    
+        callbacks = CallbackList(callbacks=callbacks)
+
+    callbacks.on_training_start()
+    ep_counter = 0
+    step_counter = 0
     while global_step < total_timesteps and not session.default_session.is_shutting_down():
         s0b = buffer.stored_frames()
         t0 = time.monotonic()
         steps_to_collect = train_freq*num_envs
         vsteps_to_collect = train_freq
+        callbacks.on_collection_start()
         collector.collect_experience_async(model_state_dict=model.state_dict(),
                                             vsteps_to_collect=vsteps_to_collect,
                                             global_vstep_count=global_step//num_envs,
@@ -294,14 +323,31 @@ def train(collector,
 
         t_before_train = time.monotonic()
         if global_step > learning_starts:
-            for _ in range(grad_steps):
+            q_act_alpha_losses = th.zeros(size=(grad_steps, 3), dtype=th.float32, device=model.device)
+            for i in range(grad_steps):
                 data = buffer.sample(batch_size)
-                model.update(transitions = data)
+                q_loss, actor_loss, alpha_loss = model.update(transitions = data)
+                q_act_alpha_losses[i] = th.stack((q_loss,actor_loss,alpha_loss))
                 tot_grad_steps_count += 1
+            q_loss, actor_loss, alpha_loss = q_act_alpha_losses.mean(dim = 0).cpu().numpy()
+            wandb_log({"sac/tot_grad_steps_count":tot_grad_steps_count,
+                       "sac/q_loss":q_loss,
+                       "sac/actor_loss":actor_loss,
+                       "sac/alpha_loss":alpha_loss,
+                       "sac/alpha":model._alpha})
         t_after_train = time.monotonic()
 
         tmp_buff = collector.wait_collection(timeout = 120.0)
+        new_episodes = tmp_buff.added_completed_episodes() - ep_counter
+        ep_counter = tmp_buff.added_completed_episodes()
+        step_counter = tmp_buff.added_frames()
         t_coll_sl += collector.collection_duration()
+        lr_gym.utils.session.default_session.run_info["collected_episodes"] = ep_counter
+        lr_gym.utils.session.default_session.run_info["collected_steps"] = step_counter
+        # callbacks._callbacks[0].set_model(model)
+        callbacks.on_collection_end(collected_steps=vsteps_to_collect*num_envs,
+                                   collected_episodes=new_episodes,
+                                   collected_data=tmp_buff)
         s = 0
         for (obs, next_obs, action, reward, terminated, truncated) in tmp_buff.replay():
             # ggLog.info(f"replaying step {s} ")
@@ -317,6 +363,7 @@ def train(collector,
         t_train_sl += t_after_train - t_before_train
         t_tot_sl += tf-t0
         if global_step/num_envs % log_freq == 0:
-            ggLog.info(f"TRAIN: expstps:{global_step} trainstps={tot_grad_steps_count} coll={t_coll_sl:.2f}s train={t_train_sl:.2f}s tot={t_tot_sl:.2f}")
+            ggLog.info(f"OFFTRAIN: expstps:{global_step} trainstps={tot_grad_steps_count} coll={t_coll_sl:.2f}s train={t_train_sl:.2f}s tot={t_tot_sl:.2f}")
             t_train_sl, t_coll_sl, t_tot_sl = 0,0,0
             lr_gym.utils.sigint_handler.haltOnSigintReceived()
+    callbacks.on_training_end()

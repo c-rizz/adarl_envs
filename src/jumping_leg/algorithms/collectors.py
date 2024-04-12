@@ -19,21 +19,33 @@ import gymnasium as gym
 import lr_gym.utils.mp_helper as mp_helper
 import lr_gym.utils.session as session
 from lr_gym.utils.utils import pyTorch_makeDeterministic
+from jumping_leg.algorithms.rl_policy import RLPolicy
+
+
 class ExperienceCollector():
-    def __init__(self, vec_env : gym.vector.VectorEnv):
+    def __init__(self, vec_env : gym.vector.VectorEnv,
+                        base_model : Optional[RLPolicy] = None,
+                        buffer : Optional[BasicStorage] = None):
         self._vec_env = vec_env
         self._current_obs = None
+
+        self._collector_model = copy.deepcopy(base_model)
+        self._buffer = buffer
+
+    def num_envs(self):
+        return self._vec_env.num_envs
 
     def reset(self):
         if self._vec_env is not None:
             self._current_obs, info = self._vec_env.reset()
 
     def collect_experience(self, policy, vsteps_to_collect, global_vstep_count, random_vsteps, policy_device,
-                           buffer):
+                           buffer : BasicStorage):
+        t0 = time.monotonic()
         with th.no_grad(): #just to be sure
             if  self._current_obs is None:
                 raise RuntimeError(f"last_obs is not set. reset() should be called before running collect_experience the first time")
-            num_envs = self._vec_env.unwrapped.num_envs
+            num_envs = self.num_envs()
             t_act = 0.
             t_step = 0.
             t_copy = 0.
@@ -46,7 +58,7 @@ class ExperienceCollector():
                     actions = th.as_tensor(np.stack([self._vec_env.single_action_space.sample() for _ in range(num_envs)]))
                 else:
                     th_obs = map_tensor_tree(obs, lambda a: th.as_tensor(a, device = policy_device))
-                    actions = policy.sample_actions(th_obs)
+                    actions = policy.predict(th_obs)
                     actions = actions.detach().cpu().numpy()
                 t_post_act = time.monotonic()
 
@@ -85,6 +97,28 @@ class ExperienceCollector():
                 t_final_obs += t_post_final_obs-t_post_copy
                 t_add += t_post_add-t_post_final_obs
             # ggLog.info(f"collection times = {t_act} {t_step} {t_copy} {t_final_obs} {t_add}")
+        self._last_collection_wallduration = time.monotonic() - t0
+
+    def collection_duration(self):
+        return self._last_collection_wallduration
+
+
+    def collect_experience_async(self, model_state_dict, vsteps_to_collect, global_vstep_count, random_vsteps):
+        if self._collector_model is None or self._buffer is None:
+            raise RuntimeError(f"Called collect_experience_async but base_model and buffer were not provided")
+        self._collector_model.load_state_dict(model_state_dict, assign=False)
+        self._buffer.clear()
+        self.collect_experience(self._collector_model,
+                                vsteps_to_collect,
+                                global_vstep_count,
+                                random_vsteps,
+                                self._collector_model.device,
+                                self._buffer)
+        
+    def wait_collection(self, timeout = 0.0):
+        if self._buffer is None:
+            raise RuntimeError(f"Called collect_experience_async but buffer was not provided")
+        return self._buffer
 
 class AsyncThreadExperienceCollector(ExperienceCollector):
     def __init__(self, vec_env : gym.vector.VectorEnv,
@@ -146,12 +180,11 @@ class AsyncThreadExperienceCollector(ExperienceCollector):
     
     def action_space(self):
         return self._vec_env.single_action_space
-    
-    def num_envs(self):
-        return self._vec_env.num_envs
-    
+        
     def collection_duration(self):
         return self._last_collection_duration
+    
+
 
 class AsyncProcessExperienceCollector(ExperienceCollector):
     def __init__(self, vec_env_builder,
@@ -178,10 +211,7 @@ class AsyncProcessExperienceCollector(ExperienceCollector):
         self._seed = seed
         p2.close()
 
-        time.sleep(5)
-        ggLog.info(f"sending build req")
         self._commander.set_command("build")
-        ggLog.info(f"waiting build")
         self._commander.wait_done(timeout=60)
         self._buffer, self._obs_space, self._action_space, self._num_envs, self._collector_model = self._pipe.recv()
 
@@ -190,9 +220,9 @@ class AsyncProcessExperienceCollector(ExperienceCollector):
     
     def action_space(self):
         return self._action_space
-    
+
     def num_envs(self):
-        return self._num_envs
+        return self._num_envs    
 
     def _worker(self, pipe, parent_session):
         ggLog.info(f"AsyncProcessExperienceCollector worker started with pid {os.getpid()}")

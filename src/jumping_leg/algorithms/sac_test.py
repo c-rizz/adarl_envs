@@ -7,19 +7,21 @@ import time
 import numpy as np
 import torch
 import torch as th
-from jumping_leg.experiments.build_jumping_leg_env import env_builder
+import jumping_leg.experiments.build_jumping_leg_env as build_jumping_leg_env
 from lr_gym.utils.async_vector_env import AsyncVectorEnvShmem
 import inspect
 import lr_gym.utils.session
 from lr_gym.envs.vector_env_logger import VectorEnvLogger
 from lr_gym.utils.buffers import ThDReplayBuffer
 import lr_gym.utils.sigint_handler
-from jumping_leg.algorithms.sac import SAC, train
-from jumping_leg.algorithms.collector import AsyncProcessExperienceCollector, AsyncThreadExperienceCollector
+from jumping_leg.algorithms.sac import SAC, train_off_policy
+from jumping_leg.algorithms.collectors import AsyncProcessExperienceCollector, AsyncThreadExperienceCollector
 import wandb 
+from lr_gym.utils.callbacks import EvalCallback
+
 
 def build_vec_env(env_builder_args, log_folder, seed, num_envs):
-    builders = [(lambda i: (lambda: env_builder(log_folder=log_folder,
+    builders = [(lambda i: (lambda: build_jumping_leg_env.env_builder(log_folder=log_folder,
                                                   seed=seed+100000*i,
                                                   env_builder_args = env_builder_args)
                                 ))(i) for i in range(num_envs)]
@@ -31,7 +33,8 @@ def build_sac(obs_space, act_space, hyperparams):
     return SAC(observation_space=obs_space,
                 action_size=int(np.prod(act_space.shape)),
                 q_network_arch=[512,256],
-                q_lr=0.005,
+                q_lr=hyperparams["q_lr"],
+                policy_lr=hyperparams["policy_lr"],
                 policy_arch=[512,256],
                 action_min = th.as_tensor(act_space.low),
                 action_max = th.as_tensor(act_space.high),
@@ -61,7 +64,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False}
 
     hyperparams = {"train_freq" : 50,
-                   "grad_steps" : 25}
+                   "grad_steps" : 25,
+                   "q_lr" : 0.005,
+                   "policy_lr" : 0.0005}
     main(seed, folderName, run_id, args, env_builder_args, hyperparams)
 
 # import traceback
@@ -86,7 +91,6 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
                                                         run_comment=args["comment"],
                                                         folderName=folderName)
 
-    seed = 0
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -144,18 +148,41 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
         n_envs=num_envs)
     start_time = time.time()
 
-
-    train(collector=collector,
-          model = model,
-          buffer = rb,
-          total_timesteps=10_000_000,
-          train_freq = hyperparams["train_freq"],
-          learning_starts=500*num_envs*5,
-          grad_steps=hyperparams["grad_steps"],
-          batch_size=16384,
-          log_freq=500)
-
-    collector.close()
+    eval_env = build_jumping_leg_env.env_builder(log_folder=log_folder+"/eval",
+                            seed=seed+100000000,
+                            env_builder_args = env_builder_args)
+    eval_env_rec = build_jumping_leg_env.wrap_with_recorder(eval_env,
+                                                        stepLength_sec=env_builder_args["stepLength_sec"],
+                                                        log_folder=log_folder+"/eval",
+                                                        video_save_freq=1)
+    eval_env_rec_det = build_jumping_leg_env.wrap_with_recorder(eval_env,
+                                                        stepLength_sec=env_builder_args["stepLength_sec"],
+                                                        log_folder=log_folder+"/eval_deterministic",
+                                                        video_save_freq=1)
+    callbacks = []
+    callbacks.append(EvalCallback(eval_env=eval_env_rec,
+                                  model=model,
+                                  n_eval_episodes=1,
+                                  eval_freq_ep=10*num_envs,
+                                  deterministic=False))
+    callbacks.append(EvalCallback(eval_env=eval_env_rec_det,
+                                  model=model,
+                                  n_eval_episodes=1,
+                                  eval_freq_ep=10*num_envs,
+                                  deterministic=True))
+    try:
+        train_off_policy(collector=collector,
+            model = model,
+            buffer = rb,
+            total_timesteps=10_000_000,
+            train_freq = hyperparams["train_freq"],
+            learning_starts=500*num_envs*5,
+            grad_steps=hyperparams["grad_steps"],
+            batch_size=16384,
+            log_freq=500,
+            callbacks=callbacks)
+    finally:
+        collector.close()
     # writer.close()
 
 

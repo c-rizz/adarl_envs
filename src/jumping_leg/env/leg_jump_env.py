@@ -87,7 +87,8 @@ class LegJumpEnv(ControlledEnv):
                             "SHIN_ANG_POS_Z",
                             "IMPULSES_SUM",
                             "FORCES_SUM",
-                            "FORCES_NUM"], start=0)
+                            "FORCES_NUM",
+                            "IMPULSES_SUM_AVG"], start=0)
     
     EPISODE_CONFIG = IntEnum("EPISODE_CONFIG", ["HIP_GOAL_Z",
                                                 "SUPPORT1_POS_X",
@@ -286,12 +287,12 @@ class LegJumpEnv(ControlledEnv):
             action_len = 4
         else:
             action_len = 2
-        self._current_episode_config = LegJumpEnv.EpisodeConfiguration(hip_goal_z=0,
-                                                                       support1_pos_x=0,
-                                                                       support1_pos_z=0,
-                                                                       support2_pos_x=0,
-                                                                       support2_pos_z=0,
-                                                                       reward_contacts_weights=0)
+        self._current_episode_config = LegJumpEnv.EpisodeConfiguration(hip_goal_z=th.tensor(0),
+                                                                       support1_pos_x=th.tensor(0),
+                                                                       support1_pos_z=th.tensor(0),
+                                                                       support2_pos_x=th.tensor(0),
+                                                                       support2_pos_z=th.tensor(0),
+                                                                       reward_contacts_weights=th.tensor(0))
         # max_dact_dt = 100 #max change in action, i.e. da/dt
         # self._max_act_change = th.tensor(max_dact_dt*stepLength_sec,dtype=th.float32, device=self._th_device)
         # self._hip_goal_z = th.tensor(0.5,dtype=th.float32, device=self._th_device)
@@ -312,6 +313,8 @@ class LegJumpEnv(ControlledEnv):
         self._max_hip_torque = th.tensor(0)
         self._cumulated_abs_impulses = 0
         self._last_abs_impulses_sum = 0
+        self._impulses_avg_alpha = 0.5
+        self._last_abs_impulses_sum_avg = 0.0
         self._max_abs_impulses = 0
         self._last_external_work = 0
         self._last_state = None
@@ -376,7 +379,8 @@ class LegJumpEnv(ControlledEnv):
                             self.STATE.SHIN_ANG_POS_Z : [-100,100],
                             self.STATE.IMPULSES_SUM : [0,100],
                             self.STATE.FORCES_SUM : [0,1000],
-                            self.STATE.FORCES_NUM : [0,1000]}
+                            self.STATE.FORCES_NUM : [0,1000],
+                            self.STATE.IMPULSES_SUM_AVG : [0,100]}
         
         self._configuration.vstate_minmax = th.tensor([vstate_min_max[k] for k in self.STATE], device = self._th_device)
 
@@ -563,7 +567,7 @@ class LegJumpEnv(ControlledEnv):
         # tracking_reward = 1 - goal_dist
         tracking_reward = 1/(1+goal_dist/0.05) # halves at 0.05m
         impulse_threshold = pvstate_un[LegJumpEnv.STATE.REWARD_IMPULSE_THRESHOLD]
-        contacts_reward = th.clamp(-(vstate_un[LegJumpEnv.STATE.IMPULSES_SUM]/impulse_threshold)**10, min = -1)
+        contacts_reward = th.clamp(-(vstate_un[LegJumpEnv.STATE.IMPULSES_SUM_AVG]/impulse_threshold)**10, min = -1)
 
 
         ktorque = vstate_un[LegJumpEnv.STATE.KNEE_JOINT_EFFORT]
@@ -683,8 +687,11 @@ class LegJumpEnv(ControlledEnv):
         self._max_abs_impulses = 0
         self._last_external_work = 0
         self._last_step_got_state = -1
+        self._last_abs_impulses_sum_avg = 0.0
 
-        if self._platform_randomization == "duoble":
+        hip_goal_z = 0.4 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*0.8 # uniform(0.4,1.2)
+
+        if self._platform_randomization == "double":
             s1_area = th.tensor([[0.20, 0.30],  # minx, maxx
                                  [0.05, 0.40]], # miny, maxy
                                 device=self._th_device)
@@ -703,7 +710,7 @@ class LegJumpEnv(ControlledEnv):
         elif self._platform_randomization == "single":
             s1_xz = th.tensor([-0.1-0.125, -0.3]) # hide platform 
             s2_area = th.tensor([[0.20, 0.30],  # minx, maxx
-                                 [0.05, 0.40]], # miny, maxy
+                                 [hip_goal_z-0.8, hip_goal_z-0.20]], # miny, maxy
                                 device=self._th_device)
             s2_xz = th.rand(size=(2,), generator=self._rng, device=self._th_device)
             s2_xz = s2_xz*(s2_area[:,1]-s2_area[:,0])+s2_area[:,0]
@@ -712,9 +719,8 @@ class LegJumpEnv(ControlledEnv):
             s1_xz = th.tensor([-0.1-0.125, 0.3])
             s2_xz = th.tensor([-0.15-0.125, 0.6])
         else:
-            raise RuntimeError(f"Invalid platofrm_Randomization mode '{self._platform_randomization}'")
+            raise RuntimeError(f"Invalid platform_randomization mode '{self._platform_randomization}'")
 
-        hip_goal_z = 0.4 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*(s2_xz[1]+0.8-0.4)
 
         self._current_episode_config.support1_pos_x = s1_xz[0]
         self._current_episode_config.support1_pos_z = s1_xz[1]
@@ -784,7 +790,7 @@ class LegJumpEnv(ControlledEnv):
                                                                         pos_velocity_xyz = th.tensor((0.,0.,0)),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.)))})
         
-    def getUiRendering(self) -> Tuple[Union[np.ndarray, th.Tensor], float]:
+    def getUiRendering(self) -> Tuple[Union[np.ndarray, th.Tensor, None], float]:
         try:
             img, time = self._environmentController.getRenderings([self._rendering_cam_name])[self._rendering_cam_name]
             if img is None:
@@ -852,7 +858,8 @@ class LegJumpEnv(ControlledEnv):
                     impulses += [contact[3]*contact[4] for contact in simsteps_contacts]
                 abs_impulses = [abs(i) for i in impulses]
                 abs_forces = [abs(i) for i in forces]
-
+                abs_impulses_sum = sum(abs_impulses)
+                abs_impulses_sum_avg = self._impulses_avg_alpha*self._last_abs_impulses_sum_avg + self._impulses_avg_alpha*abs_impulses_sum
 
                 # ggLog.info(f"jstates = {jstates}")
 
@@ -904,9 +911,10 @@ class LegJumpEnv(ControlledEnv):
                                     shin_ang_pos_x,
                                     shin_ang_pos_y,
                                     shin_ang_pos_z,
-                                    sum(abs_impulses),
+                                    abs_impulses_sum,
                                     sum(abs_forces),
-                                    len(abs_forces)),
+                                    len(abs_forces),
+                                    abs_impulses_sum_avg),
                                 dtype = th.float32,
                                 device = self._th_device)
                 

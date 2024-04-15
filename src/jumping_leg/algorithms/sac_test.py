@@ -49,7 +49,7 @@ def build_sac(obs_space, act_space, hyperparams):
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     env_builder_args = {
-        "reward_contacts_weight" : 0.1,
+        "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
         "reward_position_limit_weight" : 10.0,
         "reward_torque_limit_weight" : 1.0,

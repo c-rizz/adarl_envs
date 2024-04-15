@@ -1,6 +1,6 @@
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 import gymnasium as gym
 import lr_gym.utils.callbacks
@@ -21,6 +21,8 @@ from lr_gym.utils.wandb_wrapper import wandb_log
 from lr_gym.utils.callbacks import TrainingCallback, CallbackList
 from jumping_leg.algorithms.collectors import ExperienceCollector
 from jumping_leg.algorithms.rl_policy import RLPolicy
+import inspect
+import yaml
 class QNetwork(nn.Module):
     def __init__(self, observation_space : gym.spaces.Space,
                  action_size : int,
@@ -147,6 +149,9 @@ class SAC(RLPolicy):
                  policy_update_freq = 2,
                  target_update_freq = 1):
         super().__init__()
+        _, _, _, values = inspect.getargvalues(inspect.currentframe())
+        self._init_args = values
+        self._init_args.pop("self")
         self._hp = SAC.Hyperparams(q_lr=q_lr,
                                    policy_lr = policy_lr,
                                    gamma=gamma,
@@ -198,6 +203,23 @@ class SAC(RLPolicy):
         self._last_q_loss = th.as_tensor(float("nan"), device=self.device)
         self._last_actor_loss = th.as_tensor(float("nan"), device=self.device)
         self._last_alpha_loss = th.as_tensor(float("nan"), device=self.device)
+
+    def save(self, path : str):
+        th.save(self.state_dict(), path)
+        extra = {}
+        extra["init_args"] = self._init_args
+        extra["hyperparams"] = asdict(self._hp)
+        with open(path+".extra.yaml", "w") as init_args_yamlfile:
+            yaml.dump(extra,init_args_yamlfile, default_flow_style=None)
+
+    @staticmethod
+    def load(path : str):
+        with open(path+".extra.yaml", "r") as init_args_yamlfile:
+            extra = yaml.safe_load(init_args_yamlfile)
+        model = SAC(**extra["init_args"])
+        model._hp = SAC.Hyperparams(**extra["hyperparams"]) # shouldn't be necessary, but shouldn't hurt
+        model.load_state_dict(th.load(path))
+        return model
 
     def predict(self, observation, deterministic = False):
         # s = {k:v.size() for k,v in observation.items()}

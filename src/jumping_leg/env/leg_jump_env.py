@@ -567,7 +567,7 @@ class LegJumpEnv(ControlledEnv):
         # tracking_reward = 1 - goal_dist
         tracking_reward = 1/(1+goal_dist/0.05) # halves at 0.05m
         impulse_threshold = pvstate_un[LegJumpEnv.STATE.REWARD_IMPULSE_THRESHOLD]
-        contacts_reward = th.clamp(-(vstate_un[LegJumpEnv.STATE.IMPULSES_SUM_AVG]/impulse_threshold)**10, min = -1)
+        contacts_reward = th.clamp(-(vstate_un[LegJumpEnv.STATE.IMPULSES_SUM_AVG]/impulse_threshold)**4, min = -1)
 
 
         ktorque = vstate_un[LegJumpEnv.STATE.KNEE_JOINT_EFFORT]

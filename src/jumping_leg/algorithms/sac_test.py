@@ -17,7 +17,7 @@ import lr_gym.utils.sigint_handler
 from jumping_leg.algorithms.sac import SAC, train_off_policy
 from jumping_leg.algorithms.collectors import AsyncProcessExperienceCollector, AsyncThreadExperienceCollector
 import wandb 
-from lr_gym.utils.callbacks import EvalCallback
+from lr_gym.utils.callbacks import EvalCallback, CheckpointCallbackRB
 
 
 def build_vec_env(env_builder_args, log_folder, seed, num_envs):
@@ -49,7 +49,7 @@ def build_sac(obs_space, act_space, hyperparams):
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     env_builder_args = {
-        "reward_contacts_weight" : 0.0,
+        "reward_contacts_weight" : 1.0,
         "reward_energy_weight" : 0.0,
         "reward_position_limit_weight" : 10.0,
         "reward_torque_limit_weight" : 1.0,
@@ -170,6 +170,10 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
                                   n_eval_episodes=1,
                                   eval_freq_ep=10*num_envs,
                                   deterministic=True))
+    callbacks.append(CheckpointCallbackRB(save_path=log_folder+"/checkpoints",
+                                          model=model,
+                                          save_best=False,
+                                          save_freq_ep=100*num_envs))
     try:
         train_off_policy(collector=collector,
             model = model,

@@ -687,10 +687,10 @@ class LegJumpEnv(ControlledEnv):
         self._max_hip_torque = th.tensor(0)
         self._cumulated_abs_impulses = 0
         self._last_abs_impulses_sum = 0
-        self._ep_max_abs_impulse = 0
-        self._ep_max_abs_impulses_sum = 0
-        self._ep_max_abs_contact = 0
-        self._ep_max_abs_contacts_sum = 0
+        self._ep_max_abs_impulse = 0.0
+        self._ep_max_abs_impulses_sum = 0.0
+        self._ep_max_abs_contact = 0.0
+        self._ep_max_abs_contacts_sum = 0.0
         self._last_external_work = 0
         self._last_step_got_state = -1
         self._last_abs_impulses_sum_avg = 0.0
@@ -980,8 +980,8 @@ class LegJumpEnv(ControlledEnv):
         if len(abs_impulses)>0:
             self._ep_max_abs_impulse = max(self._ep_max_abs_impulse, max(abs_impulses))
             self._ep_max_abs_impulses_sum = max(self._ep_max_abs_impulses_sum, sum(abs_impulses))
-            self._ep_max_abs_contact = max(self._ep_max_abs_contact, max(abs_impulses))
-            self._ep_max_abs_contacts_sum = max(self._ep_max_abs_contacts_sum, sum(abs_impulses))
+            self._ep_max_abs_contact = max(self._ep_max_abs_contact, max(abs_contacts))
+            self._ep_max_abs_contacts_sum = max(self._ep_max_abs_contacts_sum, sum(abs_contacts))
         return rew_dbg_info
 
     def performStep(self):

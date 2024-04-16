@@ -356,7 +356,8 @@ def train_off_policy(collector : ExperienceCollector,
                        "sac/q_loss":q_loss,
                        "sac/actor_loss":actor_loss,
                        "sac/alpha_loss":alpha_loss,
-                       "sac/alpha":model._alpha})
+                       "sac/alpha":model._alpha},
+                       throttle_period=2)
         t_after_train = time.monotonic()
 
         tmp_buff = collector.wait_collection(timeout = 120.0)

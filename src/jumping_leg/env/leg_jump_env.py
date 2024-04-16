@@ -316,6 +316,9 @@ class LegJumpEnv(ControlledEnv):
         self._impulses_avg_alpha = 0.5
         self._last_abs_impulses_sum_avg = 0.0
         self._ep_max_abs_impulse = 0
+        self._ep_max_abs_impulses_sum = 0
+        self._ep_max_abs_contact = 0
+        self._ep_max_abs_contacts_sum = 0
         self._last_external_work = 0
         self._last_state = None
         self._dbg_info = {}

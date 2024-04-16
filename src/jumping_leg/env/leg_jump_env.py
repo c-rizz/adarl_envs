@@ -315,7 +315,7 @@ class LegJumpEnv(ControlledEnv):
         self._last_abs_impulses_sum = 0
         self._impulses_avg_alpha = 0.5
         self._last_abs_impulses_sum_avg = 0.0
-        self._max_abs_impulses = 0
+        self._ep_max_abs_impulse = 0
         self._last_external_work = 0
         self._last_state = None
         self._dbg_info = {}
@@ -684,7 +684,10 @@ class LegJumpEnv(ControlledEnv):
         self._max_hip_torque = th.tensor(0)
         self._cumulated_abs_impulses = 0
         self._last_abs_impulses_sum = 0
-        self._max_abs_impulses = 0
+        self._ep_max_abs_impulse = 0
+        self._ep_max_abs_impulses_sum = 0
+        self._ep_max_abs_contact = 0
+        self._ep_max_abs_contacts_sum = 0
         self._last_external_work = 0
         self._last_step_got_state = -1
         self._last_abs_impulses_sum_avg = 0.0
@@ -956,8 +959,10 @@ class LegJumpEnv(ControlledEnv):
                                sub_rewards=sub_rewards)
         contacts = self._environmentController.get_contacts()
         abs_impulses = []
+        abs_contacts = []
         for simsteps_contacts in contacts:
             abs_impulses += [abs(contact[3]*contact[4]) for contact in simsteps_contacts]
+            abs_contacts += [abs(contact[3]) for contact in simsteps_contacts]
         vstate_unnorm = self._unnormalize(self._last_state[self.VECTOR_PART][0],self._configuration.vstate_minmax[:,0],self._configuration.vstate_minmax[:,1])
         goal_dist = abs(vstate_unnorm[self.STATE.HIP_GOAL_Z]-vstate_unnorm[self.STATE.HIP_POS_Z])
         self._cumulative_dist_to_goal += goal_dist
@@ -970,7 +975,10 @@ class LegJumpEnv(ControlledEnv):
         self._cumulated_abs_impulses += self._last_abs_impulses_sum
 
         if len(abs_impulses)>0:
-            self._max_abs_impulses = max(self._max_abs_impulses, max(abs_impulses))
+            self._ep_max_abs_impulse = max(self._ep_max_abs_impulse, max(abs_impulses))
+            self._ep_max_abs_impulses_sum = max(self._ep_max_abs_impulses_sum, sum(abs_impulses))
+            self._ep_max_abs_contact = max(self._ep_max_abs_contact, max(abs_impulses))
+            self._ep_max_abs_contacts_sum = max(self._ep_max_abs_contacts_sum, sum(abs_impulses))
         return rew_dbg_info
 
     def performStep(self):
@@ -1030,7 +1038,10 @@ class LegJumpEnv(ControlledEnv):
         i["avg_knee_torque"] = self._cumulative_knee_torque/self._stepCounter if self._stepCounter!=0 else float("nan")
         i["avg_hip_torque"] = self._cumulative_hip_torque/self._stepCounter if self._stepCounter!=0 else float("nan")
         i["avg_abs_impulse"] = self._cumulated_abs_impulses/self._stepCounter if self._stepCounter!=0 else float("nan")
-        i["max_abs_impulse"] = self._max_abs_impulses
+        i["max_abs_impulse"] = self._ep_max_abs_impulse
+        i["max_abs_impulses_sum"] = self._ep_max_abs_impulses_sum
+        i["max_abs_contact"] = self._ep_max_abs_contact
+        i["max_abs_contacts_sum"] = self._ep_max_abs_contacts_sum
         i["max_knee_torque"] = self._max_knee_torque
         i["max_hip_torque"] = self._max_hip_torque
         i["impulses_sum"] = self._last_abs_impulses_sum

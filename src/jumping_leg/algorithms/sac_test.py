@@ -36,8 +36,8 @@ def build_sac(obs_space, act_space, hyperparams):
                 q_lr=hyperparams["q_lr"],
                 policy_lr=hyperparams["policy_lr"],
                 policy_arch=[512,256],
-                action_min = th.as_tensor(act_space.low),
-                action_max = th.as_tensor(act_space.high),
+                action_min = act_space.low.tolist(),
+                action_max = act_space.high.tolist(),
                 torch_device=hyperparams["device"],
                 auto_entropy_temperature=True,
                 constant_entropy_temperature=None,
@@ -49,7 +49,7 @@ def build_sac(obs_space, act_space, hyperparams):
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     env_builder_args = {
-        "reward_contacts_weight" : 1.0,
+        "reward_contacts_weight" : 10.0,
         "reward_energy_weight" : 0.0,
         "reward_position_limit_weight" : 10.0,
         "reward_torque_limit_weight" : 1.0,

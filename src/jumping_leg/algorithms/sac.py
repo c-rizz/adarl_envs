@@ -121,8 +121,8 @@ class SAC(RLPolicy):
         auto_entropy_temperature : bool
         constant_entropy_temperature : Optional[float]
         action_size : int
-        action_min : Union[float, th.Tensor]
-        action_max : Union[float, th.Tensor]
+        action_min : th.Tensor
+        action_max : th.Tensor
         target_tau : float
         policy_update_freq : int
         targets_update_freq : int
@@ -138,8 +138,8 @@ class SAC(RLPolicy):
                  q_lr : float = 0.005,
                  policy_lr : float = 0.005,
                  policy_arch : List[int] = [256,256],
-                 action_min : Union[float, th.Tensor] = -1.0,
-                 action_max : Union[float, th.Tensor] = 1.0,
+                 action_min : Union[float, List[float]] = -1.0,
+                 action_max : Union[float, List[float]] = 1.0,
                  torch_device : Union[str,th.device] = "cuda",
                  auto_entropy_temperature : bool = True,
                  constant_entropy_temperature : Optional[float] = None,
@@ -158,8 +158,8 @@ class SAC(RLPolicy):
                                    auto_entropy_temperature=auto_entropy_temperature,
                                    constant_entropy_temperature=constant_entropy_temperature,
                                    action_size=action_size,
-                                   action_min = action_min,
-                                   action_max = action_max,
+                                   action_min = th.as_tensor(action_min),
+                                   action_max = th.as_tensor(action_max),
                                    target_tau = target_tau,
                                    policy_update_freq=policy_update_freq,
                                    targets_update_freq=target_update_freq,

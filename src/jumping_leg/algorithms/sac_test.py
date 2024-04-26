@@ -57,7 +57,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_tracking_weight" : 1.0,
         "reward_velocity_weight" : 0.0,
         "th_device" : th.device("cpu"),
-        "control_mode" : "torque",
+        "control_mode" : "position_and_gains",
         "video_save_freq" : 0,
         "stepLength_sec" : 0.01,
         "platform_randomization" : "single",
@@ -82,7 +82,6 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
     # print(f"active threads = {threading.enumerate()}")
     # threading.Thread.__init__ = threadwrapper
     # torchexplorer.setup()
-    seed = 0
     log_folder, session = lr_gym.utils.session.lr_gym_startup(   __file__,
                                                         inspect.currentframe(),
                                                         seed=seed,

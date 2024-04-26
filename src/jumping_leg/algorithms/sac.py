@@ -300,7 +300,25 @@ class SAC(RLPolicy):
             self._update_target_nets()
         return self._last_q_loss, self._last_actor_loss, self._last_alpha_loss
 
-    
+    def train(self, global_step, learning_starts, iterations, batch_size, buffer):
+        q_loss, actor_loss, alpha_loss = float("nan"), float("nan"), float("nan")
+        if global_step > learning_starts:
+            q_act_alpha_losses = th.zeros(size=(iterations, 3), dtype=th.float32, device=self.device)
+            for i in range(iterations):
+                data = buffer.sample(batch_size)
+                nq_loss, nactor_loss, nalpha_loss = self.update(transitions = data)
+                q_act_alpha_losses[i] = th.stack((nq_loss,nactor_loss,nalpha_loss))
+                tot_grad_steps_count += 1
+            # q_loss, actor_loss, alpha_loss = q_act_alpha_losses.mean(dim = 0).cpu().numpy()
+            q_loss, actor_loss, alpha_loss = q_act_alpha_losses[-1].cpu().numpy()
+            wandb_log({"sac/tot_grad_steps_count":tot_grad_steps_count,
+                        "sac/q_loss":q_loss,
+                        "sac/actor_loss":actor_loss,
+                        "sac/alpha_loss":alpha_loss,
+                        "sac/alpha":self._alpha},
+                        throttle_period=2)
+        print(f"SAC: q_loss={q_loss:5g} actor_loss={actor_loss:5g} alpha_loss={alpha_loss:5g}")
+
 
 def train_off_policy(collector : ExperienceCollector,
           model : SAC,
@@ -335,6 +353,8 @@ def train_off_policy(collector : ExperienceCollector,
     while global_step < total_timesteps and not session.default_session.is_shutting_down():
         s0b = buffer.stored_frames()
         t0 = time.monotonic()
+
+        # ------------------  Start experience collection  ------------------
         steps_to_collect = train_freq*num_envs
         vsteps_to_collect = train_freq
         callbacks.on_collection_start()
@@ -343,23 +363,12 @@ def train_off_policy(collector : ExperienceCollector,
                                             global_vstep_count=global_step//num_envs,
                                             random_vsteps=learning_starts//num_envs)
 
+        # ------------------             Train             ------------------
         t_before_train = time.monotonic()
-        if global_step > learning_starts:
-            q_act_alpha_losses = th.zeros(size=(grad_steps, 3), dtype=th.float32, device=model.device)
-            for i in range(grad_steps):
-                data = buffer.sample(batch_size)
-                q_loss, actor_loss, alpha_loss = model.update(transitions = data)
-                q_act_alpha_losses[i] = th.stack((q_loss,actor_loss,alpha_loss))
-                tot_grad_steps_count += 1
-            q_loss, actor_loss, alpha_loss = q_act_alpha_losses.mean(dim = 0).cpu().numpy()
-            wandb_log({"sac/tot_grad_steps_count":tot_grad_steps_count,
-                       "sac/q_loss":q_loss,
-                       "sac/actor_loss":actor_loss,
-                       "sac/alpha_loss":alpha_loss,
-                       "sac/alpha":model._alpha},
-                       throttle_period=2)
+        model.train(global_step, learning_starts, grad_steps, batch_size, buffer)
         t_after_train = time.monotonic()
 
+        # ------------------   Store collected experience  ------------------
         tmp_buff = collector.wait_collection(timeout = 120.0)
         new_episodes = tmp_buff.added_completed_episodes() - ep_counter
         ep_counter = tmp_buff.added_completed_episodes()
@@ -378,10 +387,10 @@ def train_off_policy(collector : ExperienceCollector,
             buffer.add(obs=obs, next_obs=next_obs, action=action, reward=reward,
                         truncated=truncated, terminated=terminated)
 
+        # ------------------      Wrap up and restart      ------------------
         if buffer.stored_frames()-s0b != steps_to_collect and not buffer.full:
             raise RuntimeError(f"Expected to collect {steps_to_collect} but got {buffer.stored_frames()-s0b}")
         global_step += steps_to_collect
-
         tf = time.monotonic()
         t_train_sl += t_after_train - t_before_train
         t_tot_sl += tf-t0

@@ -95,4 +95,5 @@ def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
                                                                         f"torqKne {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_EFFORT.name]:.2f}\n"
                                                                         f"posiHip {info['vstate'][LegJumpEnv.STATE.HIP_JOINT_POS.name]:.2f}\n"
                                                                         f"posiKne {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_POS.name]:.2f}\n"
+                                                                         "act     "+str([f"{ae:.3f}" for ae in a] if a is not None else None)
                                                                         )

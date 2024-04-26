@@ -268,11 +268,12 @@ class AsyncProcessExperienceCollector(ExperienceCollector):
                 ggLog.warn(f"{type(self)}: closing")
                 self._vec_env.close()
                 self._running.value = ctypes.c_bool(False)
-            elif cmd == None:
+            elif cmd is None:
                 pass # no command received, wait timed out
             else:
                 ggLog.warn(f"{type(self)}: Unexpected command {cmd}")
-            self._commander.mark_done()
+            if cmd is not None: # if a command was actually received
+                self._commander.mark_done()
             # ggLog.info(f" {cmd} done")
         ggLog.info(f"Collector worker terminating")
 

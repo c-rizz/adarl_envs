@@ -16,7 +16,7 @@ import lr_gym.utils.spaces as spaces
 
 from lr_gym.envs.ControlledEnv import ControlledEnv
 import lr_gym
-from lr_gym.utils.utils import Pose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle
+from lr_gym.utils.utils import Pose, buildPose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle
 from lr_gym.env_controllers.SimulatedEnvController import SimulatedEnvController
 import torch as th
 import lr_gym.utils.utils
@@ -210,6 +210,7 @@ class LegJumpEnv(ControlledEnv):
         self._use_full_impedance_control = control_mode.lower() == "impedance"
         self._use_impedance_no_gains = control_mode.lower() == "impedance_no_gains"
         self._use_position_and_torque_control = control_mode.lower() == "position_and_torque"
+        self._use_position_and_gains = control_mode.lower() == "position_and_gains"
         self._platform_randomization = platform_randomization
 
         self._obs_only_vec = obs_only_vec
@@ -284,6 +285,8 @@ class LegJumpEnv(ControlledEnv):
         elif self._use_impedance_no_gains:
             action_len = 6
         elif self._use_position_and_torque_control:
+            action_len = 4
+        elif self._use_position_and_gains:
             action_len = 4
         else:
             action_len = 2
@@ -503,6 +506,15 @@ class LegJumpEnv(ControlledEnv):
             self._environmentController.setJointsImpedanceCommand(jointImpedances = 
                                                             [   (self._hip_joint,   (hpos,hvel,htorque,hpgain,hvgain)),
                                                                 (self._knee_joint,  (kpos,kvel,ktorque,kpgain,kvgain))])
+        elif self._use_position_and_gains:
+            hpos = self._unnormalize(action[0],self._configuration.position_limits_hip[0],self._configuration.position_limits_hip[1])
+            kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
+            hpgain = (action[2]+1)/2*400
+            kpgain = (action[3]+1)/2*400
+            
+            self._environmentController.setJointsImpedanceCommand(jointImpedances = 
+                                                            [   (self._hip_joint,   (hpos,0,0,hpgain,30)),
+                                                                (self._knee_joint,  (kpos,0,0,kpgain,30))])
         else:
             htorque = action[0]*self._configuration.torque_command_scale_hip
             ktorque = action[1]*self._configuration.torque_command_scale_knee
@@ -649,7 +661,7 @@ class LegJumpEnv(ControlledEnv):
 
             leg_model_name = "leg"
             cam_model_name = "camera"
-            leg_pose = Pose(0,0,0,0,0,0,1)
+            leg_pose = buildPose(0,0,0,0,0,0,1)
             name = self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/leg_simple.urdf.xacro"),
                                                             model_name=leg_model_name,
                                                             pose=leg_pose,
@@ -657,7 +669,7 @@ class LegJumpEnv(ControlledEnv):
             self._spawned = True
             self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("lr_gym","models/simple_camera.sdf.xacro"),
                                                     model_name=cam_model_name,
-                                                    pose=Pose(0,2.5,0.7, 0.0,0.0,-0.707,0.707),
+                                                    pose=buildPose(0,2.5,0.7, 0.0,0.0,-0.707,0.707),
                                                     model_kwargs={"camera_width":"256","camera_height":"144","frame_rate":1/self._intendedStepLength_sec},
                                                     model_format="sdf.xacro")
             # ggLog.info(f"Model spawned with name {name}")
@@ -669,12 +681,12 @@ class LegJumpEnv(ControlledEnv):
                                                         model_format="urdf.xacro")
             self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
                                                     model_name="support1",
-                                                    pose=Pose(-0.1-0.125, 0.3, 0.2, 0,0,0,1),
+                                                    pose=buildPose(-0.1-0.125, 0.3, 0.2, 0,0,0,1),
                                                     model_format="urdf.xacro")
             
             self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
                                                     model_name="support2",
-                                                    pose=Pose(-0.15-0.125, 0.3, 0.4, 0,0,0,1),
+                                                    pose=buildPose(-0.15-0.125, 0.3, 0.4, 0,0,0,1),
                                                     model_format="urdf.xacro")
 
         
@@ -843,17 +855,17 @@ class LegJumpEnv(ControlledEnv):
 
                 # n = '\n'
                 # ggLog.info(f"contacts == {n.join([str(c) for c in contacts])}")
-                thigh_ang_pos_x = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_wxyz,
+                thigh_ang_pos_x = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_xyzw[[3,0,1,2]],
                                                                                     th.tensor([1.0,0.0,0.0], device=self._th_device))[1])
-                thigh_ang_pos_y = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_wxyz,
+                thigh_ang_pos_y = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_xyzw[[3,0,1,2]],
                                                                                     th.tensor([0.0,1.0,0.0], device=self._th_device))[1])
-                thigh_ang_pos_z = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_wxyz,
+                thigh_ang_pos_z = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_xyzw[[3,0,1,2]],
                                                                                     th.tensor([0.0,0.0,1.0], device=self._th_device))[1])
-                shin_ang_pos_x = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_wxyz,
+                shin_ang_pos_x = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_xyzw[[3,0,1,2]],
                                                                                     th.tensor([1.0,0.0,0.0], device=self._th_device))[1])
-                shin_ang_pos_y = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_wxyz,
+                shin_ang_pos_y = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_xyzw[[3,0,1,2]],
                                                                                     th.tensor([0.0,1.0,0.0], device=self._th_device))[1])
-                shin_ang_pos_z = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_wxyz,
+                shin_ang_pos_z = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_xyzw[[3,0,1,2]],
                                                                                     th.tensor([0.0,0.0,1.0], device=self._th_device))[1])
 
                 contacts = self._environmentController.get_contacts()
@@ -1016,7 +1028,7 @@ class LegJumpEnv(ControlledEnv):
         #     self._environmentController.build_scenario(sdf_file = ("lr_gym_ros2","/worlds/empty_cams.sdf"))
         #     # self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("lr_gym","models/simple_camera.sdf.xacro"),
         #     #                                         model_name=None,
-        #     #                                         pose=Pose(0,2,0.5,0,0.0,-0.707,0.707),
+        #     #                                         pose=buildPose(0,2,0.5,0,0.0,-0.707,0.707),
         #     #                                         model_kwargs={"camera_width":"1920","camera_height":"1080","frame_rate":1/self._intendedStepLength_sec},
         #     #                                         model_format="sdf.xacro")
         #     self._rendering_cam_name = "simple_camera"

@@ -307,8 +307,8 @@
 				<!-- <spinning_friction value="0"/> -->
 				<!-- <friction_anchor value="0"/> -->
 				<!-- <inertia_scaling value="0"/> -->
-				<!-- <stiffness value="2500"/> -->
-				<!-- <damping value="8"/>  -->
+				<stiffness value="2500"/>
+				<damping value="8"/> 
 			</contact>
 	</link>
 

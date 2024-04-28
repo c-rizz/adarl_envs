@@ -17,11 +17,11 @@ import lr_gym.utils.spaces as spaces
 from lr_gym.envs.ControlledEnv import ControlledEnv
 import lr_gym
 from lr_gym.utils.utils import Pose, buildPose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle
-from lr_gym.env_controllers.SimulatedEnvController import SimulatedEnvController
+from lr_gym.adapters.SimulationAdapter import SimulationAdapter
 import torch as th
 import lr_gym.utils.utils
 from enum import IntEnum
-from lr_gym.env_controllers.EnvironmentController import EnvironmentController
+from lr_gym.adapters.BaseAdapter import BaseAdapter
 import dataclasses
 from dataclasses import dataclass
 
@@ -150,7 +150,7 @@ class LegJumpEnv(ControlledEnv):
     def __init__(   self,
                     maxStepsPerEpisode : int = 500,
                     stepLength_sec : float = 0.01,
-                    environmentController : EnvironmentController = None,
+                    environmentController : BaseAdapter = None,
                     startSimulation : bool = True,
                     wall_sim_speed = False,
                     seed = 0,
@@ -184,7 +184,7 @@ class LegJumpEnv(ControlledEnv):
             Duration in seconds of each simulation step. Lower values will lead to
             slower simulation. This value should be kept higher than the gazebo
             max_step_size parameter.
-        environmentController : EnvironmentController
+        environmentController : BaseAdapter
             Specifies which simulator controller to use. By default it connects to Gazebo
 
 
@@ -654,7 +654,7 @@ class LegJumpEnv(ControlledEnv):
     def initializeEpisode(self, options = {}) -> None:
 
 
-        if not self._spawned and isinstance(self._environmentController, SimulatedEnvController):
+        if not self._spawned and isinstance(self._environmentController, SimulationAdapter):
             
             # supp1_pos = [-0.1,0.2]
             # supp2_pos = [-0.15,0.4]
@@ -769,7 +769,7 @@ class LegJumpEnv(ControlledEnv):
                                                                        support2_pos_z=s2_xz[1],
                                                                        reward_contacts_weights=reward_contacts_weights)
 
-        if isinstance(self._environmentController, SimulatedEnvController):
+        if isinstance(self._environmentController, SimulationAdapter):
             if self._current_episode_config.support2_pos_x > 0:
                 self._environmentController.setJointsStateDirect({self._rail_joint: JointState(position = [self._start_height], rate=[0], effort=[0]),
                                                                 self._hip_joint:  JointState(position = [ 3.14159/4], rate=[0], effort=[0]),
@@ -1005,10 +1005,10 @@ class LegJumpEnv(ControlledEnv):
     def buildSimulation(self):
         # ggLog.info("Building env")
         envCtrlName = type(self._environmentController).__name__
-        if envCtrlName == "PyBulletJointImpedanceController":
+        if envCtrlName == "PyBulletJointImpedanceAdapter":
             self._environmentController.build_scenario(None)
             self._rendering_cam_name = "simple_camera"
-        # elif envCtrlName in ["GazeboController", "GazeboControllerNoPlugin"]:
+        # elif envCtrlName in ["GazeboAdapter", "GazeboAdapterNoPlugin"]:
         #     # ggLog.info(f"sim_img_width  = {sim_img_width}")
         #     # ggLog.info(f"sim_img_height = {sim_img_height}")
         #     if not self._rendering_enabled:

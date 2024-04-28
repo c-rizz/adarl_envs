@@ -15,16 +15,16 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
     th_device = env_builder_args["th_device"]
     max_steps = 5/stepLength_sec
 
-    mode = "PyBulletController"
+    mode = "PyBulletAdapter"
     if mode == "GzController":
-        from lr_gym_ros2.env_controllers.GzController import GzController
+        from lr_gym_ros2.adapters.GzController import GzController
         env_controller = GzController(stepLength_sec=stepLength_sec)
-    elif mode == "GazeboController":
-        from lr_gym_ros.envControllers.GazeboController import GazeboController
-        env_controller = GazeboController(stepLength_sec=stepLength_sec)
-    elif mode == "PyBulletController":
-        from lr_gym.env_controllers.PyBulletJointImpedanceController import PyBulletJointImpedanceController
-        env_controller = PyBulletJointImpedanceController(stepLength_sec=stepLength_sec, restore_on_reset=False, debug_gui=False)
+    elif mode == "GazeboAdapter":
+        from lr_gym_ros.adapters.GazeboAdapter import GazeboAdapter
+        env_controller = GazeboAdapter(stepLength_sec=stepLength_sec)
+    elif mode == "PyBulletAdapter":
+        from lr_gym.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
+        env_controller = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec, restore_on_reset=False, debug_gui=False)
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)

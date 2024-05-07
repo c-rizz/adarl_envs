@@ -16,7 +16,7 @@ import lr_gym.utils.spaces as spaces
 
 from lr_gym.envs.ControlledEnv import ControlledEnv
 import lr_gym
-from lr_gym.utils.utils import Pose, buildPose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle
+from lr_gym.utils.utils import Pose, build_pose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle
 from lr_gym.env_controllers.SimulatedEnvController import SimulatedEnvController
 import torch as th
 import lr_gym.utils.utils
@@ -661,7 +661,7 @@ class LegJumpEnv(ControlledEnv):
 
             leg_model_name = "leg"
             cam_model_name = "camera"
-            leg_pose = buildPose(0,0,0,0,0,0,1)
+            leg_pose = build_pose(0,0,0,0,0,0,1)
             name = self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/leg_simple.urdf.xacro"),
                                                             model_name=leg_model_name,
                                                             pose=leg_pose,
@@ -669,7 +669,7 @@ class LegJumpEnv(ControlledEnv):
             self._spawned = True
             self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("lr_gym","models/simple_camera.sdf.xacro"),
                                                     model_name=cam_model_name,
-                                                    pose=buildPose(0,2.5,0.7, 0.0,0.0,-0.707,0.707),
+                                                    pose=build_pose(0,2.5,0.7, 0.0,0.0,-0.707,0.707),
                                                     model_kwargs={"camera_width":"256","camera_height":"144","frame_rate":1/self._intendedStepLength_sec},
                                                     model_format="sdf.xacro")
             # ggLog.info(f"Model spawned with name {name}")
@@ -681,12 +681,12 @@ class LegJumpEnv(ControlledEnv):
                                                         model_format="urdf.xacro")
             self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
                                                     model_name="support1",
-                                                    pose=buildPose(-0.1-0.125, 0.3, 0.2, 0,0,0,1),
+                                                    pose=build_pose(-0.1-0.125, 0.3, 0.2, 0,0,0,1),
                                                     model_format="urdf.xacro")
             
             self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
                                                     model_name="support2",
-                                                    pose=buildPose(-0.15-0.125, 0.3, 0.4, 0,0,0,1),
+                                                    pose=build_pose(-0.15-0.125, 0.3, 0.4, 0,0,0,1),
                                                     model_format="urdf.xacro")
 
         
@@ -871,9 +871,18 @@ class LegJumpEnv(ControlledEnv):
                 contacts = self._environmentController.get_contacts()
                 impulses = []
                 forces = []
-                for simsteps_contacts in contacts:
-                    forces   += [contact[3] for contact in simsteps_contacts]
-                    impulses += [contact[3]*contact[4] for contact in simsteps_contacts]
+                n = "\n"
+                clean_contacts = []
+                for simstep_contacts in contacts:
+                    nonzero_contacts = [contact for contact in simstep_contacts if contact[3]!=0]
+                    if len(nonzero_contacts)>0:
+                        clean_contacts.append(nonzero_contacts)
+                contacts = clean_contacts
+                
+                # ggLog.info(f"contacts ({len(contacts)}) = \n{n.join([str(simstep_contacts) for simstep_contacts in contacts])}")
+                for simstep_contacts in contacts:
+                    forces   += [contact[3] for contact in simstep_contacts]
+                    impulses += [contact[3]*contact[4] for contact in simstep_contacts]
                 abs_impulses = [abs(i) for i in impulses]
                 abs_forces = [abs(i) for i in forces]
                 abs_impulses_sum = sum(abs_impulses)
@@ -1028,7 +1037,7 @@ class LegJumpEnv(ControlledEnv):
         #     self._environmentController.build_scenario(sdf_file = ("lr_gym_ros2","/worlds/empty_cams.sdf"))
         #     # self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("lr_gym","models/simple_camera.sdf.xacro"),
         #     #                                         model_name=None,
-        #     #                                         pose=buildPose(0,2,0.5,0,0.0,-0.707,0.707),
+        #     #                                         pose=build_pose(0,2,0.5,0,0.0,-0.707,0.707),
         #     #                                         model_kwargs={"camera_width":"1920","camera_height":"1080","frame_rate":1/self._intendedStepLength_sec},
         #     #                                         model_format="sdf.xacro")
         #     self._rendering_cam_name = "simple_camera"
@@ -1055,8 +1064,10 @@ class LegJumpEnv(ControlledEnv):
         i["avg_abs_impulse"] = self._cumulated_abs_impulses/self._stepCounter if self._stepCounter!=0 else float("nan")
         i["max_abs_impulse"] = self._ep_max_abs_impulse
         i["max_abs_impulses_sum"] = self._ep_max_abs_impulses_sum
+        i["max_abs_normimps_sum"] = self._ep_max_abs_impulses_sum/self._configuration.stepLength_sec
         i["max_abs_contact"] = self._ep_max_abs_contact
         i["max_abs_contacts_sum"] = self._ep_max_abs_contacts_sum
+        i["max_abs_normconts_sum"] = self._ep_max_abs_contacts_sum/self._configuration.stepLength_sec
         i["max_knee_torque"] = self._max_knee_torque
         i["max_hip_torque"] = self._max_hip_torque
         i["impulses_sum"] = self._last_abs_impulses_sum

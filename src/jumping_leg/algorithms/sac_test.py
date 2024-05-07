@@ -59,7 +59,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "th_device" : th.device("cpu"),
         "control_mode" : "position_and_gains",
         "video_save_freq" : 0,
-        "stepLength_sec" : 0.01,
+        "stepLength_sec" : 0.02,
         "platform_randomization" : "single",
         "quiet" : False}
 

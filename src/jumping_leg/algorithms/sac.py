@@ -203,6 +203,7 @@ class SAC(RLPolicy):
         self._last_q_loss = th.as_tensor(float("nan"), device=self.device)
         self._last_actor_loss = th.as_tensor(float("nan"), device=self.device)
         self._last_alpha_loss = th.as_tensor(float("nan"), device=self.device)
+        self._tot_grad_steps_count = 0
 
     def save(self, path : str):
         th.save(self.state_dict(), path)
@@ -308,10 +309,10 @@ class SAC(RLPolicy):
                 data = buffer.sample(batch_size)
                 nq_loss, nactor_loss, nalpha_loss = self.update(transitions = data)
                 q_act_alpha_losses[i] = th.stack((nq_loss,nactor_loss,nalpha_loss))
-                tot_grad_steps_count += 1
+                self._tot_grad_steps_count += 1
             # q_loss, actor_loss, alpha_loss = q_act_alpha_losses.mean(dim = 0).cpu().numpy()
             q_loss, actor_loss, alpha_loss = q_act_alpha_losses[-1].cpu().numpy()
-            wandb_log({"sac/tot_grad_steps_count":tot_grad_steps_count,
+            wandb_log({"sac/tot_grad_steps_count":self._tot_grad_steps_count,
                         "sac/q_loss":q_loss,
                         "sac/actor_loss":actor_loss,
                         "sac/alpha_loss":alpha_loss,
@@ -335,7 +336,6 @@ def train_off_policy(collector : ExperienceCollector,
 
     collector.reset()
     global_step = 0
-    tot_grad_steps_count = 0
     t_coll_sl = 0
     t_train_sl = 0
     t_tot_sl = 0
@@ -395,7 +395,7 @@ def train_off_policy(collector : ExperienceCollector,
         t_train_sl += t_after_train - t_before_train
         t_tot_sl += tf-t0
         if global_step/num_envs % log_freq == 0:
-            ggLog.info(f"OFFTRAIN: expstps:{global_step} trainstps={tot_grad_steps_count} coll={t_coll_sl:.2f}s train={t_train_sl:.2f}s tot={t_tot_sl:.2f}")
+            ggLog.info(f"OFFTRAIN: expstps:{global_step} trainstps={model._tot_grad_steps_count} coll={t_coll_sl:.2f}s train={t_train_sl:.2f}s tot={t_tot_sl:.2f}")
             t_train_sl, t_coll_sl, t_tot_sl = 0,0,0
             lr_gym.utils.sigint_handler.haltOnSigintReceived()
     callbacks.on_training_end()

@@ -16,16 +16,15 @@ import lr_gym.utils.spaces as spaces
 
 from lr_gym.envs.ControlledEnv import ControlledEnv
 import lr_gym
-from lr_gym.utils.utils import Pose, buildPose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle
+from lr_gym.utils.utils import Pose, build_pose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle
 from lr_gym.adapters.SimulationAdapter import SimulationAdapter
 import torch as th
 import lr_gym.utils.utils
 from enum import IntEnum
 from lr_gym.adapters.BaseAdapter import BaseAdapter
+from lr_gym.adapters.JointImpedanceAdapter import JointImpedanceAdapter
 import dataclasses
 from dataclasses import dataclass
-
-
 
 
 
@@ -129,7 +128,7 @@ class LegJumpEnv(ControlledEnv):
         velocity_limits_knee : Tuple[float,float]
         velocity_command_scale_hip : float
         velocity_command_scale_knee : float
-        vstate_minmax : Optional[th.Tensor]
+        vstate_minmax : th.Tensor
         reward_scale : float
         platform_obs_noise_std : float
 
@@ -150,7 +149,7 @@ class LegJumpEnv(ControlledEnv):
     def __init__(   self,
                     maxStepsPerEpisode : int = 500,
                     stepLength_sec : float = 0.01,
-                    environmentController : BaseAdapter = None,
+                    environmentController : JointImpedanceAdapter = None,
                     startSimulation : bool = True,
                     wall_sim_speed = False,
                     seed = 0,
@@ -169,7 +168,8 @@ class LegJumpEnv(ControlledEnv):
                     reward_contacts_weight = 0.0,
                     control_mode = "torque",
                     reward_scale = 1.0,
-                    platform_randomization : Literal["none","single","double"] = "none"):
+                    platform_randomization : Literal["none","single","double"] = "none",
+                    use_contacts = True):
         """Short summary.
 
         Parameters
@@ -224,6 +224,8 @@ class LegJumpEnv(ControlledEnv):
         self._rng = th.Generator(device=self._th_device)
         self._wall_sim_speed = wall_sim_speed
         self._original_max_epsteps = maxStepsPerEpisode
+        self._use_contacts = use_contacts
+        self._real = True
         # self._hip_torque_scale = 100
         # self._knee_torque_scale = 100
         # self._velocity_scale = {self._knee_joint : 1,
@@ -277,7 +279,7 @@ class LegJumpEnv(ControlledEnv):
                                                             velocity_limits_knee = (-20, 20),
                                                             velocity_command_scale_hip = 20,
                                                             velocity_command_scale_knee = 20,
-                                                            vstate_minmax = None,
+                                                            vstate_minmax = th.empty((0,)),
                                                             reward_scale = reward_scale,
                                                             platform_obs_noise_std = 0.002)
         if self._use_full_impedance_control:
@@ -318,12 +320,12 @@ class LegJumpEnv(ControlledEnv):
         self._last_abs_impulses_sum = 0
         self._impulses_avg_alpha = 0.5
         self._last_abs_impulses_sum_avg = 0.0
-        self._ep_max_abs_impulse = 0
-        self._ep_max_abs_impulses_sum = 0
-        self._ep_max_abs_contact = 0
-        self._ep_max_abs_contacts_sum = 0
+        self._ep_max_abs_impulse = -1
+        self._ep_max_abs_impulses_sum = -1
+        self._ep_max_abs_contact = -1
+        self._ep_max_abs_contacts_sum = -1
         self._last_external_work = 0
-        self._last_state = None
+        self._last_state = {}
         self._dbg_info = {}
         self._dbg_info["external_work"] = 0
         self._dbg_info["thigh_work"] = 0
@@ -425,12 +427,15 @@ class LegJumpEnv(ControlledEnv):
                          observation_space=observation_space,
                          action_space = action_space,
                          state_space=state_space)
-
+        self._environmentController = environmentController
+        if not isinstance(self._environmentController , JointImpedanceAdapter):
+            raise RuntimeError()
         self.seed(seed)
         self._environmentController.setJointsToObserve([self._knee_joint,self._hip_joint])
         self._environmentController.setLinksToObserve([self._foot_link, self._shin_com_link, self._thigh_com_link])
         self._environmentController.setCamerasToObserve(["camera"])
-        self._environmentController.monitor_contacts([("leg",None,None,None)]) # Monitor the contacts between the leg and all the environment
+        if self._use_contacts:
+            self._environmentController.monitor_contacts([("leg",None,None,None)]) # Monitor the contacts between the leg and all the environment
 
         self._environmentController.startController()
         
@@ -464,12 +469,13 @@ class LegJumpEnv(ControlledEnv):
             # kvel = self._unnormalize(action[1],self._configuration.velocity_command_scale_knee,self._configuration.velocity_limits_knee[0],self._configuration.velocity_limits_knee[1])
             hvel = action[0]*self._configuration.velocity_command_scale_hip
             kvel = action[1]*self._configuration.velocity_command_scale_knee
-            self._environmentController.setJointsVelocityCommand(jointVelocities = [(self._hip_joint,  hvel),
-                                                                                    (self._knee_joint, kvel)])
+            self._environmentController.setJointsImpedanceCommand(joint_impedances_pvesd = 
+                                                            [   (self._hip_joint,   (0,hvel.item(),0,0,30)),
+                                                                (self._knee_joint,  (0,kvel.item(),0,0,30))])
         elif self._use_position_control:
             hpos = self._unnormalize(action[0],self._configuration.position_limits_hip[0],self._configuration.position_limits_hip[1])
             kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
-            self._environmentController.setJointsImpedanceCommand(jointImpedances = 
+            self._environmentController.setJointsImpedanceCommand(joint_impedances_pvesd = 
                                                             [   (self._hip_joint,   (hpos,0,0,300,30)),
                                                                 (self._knee_joint,  (kpos,0,0,300,30))])
         elif self._use_position_and_torque_control:
@@ -477,9 +483,9 @@ class LegJumpEnv(ControlledEnv):
             kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
             htorque = action[2]*self._configuration.torque_command_scale_hip
             ktorque = action[3]*self._configuration.torque_command_scale_knee
-            self._environmentController.setJointsImpedanceCommand(jointImpedances = 
-                                                            [   (self._hip_joint,   (hpos,0,htorque,300,30)),
-                                                                (self._knee_joint,  (kpos,0,ktorque,300,30))])
+            self._environmentController.setJointsImpedanceCommand(joint_impedances_pvesd = 
+                                                            [   (self._hip_joint,   (hpos,0,htorque.item(),300,30)),
+                                                                (self._knee_joint,  (kpos,0,ktorque.item(),300,30))])
         elif self._use_impedance_no_gains:
             hpos = self._unnormalize(action[0],self._configuration.position_limits_hip[0],self._configuration.position_limits_hip[1])
             kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
@@ -488,9 +494,9 @@ class LegJumpEnv(ControlledEnv):
             htorque = action[4]*self._configuration.torque_command_scale_hip
             ktorque = action[5]*self._configuration.torque_command_scale_knee
             
-            self._environmentController.setJointsImpedanceCommand(jointImpedances = 
-                                                            [   (self._hip_joint,   (hpos,hvel,htorque,300,30)),
-                                                                (self._knee_joint,  (kpos,kvel,ktorque,300,30))])
+            self._environmentController.setJointsImpedanceCommand(joint_impedances_pvesd = 
+                                                            [   (self._hip_joint,   (hpos,hvel.item(),htorque.item(),300,30)),
+                                                                (self._knee_joint,  (kpos,kvel.item(),ktorque.item(),300,30))])
         elif self._use_full_impedance_control:
             hpos = self._unnormalize(action[0],self._configuration.position_limits_hip[0],self._configuration.position_limits_hip[1])
             kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
@@ -503,23 +509,25 @@ class LegJumpEnv(ControlledEnv):
             hvgain = action[8]*100
             kvgain = action[9]*100
             
-            self._environmentController.setJointsImpedanceCommand(jointImpedances = 
-                                                            [   (self._hip_joint,   (hpos,hvel,htorque,hpgain,hvgain)),
-                                                                (self._knee_joint,  (kpos,kvel,ktorque,kpgain,kvgain))])
+            self._environmentController.setJointsImpedanceCommand(joint_impedances_pvesd = 
+                                                            [   (self._hip_joint,   (hpos,hvel.item(),htorque.item(),hpgain.item(),hvgain.item())),
+                                                                (self._knee_joint,  (kpos,kvel.item(),ktorque.item(),kpgain.item(),kvgain.item()))])
         elif self._use_position_and_gains:
             hpos = self._unnormalize(action[0],self._configuration.position_limits_hip[0],self._configuration.position_limits_hip[1])
             kpos = self._unnormalize(action[1],self._configuration.position_limits_knee[0],self._configuration.position_limits_knee[1])
             hpgain = (action[2]+1)/2*400
             kpgain = (action[3]+1)/2*400
             
-            self._environmentController.setJointsImpedanceCommand(jointImpedances = 
-                                                            [   (self._hip_joint,   (hpos,0,0,hpgain,30)),
-                                                                (self._knee_joint,  (kpos,0,0,kpgain,30))])
+            self._environmentController.setJointsImpedanceCommand(joint_impedances_pvesd = 
+                                                            [   (self._hip_joint,   (hpos,0,0,hpgain.item(),30)),
+                                                                (self._knee_joint,  (kpos,0,0,kpgain.item(),30))])
         else:
             htorque = action[0]*self._configuration.torque_command_scale_hip
             ktorque = action[1]*self._configuration.torque_command_scale_knee
-            self._environmentController.setJointsEffortCommand(jointTorques = [(self._hip_joint,  htorque),
-                                                                            (self._knee_joint, ktorque)])
+
+            self._environmentController.setJointsImpedanceCommand(joint_impedances_pvesd = 
+                                                            [   (self._hip_joint,   (0,0,htorque.item(),0,0)),
+                                                                (self._knee_joint,  (0,0,ktorque.item(),0,0))])
             
 
 
@@ -770,43 +778,47 @@ class LegJumpEnv(ControlledEnv):
                                                                        reward_contacts_weights=reward_contacts_weights)
 
         if isinstance(self._environmentController, SimulationAdapter):
-            if self._current_episode_config.support2_pos_x > 0:
-                self._environmentController.setJointsStateDirect({self._rail_joint: JointState(position = [self._start_height], rate=[0], effort=[0]),
-                                                                self._hip_joint:  JointState(position = [ 3.14159/4], rate=[0], effort=[0]),
-                                                                self._knee_joint: JointState(position = [-3.14159/2], rate=[0], effort=[0])})
-            else:
-                self._environmentController.setJointsStateDirect({self._rail_joint: JointState(position = [self._start_height], rate=[0], effort=[0]),
-                                                                self._hip_joint:  JointState(position = [-3.14159/4], rate=[0], effort=[0]),
-                                                                self._knee_joint: JointState(position = [ 3.14159/2], rate=[0], effort=[0])})
+            self._simulation_initialization()
         else:
-            raise RuntimeError("Cannot reset joint state")
-        self._environmentController.setJointsEffortCommand([(self._hip_joint,0),(self._knee_joint,0)])
-        self._place_objects()
+            raise RuntimeError("Cannot initialize episode with non-simulated adapter")
 
-    def _place_objects(self):
-        # ggLog.info(f"placing: _current_episode_config {self._current_episode_config}")
-        self._environmentController.setLinksStateDirect({("support1","world") : 
-                                                         LinkState( position_xyz = th.tensor((self._current_episode_config.support1_pos_x,
-                                                                                              0.3,
-                                                                                              self._current_episode_config.support1_pos_z)),
-                                                                    orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
-                                                                    pos_velocity_xyz = th.tensor((0.,0.,0)),
-                                                                    ang_velocity_xyz = th.tensor((0.,0.,0.)))})
-        self._environmentController.setLinksStateDirect({("support2","world") :
-                                                          LinkState(position_xyz = th.tensor((self._current_episode_config.support2_pos_x,
-                                                                                              0.3,
-                                                                                              self._current_episode_config.support2_pos_z)),
-                                                                    orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
-                                                                    pos_velocity_xyz = th.tensor((0.,0.,0)),
-                                                                    ang_velocity_xyz = th.tensor((0.,0.,0.)))})
-        if self._show_goal:
-            self._environmentController.setLinksStateDirect({("red_ball","world") :
-                                                             LinkState( position_xyz = th.tensor((0.,
-                                                                                                 0.2,
-                                                                                                 self._current_episode_config.hip_goal_z)),
+    def _simulation_initialization(self):
+        if isinstance(self._environmentController, SimulationAdapter):
+            if self._current_episode_config.support2_pos_x > 0:
+                self._environmentController.setJointsStateDirect({self._rail_joint: JointState(position = self._start_height, rate=0, effort=0),
+                                                                self._hip_joint:  JointState(position =  3.14159/4, rate=0, effort=0),
+                                                                self._knee_joint: JointState(position = -3.14159/2, rate=0, effort=0)})
+            else:
+                self._environmentController.setJointsStateDirect({self._rail_joint: JointState(position = self._start_height, rate=0, effort=0),
+                                                                self._hip_joint:  JointState(position = -3.14159/4, rate=0, effort=0),
+                                                                self._knee_joint: JointState(position =  3.14159/2, rate=0, effort=0)})
+            self._environmentController.apply_joint_impedances([(self._hip_joint, (0,0,0,0,0)),
+                                                                (self._knee_joint,(0,0,0,0,0))])
+            # ggLog.info(f"placing: _current_episode_config {self._current_episode_config}")
+            self._environmentController.setLinksStateDirect({("support1","world") : 
+                                                            LinkState( position_xyz = th.tensor((self._current_episode_config.support1_pos_x,
+                                                                                                0.3,
+                                                                                                self._current_episode_config.support1_pos_z)),
                                                                         orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
                                                                         pos_velocity_xyz = th.tensor((0.,0.,0)),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.)))})
+            self._environmentController.setLinksStateDirect({("support2","world") :
+                                                            LinkState(position_xyz = th.tensor((self._current_episode_config.support2_pos_x,
+                                                                                                0.3,
+                                                                                                self._current_episode_config.support2_pos_z)),
+                                                                        orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
+                                                                        pos_velocity_xyz = th.tensor((0.,0.,0)),
+                                                                        ang_velocity_xyz = th.tensor((0.,0.,0.)))})
+            if self._show_goal:
+                self._environmentController.setLinksStateDirect({("red_ball","world") :
+                                                                LinkState( position_xyz = th.tensor((0.,
+                                                                                                    0.2,
+                                                                                                    self._current_episode_config.hip_goal_z)),
+                                                                            orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
+                                                                            pos_velocity_xyz = th.tensor((0.,0.,0)),
+                                                                            ang_velocity_xyz = th.tensor((0.,0.,0.)))})
+        else:
+            raise RuntimeError(f"called simulation initialization with non-simulated adapter")
         
     def getUiRendering(self) -> Tuple[Union[np.ndarray, th.Tensor, None], float]:
         try:
@@ -868,16 +880,24 @@ class LegJumpEnv(ControlledEnv):
                 shin_ang_pos_z = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_xyzw[[3,0,1,2]],
                                                                                     th.tensor([0.0,0.0,1.0], device=self._th_device))[1])
 
-                contacts = self._environmentController.get_contacts()
-                impulses = []
-                forces = []
-                for simsteps_contacts in contacts:
-                    forces   += [contact[3] for contact in simsteps_contacts]
-                    impulses += [contact[3]*contact[4] for contact in simsteps_contacts]
-                abs_impulses = [abs(i) for i in impulses]
-                abs_forces = [abs(i) for i in forces]
-                abs_impulses_sum = sum(abs_impulses)
-                abs_impulses_sum_avg = self._impulses_avg_alpha*self._last_abs_impulses_sum_avg + self._impulses_avg_alpha*abs_impulses_sum
+                if self._use_contacts:
+                    contacts = self._environmentController.get_contacts()
+                    impulses = []
+                    forces = []
+                    for simsteps_contacts in contacts:
+                        forces   += [contact[3] for contact in simsteps_contacts]
+                        impulses += [contact[3]*contact[4] for contact in simsteps_contacts]
+                    abs_impulses = [abs(i) for i in impulses]
+                    abs_forces = [abs(i) for i in forces]
+                    abs_forces_sum = sum(abs_forces)
+                    abs_forces_num = len(abs_forces)
+                    abs_impulses_sum = sum(abs_impulses)
+                    abs_impulses_sum_avg = self._impulses_avg_alpha*self._last_abs_impulses_sum_avg + self._impulses_avg_alpha*abs_impulses_sum
+                else:
+                    abs_impulses_sum = -1
+                    abs_forces_sum = -1
+                    abs_forces_num = -1
+                    abs_impulses_sum_avg = -1
 
                 # ggLog.info(f"jstates = {jstates}")
 
@@ -930,8 +950,8 @@ class LegJumpEnv(ControlledEnv):
                                     shin_ang_pos_y,
                                     shin_ang_pos_z,
                                     abs_impulses_sum,
-                                    sum(abs_forces),
-                                    len(abs_forces),
+                                    abs_forces_sum,
+                                    abs_forces_num,
                                     abs_impulses_sum_avg),
                                 dtype = th.float32,
                                 device = self._th_device)
@@ -972,12 +992,18 @@ class LegJumpEnv(ControlledEnv):
                                env_conf=self.get_configuration(),
                                dbg_info=rew_dbg_info,
                                sub_rewards=sub_rewards)
-        contacts = self._environmentController.get_contacts()
-        abs_impulses = []
-        abs_contacts = []
-        for simsteps_contacts in contacts:
-            abs_impulses += [abs(contact[3]*contact[4]) for contact in simsteps_contacts]
-            abs_contacts += [abs(contact[3]) for contact in simsteps_contacts]
+        if self._use_contacts:
+            contacts = self._environmentController.get_contacts()
+            abs_impulses = []
+            abs_contacts = []
+            for simsteps_contacts in contacts:
+                abs_impulses += [abs(contact[3]*contact[4]) for contact in simsteps_contacts]
+                abs_contacts += [abs(contact[3]) for contact in simsteps_contacts]
+            if len(abs_impulses)>0:
+                self._ep_max_abs_impulse = max(self._ep_max_abs_impulse, max(abs_impulses))
+                self._ep_max_abs_impulses_sum = max(self._ep_max_abs_impulses_sum, sum(abs_impulses))
+                self._ep_max_abs_contact = max(self._ep_max_abs_contact, max(abs_contacts))
+                self._ep_max_abs_contacts_sum = max(self._ep_max_abs_contacts_sum, sum(abs_contacts))
         vstate_unnorm = self._unnormalize(self._last_state[self.VECTOR_PART][0],self._configuration.vstate_minmax[:,0],self._configuration.vstate_minmax[:,1])
         goal_dist = abs(vstate_unnorm[self.STATE.HIP_GOAL_Z]-vstate_unnorm[self.STATE.HIP_POS_Z])
         self._cumulative_dist_to_goal += goal_dist
@@ -989,11 +1015,6 @@ class LegJumpEnv(ControlledEnv):
         self._dists_to_goal[self._stepCounter%len(self._dists_to_goal)] = goal_dist
         self._cumulated_abs_impulses += self._last_abs_impulses_sum
 
-        if len(abs_impulses)>0:
-            self._ep_max_abs_impulse = max(self._ep_max_abs_impulse, max(abs_impulses))
-            self._ep_max_abs_impulses_sum = max(self._ep_max_abs_impulses_sum, sum(abs_impulses))
-            self._ep_max_abs_contact = max(self._ep_max_abs_contact, max(abs_contacts))
-            self._ep_max_abs_contacts_sum = max(self._ep_max_abs_contacts_sum, sum(abs_contacts))
         return rew_dbg_info
 
     def performStep(self):
@@ -1008,6 +1029,21 @@ class LegJumpEnv(ControlledEnv):
         if envCtrlName == "PyBulletJointImpedanceAdapter":
             self._environmentController.build_scenario(None)
             self._rendering_cam_name = "simple_camera"
+        elif envCtrlName == "RosXbotAdapter":
+            from lr_gym_ros.adapters.RosXbotAdapter import RosXbotAdapter
+            if self._real:
+                raise NotImplementedError()
+            else:
+                self._environmentController.build_scenario(launch_file_pkg_and_path = ["protoleg","/launch/launch_sim_all.launch"])
+                self._knee_joint = ("leg","knee_pitch_1")
+                self._hip_joint = ("leg","hip_pitch_1")
+                self._rail_joint = ("leg","rail_joint")
+                self._foot_link = ("leg","tip1")
+                self._thigh_base_link = ("leg", "femur1")
+                self._shin_base_link = ("leg", "shin1")
+                self._thigh_com_link = ("leg", "thigh_link")
+                self._shin_com_link = ("leg", "shin_link")
+                self._rendering_cam_name = "simple_camera"
         # elif envCtrlName in ["GazeboAdapter", "GazeboAdapterNoPlugin"]:
         #     # ggLog.info(f"sim_img_width  = {sim_img_width}")
         #     # ggLog.info(f"sim_img_height = {sim_img_height}")

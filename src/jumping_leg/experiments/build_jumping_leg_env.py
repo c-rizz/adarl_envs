@@ -22,6 +22,19 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
     elif mode == "GazeboAdapter":
         from lr_gym_ros.adapters.GazeboAdapter import GazeboAdapter
         env_controller = GazeboAdapter(stepLength_sec=stepLength_sec)
+    elif mode == "xbot":
+        from lr_gym_ros.adapters.RosXbotAdapter import RosXbotAdapter
+        env_controller = RosXbotAdapter(model_name = "leg",
+                                        stepLength_sec = stepLength_sec,
+                                        forced_ros_master_uri = None,
+                                        maxObsDelay = float("+inf"),
+                                        blocking_observation = False,
+                                        is_floating_base = True,
+                                        reference_frame = "base_link",
+                                        torch_device = th.device("cpu"),
+                                        fallback_cmd_stiffness = 200.0,
+                                        fallback_cmd_damping = 100.0,
+                                        allow_fallback = True)
     elif mode == "PyBulletAdapter":
         from lr_gym.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
         env_controller = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec, restore_on_reset=False, debug_gui=False)

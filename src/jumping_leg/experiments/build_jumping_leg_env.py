@@ -7,6 +7,8 @@ import torch as th
 from gymnasium.wrappers.normalize import NormalizeObservation
 import threading, os
 import traceback
+import time
+from lr_gym.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 
 def env_builder(seed, log_folder, env_builder_args, no_dict = False):
     ggLog.info(f"Building env: thread={threading.current_thread()}, pid={os.getpid()}")
@@ -15,11 +17,11 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
     th_device = env_builder_args["th_device"]
     max_steps = 5/stepLength_sec
 
-    mode = "PyBulletAdapter"
-    if mode == "GzController":
+    mode = env_builder_args["mode"].strip().lower()
+    if mode == "gz":
         from lr_gym_ros2.adapters.GzController import GzController
         env_controller = GzController(stepLength_sec=stepLength_sec)
-    elif mode == "GazeboAdapter":
+    elif mode == "gazebo":
         from lr_gym_ros.adapters.GazeboAdapter import GazeboAdapter
         env_controller = GazeboAdapter(stepLength_sec=stepLength_sec)
     elif mode == "xbot":
@@ -35,24 +37,30 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
                                         fallback_cmd_stiffness = 200.0,
                                         fallback_cmd_damping = 100.0,
                                         allow_fallback = True)
-    elif mode == "PyBulletAdapter":
+    elif mode == "pybullet":
         from lr_gym.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
-        env_controller = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec, restore_on_reset=False, debug_gui=False)
+        env_controller = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
+                                                       restore_on_reset=False,
+                                                       debug_gui=False,
+                                                       simulation_step=1/1024)
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)
     obs_only_vec = True
 
-    lrenv = LegJumpEnv(maxStepsPerEpisode=max_steps,
-                       stepLength_sec=stepLength_sec,
-                       environmentController=env_controller,
-                       seed=seed,
-                       obs_only_vec=obs_only_vec,
-                       obs_only_img=False,
-                       obs_img_height=64,
-                       obs_img_width=64,
-                       rgb=True,
-                       th_device=th_device,
+    print(f"env_builder_args = {env_builder_args}")
+    time.sleep(1)
+
+    lrenv = LegJumpEnv( maxStepsPerEpisode=max_steps,
+                        stepLength_sec=stepLength_sec,
+                        environmentController=env_controller,
+                        seed=seed,
+                        obs_only_vec=obs_only_vec,
+                        obs_only_img=False,
+                        obs_img_height=64,
+                        obs_img_width=64,
+                        rgb=True,
+                        th_device=th_device,
                         reward_torque_limit_weight = env_builder_args["reward_torque_limit_weight"],
                         reward_position_limit_weight = env_builder_args["reward_position_limit_weight"],
                         reward_velocity_weight = env_builder_args["reward_velocity_weight"],
@@ -62,7 +70,9 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
                         reward_contacts_weight = env_builder_args["reward_contacts_weight"],
                         control_mode = env_builder_args["control_mode"],
                         reward_scale=500/max_steps,
-                        platform_randomization = env_builder_args["platform_randomization"]) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
+                        platform_randomization = env_builder_args["platform_randomization"],
+                        use_contacts=env_builder_args["use_contacts"],
+                        step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
     if no_dict:
         from lr_gym.envs.lr_wrappers.ObsDict2FlatBox import ObsDict2FlatBox
         lrenv = ObsDict2FlatBox(lrenv, "vec")

@@ -89,6 +89,13 @@
 		</inertial>
 	</xacro:macro>
 
+    <xacro:macro name="small_inertial" params="">
+		<xacro:box_inertial mass="0.0001"
+                            x="0.001" y="0.001" z="0.001"
+                            pose_xyz = "0 0 0"
+                            pose_rpy = "0 0 0"/>
+    </xacro:macro>
+
     <xacro:macro name="cylinder_z_inertial" params="mass height radius pose_xyz pose_rpy">
 		<inertial>
 			<origin xyz="${pose_xyz}" rpy="${pose_rpy}"/>
@@ -166,29 +173,27 @@
                             pose_rpy = "0 0 0"/>
 	</link>
 
-	<link name="thigh_link">
+	<link name="thigh_link_base">
 		<visual name = "thigh_link_v">
 			<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
 			<geometry>
                 <cylinder length="${thigh_height}" radius="${thigh_width/2}" />
 			</geometry>
-	   </visual>
+	   	</visual>
 		<collision name = "thigh_link_c">
 			<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
 			<geometry>
                 <cylinder length="${thigh_height}" radius="${thigh_width/2}" />
 			</geometry>
-	   </collision>
-		<xacro:cylinder_z_inertial mass="${thigh_mass}" height="${thigh_height}" radius="${thigh_width/2}" pose_xyz="0 0 -${thigh_height/2}" pose_rpy="0 0 0"/>
+	   	</collision>
+		<xacro:small_inertial />
 	</link>
-	<link name="thigh_link_base">
-		<xacro:box_inertial mass="0.0001"
-                            x="0.001" y="0.001" z="0.001"
-                            pose_xyz = "0 0 0"
-                            pose_rpy = "0 0 0"/>
+	<link name="thigh_link_com">
+		<xacro:cylinder_z_inertial mass="${thigh_mass}" height="${thigh_height}" radius="${thigh_width/2}" 
+									pose_xyz="0 0 0" pose_rpy="0 0 0"/>
 	</link>
 
-	<gazebo reference="thigh_link">
+	<gazebo reference="thigh_link_base">
 		<visual name="thigh_link_v">
 			<material>
 			<ambient>$(arg thigh_color)</ambient>
@@ -204,21 +209,21 @@
 
 
 
-	<link name="shin_link">
+	<link name="shin_link_base">
 		<!-- shin_height is the knee to foot tip distance, so the actual shin lenght is determined accordingly-->
 		<visual name = "shin_link_v">
 			<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
 			<geometry>
                 <cylinder length="${shin_height-shin_width}" radius="${shin_width/2}" />
 			</geometry>
-	   </visual>
+	   	</visual>
 		<collision name = "shin_link_c">
 			<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
 			<geometry>
                 <cylinder length="${shin_height-shin_width}" radius="${shin_width/2}" />
 			</geometry>
-	   </collision>
-		<xacro:cylinder_z_inertial mass="${shin_mass}" height="${shin_height}" radius="${shin_width/2}" pose_xyz="0 0 -${shin_height/2}" pose_rpy="0 0 0"/>
+		</collision>
+		<xacro:small_inertial />
 
 		<contact>
 				<!-- 
@@ -247,13 +252,11 @@
 			</contact>
 
 	</link>
-	<link name="shin_link_base">
-		<xacro:box_inertial mass="0.0001"
-                            x="0.001" y="0.001" z="0.001"
-                            pose_xyz = "0 0 0"
-                            pose_rpy = "0 0 0"/>
+	<link name="shin_link_com">
+		<xacro:cylinder_z_inertial mass="${shin_mass}" height="${shin_height}" radius="${shin_width/2}"
+									pose_xyz="0 0 -${shin_height/2}" pose_rpy="0 0 0"/>
 	</link>
-	<gazebo reference="shin_link">
+	<gazebo reference="shin_link_base">
 		<visual name="visual">
 			<material>
 			<ambient>$(arg shin_color)</ambient>
@@ -281,10 +284,7 @@
                 <sphere radius="${shin_width}" />
             </geometry>
         </collision>
-		<xacro:box_inertial mass="0.0001"
-                            x="0.001" y="0.001" z="0.001"
-                            pose_xyz = "0 0 0"
-                            pose_rpy = "0 0 0"/>
+		<xacro:small_inertial />
 		<contact>
 				<!-- 
 				Pybullet defaults maybe are these (from bullet3/examples/Importers/ImportURDFDemo/URDFJointTypes.h line 33)
@@ -314,10 +314,7 @@
 
 
     <link name="foot_link">
-		<xacro:box_inertial mass="0.0001"
-                            x="0.001" y="0.001" z="0.001"
-                            pose_xyz = "0 0 0"
-                            pose_rpy = "0 0 0"/>
+		<xacro:small_inertial />
 	</link>
 
 
@@ -343,39 +340,40 @@
 	</joint>
     <joint name="hip_joint" type="revolute">
     	<parent link="slider_link"/>
-    	<child link="thigh_link"/>
+    	<child link="thigh_link_base"/>
     	<origin xyz="0 ${hip_y_offset} 0" rpy="0 0 0"/>
 		<dynamics damping="0.0" friction="${hip_friction}"/>
        	<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
         <axis xyz="0 1 0"/>
 	</joint>
-	<joint name="thigh_link_base" type="fixed">
-        <parent link="thigh_link"/>
-        <child link="thigh_link_base"/>
+	<joint name="thigh_link_com" type="fixed">
+        <parent link="thigh_link_base"/>
+        <child link="thigh_link_com"/>
+		<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
     </joint>
 
-
  	<joint name="knee_joint" type="revolute">
-    	<parent link="thigh_link"/>
-    	<child link="shin_link"/>
+    	<parent link="thigh_link_base"/>
+    	<child link="shin_link_base"/>
     	<origin xyz="0 ${knee_y_offset} -${thigh_height}" rpy="0 0 0"/>
 		<dynamics damping="0.0" friction="${knee_friction}"/>
        	<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
         <axis xyz="0 1 0"/>
 	</joint>
-	<joint name="shin_link_base" type="fixed">
-        <parent link="shin_link"/>
-        <child link="shin_link_base"/>
+	<joint name="shin_link_com" type="fixed">
+        <parent link="shin_link_base"/>
+        <child link="shin_link_com"/>
+		<origin xyz="0 0 -${shin_height/2}" rpy="0 0 0"/>
     </joint>
 
 	<joint name="foot_center_joint" type="fixed">
-        <parent link="shin_link"/>
+        <parent link="shin_link_base"/>
         <child link="foot_center_link"/>
     	<origin xyz="0 0 -${shin_height-shin_width}" rpy="0 0 0"/>
     </joint>
 
 	<joint name="foot_joint" type="fixed">
-        <parent link="shin_link"/>
+        <parent link="shin_link_base"/>
         <child link="foot_link"/>
     	<origin xyz="0 0 -${shin_height}" rpy="0 0 0"/>
     </joint>

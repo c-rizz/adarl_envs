@@ -24,9 +24,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "th_device" : th.device("cpu"),
         "control_mode" : "position_and_gains",
         "video_save_freq" : 0,
-        "stepLength_sec" : 0.01,
+        "stepLength_sec" : 1/128,
         "platform_randomization" : "single",
-        "quiet" : False}
+        "quiet" : False,
+        "mode" : args["mode"],
+        "use_contacts" : args["mode"].lower().strip() != "xbot"}
 
     hyperparams = {"train_freq" : 50,
                    "grad_steps" : 25,
@@ -41,6 +43,26 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 #     t(self, *args, **kwargs)
 #     print(f" created thread {self.name}")
 #     traceback.print_stack()
+
+direction = 1
+def oscillate_policy(obs):
+    global direction
+    hz = 100 # expected call freq
+    hip_pos = obs["vec"][0]
+    # knee_pos = obs["vec"][3]
+    # print(f"hip_pos = {hip_pos:.3f} kpos = {knee_pos:.3f}")
+
+    speed = 10
+    href = hip_pos + 1/hz*speed*direction
+    kref = href*2
+    if href > 0.5:
+        direction = -1
+    if href < -0.5:
+        direction = 1
+    # print(f"d = {direction} href = {href:.3f} kref {kref:.3f}")
+
+
+    return th.tensor([href,kref,1,1]), None
 
 def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
 
@@ -64,17 +86,17 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
     device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
     hyperparams["device"] = device
     # env setup
-    env = build_jumping_leg_env.env_builder(log_folder=log_folder,
+    with build_jumping_leg_env.env_builder(log_folder=log_folder,
                                         seed=seed,
-                                        env_builder_args = env_builder_args)
+                                        env_builder_args = env_builder_args) as env:
+        action_size = env.action_space.shape[0]
 
-    def zero(obs):
-        return th.tensor([0.0,0.0]), None
-
-
-    res = lr_gym.utils.utils.evaluatePolicy(env = env, model = None, episodes = 5, predict_func=zero,
-                                            images_return = None, obs_return=None)
-    print(f"evaluation returned {res}")
+        def zero(obs):
+            return th.zeros(size=(action_size,)), None
+        
+        res = lr_gym.utils.utils.evaluatePolicy(env = env, model = None, episodes = 5, predict_func=oscillate_policy,
+                                                images_return = None, obs_return=None)
+        print(f"evaluation returned {res}")
 
 
 
@@ -88,6 +110,7 @@ if __name__ == "__main__":
 
     ap.set_defaults(feature=True)
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
+    ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use")
     args = vars(ap.parse_args())
 
     

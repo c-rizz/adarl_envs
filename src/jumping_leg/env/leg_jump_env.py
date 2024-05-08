@@ -17,15 +17,15 @@ import lr_gym.utils.spaces as spaces
 from lr_gym.envs.ControlledEnv import ControlledEnv
 import lr_gym
 from lr_gym.utils.utils import Pose, build_pose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle
-from lr_gym.adapters.SimulationAdapter import SimulationAdapter
+from lr_gym.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 import torch as th
 import lr_gym.utils.utils
 from enum import IntEnum
 from lr_gym.adapters.BaseAdapter import BaseAdapter
-from lr_gym.adapters.JointImpedanceAdapter import JointImpedanceAdapter
+from lr_gym.adapters.BaseJointImpedanceAdapter import BaseJointImpedanceAdapter
 import dataclasses
 from dataclasses import dataclass
-
+import time
 
 
 
@@ -149,7 +149,7 @@ class LegJumpEnv(ControlledEnv):
     def __init__(   self,
                     maxStepsPerEpisode : int = 500,
                     stepLength_sec : float = 0.01,
-                    environmentController : JointImpedanceAdapter = None,
+                    environmentController : BaseJointImpedanceAdapter = None,
                     startSimulation : bool = True,
                     wall_sim_speed = False,
                     seed = 0,
@@ -169,7 +169,9 @@ class LegJumpEnv(ControlledEnv):
                     control_mode = "torque",
                     reward_scale = 1.0,
                     platform_randomization : Literal["none","single","double"] = "none",
-                    use_contacts = True):
+                    use_contacts : bool = True,
+                    real : bool = False,
+                    step_precision_tolerance : float = 0.0):
         """Short summary.
 
         Parameters
@@ -200,8 +202,8 @@ class LegJumpEnv(ControlledEnv):
         self._foot_link = ("leg","foot_link")
         self._thigh_base_link = ("leg", "thigh_link_base")
         self._shin_base_link = ("leg", "shin_link_base")
-        self._thigh_com_link = ("leg", "thigh_link")
-        self._shin_com_link = ("leg", "shin_link")
+        self._thigh_com_link = ("leg", "thigh_link_com")
+        self._shin_com_link = ("leg", "shin_link_com")
         self._rendering_cam_name = "simple_camera"
 
         self._use_velocity_control = control_mode.lower() == "velocity"
@@ -225,7 +227,10 @@ class LegJumpEnv(ControlledEnv):
         self._wall_sim_speed = wall_sim_speed
         self._original_max_epsteps = maxStepsPerEpisode
         self._use_contacts = use_contacts
-        self._real = True
+        self._real = real
+        if self._use_contacts == False and reward_contacts_weight!=0:
+            raise RuntimeError(f"use_contacts is False but reward_contacts_weight is not zero")
+
         # self._hip_torque_scale = 100
         # self._knee_torque_scale = 100
         # self._velocity_scale = {self._knee_joint : 1,
@@ -256,7 +261,7 @@ class LegJumpEnv(ControlledEnv):
         #   alpha = 0.5^(1/halving_time)
         # E.g. with a halving time of 0.01s:
         #   alpha = 0.5^(1/0.01) = 7.88e-31
-        halflife_s = 0.01
+        halflife_s = 0.05
         action_exp_smoothing_1s = 0.5**(1/halflife_s)
 
         self._configuration = LegJumpEnv.EnvConfiguration(  reward_contacts_weight = reward_contacts_weight,
@@ -426,13 +431,14 @@ class LegJumpEnv(ControlledEnv):
                          startSimulation = startSimulation,
                          observation_space=observation_space,
                          action_space = action_space,
-                         state_space=state_space)
+                         state_space=state_space,
+                         step_precision_tolerance=step_precision_tolerance)
         self._environmentController = environmentController
-        if not isinstance(self._environmentController , JointImpedanceAdapter):
+        if not isinstance(self._environmentController , BaseJointImpedanceAdapter):
             raise RuntimeError()
         self.seed(seed)
         self._environmentController.setJointsToObserve([self._knee_joint,self._hip_joint])
-        self._environmentController.setLinksToObserve([self._foot_link, self._shin_com_link, self._thigh_com_link])
+        self._environmentController.setLinksToObserve([self._foot_link, self._shin_com_link, self._thigh_com_link, self._shin_base_link, self._thigh_base_link])
         self._environmentController.setCamerasToObserve(["camera"])
         if self._use_contacts:
             self._environmentController.monitor_contacts([("leg",None,None,None)]) # Monitor the contacts between the leg and all the environment
@@ -455,7 +461,7 @@ class LegJumpEnv(ControlledEnv):
 
 
     def submitAction(self, action : th.Tensor) -> None:
-        
+        # ggLog.info(f"Submitting action {action}")
         super().submitAction(action)
         dt = self._configuration.stepLength_sec
         alpha = self._configuration.action_exp_smoothing_1s**(dt/1)
@@ -662,7 +668,7 @@ class LegJumpEnv(ControlledEnv):
     def initializeEpisode(self, options = {}) -> None:
 
 
-        if not self._spawned and isinstance(self._environmentController, SimulationAdapter):
+        if not self._spawned and isinstance(self._environmentController, BaseSimulationAdapter):
             
             # supp1_pos = [-0.1,0.2]
             # supp2_pos = [-0.15,0.4]
@@ -777,13 +783,15 @@ class LegJumpEnv(ControlledEnv):
                                                                        support2_pos_z=s2_xz[1],
                                                                        reward_contacts_weights=reward_contacts_weights)
 
-        if isinstance(self._environmentController, SimulationAdapter):
+        if isinstance(self._environmentController, BaseSimulationAdapter):
             self._simulation_initialization()
         else:
-            raise RuntimeError("Cannot initialize episode with non-simulated adapter")
+            ggLog.info(f"Cannot automatically initialize episode with non-simulated adapter. Lift up the robot and press ENTER.")
+            input()
+            # raise RuntimeError("")
 
     def _simulation_initialization(self):
-        if isinstance(self._environmentController, SimulationAdapter):
+        if isinstance(self._environmentController, BaseSimulationAdapter):
             if self._current_episode_config.support2_pos_x > 0:
                 self._environmentController.setJointsStateDirect({self._rail_joint: JointState(position = self._start_height, rate=0, effort=0),
                                                                 self._hip_joint:  JointState(position =  3.14159/4, rate=0, effort=0),
@@ -860,12 +868,14 @@ class LegJumpEnv(ControlledEnv):
                 jstates = self._environmentController.getJointsState(requestedJoints=[self._knee_joint, self._hip_joint])
                 lstates : Dict[Tuple[str,str],LinkState] = self._environmentController.getLinksState(requestedLinks = [self._thigh_com_link,
                                                                                     self._shin_com_link,
-                                                                                    self._thigh_base_link], use_com_frame = True)
+                                                                                    self._thigh_base_link])
                 hip_height = lstates[self._thigh_base_link].pose.position[2]
                 hip_vel_z = lstates[self._thigh_base_link].pos_velocity_xyz[2]
                 self._max_hip_height_reached = th.maximum(self._max_hip_height_reached,hip_height)
 
                 # n = '\n'
+                # ggLog.info(f"\nlstates = \n{n.join([str(i) for i in lstates.items()])}")
+
                 # ggLog.info(f"contacts == {n.join([str(c) for c in contacts])}")
                 thigh_ang_pos_x = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_xyzw[[3,0,1,2]],
                                                                                     th.tensor([1.0,0.0,0.0], device=self._th_device))[1])
@@ -1039,15 +1049,17 @@ class LegJumpEnv(ControlledEnv):
             if self._real:
                 raise NotImplementedError()
             else:
-                self._environmentController.build_scenario(launch_file_pkg_and_path = ["protoleg","/launch/launch_sim_all.launch"])
+                self._environmentController.build_scenario(launch_file_pkg_and_path = ["protoleg","/launch/launch_sim_all.launch"],
+                                                           launch_file_args={})
                 self._knee_joint = ("leg","knee_pitch_1")
                 self._hip_joint = ("leg","hip_pitch_1")
                 self._rail_joint = ("leg","rail_joint")
+
                 self._foot_link = ("leg","tip1")
                 self._thigh_base_link = ("leg", "femur1")
                 self._shin_base_link = ("leg", "shin1")
-                self._thigh_com_link = ("leg", "thigh_link")
-                self._shin_com_link = ("leg", "shin_link")
+                self._thigh_com_link = ("leg", "femur1_com")
+                self._shin_com_link = ("leg", "shin1_com")
                 self._rendering_cam_name = "simple_camera"
         # elif envCtrlName in ["GazeboAdapter", "GazeboAdapterNoPlugin"]:
         #     # ggLog.info(f"sim_img_width  = {sim_img_width}")

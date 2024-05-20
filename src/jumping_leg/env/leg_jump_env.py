@@ -576,21 +576,32 @@ class LegJumpEnv(ControlledEnv):
         return thigh_kin_energy+thigh_pot_energy, shin_kin_energy+shin_pot_energy, slider_kin_energy+slider_pot_energy
 
     @staticmethod
-    def computeReward(previousState, state , action : int, env_conf, sub_rewards : Optional[Dict[str,th.Tensor]] = None, dbg_info = None) -> th.Tensor:
+    def computeReward(previousState : Dict[str,th.Tensor],
+                      state : Dict[str,th.Tensor],
+                      action : th.Tensor,
+                      env_conf,
+                      sub_rewards : Optional[Dict[str,th.Tensor]] = None, dbg_info = None) -> th.Tensor:
 
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
         vstate_norm = state[LegJumpEnv.VECTOR_PART][0]
         pvstate_norm = state[LegJumpEnv.VECTOR_PART][-1]
 
-        
-        ntorques =       [vstate_norm[k] for k in [LegJumpEnv.STATE.HIP_JOINT_EFFORT,LegJumpEnv.STATE.KNEE_JOINT_EFFORT]]
-        nvelocities =    [vstate_norm[k] for k in [LegJumpEnv.STATE.HIP_JOINT_VEL,LegJumpEnv.STATE.KNEE_JOINT_VEL]]
-        npositions =     [vstate_norm[k] for k in [LegJumpEnv.STATE.HIP_JOINT_POS,LegJumpEnv.STATE.KNEE_JOINT_POS]]
-        torque_reward : th.Tensor = -(sum([t**4 for t in ntorques])/len(ntorques)) # type: ignore
-        torque_limit_reward : th.Tensor =   -(sum([t**50 for t in ntorques])/len(ntorques)) # type: ignore # 0.0769 at 0.95
-        velocity_reward : th.Tensor =       -(sum([t**2  for t in nvelocities])/len(nvelocities)) # type: ignore
-        position_limit_reward : th.Tensor = -(sum([t**50 for t in npositions])/len(npositions)) # type: ignore # 0.0769 at 0.95
+        normtorques = vstate_norm[[LegJumpEnv.STATE.HIP_JOINT_EFFORT,LegJumpEnv.STATE.KNEE_JOINT_EFFORT]]
+        normvelocities = vstate_norm[[LegJumpEnv.STATE.HIP_JOINT_VEL,LegJumpEnv.STATE.KNEE_JOINT_VEL]]
+        normpositions = vstate_norm[[LegJumpEnv.STATE.HIP_JOINT_POS,LegJumpEnv.STATE.KNEE_JOINT_POS]]
+        # ntorques =       [vstate_norm[k] for k in [LegJumpEnv.STATE.HIP_JOINT_EFFORT,LegJumpEnv.STATE.KNEE_JOINT_EFFORT]]
+        # nvelocities =    [vstate_norm[k] for k in [LegJumpEnv.STATE.HIP_JOINT_VEL,LegJumpEnv.STATE.KNEE_JOINT_VEL]]
+        # npositions =     [vstate_norm[k] for k in [LegJumpEnv.STATE.HIP_JOINT_POS,LegJumpEnv.STATE.KNEE_JOINT_POS]]
+        max_r = 100
+        torque_reward = - th.clamp(th.mean(th.pow(normtorques,4)),-max_r,max_r)
+        torque_limit_reward = - th.clamp(th.mean(th.pow(normtorques,50)),-max_r,max_r)
+        velocity_reward = - th.clamp(th.mean(th.pow(normvelocities,2)),-max_r,max_r)
+        position_limit_reward = - th.clamp(th.mean(th.pow(normpositions,50)),-max_r,max_r)
+        # torque_reward : th.Tensor = -(sum([t**4 for t in ntorques])/len(ntorques)) # type: ignore
+        # torque_limit_reward : th.Tensor =   -(sum([t**50 for t in ntorques])/len(ntorques)) # type: ignore # 0.0769 at 0.95
+        # velocity_reward : th.Tensor =       -(sum([t**2  for t in nvelocities])/len(nvelocities)) # type: ignore
+        # position_limit_reward : th.Tensor = -(sum([t**50 for t in npositions])/len(npositions)) # type: ignore # 0.0769 at 0.95
 
         vstate_un = LegJumpEnv._unnormalize(vstate_norm,env_conf["vstate_minmax"][:,0],env_conf["vstate_minmax"][:,1])
         pvstate_un = LegJumpEnv._unnormalize(pvstate_norm,env_conf["vstate_minmax"][:,0],env_conf["vstate_minmax"][:,1])
@@ -692,20 +703,20 @@ class LegJumpEnv(ControlledEnv):
                                                     model_format="sdf.xacro")
             # ggLog.info(f"Model spawned with name {name}")
 
-            # if self._show_goal:
-            #     self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/red_intangible_ball.urdf.xacro"),
-            #                                             model_name="red_ball",
-            #                                             pose=leg_pose,
-            #                                             model_format="urdf.xacro")
-            # self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
-            #                                         model_name="support1",
-            #                                         pose=build_pose(-0.1-0.125, 0.3, 0.2, 0,0,0,1),
-            #                                         model_format="urdf.xacro")
+            if self._show_goal:
+                self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/red_intangible_ball.urdf.xacro"),
+                                                        model_name="red_ball",
+                                                        pose=leg_pose,
+                                                        model_format="urdf.xacro")
+            self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
+                                                    model_name="support1",
+                                                    pose=build_pose(-0.1-0.125, 0.3, 0.2, 0,0,0,1),
+                                                    model_format="urdf.xacro")
             
-            # self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
-            #                                         model_name="support2",
-            #                                         pose=build_pose(-0.15-0.125, 0.3, 0.4, 0,0,0,1),
-            #                                         model_format="urdf.xacro")
+            self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
+                                                    model_name="support2",
+                                                    pose=build_pose(-0.15-0.125, 0.3, 0.4, 0,0,0,1),
+                                                    model_format="urdf.xacro")
 
         
         self._max_hip_height_reached = th.tensor(0)
@@ -818,9 +829,9 @@ class LegJumpEnv(ControlledEnv):
                                                             self._knee_joint: JointState(position = kpos, rate=0, effort=0)})
             if self._environmentController.__class__.__name__== "RosXbotGazeboAdapter":
                 self._environmentController.freerun(3.0) # let the leg fall
-            ggLog.info(f"jpos set")
-            self._environmentController.apply_joint_impedances([(self._hip_joint, (hpos,0,0,200,50)),
-                                                                (self._knee_joint,(kpos,0,0,200,50))])
+            # ggLog.info(f"jpos set")
+            self._environmentController.apply_joint_impedances({self._hip_joint: (hpos,0,0,200,50),
+                                                                self._knee_joint:(kpos,0,0,200,50)})
             ggLog.info(f"Placing supports")
             # ggLog.info(f"placing: _current_episode_config {self._current_episode_config}")
             self._environmentController.setLinksStateDirect({("support1","plate") : 
@@ -846,7 +857,7 @@ class LegJumpEnv(ControlledEnv):
                                                                             pos_velocity_xyz = th.tensor((0.,0.,0)),
                                                                             ang_velocity_xyz = th.tensor((0.,0.,0.)))})
             jpos = {k:v.position for k,v in self._environmentController.getJointsState(requestedJoints=[self._rail_joint, self._hip_joint, self._knee_joint]).items()}
-            ggLog.info(f"Init: current jpos = {jpos}")
+            # ggLog.info(f"Init: current jpos = {jpos}")
         else:
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
         

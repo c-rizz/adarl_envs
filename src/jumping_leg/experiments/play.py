@@ -24,9 +24,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_weight" : 0.0,
         "th_device" : th.device("cpu"),
         "control_mode" : "position_and_gains",
-        "video_save_freq" : 0,
+        "video_save_freq" : 1,
         "stepLength_sec" : 1/128,
-        "platform_randomization" : "single",
+        "platform_randomization" : "fixed",
         "quiet" : False,
         "mode" : args["mode"],
         "use_contacts" : args["mode"].lower().strip() == "pybullet"}
@@ -81,7 +81,7 @@ def oscillate_policy(obs):
     href = hip_range*math.sin(t*(2*3.14159)*rate)
     kref = knee_range*math.sin(t*(2*3.14159)*rate)
 
-    print(f"t = {t} href = {href:.3f}={href*2.4:.3f} kref {kref:.3f}={kref*2.4:.3f}")
+    # print(f"t = {t} href = {href:.3f}={href*2.4:.3f} kref {kref:.3f}={kref*2.4:.3f}")
     return th.tensor([href,kref,1,1]), None
 
 def reset_time_cb(episodeReward, steps, episode):

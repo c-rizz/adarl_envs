@@ -19,11 +19,6 @@
 		</inertial>
 	</xacro:macro>
 
-    <link name="world"/>
-
-
-
-
 	<link name="sphere_link">
 		<!-- The shin is made of a cylinder plus a sphere, the total length, is shin_height, so the length  of the two are detemrined accordingly -->
         <visual>
@@ -47,11 +42,5 @@
 			</material>
       	</visual>
     </gazebo>
-
-	<joint name="world_to_sphere" type="fixed">
-        <parent link="world"/>
-        <child link="sphere_link"/>
-    </joint>
-
 
 </robot>

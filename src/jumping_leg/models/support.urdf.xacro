@@ -23,12 +23,12 @@
 		</inertial>
 	</xacro:macro>
 
-    <link name="world"/>
+    <!-- <link name="world"/> -->
 
 
 
 
-	<link name="box_link">
+	<link name="plate">
 		<!-- The shin is made of a cylinder plus a sphere, the total length, is shin_height, so the length  of the two are detemrined accordingly -->
         <visual>
 			<origin xyz="0 0 0" rpy="0 0 0"/>
@@ -72,7 +72,7 @@
 				<!-- <damping value="8"/>  -->
 			</contact>
 	</link>
-	<gazebo reference="box_link">
+	<gazebo reference="plate">
 		<visual name="visual">
 			<material>
 			<ambient>"${color_rgba}"</ambient>
@@ -84,11 +84,6 @@
 			</material>
       	</visual>
     </gazebo>
-
-	<joint name="world_to_sphere" type="fixed">
-        <parent link="world"/>
-        <child link="box_link"/>
-    </joint>
 
 
 </robot>

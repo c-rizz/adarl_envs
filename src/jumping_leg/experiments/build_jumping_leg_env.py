@@ -36,7 +36,28 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
                                         torch_device = th.device("cpu"),
                                         fallback_cmd_stiffness = 200.0,
                                         fallback_cmd_damping = 100.0,
-                                        allow_fallback = True)
+                                        allow_fallback = True,
+                                        jpos_cmd_max_vel = {},
+                                        jpos_cmd_max_vel_default = 1.0,
+                                        jpos_cmd_max_acc = {},
+                                        jpos_cmd_max_acc_default = 1.0)
+    elif mode == "xbot-gazebo":
+        from lr_gym_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
+        env_controller = RosXbotGazeboAdapter(model_name = "leg",
+                                        stepLength_sec = stepLength_sec,
+                                        forced_ros_master_uri = None,
+                                        maxObsDelay = float("+inf"),
+                                        blocking_observation = False,
+                                        is_floating_base = True,
+                                        reference_frame = "base_link",
+                                        torch_device = th.device("cpu"),
+                                        fallback_cmd_stiffness = 200.0,
+                                        fallback_cmd_damping = 100.0,
+                                        allow_fallback = True,
+                                        jpos_cmd_max_vel = {},
+                                        jpos_cmd_max_vel_default = 10.0,
+                                        jpos_cmd_max_acc = {},
+                                        jpos_cmd_max_acc_default = 10.0)
     elif mode == "pybullet":
         from lr_gym.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
         env_controller = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,

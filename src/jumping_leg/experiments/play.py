@@ -10,6 +10,7 @@ import jumping_leg.experiments.build_jumping_leg_env as build_jumping_leg_env
 import random
 import numpy as np
 import torch as th
+import math
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
@@ -28,7 +29,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "platform_randomization" : "single",
         "quiet" : False,
         "mode" : args["mode"],
-        "use_contacts" : args["mode"].lower().strip() != "xbot"}
+        "use_contacts" : args["mode"].lower().strip() == "pybullet"}
 
     hyperparams = {"train_freq" : 50,
                    "grad_steps" : 25,
@@ -44,25 +45,57 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 #     print(f" created thread {self.name}")
 #     traceback.print_stack()
 
-direction = 1
+policy_time = 0
+hdirection = 1
+kdirection = 1
 def oscillate_policy(obs):
-    global direction
+    # global hdirection
+    # global kdirection
     hz = 100 # expected call freq
     hip_pos = obs["vec"][0]
-    # knee_pos = obs["vec"][3]
-    # print(f"hip_pos = {hip_pos:.3f} kpos = {knee_pos:.3f}")
+    knee_pos = obs["vec"][3]
+    # # print(f"hip_pos = {hip_pos:.3f} kpos = {knee_pos:.3f}")
 
-    speed = 10
-    href = hip_pos + 1/hz*speed*direction
-    kref = href*2
-    if href > 0.5:
-        direction = -1
-    if href < -0.5:
-        direction = 1
-    # print(f"d = {direction} href = {href:.3f} kref {kref:.3f}")
+    # speed = 10
+    # href = hip_pos + 1/hz*speed*hdirection
+    # kref = knee_pos + 1/hz*speed*kdirection
+    # # kref = href*2
+    # if href > 0.5:
+    #     hdirection = -1
+    # if href < -0.5:
+    #     hdirection = 1
+    # if kref > 0.5:
+    #     kdirection = -1
+    # if kref < -0.5:
+    #     kdirection = 1
+    # print(f"d = {hdirection,kdirection} href = {href:.3f} kref {kref:.3f}")
+    rate = 0.5
+    hip_range = 0.4
+    knee_range = 0.8
+    global policy_time
+    if policy_time == 0:
+        policy_time = (math.asin(hip_pos/hip_range)+2*3.14159)/(rate*2*3.14159)
+    t = policy_time
+    policy_time+=1/hz
 
+    href = hip_range*math.sin(t*(2*3.14159)*rate)
+    kref = knee_range*math.sin(t*(2*3.14159)*rate)
 
+    print(f"t = {t} href = {href:.3f}={href*2.4:.3f} kref {kref:.3f}={kref*2.4:.3f}")
     return th.tensor([href,kref,1,1]), None
+
+def reset_time_cb(episodeReward, steps, episode):
+    global policy_time
+    policy_time = 0
+
+def keep(obs):
+    hip_pos = obs["vec"][0]
+    knee_pos = obs["vec"][3]
+    return th.tensor([hip_pos,knee_pos,1,1]), None
+
+
+def normal(obs):
+    return th.randn(size=(4,), dtype=th.float32), None
 
 def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
 
@@ -95,7 +128,8 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
             return th.zeros(size=(action_size,)), None
         
         res = lr_gym.utils.utils.evaluatePolicy(env = env, model = None, episodes = 5, predict_func=oscillate_policy,
-                                                images_return = None, obs_return=None)
+                                                images_return = None, obs_return=None,
+                                                on_ep_done_callback=reset_time_cb)
         print(f"evaluation returned {res}")
 
 

@@ -59,9 +59,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "th_device" : th.device("cpu"),
         "control_mode" : "position_and_gains",
         "video_save_freq" : 0,
-        "stepLength_sec" : 0.02,
+        "stepLength_sec" : 20/1024, # about 50Hz
         "platform_randomization" : "single",
-        "quiet" : False}
+        "quiet" : False,
+        "mode" : "pybullet",
+        "use_contacts" : True}
 
     hyperparams = {"train_freq" : 50,
                    "grad_steps" : 25,

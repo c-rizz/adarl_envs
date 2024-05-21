@@ -26,7 +26,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "control_mode" : "position_and_gains",
         "video_save_freq" : 1,
         "stepLength_sec" : 1/128,
-        "platform_randomization" : "fixed",
+        "platform_randomization" : "no_platforms",
         "quiet" : False,
         "mode" : args["mode"],
         "use_contacts" : args["mode"].lower().strip() == "pybullet"}
@@ -49,26 +49,10 @@ policy_time = 0
 hdirection = 1
 kdirection = 1
 def oscillate_policy(obs):
-    # global hdirection
-    # global kdirection
     hz = 100 # expected call freq
     hip_pos = obs["vec"][0]
     knee_pos = obs["vec"][3]
-    # # print(f"hip_pos = {hip_pos:.3f} kpos = {knee_pos:.3f}")
 
-    # speed = 10
-    # href = hip_pos + 1/hz*speed*hdirection
-    # kref = knee_pos + 1/hz*speed*kdirection
-    # # kref = href*2
-    # if href > 0.5:
-    #     hdirection = -1
-    # if href < -0.5:
-    #     hdirection = 1
-    # if kref > 0.5:
-    #     kdirection = -1
-    # if kref < -0.5:
-    #     kdirection = 1
-    # print(f"d = {hdirection,kdirection} href = {href:.3f} kref {kref:.3f}")
     rate = 0.5
     hip_range = 0.4
     knee_range = 0.8
@@ -88,10 +72,18 @@ def reset_time_cb(episodeReward, steps, episode):
     global policy_time
     policy_time = 0
 
+keep_h = 0
+keep_k = 0
 def keep(obs):
+    global policy_time, keep_h, keep_k
+    hz = 100 # expected call freq
     hip_pos = obs["vec"][0]
     knee_pos = obs["vec"][3]
-    return th.tensor([hip_pos,knee_pos,1,1]), None
+    if policy_time == 0:
+        keep_h = hip_pos
+        keep_k = knee_pos
+    policy_time += 1/hz
+    return th.tensor([keep_h,keep_k,1,1]), None
 
 
 def normal(obs):
@@ -127,7 +119,7 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
         def zero(obs):
             return th.zeros(size=(action_size,)), None
         
-        res = lr_gym.utils.utils.evaluatePolicy(env = env, model = None, episodes = 5, predict_func=oscillate_policy,
+        res = lr_gym.utils.utils.evaluatePolicy(env = env, model = None, episodes = 5, predict_func=keep, # oscillate_policy,
                                                 images_return = None, obs_return=None,
                                                 on_ep_done_callback=reset_time_cb)
         print(f"evaluation returned {res}")

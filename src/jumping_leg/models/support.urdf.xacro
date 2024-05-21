@@ -4,11 +4,13 @@
 	<xacro:arg name="size_x" default="0.20" />
 	<xacro:arg name="size_y" default="0.50" />
 	<xacro:arg name="size_z" default="0.005" />
+	<xacro:arg name="add_world_link" default="True" />
 
 	<xacro:property name="size_x" default="$(arg size_x)" />
 	<xacro:property name="size_y" default="$(arg size_y)" />
 	<xacro:property name="size_z" default="$(arg size_z)" />
 	<xacro:property name="color_rgba" default="0.3 0.3 0.3 1.0" />
+	<xacro:property name="add_world_link" default="$(arg add_world_link)" />
 
 
 	<material name="support_color">
@@ -23,7 +25,6 @@
 		</inertial>
 	</xacro:macro>
 
-    <!-- <link name="world"/> -->
 
 
 
@@ -84,6 +85,16 @@
 			</material>
       	</visual>
     </gazebo>
+	<gazebo>
+		<static>true</static>
+	</gazebo>
 
+	<xacro:if value="${add_world_link}"> 
+		<link name="world"/>
+		<joint name="world_joint" type="fixed">
+			<parent link="world"/>
+			<child link="plate"/>
+		</joint>
+	</xacro:if>
 
 </robot>

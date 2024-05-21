@@ -2,9 +2,11 @@
 <robot name="red_intangible_ball" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
 	<xacro:arg name="radius" default="0.05" />
+	<xacro:arg name="add_world_link" default="False" />
 
 	<xacro:property name="radius" default="$(arg radius)" />
 	<xacro:property name="color_rgba" default="0.9 0.1 0.1 0.8" />
+	<xacro:property name="add_world_link" default="$(arg add_world_link)" />
 
 
 	<material name="red">
@@ -26,21 +28,30 @@
             <geometry>
                 <sphere radius="${radius}" />
             </geometry>
-			<material name="red"/>
+			<!-- <material name="red"/> -->
         </visual>
 		<xacro:box_inertial mass="0.001" x="${2*radius}" y="${2*radius}" z="${2*radius}" pose_xyz="0 0 0" pose_rpy="0 0 0"/>
 	</link>
 	<gazebo reference="sphere_link">
 		<visual name="visual">
 			<material>
-			<ambient>"${color_rgba}"</ambient>
-			<diffuse>"${color_rgba}"</diffuse>
-			<!--
-			<specular>1 0 0 1</specular>
-			<emissive>1 0 0 1</emissive>
-			-->
+				<ambient>${color_rgba}</ambient>
+				<diffuse>${color_rgba}</diffuse>				
+				<specular>0 0 0 1</specular>
+				<emissive>0 0 0 1</emissive>
 			</material>
       	</visual>
     </gazebo>
+	<gazebo>
+		<static>true</static>
+	</gazebo>
+
+	<xacro:if value="${add_world_link}"> 
+		<link name="world"/>
+		<joint name="world_joint" type="fixed">
+			<parent link="world"/>
+			<child link="sphere_link"/>
+		</joint>
+	</xacro:if>
 
 </robot>

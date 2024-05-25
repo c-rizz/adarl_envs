@@ -114,6 +114,7 @@ def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
                                 outFolder=log_folder+"/videos/RecorderGymWrapper",
                                 saveFrequency_ep=video_save_freq,
                                 vec_obs_key="vec",
+                                overlay_text_xy=(0.025,0.025),
                                 overlay_text_func=lambda vo, a, r, te, tr, info:   f"Step    {info['step_count']: .3f}\n"+
                                                                         f"ImpSum  {info['impulses_sum']: .3f}\n"+
                                                                         f"ExtWork {info['external_work']:+.3f}\n"+

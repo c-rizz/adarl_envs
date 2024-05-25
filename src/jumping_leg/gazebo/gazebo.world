@@ -13,7 +13,7 @@
     <physics name="ode_unlimited_ap" type="ode" default="true">
 
         <max_step_size> 0.0009765625 </max_step_size> <!-- This is exactly 1/1024, this way we can exactli step at 1/128 Hz without floating rounding errors -->
-        <real_time_update_rate>1000</real_time_update_rate>
+        <real_time_update_rate>100</real_time_update_rate>
         <!-- <real_time_factor> 1</real_time_factor> -->
         
         <!-- ODE -->

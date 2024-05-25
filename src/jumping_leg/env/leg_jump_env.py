@@ -710,7 +710,11 @@ class LegJumpEnv(ControlledEnv):
             leg_pose = build_pose(0,0,0,0,0,0,1)
             self._spawned = True
             if isinstance(self._environmentController, PyBulletAdapter):
-                name = self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/protoleg_simplified.urdf.xacro"),
+                # leg_file = lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/protoleg_simplified.urdf.xacro")
+                leg_file = lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/leg_simple.urdf.xacro")
+                # import rospkg
+                # leg_file = rospkg.RosPack().get_path("protoleg")+"/description/urdf/protoleg_test_rig.urdf.xacro"
+                name = self._environmentController.spawn_model(model_file=leg_file,
                                                                 model_name=leg_model_name,
                                                                 pose=leg_pose,
                                                                 model_format="urdf.xacro")
@@ -1123,7 +1127,7 @@ class LegJumpEnv(ControlledEnv):
             else:
                 self._environmentController.build_scenario(launch_file_pkg_and_path = lr_gym.utils.utils.pkgutil_get_path("jumping_leg",
                                                                                                                           "gazebo/all_gazebo_xbot.launch"),
-                                                           launch_file_args={"gui":"false"})
+                                                           launch_file_args={"gui":"true"})
                 self._knee_joint = ("leg","knee_pitch_1")
                 self._hip_joint = ("leg","hip_pitch_1")
                 self._rail_joint = ("leg","rail_joint")

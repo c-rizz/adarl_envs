@@ -11,6 +11,7 @@ import random
 import numpy as np
 import torch as th
 import math
+import lr_gym
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
@@ -68,9 +69,11 @@ def oscillate_policy(obs):
     # print(f"t = {t} href = {href:.3f}={href*2.4:.3f} kref {kref:.3f}={kref*2.4:.3f}")
     return th.tensor([href,kref,1,1]), None
 
-def reset_time_cb(episodeReward, steps, episode):
+def ep_done_cb(episodeReward, steps, episode):
     global policy_time
     policy_time = 0
+    lr_gym.utils.session.default_session.run_info["collected_episodes"] += 1
+    lr_gym.utils.session.default_session.run_info["collected_steps"] += steps
 
 keep_h = 0
 keep_k = 0
@@ -121,7 +124,7 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
         
         res = lr_gym.utils.utils.evaluatePolicy(env = env, model = None, episodes = 5, predict_func=keep, # oscillate_policy,
                                                 images_return = None, obs_return=None,
-                                                on_ep_done_callback=reset_time_cb)
+                                                on_ep_done_callback=ep_done_cb)
         print(f"evaluation returned {res}")
 
 

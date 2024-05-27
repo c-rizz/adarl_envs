@@ -106,6 +106,16 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
                                                         folderName=folderName,
                                                         use_wandb=False)
 
+    policy_name = args["policy"].lower().strip()
+    if policy_name == "keep":
+        policy = keep
+    elif policy_name == "oscillate":
+        policy = oscillate_policy
+    elif policy_name == "random":
+        policy = normal
+    else:
+        raise RuntimeError(f"Invalid policy '{policy_name}'")
+        
     random.seed(seed)
     np.random.seed(seed)
     th.manual_seed(seed)
@@ -121,8 +131,7 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
 
         def zero(obs):
             return th.zeros(size=(action_size,)), None
-        
-        res = lr_gym.utils.utils.evaluatePolicy(env = env, model = None, episodes = 5, predict_func=keep, # oscillate_policy,
+        res = lr_gym.utils.utils.evaluatePolicy(env = env, model = None, episodes = 5, predict_func=policy,
                                                 images_return = None, obs_return=None,
                                                 on_ep_done_callback=ep_done_cb)
         print(f"evaluation returned {res}")
@@ -140,6 +149,7 @@ if __name__ == "__main__":
     ap.set_defaults(feature=True)
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use")
+    ap.add_argument("--policy", default="oscillate", type=str, help="Policy to use (oscillate, keep, random)")
     args = vars(ap.parse_args())
 
     

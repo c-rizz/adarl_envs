@@ -222,7 +222,7 @@ class SAC(RLPolicy):
         model.load_state_dict(th.load(path))
         return model
 
-    def predict(self, observation, deterministic = False):
+    def predict_action(self, observation, deterministic = False):
         # s = {k:v.size() for k,v in observation.items()}
         # ggLog.info(f"predict: observation = {s}")
         action, log_prob, mean = self._actor.sample_action(observation)
@@ -230,6 +230,9 @@ class SAC(RLPolicy):
             return mean
         else:
             return action
+        
+    def get_hidden_state(self):
+        return None
 
     def _update_value_func(self, transitions : TransitionBatch):
         with torch.no_grad():

@@ -58,7 +58,7 @@ class ExperienceCollector():
                     actions = th.as_tensor(np.stack([self._vec_env.single_action_space.sample() for _ in range(num_envs)]))
                 else:
                     th_obs = map_tensor_tree(obs, lambda a: th.as_tensor(a, device = policy_device))
-                    actions = policy.predict(th_obs)
+                    actions = policy.predict_action(th_obs)
                     actions = actions.detach().cpu().numpy()
                 t_post_act = time.monotonic()
 

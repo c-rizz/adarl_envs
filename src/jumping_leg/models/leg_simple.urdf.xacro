@@ -173,7 +173,7 @@
                             pose_rpy = "0 0 0"/>
 	</link>
 
-	<link name="thigh_link_base">
+	<link name="thigh_link1">
 		<visual name = "thigh_link_v">
 			<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
 			<geometry>
@@ -188,12 +188,12 @@
 	   	</collision>
 		<xacro:small_inertial />
 	</link>
-	<link name="thigh_link_com">
+	<link name="thigh_link1_com">
 		<xacro:cylinder_z_inertial mass="${thigh_mass}" height="${thigh_height}" radius="${thigh_width/2}" 
 									pose_xyz="0 0 0" pose_rpy="0 0 0"/>
 	</link>
 
-	<gazebo reference="thigh_link_base">
+	<gazebo reference="thigh_link1">
 		<visual name="thigh_link_v">
 			<material>
 			<ambient>$(arg thigh_color)</ambient>
@@ -209,7 +209,7 @@
 
 
 
-	<link name="shin_link_base">
+	<link name="shin_link1">
 		<!-- shin_height is the knee to foot tip distance, so the actual shin lenght is determined accordingly-->
 		<visual name = "shin_link_v">
 			<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
@@ -225,38 +225,12 @@
 		</collision>
 		<xacro:small_inertial />
 
-		<contact>
-				<!-- 
-				Pybullet defaults maybe are these (from bullet3/examples/Importers/ImportURDFDemo/URDFJointTypes.h line 33)
-				URDFLinkContactInfo()
-					: m_lateralFriction(0.5),
-					m_rollingFriction(0),
-					m_spinningFriction(0),
-					m_restitution(0),
-					m_inertiaScaling(1),
-					m_contactCfm(0),
-					m_contactErp(0),
-					m_contactStiffness(1e4),
-					m_contactDamping(1)
-				-->
-				<lateral_friction value="0.05"/>
-				<rolling_friction value="0.01"/>
-				<!-- <contact_cfm value="0.1 "/> -->
-				<!-- <contact_erp value="0.2"/> -->
-				<restitution value="0.05"/>
-				<!-- <spinning_friction value="0"/> -->
-				<!-- <friction_anchor value="0"/> -->
-				<!-- <inertia_scaling value="0"/> -->
-				<!-- <stiffness value="2500"/> -->
-				<!-- <damping value="8"/>  -->
-			</contact>
-
 	</link>
-	<link name="shin_link_com">
+	<link name="shin_link1_com">
 		<xacro:cylinder_z_inertial mass="${shin_mass}" height="${shin_height}" radius="${shin_width/2}"
 									pose_xyz="0 0 -${shin_height/2}" pose_rpy="0 0 0"/>
 	</link>
-	<gazebo reference="shin_link_base">
+	<gazebo reference="shin_link1">
 		<visual name="visual">
 			<material>
 			<ambient>$(arg shin_color)</ambient>
@@ -338,42 +312,42 @@
        	<limit lower="0.0" upper="2.0" effort="2000000" velocity="100000"/>
         <axis xyz="0 0 1"/>
 	</joint>
-    <joint name="hip_joint" type="revolute">
+    <joint name="hip_joint_1" type="revolute">
     	<parent link="slider_link"/>
-    	<child link="thigh_link_base"/>
+    	<child link="thigh_link1"/>
     	<origin xyz="0 ${hip_y_offset} 0" rpy="0 0 0"/>
 		<dynamics damping="0.0" friction="${hip_friction}"/>
        	<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
         <axis xyz="0 1 0"/>
 	</joint>
-	<joint name="thigh_link_com" type="fixed">
-        <parent link="thigh_link_base"/>
-        <child link="thigh_link_com"/>
+	<joint name="thigh_link1_com" type="fixed">
+        <parent link="thigh_link1"/>
+        <child link="thigh_link1_com"/>
 		<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
     </joint>
 
- 	<joint name="knee_joint" type="revolute">
-    	<parent link="thigh_link_base"/>
-    	<child link="shin_link_base"/>
+ 	<joint name="knee_joint_1" type="revolute">
+    	<parent link="thigh_link1"/>
+    	<child link="shin_link1"/>
     	<origin xyz="0 ${knee_y_offset} -${thigh_height}" rpy="0 0 0"/>
 		<dynamics damping="0.0" friction="${knee_friction}"/>
        	<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
         <axis xyz="0 -1 0"/>
 	</joint>
-	<joint name="shin_link_com" type="fixed">
-        <parent link="shin_link_base"/>
-        <child link="shin_link_com"/>
+	<joint name="shin_link1_com" type="fixed">
+        <parent link="shin_link1"/>
+        <child link="shin_link1_com"/>
 		<origin xyz="0 0 -${shin_height/2}" rpy="0 0 0"/>
     </joint>
 
 	<joint name="foot_center_joint" type="fixed">
-        <parent link="shin_link_base"/>
+        <parent link="shin_link1"/>
         <child link="foot_center_link"/>
     	<origin xyz="0 0 -${shin_height-shin_width}" rpy="0 0 0"/>
     </joint>
 
 	<joint name="foot_joint" type="fixed">
-        <parent link="shin_link_base"/>
+        <parent link="shin_link1"/>
         <child link="foot_link"/>
     	<origin xyz="0 0 -${shin_height}" rpy="0 0 0"/>
     </joint>

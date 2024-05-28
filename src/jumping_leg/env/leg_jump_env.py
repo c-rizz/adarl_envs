@@ -197,8 +197,8 @@ class LegJumpEnv(ControlledEnv):
 
         
 
-        self._knee_joint = ("leg","knee_joint")
-        self._hip_joint = ("leg","hip_joint")
+        self._knee_joint = ("leg","knee_joint_1")
+        self._hip_joint = ("leg","hip_joint_1")
         self._rail_joint = ("leg","rail_joint")
         self._foot_link = ("leg","foot_link")
         self._thigh_base_link = ("leg", "thigh_link_base")
@@ -710,7 +710,6 @@ class LegJumpEnv(ControlledEnv):
             leg_pose = build_pose(0,0,0,0,0,0,1)
             self._spawned = True
             if isinstance(self._environmentController, PyBulletAdapter):
-                # leg_file = lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/protoleg_simplified.urdf.xacro")
                 leg_file = lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/leg_simple.urdf.xacro")
                 # import rospkg
                 # leg_file = rospkg.RosPack().get_path("protoleg")+"/description/urdf/protoleg_test_rig.urdf.xacro"
@@ -1108,15 +1107,15 @@ class LegJumpEnv(ControlledEnv):
             self._environmentController.build_scenario(None)
             self._rendering_cam_name = "simple_camera"
 
-            self._knee_joint = ("leg","knee_pitch_1")
-            self._hip_joint = ("leg","hip_pitch_1")
+            self._knee_joint = ("leg","knee_joint_1")
+            self._hip_joint = ("leg","hip_joint_1")
             self._rail_joint = ("leg","rail_joint")
 
             self._foot_link = ("leg","tip1")
-            self._thigh_base_link = ("leg", "femur1")
-            self._shin_base_link = ("leg", "shin1")
-            self._thigh_com_link = ("leg", "femur1_com")
-            self._shin_com_link = ("leg", "shin1_com")
+            self._thigh_base_link = ("leg", "thigh_link1")
+            self._shin_base_link = ("leg", "shin_link1")
+            self._thigh_com_link = ("leg", "thigh_link1_com")
+            self._shin_com_link = ("leg", "shin_link1_com")
             self._rendering_cam_name = "simple_camera"
             self._support1_base = ("support1","world")
             self._support2_base = ("support2","world")
@@ -1128,15 +1127,15 @@ class LegJumpEnv(ControlledEnv):
                 self._environmentController.build_scenario(launch_file_pkg_and_path = lr_gym.utils.utils.pkgutil_get_path("jumping_leg",
                                                                                                                           "gazebo/all_gazebo_xbot.launch"),
                                                            launch_file_args={"gui":"true"})
-                self._knee_joint = ("leg","knee_pitch_1")
-                self._hip_joint = ("leg","hip_pitch_1")
+                self._knee_joint = ("leg","knee_joint_1")
+                self._hip_joint = ("leg","hip_joint_1")
                 self._rail_joint = ("leg","rail_joint")
 
                 self._foot_link = ("leg","tip1")
-                self._thigh_base_link = ("leg", "femur1")
-                self._shin_base_link = ("leg", "shin1")
-                self._thigh_com_link = ("leg", "femur1_com")
-                self._shin_com_link = ("leg", "shin1_com")
+                self._thigh_base_link = ("leg", "thigh_link1")
+                self._shin_base_link = ("leg", "shin_link1")
+                self._thigh_com_link = ("leg", "thigh_link1_com")
+                self._shin_com_link = ("leg", "shin_link1_com")
                 self._rendering_cam_name = "simple_camera"
                 self._support1_base = ("support1","plate")
                 self._support2_base = ("support2","plate")

@@ -336,7 +336,7 @@ class SAC(OffPolicyAlgorithm):
 
     def predict(
             self,
-            observation: Union[np.ndarray, Dict[str, np.ndarray]],
+            observation: Union[np.ndarray, Dict[Any, np.ndarray], th.Tensor, Dict[Any, th.Tensor]],
             state: Optional[Tuple[np.ndarray, ...]] = None,
             episode_start: Optional[np.ndarray] = None,
             deterministic: bool = False,

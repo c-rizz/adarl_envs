@@ -18,9 +18,9 @@ from jumping_leg.algorithms.sac import SAC, train_off_policy
 from jumping_leg.algorithms.collectors import AsyncProcessExperienceCollector, AsyncThreadExperienceCollector
 import wandb 
 from lr_gym.utils.callbacks import EvalCallback, CheckpointCallbackRB
+import gymnasium as gym
 
-
-def build_vec_env(env_builder_args, log_folder, seed, num_envs):
+def build_vec_env(env_builder_args, log_folder, seed, num_envs) -> gym.vector.VectorEnv:
     builders = [(lambda i: (lambda: build_jumping_leg_env.env_builder(log_folder=log_folder,
                                                   seed=seed+100000*i,
                                                   env_builder_args = env_builder_args)
@@ -29,7 +29,7 @@ def build_vec_env(env_builder_args, log_folder, seed, num_envs):
     envs = VectorEnvLogger(env = envs)
     return envs
 
-def build_sac(obs_space, act_space, hyperparams):
+def build_sac(obs_space : gym.Space, act_space : gym.Space, hyperparams):
     return SAC(observation_space=obs_space,
                 action_size=int(np.prod(act_space.shape)),
                 q_network_arch=[512,256],

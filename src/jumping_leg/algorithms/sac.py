@@ -86,16 +86,16 @@ class Actor(nn.Module):
         self.register_buffer("action_scale", torch.as_tensor((action_max - action_min) / 2.0, dtype=torch.float32, device=torch_device))
         self.register_buffer("action_bias",  torch.as_tensor((action_max + action_min) / 2.0, dtype=torch.float32, device=torch_device))
 
-    def forward(self, observations):
-        observations = self._obs_converter.getVectorPart(observation_batch=observations)
-        observations = self.act_fc(observations)
-        mean = self.act_fc_mean(observations)
-        log_std = self.act_fc_logstd(observations)
+    def forward(self, observation_batch):
+        observation_batch = self._obs_converter.getVectorPart(observation_batch=observation_batch)
+        observation_batch = self.act_fc(observation_batch)
+        mean = self.act_fc_mean(observation_batch)
+        log_std = self.act_fc_logstd(observation_batch)
         log_std = (torch.tanh(log_std)+1)*0.5*(self._log_std_max - self._log_std_min) + self._log_std_min
         return mean, log_std
 
-    def sample_action(self, observations):
-        mean, log_std = self(observations)
+    def sample_action(self, observation_batch):
+        mean, log_std = self(observation_batch)
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
@@ -152,6 +152,7 @@ class SAC(RLPolicy):
         _, _, _, values = inspect.getargvalues(inspect.currentframe())
         self._init_args = values
         self._init_args.pop("self")
+        self._init_args.pop("__class__")
         self._hp = SAC.Hyperparams(q_lr=q_lr,
                                    policy_lr = policy_lr,
                                    gamma=gamma,
@@ -216,16 +217,16 @@ class SAC(RLPolicy):
     @staticmethod
     def load(path : str):
         with open(path+".extra.yaml", "r") as init_args_yamlfile:
-            extra = yaml.safe_load(init_args_yamlfile)
+            extra = yaml.load(init_args_yamlfile, Loader=yaml.CLoader)
         model = SAC(**extra["init_args"])
         model._hp = SAC.Hyperparams(**extra["hyperparams"]) # shouldn't be necessary, but shouldn't hurt
         model.load_state_dict(th.load(path))
         return model
 
-    def predict(self, observation, deterministic = False):
+    def predict(self, observation_batch, deterministic = False):
         # s = {k:v.size() for k,v in observation.items()}
         # ggLog.info(f"predict: observation = {s}")
-        action, log_prob, mean = self._actor.sample_action(observation)
+        action, log_prob, mean = self._actor.sample_action(observation_batch)
         if deterministic:
             return mean
         else:

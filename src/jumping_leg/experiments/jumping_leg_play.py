@@ -2,7 +2,8 @@
 
 import time
 import inspect
-from jumping_leg.utils.modded_sac import SAC
+from jumping_leg.utils.modded_sac import SAC as SB3_SAC
+from jumping_leg.algorithms.sac import SAC
 from stable_baselines3.ppo import PPO
 import lr_gym.utils.dbg.ggLog as ggLog
 import lr_gym.utils.utils
@@ -21,8 +22,13 @@ import stable_baselines3.common.base_class
 import stable_baselines3.common.on_policy_algorithm
 import lr_gym.utils.dbg.dbg_img as dbg_img 
 from lr_gym.utils.keyboard_listener import KeyboardListener
+from lr_gym.utils.tensor_trees import map_tensor_tree, TensorTree
+
 def load_model(model_path):
-    return SAC.load(model_path)
+    try:
+        return SB3_SAC.load(model_path)
+    except:
+        return SAC.load(model_path)
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args = {
@@ -37,7 +43,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "control_mode" : "torque",
         "video_save_freq" : 0,
         "stepLength_sec" : 0.01,
-        "platform_randomization" : "single"
+        "platform_randomization" : "single",
+        "mode" : "pybullet",
+        "use_contacts" : False,
+        "quiet" : False
                         }
     args.update({
         "batch_size" : 16384,
@@ -106,15 +115,17 @@ def play(seed, folderName, run_id, args, env_builder_args):
                 cmd = 'c'   
         if not play:
             break
-        obs, info = env.reset(options = options)
-        ggLog.info(f"ep_config = {info['ep_config']}")
+        obs : TensorTree[th.Tensor]
+        obs, info = env.reset(options = options)  #type: ignore
+        # ggLog.info(f"ep_config = {info['ep_config']}")
         done = False
         ep_reward = 0
         while not done:
             t0 = time.monotonic()
             # ggLog.info(f"ep_config = {info['ep_config']}")
-            action, hidden_state = model.predict(obs, deterministic = True)
-            obs, reward, terminated, truncated, info = env.step(action)
+            obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
+            action, hidden_state = model.predict(obs_batch, deterministic = True)
+            obs, reward, terminated, truncated, info = env.step(action) #type: ignore
             img = env.render()
             dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
             if verbose:

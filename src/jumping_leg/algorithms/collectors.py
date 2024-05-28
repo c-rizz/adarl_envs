@@ -5,7 +5,7 @@ import time
 import gymnasium as gym
 import numpy as np
 import torch as th
-from typing import List, Union, NamedTuple, Dict, Optional, Callable, Literal
+from typing import List, Union, NamedTuple, Dict, Optional, Callable, Literal, Any
 from lr_gym.utils.tensor_trees import map_tensor_tree, unstack_tensor_tree, stack_tensor_tree
 import lr_gym.utils.dbg.ggLog as ggLog
 import copy
@@ -187,7 +187,7 @@ class AsyncThreadExperienceCollector(ExperienceCollector):
 
 
 class AsyncProcessExperienceCollector(ExperienceCollector):
-    def __init__(self, vec_env_builder,
+    def __init__(self, vec_env_builder : Callable[[],gym.vector.VectorEnv],
                  base_model_builder : Callable[[gym.spaces.Space, gym.spaces.Space],th.nn.Module],
                  buffer_size, storage_torch_device, start_method : Literal['fork', 'spawn', 'forkserver']= "forkserver",
                  session : session.Session = None,
@@ -213,12 +213,14 @@ class AsyncProcessExperienceCollector(ExperienceCollector):
 
         self._commander.set_command("build")
         self._commander.wait_done(timeout=60)
+        self._obs_space : gym.Space
+        self._action_space : gym.Space
         self._buffer, self._obs_space, self._action_space, self._num_envs, self._collector_model = self._pipe.recv()
 
-    def observation_space(self):
+    def observation_space(self) -> gym.Space:
         return self._obs_space
     
-    def action_space(self):
+    def action_space(self) -> gym.Space:
         return self._action_space
 
     def num_envs(self):
@@ -235,7 +237,7 @@ class AsyncProcessExperienceCollector(ExperienceCollector):
             cmd = self._commander.wait_command()
             # ggLog.info(f"got command {cmd}")
             if cmd == b"build":
-                self._vec_env = self._vec_env_builder.var()
+                self._vec_env : gym.vector.VectorEnv = self._vec_env_builder.var()
                 self.reset()
                 self._buffer = BasicStorage(buffer_size = self._buffer_size,
                                             observation_space=self._vec_env.single_observation_space,

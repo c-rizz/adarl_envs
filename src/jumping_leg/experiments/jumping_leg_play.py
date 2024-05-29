@@ -30,31 +30,27 @@ def load_model(model_path):
     except:
         return SAC.load(model_path)
 
+
+
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
+
     env_builder_args = {
-        "reward_contacts_weight" : 0.0, # ("uniform", 0, 1),
+        "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
         "reward_position_limit_weight" : 10.0,
         "reward_torque_limit_weight" : 1.0,
-        "reward_torque_weight" : 0.0,
+        "reward_torque_weight" : 0.1,
         "reward_tracking_weight" : 1.0,
         "reward_velocity_weight" : 0.0,
         "th_device" : th.device("cpu"),
-        "control_mode" : "torque",
+        "control_mode" : "position_and_gains",
         "video_save_freq" : 0,
-        "stepLength_sec" : 0.01,
+        "stepLength_sec" : 20/1024, # about 50Hz
         "platform_randomization" : "single",
+        "quiet" : False,
         "mode" : "pybullet",
-        "use_contacts" : False,
-        "quiet" : False
-                        }
-    args.update({
-        "batch_size" : 16384,
-        "lr" : 0.005,
-        "train_steps" : 50,
-        "train_freq" : 50,
-        "algorithm" : "sac"
-                 })
+        "use_contacts" : True}
+
     return play(seed, folderName, run_id, args, env_builder_args)
 
 def play(seed, folderName, run_id, args, env_builder_args):
@@ -122,10 +118,10 @@ def play(seed, folderName, run_id, args, env_builder_args):
         ep_reward = 0
         while not done:
             t0 = time.monotonic()
-            # ggLog.info(f"ep_config = {info['ep_config']}")
+            ggLog.info(f"ep_config = {info['ep_config']}")
             obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
             action, hidden_state = model.predict(obs_batch, deterministic = True)
-            obs, reward, terminated, truncated, info = env.step(action) #type: ignore
+            obs, reward, terminated, truncated, info = env.step(action.squeeze()) #type: ignore
             img = env.render()
             dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
             if verbose:

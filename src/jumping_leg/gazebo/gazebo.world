@@ -7,7 +7,9 @@
     <gravity>0 0 -9.80665</gravity>
 
 
-    <plugin name='lr_gym_ros_env' filename='libgazebo_gym_env_plugin.so'/>
+    <plugin name='lr_gym_ros_env' filename='libgazebo_gym_env_plugin.so'>
+      <joint_state_smoothing value="0.0"/>
+    </plugin>
     <plugin name='xbot2_gz_clock' filename='libxbot2_gz_clock.so'/> <!-- xbot2 clock plugin (enables the clock synchronization on the XBot2 side according to Gazebo's simulation time) -->
 
     <physics name="ode_unlimited_ap" type="ode" default="true">
@@ -179,7 +181,7 @@
                 <kd>80</kd>
                 <!-- Equivalent to CFM = 10e-2, ERP = 0.2, with step size = 10^-3,
                     See http://www.ode.org/ode-latest-userguide.html#sec_3_8_2 -->                                                                                                                                                                 
-              </ode>                                                                                                                                                                            
+              </ode>
             </contact>                                                                                                                                                                          
             <friction>
               <!--

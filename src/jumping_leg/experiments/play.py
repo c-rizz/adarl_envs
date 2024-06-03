@@ -26,7 +26,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "th_device" : th.device("cpu"),
         "control_mode" : "position_and_gains",
         "video_save_freq" : 1,
-        "stepLength_sec" : 1/128,
+        "stepLength_sec" : 1/1024,
         "platform_randomization" : "no_platforms",
         "quiet" : False,
         "mode" : args["mode"],
@@ -50,7 +50,7 @@ policy_time = 0
 hdirection = 1
 kdirection = 1
 def oscillate_policy(obs):
-    hz = 100 # expected call freq
+    hz = 1000 # expected call freq
     hip_pos = obs["vec"][0]
     knee_pos = obs["vec"][3]
 

@@ -482,7 +482,8 @@ class LegJumpEnv(ControlledEnv):
 
     def submitAction(self, action : th.Tensor) -> None:
         # ggLog.info(f"Submitting action {action}")
-        action = action.detach()
+        if isinstance(action, th.Tensor):
+            action = action.detach()
         super().submitAction(action)
         dt = self._configuration.stepLength_sec
         alpha = self._configuration.action_exp_smoothing_1s**(dt/1)
@@ -845,22 +846,28 @@ class LegJumpEnv(ControlledEnv):
                         ggLog.warn(f"Failed to move to joint position. Error = {exc_to_str(e)}")
             # raise RuntimeError("")
 
-    def _place_objects(self):
+    def _place_objects(self, support1_xz=None, support2_xz=None, goal_z=None):
         if not isinstance(self._environmentController, BaseSimulationAdapter):
             raise RuntimeError("Cannot place objects in the real")
         # ggLog.info(f"Placing supports")
         # ggLog.info(f"placing: _current_episode_config {self._current_episode_config}")
+        if support1_xz is None:
+            support1_xz = self._current_episode_config.support1_pos_x,self._current_episode_config.support1_pos_z
+        if support2_xz is None:
+            support2_xz = self._current_episode_config.support2_pos_x,self._current_episode_config.support2_pos_z 
+        if goal_z is None:
+            goal_z = self._current_episode_config.hip_goal_z
         self._environmentController.setLinksStateDirect({self._support1_base : 
-                                                        LinkState( position_xyz = th.tensor((self._current_episode_config.support1_pos_x,
-                                                                                            0.3,
-                                                                                            self._current_episode_config.support1_pos_z)),
+                                                        LinkState( position_xyz = th.tensor((support1_xz[0],
+                                                                                             0.3,
+                                                                                             support1_xz[1])),
                                                                     orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
                                                                     pos_velocity_xyz = th.tensor((0.,0.,0)),
                                                                     ang_velocity_xyz = th.tensor((0.,0.,0.)))})
         self._environmentController.setLinksStateDirect({self._support2_base :
-                                                        LinkState(position_xyz = th.tensor((self._current_episode_config.support2_pos_x,
+                                                        LinkState(position_xyz = th.tensor((support2_xz[0],
                                                                                             0.3,
-                                                                                            self._current_episode_config.support2_pos_z)),
+                                                                                            support2_xz[1])),
                                                                     orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
                                                                     pos_velocity_xyz = th.tensor((0.,0.,0)),
                                                                     ang_velocity_xyz = th.tensor((0.,0.,0.)))})
@@ -868,13 +875,16 @@ class LegJumpEnv(ControlledEnv):
             self._environmentController.setLinksStateDirect({self._red_ball_base :
                                                             LinkState( position_xyz = th.tensor((0.,
                                                                                                 0.2,
-                                                                                                self._current_episode_config.hip_goal_z)),
+                                                                                                goal_z)),
                                                                         orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
                                                                         pos_velocity_xyz = th.tensor((0.,0.,0)),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.)))})
 
     def _simulation_initialization(self):
         if isinstance(self._environmentController, BaseSimulationAdapter):
+            self._place_objects(support1_xz=(10,10),
+                                support2_xz=(10,10),
+                                goal_z=10)
             if self._current_episode_config.support2_pos_x > 0:
                 rpos, hpos, kpos = self._start_height, 3.4159/4,  3.14159/2
             else:
@@ -890,7 +900,9 @@ class LegJumpEnv(ControlledEnv):
             # if self._environmentController.__class__.__name__== "RosXbotGazeboAdapter":
             self._environmentController.freerun(3.0) # let the leg fall
             # ggLog.info(f"jpos set")
-            self._place_objects()
+            self._place_objects(support1_xz=(self._current_episode_config.support1_pos_x,self._current_episode_config.support1_pos_z),
+                                support2_xz=(self._current_episode_config.support2_pos_x, self._current_episode_config.support2_pos_z),
+                                goal_z=self._current_episode_config.hip_goal_z)
             # jpos = {k:v.position for k,v in self._environmentController.getJointsState(requestedJoints=[self._rail_joint, self._hip_joint, self._knee_joint]).items()}
             # ggLog.info(f"Init: current jpos = {jpos}")
         else:

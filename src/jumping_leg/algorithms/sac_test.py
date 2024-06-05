@@ -14,8 +14,8 @@ import lr_gym.utils.session
 from lr_gym.envs.vector_env_logger import VectorEnvLogger
 from lr_gym.utils.buffers import ThDReplayBuffer
 import lr_gym.utils.sigint_handler
-from jumping_leg.algorithms.sac import SAC, train_off_policy
-from jumping_leg.algorithms.collectors import AsyncProcessExperienceCollector, AsyncThreadExperienceCollector
+from rreal.algorithms.sac import SAC, train_off_policy
+from rreal.algorithms.collectors import AsyncProcessExperienceCollector, AsyncThreadExperienceCollector
 import wandb 
 from lr_gym.utils.callbacks import EvalCallback, CheckpointCallbackRB
 import gymnasium as gym

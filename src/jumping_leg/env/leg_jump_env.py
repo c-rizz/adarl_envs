@@ -265,6 +265,7 @@ class LegJumpEnv(ControlledEnv):
         halflife_s = 0.05
         action_exp_smoothing_1s = 0.5**(1/halflife_s)
 
+
         self._configuration = LegJumpEnv.EnvConfiguration(  reward_contacts_weight = reward_contacts_weight,
                                                             reward_energy_weight = reward_energy_weight,
                                                             reward_max_impulse = 10,
@@ -410,6 +411,7 @@ class LegJumpEnv(ControlledEnv):
                                                 self.STATE.SUPPORT1_Z,
                                                 self.STATE.SUPPORT2_X,
                                                 self.STATE.SUPPORT2_Z], device=self._th_device)
+
         self._constant_obs_part = th.as_tensor([self.STATE.HIP_GOAL_Z,
                                                 self.STATE.REWARD_TORQUE_LIMIT_WEIGHT,
                                                 self.STATE.REWARD_POSITION_LIMIT_WEIGHT,
@@ -443,6 +445,13 @@ class LegJumpEnv(ControlledEnv):
             
         action_space_high = np.array([1]*action_len)
         action_space = spaces.gym_spaces.Box(-action_space_high,action_space_high, seed=seed)
+
+        ep_obs_white_noise_std = 0.01 * th.ones_like(self._stacked_obs_part, dtype=th.float32, device=self._th_device)
+        step_obs_white_noise_std = 0.01 * th.ones_like(self._stacked_obs_part, dtype=th.float32, device=self._th_device)
+        action_white_noise_std = 0.01 * th.ones(size=(action_len,), dtype=th.float32, device=self._th_device)
+        # delay noises will actually be discretized by the step_length
+        action_delay_noise_mustd = th.tensor([0.01,0.01], dtype=th.float32, device=self._th_device)
+        obs_delay_noise_mustd = th.tensor([0.01,0.01], dtype=th.float32, device=self._th_device)
 
 
         super().__init__(maxStepsPerEpisode = maxStepsPerEpisode,
@@ -889,7 +898,7 @@ class LegJumpEnv(ControlledEnv):
                 rpos, hpos, kpos = self._start_height, 3.4159/4,  3.14159/2
             else:
                 rpos, hpos, kpos = self._start_height, -3.4159/4, -3.14159/2
-            ggLog.info(f"Directly setting jpos = {rpos, hpos, kpos}")
+            # ggLog.info(f"Directly setting jpos = {rpos, hpos, kpos}")
             self._environmentController.setJointsStateDirect({self._rail_joint: JointState(position = self._start_height, rate=0, effort=0),
                                                             self._hip_joint:  JointState(position = hpos, rate=0, effort=0),
                                                             self._knee_joint: JointState(position = kpos, rate=0, effort=0)})

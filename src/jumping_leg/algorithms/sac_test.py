@@ -8,16 +8,16 @@ import numpy as np
 import torch
 import torch as th
 import jumping_leg.experiments.build_jumping_leg_env as build_jumping_leg_env
-from lr_gym.utils.async_vector_env import AsyncVectorEnvShmem
+from adarl.utils.async_vector_env import AsyncVectorEnvShmem
 import inspect
-import lr_gym.utils.session
-from lr_gym.envs.vector_env_logger import VectorEnvLogger
-from lr_gym.utils.buffers import ThDReplayBuffer
-import lr_gym.utils.sigint_handler
+import adarl.utils.session
+from adarl.envs.vector_env_logger import VectorEnvLogger
+from adarl.utils.buffers import ThDReplayBuffer
+import adarl.utils.sigint_handler
 from rreal.algorithms.sac import SAC, train_off_policy
 from rreal.algorithms.collectors import AsyncProcessExperienceCollector, AsyncThreadExperienceCollector
 import wandb 
-from lr_gym.utils.callbacks import EvalCallback, CheckpointCallbackRB
+from adarl.utils.callbacks import EvalCallback, CheckpointCallbackRB
 import gymnasium as gym
 
 def build_vec_env(env_builder_args, log_folder, seed, num_envs) -> gym.vector.VectorEnv:
@@ -84,7 +84,7 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
     # print(f"active threads = {threading.enumerate()}")
     # threading.Thread.__init__ = threadwrapper
     # torchexplorer.setup()
-    log_folder, session = lr_gym.utils.session.lr_gym_startup(   __file__,
+    log_folder, session = adarl.utils.session.adarl_startup(   __file__,
                                                         inspect.currentframe(),
                                                         seed=seed,
                                                         experiment_name=os.path.basename(__file__),
@@ -197,7 +197,7 @@ if __name__ == "__main__":
     import os
     import argparse
     import multiprocessing
-    from lr_gym.utils.session import launchRun
+    from adarl.utils.session import launchRun
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--seedsNum", default=1, type=int, help="Number of seeds to test with")
@@ -217,5 +217,5 @@ if __name__ == "__main__":
                 resumeFolder = None,
                 args = args,
                 debug_level = -10,
-                start_lr_gym=False,
-                pkgs_to_save=["lr_gym","jumping_leg"])
+                start_adarl=False,
+                pkgs_to_save=["adarl","jumping_leg"])

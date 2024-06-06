@@ -1,14 +1,14 @@
 
 from jumping_leg.env.leg_jump_env import LegJumpEnv
-from lr_gym.envs.GymEnvWrapper import GymEnvWrapper
-from lr_gym.envs.RecorderGymWrapper import RecorderGymWrapper
-import lr_gym.utils.dbg.ggLog as ggLog
+from adarl.envs.GymEnvWrapper import GymEnvWrapper
+from adarl.envs.RecorderGymWrapper import RecorderGymWrapper
+import adarl.utils.dbg.ggLog as ggLog
 import torch as th
 from gymnasium.wrappers.normalize import NormalizeObservation
 import threading, os
 import traceback
 import time
-from lr_gym.adapters.BaseSimulationAdapter import BaseSimulationAdapter
+from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 
 def env_builder(seed, log_folder, env_builder_args, no_dict = False):
     ggLog.info(f"Building env: thread={threading.current_thread()}, pid={os.getpid()}")
@@ -19,13 +19,13 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
 
     mode = env_builder_args["mode"].strip().lower()
     if mode == "gz":
-        from lr_gym_ros2.adapters.GzController import GzController
+        from adarl_ros2.adapters.GzController import GzController
         env_controller = GzController(stepLength_sec=stepLength_sec)
     elif mode == "gazebo":
-        from lr_gym_ros.adapters.GazeboAdapter import GazeboAdapter
+        from adarl_ros.adapters.GazeboAdapter import GazeboAdapter
         env_controller = GazeboAdapter(stepLength_sec=stepLength_sec)
     elif mode == "xbot":
-        from lr_gym_ros.adapters.RosXbotAdapter import RosXbotAdapter
+        from adarl_ros.adapters.RosXbotAdapter import RosXbotAdapter
         env_controller = RosXbotAdapter(model_name = "leg",
                                         stepLength_sec = stepLength_sec,
                                         forced_ros_master_uri = None,
@@ -42,7 +42,7 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
                                         jpos_cmd_max_acc = {},
                                         jpos_cmd_max_acc_default = 1.0)
     elif mode == "xbot-gazebo":
-        from lr_gym_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
+        from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
         env_controller = RosXbotGazeboAdapter(model_name = "leg",
                                         stepLength_sec = stepLength_sec,
                                         forced_ros_master_uri = None,
@@ -59,7 +59,7 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
                                         jpos_cmd_max_acc = {},
                                         jpos_cmd_max_acc_default = 10.0)
     elif mode == "pybullet":
-        from lr_gym.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
+        from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
         env_controller = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
                                                        restore_on_reset=False,
                                                        debug_gui=False,
@@ -95,7 +95,7 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
                         use_contacts=env_builder_args["use_contacts"],
                         step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
     if no_dict:
-        from lr_gym.envs.lr_wrappers.ObsDict2FlatBox import ObsDict2FlatBox
+        from adarl.envs.lr_wrappers.ObsDict2FlatBox import ObsDict2FlatBox
         lrenv = ObsDict2FlatBox(lrenv, "vec")
     env = GymEnvWrapper(env=lrenv, episodeInfoLogFile=log_folder+f"/GymEnvWrapperLog.{seed}.log",
                         quiet=env_builder_args["quiet"])

@@ -7,19 +7,19 @@ import numpy as np
 from stable_baselines3.td3.policies import MlpPolicy, MultiInputPolicy
 from stable_baselines3 import TD3
 from stable_baselines3.common.noise import NormalActionNoise
-from lr_gym.envs.GymEnvWrapper import GymEnvWrapper
-import lr_gym.utils.dbg.ggLog as ggLog
-import lr_gym.utils.utils
+from adarl.envs.GymEnvWrapper import GymEnvWrapper
+import adarl.utils.dbg.ggLog as ggLog
+import adarl.utils.utils
 
-from lr_gym.envs.GymToLr import GymToLr
-from lr_gym.envs.lr_wrappers.ObsToDict import ObsToDict
+from adarl.envs.GymToLr import GymToLr
+from adarl.envs.lr_wrappers.ObsToDict import ObsToDict
 import os
-from lr_gym.envs.RecorderGymWrapper import RecorderGymWrapper
-from lr_gym.utils.buffers import ThDReplayBuffer
-from lr_gym.envs.NestedDictFlattenerGymWrapper import NestedDictFlattenerGymWrapper
-from lr_gym.envs.lr_wrappers.ObsToImgVecDict import ObsToImgVecDict
+from adarl.envs.RecorderGymWrapper import RecorderGymWrapper
+from adarl.utils.buffers import ThDReplayBuffer
+from adarl.envs.NestedDictFlattenerGymWrapper import NestedDictFlattenerGymWrapper
+from adarl.envs.lr_wrappers.ObsToImgVecDict import ObsToImgVecDict
 import torch as th
-import lr_gym.utils.session
+import adarl.utils.session
 from jumping_leg.experiments.build_jumping_leg_env import build_env
 from wandb.integration.sb3 import WandbCallback
 
@@ -35,7 +35,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     """
     ggLog.info(f"Starting run")
-    log_folder, session = lr_gym.utils.session.lr_gym_startup(   __file__,
+    log_folder, session = adarl.utils.session.adarl_startup(   __file__,
                                                         inspect.currentframe(),
                                                         seed=seed,
                                                         folderName=folderName,
@@ -44,7 +44,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                         run_comment=args["comment"])
 
     th.cuda.set_sync_debug_mode("warn")
-    device = lr_gym.utils.utils.torch_selectBestGpu()
+    device = adarl.utils.utils.torch_selectBestGpu()
     ggLog.info("Building env...")
     env, lrenv = build_env(log_folder, 10, th_device = th.device("cpu"))
     ggLog.info("Built")
@@ -82,7 +82,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     ggLog.info("Learned. Took "+str(duration_learn)+" seconds.")
 
 
-    # res = lr_gym.utils.utils.evaluatePolicy(env = eval_env, model = None, episodes = 10, predict_func=model.predict)
+    # res = adarl.utils.utils.evaluatePolicy(env = eval_env, model = None, episodes = 10, predict_func=model.predict)
     # print(f"Summary:\n{res}")
 
 if __name__ == "__main__":
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     import os
     import argparse
     import multiprocessing
-    from lr_gym.utils.session import launchRun
+    from adarl.utils.session import launchRun
 
     ap = argparse.ArgumentParser()
     # ap.add_argument("--evaluate", default=None, type=str, help="Load and evaluate model file")

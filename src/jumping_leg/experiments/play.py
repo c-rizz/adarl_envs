@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 
-import lr_gym.utils.session
+import adarl.utils.session
 import inspect
 import os
 import datetime
 import torch as th
-import lr_gym.utils.utils
+import adarl.utils.utils
 import jumping_leg.experiments.build_jumping_leg_env as build_jumping_leg_env
 import random
 import numpy as np
 import torch as th
 import math
-import lr_gym
+import adarl
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
@@ -72,8 +72,8 @@ def oscillate_policy(obs):
 def ep_done_cb(episodeReward, steps, episode):
     global policy_time
     policy_time = 0
-    lr_gym.utils.session.default_session.run_info["collected_episodes"] += 1
-    lr_gym.utils.session.default_session.run_info["collected_steps"] += steps
+    adarl.utils.session.default_session.run_info["collected_episodes"] += 1
+    adarl.utils.session.default_session.run_info["collected_steps"] += steps
 
 keep_h = 0
 keep_k = 0
@@ -97,7 +97,7 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
     # print(f"active threads = {threading.enumerate()}")
     # threading.Thread.__init__ = threadwrapper
     # torchexplorer.setup()
-    log_folder, session = lr_gym.utils.session.lr_gym_startup(   __file__,
+    log_folder, session = adarl.utils.session.adarl_startup(   __file__,
                                                         inspect.currentframe(),
                                                         seed=seed,
                                                         experiment_name=os.path.basename(__file__),
@@ -131,7 +131,7 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
 
         def zero(obs):
             return th.zeros(size=(action_size,)), None
-        res = lr_gym.utils.utils.evaluatePolicy(env = env, model = None, episodes = 5, predict_func=policy,
+        res = adarl.utils.utils.evaluatePolicy(env = env, model = None, episodes = 5, predict_func=policy,
                                                 images_return = None, obs_return=None,
                                                 on_ep_done_callback=ep_done_cb)
         print(f"evaluation returned {res}")
@@ -142,7 +142,7 @@ if __name__ == "__main__":
 
     import os
     import argparse
-    from lr_gym.utils.session import launchRun
+    from adarl.utils.session import launchRun
 
     ap = argparse.ArgumentParser()
 
@@ -161,5 +161,5 @@ if __name__ == "__main__":
                 resumeFolder = None,
                 args = args,
                 debug_level = -10,
-                start_lr_gym=False,
-                pkgs_to_save=["lr_gym","jumping_leg"])
+                start_adarl=False,
+                pkgs_to_save=["adarl","jumping_leg"])

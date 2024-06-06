@@ -7,7 +7,7 @@
     <gravity>0 0 -9.80665</gravity>
 
 
-    <plugin name='lr_gym_ros_env' filename='libgazebo_gym_env_plugin.so'>
+    <plugin name='adarl_ros_env' filename='libgazebo_gym_env_plugin.so'>
       <joint_state_smoothing value="0.0"/>
     </plugin>
     <plugin name='xbot2_gz_clock' filename='libxbot2_gz_clock.so'/> <!-- xbot2 clock plugin (enables the clock synchronization on the XBot2 side according to Gazebo's simulation time) -->

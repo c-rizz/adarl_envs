@@ -4,19 +4,19 @@ import time
 import inspect
 from jumping_leg.utils.modded_sac import SAC
 from stable_baselines3.ppo import PPO
-import lr_gym.utils.dbg.ggLog as ggLog
-import lr_gym.utils.utils
+import adarl.utils.dbg.ggLog as ggLog
+import adarl.utils.utils
 
 import os
-from lr_gym.utils.buffers import ThDReplayBuffer
+from adarl.utils.buffers import ThDReplayBuffer
 import torch as th
-import lr_gym.utils.session
+import adarl.utils.session
 from jumping_leg.experiments.build_jumping_leg_env import env_builder
 from wandb.integration.sb3 import WandbCallback
 # from stable_baselines3.common.vec_env import SubprocVecEnv
-from lr_gym.utils.subproc_vec_env import SubprocVecEnv
-from lr_gym.envs.VecEnvLogger import VecEnvLogger
-from lr_gym.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback, PrintLrRunInfo, CheckpointCallbackRB
+from adarl.utils.subproc_vec_env import SubprocVecEnv
+from adarl.envs.VecEnvLogger import VecEnvLogger
+from adarl.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback, PrintLrRunInfo, CheckpointCallbackRB
 import stable_baselines3.common.base_class
 import stable_baselines3.common.on_policy_algorithm
 
@@ -95,7 +95,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 def solve_sac(seed, folderName, run_id, args, env_builder_args):
     
     ggLog.info(f"Starting run")
-    log_folder, session = lr_gym.utils.session.lr_gym_startup(   __file__,
+    log_folder, session = adarl.utils.session.adarl_startup(   __file__,
                                                         inspect.currentframe(),
                                                         seed=seed,
                                                         folderName=folderName,
@@ -104,7 +104,7 @@ def solve_sac(seed, folderName, run_id, args, env_builder_args):
                                                         run_comment=args["comment"])
 
     th.cuda.set_sync_debug_mode("warn")
-    device = lr_gym.utils.utils.torch_selectBestGpu()
+    device = adarl.utils.utils.torch_selectBestGpu()
     ggLog.info("Building env...")
 
     
@@ -196,7 +196,7 @@ if __name__ == "__main__":
     import os
     import argparse
     import multiprocessing
-    from lr_gym.utils.session import launchRun
+    from adarl.utils.session import launchRun
 
     ap = argparse.ArgumentParser()
     # ap.add_argument("--evaluate", default=None, type=str, help="Load and evaluate model file")
@@ -228,5 +228,5 @@ if __name__ == "__main__":
                 resumeFolder = args["resumeFolder"],
                 args = args,
                 debug_level = -10,
-                start_lr_gym=False,
-                pkgs_to_save=["lr_gym","jumping_leg"])
+                start_adarl=False,
+                pkgs_to_save=["adarl","jumping_leg"])

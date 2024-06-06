@@ -7,24 +7,24 @@ Based on ControlledEnv
 
 
 
-import lr_gym.utils.spaces as spaces
+import adarl.utils.spaces as spaces
 import numpy as np
 from typing import Tuple, Dict, Any, Union, Optional, List, Literal
-import lr_gym.utils.dbg.ggLog as ggLog
+import adarl.utils.dbg.ggLog as ggLog
 import random
-import lr_gym.utils.spaces as spaces
+import adarl.utils.spaces as spaces
 
-from lr_gym.envs.ControlledEnv import ControlledEnv
-import lr_gym
-from lr_gym.utils.utils import Pose, build_pose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle, MoveFailError, exc_to_str
-from lr_gym.adapters.BaseSimulationAdapter import BaseSimulationAdapter
+from adarl.envs.ControlledEnv import ControlledEnv
+import adarl
+from adarl.utils.utils import Pose, build_pose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle, MoveFailError, exc_to_str
+from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 import torch as th
-import lr_gym.utils.utils
+import adarl.utils.utils
 from enum import IntEnum
-from lr_gym.adapters.BaseAdapter import BaseAdapter
-from lr_gym.adapters.BaseJointImpedanceAdapter import BaseJointImpedanceAdapter
-from lr_gym.adapters.BaseJointPositionAdapter import BaseJointPositionAdapter
-from lr_gym.adapters.PyBulletAdapter import PyBulletAdapter
+from adarl.adapters.BaseAdapter import BaseAdapter
+from adarl.adapters.BaseJointImpedanceAdapter import BaseJointImpedanceAdapter
+from adarl.adapters.BaseJointPositionAdapter import BaseJointPositionAdapter
+from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 import dataclasses
 from dataclasses import dataclass
 import time
@@ -721,14 +721,14 @@ class LegJumpEnv(ControlledEnv):
             leg_pose = build_pose(0,0,0,0,0,0,1)
             self._spawned = True
             if isinstance(self._environmentController, PyBulletAdapter):
-                leg_file = lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/leg_simple.urdf.xacro")
+                leg_file = adarl.utils.utils.pkgutil_get_path("jumping_leg","models/leg_simple.urdf.xacro")
                 # import rospkg
                 # leg_file = rospkg.RosPack().get_path("protoleg")+"/description/urdf/protoleg_test_rig.urdf.xacro"
                 name = self._environmentController.spawn_model(model_file=leg_file,
                                                                 model_name=leg_model_name,
                                                                 pose=leg_pose,
                                                                 model_format="urdf.xacro")
-            self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("lr_gym","models/simple_camera.sdf.xacro"),
+            self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro"),
                                                     model_name=cam_model_name,
                                                     pose=build_pose(0,2.5,0.7, 0.0,0.0,-0.707,0.707),
                                                     model_kwargs={"camera_width":"256","camera_height":"144","frame_rate":1/self._intendedStepLength_sec},
@@ -736,18 +736,18 @@ class LegJumpEnv(ControlledEnv):
             # ggLog.info(f"Model spawned with name {name}")
 
             if self._show_goal:
-                self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/red_intangible_ball.urdf.xacro"),
+                self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/red_intangible_ball.urdf.xacro"),
                                                         model_name="red_ball",
                                                         pose=leg_pose,
                                                         model_format="urdf.xacro",
                                                         model_kwargs={"add_world_link":str(isinstance(self._environmentController, PyBulletAdapter))})
-            self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
+            self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
                                                     model_name="support1",
                                                     pose=build_pose(-0.5, 0.3, 0.2, 0,0,0,1),
                                                     model_format="urdf.xacro",
                                                     model_kwargs={"add_world_link":str(isinstance(self._environmentController, PyBulletAdapter))})
             
-            self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
+            self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/support.urdf.xacro"),
                                                     model_name="support2",
                                                     pose=build_pose(-0.5, 0.3, 0.4, 0,0,0,1),
                                                     model_format="urdf.xacro",
@@ -924,7 +924,7 @@ class LegJumpEnv(ControlledEnv):
                 time = -1
             return img, time
         except Exception as e:
-            ggLog.warn(f"Exception getting ui image: {lr_gym.utils.utils.exc_to_str(e)}")
+            ggLog.warn(f"Exception getting ui image: {adarl.utils.utils.exc_to_str(e)}")
             return None, -1
 
 
@@ -1151,7 +1151,7 @@ class LegJumpEnv(ControlledEnv):
             if self._real:
                 raise NotImplementedError()
             else:
-                self._environmentController.build_scenario(launch_file_pkg_and_path = lr_gym.utils.utils.pkgutil_get_path("jumping_leg",
+                self._environmentController.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
                                                                                                                           "gazebo/all_gazebo_xbot.launch"),
                                                            launch_file_args={"gui":"true"})
                 self._knee_joint = ("leg","knee_joint_1")
@@ -1171,10 +1171,10 @@ class LegJumpEnv(ControlledEnv):
         #     # ggLog.info(f"sim_img_width  = {sim_img_width}")
         #     # ggLog.info(f"sim_img_height = {sim_img_height}")
         #     if not self._rendering_enabled:
-        #         worldpath = "\"$(find lr_gym_ros)/worlds/ground_plane_world_plugin.world\""
+        #         worldpath = "\"$(find adarl_ros)/worlds/ground_plane_world_plugin.world\""
         #     else:
-        #         worldpath = "\"$(find lr_gym_ros)/worlds/fixed_camera_world_plugin.world\""
-        #     self._environmentController.build_scenario( launch_file_pkg_and_path=("lr_gym_ros","/launch/gazebo_server.launch"),
+        #         worldpath = "\"$(find adarl_ros)/worlds/fixed_camera_world_plugin.world\""
+        #     self._environmentController.build_scenario( launch_file_pkg_and_path=("adarl_ros","/launch/gazebo_server.launch"),
         #                                                 launch_file_args={  "gui":"false",
         #                                                                     "paused":"true",
         #                                                                     "physics_engine":"bullet",
@@ -1184,8 +1184,8 @@ class LegJumpEnv(ControlledEnv):
         #                                                                     "wall_sim_speed":f"{self._wall_sim_speed}"})
         #     self._rendering_cam_name = "camera"
         # elif envCtrlName == "GzController":
-        #     self._environmentController.build_scenario(sdf_file = ("lr_gym_ros2","/worlds/empty_cams.sdf"))
-        #     # self._environmentController.spawn_model(model_file=lr_gym.utils.utils.pkgutil_get_path("lr_gym","models/simple_camera.sdf.xacro"),
+        #     self._environmentController.build_scenario(sdf_file = ("adarl_ros2","/worlds/empty_cams.sdf"))
+        #     # self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro"),
         #     #                                         model_name=None,
         #     #                                         pose=build_pose(0,2,0.5,0,0.0,-0.707,0.707),
         #     #                                         model_kwargs={"camera_width":"1920","camera_height":"1080","frame_rate":1/self._intendedStepLength_sec},

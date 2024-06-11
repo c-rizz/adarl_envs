@@ -196,14 +196,15 @@
 	<gazebo reference="thigh_link1">
 		<visual name="thigh_link_v">
 			<material>
-			<ambient>$(arg thigh_color)</ambient>
-			<diffuse>$(arg thigh_color)</diffuse>
-			<!--
-			<specular>1 0 0 1</specular>
-			<emissive>1 0 0 1</emissive>
-			-->
+				<ambient>$(arg thigh_color)</ambient>
+				<diffuse>$(arg thigh_color)</diffuse>
 			</material>
       	</visual>
+		<contact>
+			<lateral_friction value="0.1"/>
+			<rolling_friction value="0.01"/>
+			<restitution value="0.05"/>
+		</contact>
     </gazebo>
 
 
@@ -233,14 +234,15 @@
 	<gazebo reference="shin_link1">
 		<visual name="visual">
 			<material>
-			<ambient>$(arg shin_color)</ambient>
-			<diffuse>$(arg shin_color)</diffuse>
-			<!--
-			<specular>1 0 0 1</specular>
-			<emissive>1 0 0 1</emissive>
-			-->
+				<ambient>$(arg shin_color)</ambient>
+				<diffuse>$(arg shin_color)</diffuse>
 			</material>
       	</visual>
+		<contact>
+			<lateral_friction value="0.1"/>
+			<rolling_friction value="0.01"/>
+			<restitution value="0.05"/>
+		</contact>
     </gazebo>
 
 

@@ -356,8 +356,8 @@ class LegJumpEnv(ControlledEnv):
         # self._max_act_change = th.tensor(max_dact_dt*stepLength_sec,dtype=th.float32, device=self._th_device)
         # self._hip_goal_z = th.tensor(0.5,dtype=th.float32, device=self._th_device)
         self._last_out_action = th.zeros((action_len,),dtype=th.float32, device=self._th_device)
-        self._history_length = 2
-        self._frame_stack_length = 1
+        self._history_length = 4
+        self._frame_stack_length = 3
         self._vstate_history = th.zeros((self._history_length, len(self.STATE)), dtype=th.float32, device=self._th_device)
         self._new_history = th.zeros_like(self._vstate_history) # preallocate this
 
@@ -832,28 +832,39 @@ class LegJumpEnv(ControlledEnv):
         self._last_step_got_state = -1
         self._last_abs_impulses_sum_avg = 0.0
 
-        hip_goal_z = 0.4 + th.rand(size=(1,), generator=self._rng, device=self._th_device)*0.8 # uniform(0.4,1.2)
+        # Having conservative values here will not make the policy learn to behave nice in unfeasible cases
+        # Having too broad value will have unfeasible cases in training
+        min_stretch_z = 0.4
+        max_stretch_z = 0.65
+        max_jump_z = 0.6
+
+        min_goal_z = min_stretch_z
+        max_goal_z = max_jump_z + max_stretch_z
+        hip_goal_z = min_goal_z + th.rand(size=(1,), generator=self._rng, device=self._th_device)*(max_goal_z-min_goal_z) # uniform(0.4,1.2)
+        min_plat_z = hip_goal_z-max_stretch_z
+        max_plat_z = th.min(th.as_tensor([max_jump_z, hip_goal_z-min_stretch_z]))
 
         if self._platform_randomization == "double":
-            s1_area = th.tensor([[0.20, 0.30],  # minx, maxx
-                                 [0.05, 0.40]], # miny, maxy
-                                device=self._th_device)
-            s1_xz = th.rand(size=(2,), generator=self._rng, device=self._th_device)
-            s1_xz = s1_xz*(s1_area[:,1]-s1_area[:,0])+s1_area[:,0]
-            # s1_pos = th.tensor([0.0,0.0])
+            raise NotImplementedError()
+            # s1_area = th.tensor([[0.20, 0.30],  # minx, maxx
+            #                      [0.05, 0.40]], # miny, maxy
+            #                     device=self._th_device)
+            # s1_xz = th.rand(size=(2,), generator=self._rng, device=self._th_device)
+            # s1_xz = s1_xz*(s1_area[:,1]-s1_area[:,0])+s1_area[:,0]
+            # # s1_pos = th.tensor([0.0,0.0])
 
 
-            s2_area = th.tensor([[0.05, 0.30], # minx, maxx
-                                [0.05, 0.45]], device=self._th_device) # miny, maxy
-            s2_xz = th.rand(size=(2,), generator=self._rng, device=self._th_device)
-            s2_xz = s1_xz + s2_xz*(s2_area[:,1]-s2_area[:,0])+s2_area[:,0]
+            # s2_area = th.tensor([[0.05, 0.30], # minx, maxx
+            #                     [0.05, 0.45]], device=self._th_device) # miny, maxy
+            # s2_xz = th.rand(size=(2,), generator=self._rng, device=self._th_device)
+            # s2_xz = s1_xz + s2_xz*(s2_area[:,1]-s2_area[:,0])+s2_area[:,0]
 
-            s1_xz[0] = s1_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
-            s2_xz[0] = s2_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
+            # s1_xz[0] = s1_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
+            # s2_xz[0] = s2_xz[0]*th.sign(th.rand((1,), generator=self._rng, device=self._th_device)-0.5)
         elif self._platform_randomization == "single":
             s1_xz = th.tensor([-0.1-0.125, -0.3]) # hide platform 
             s2_area = th.tensor([[0.20, 0.30],  # minx, maxx
-                                 [hip_goal_z-0.8, hip_goal_z-0.20]], # miny, maxy
+                                 [min_plat_z, max_plat_z]], # miny, maxy
                                 device=self._th_device)
             s2_xz = th.rand(size=(2,), generator=self._rng, device=self._th_device)
             s2_xz = s2_xz*(s2_area[:,1]-s2_area[:,0])+s2_area[:,0]

@@ -2,8 +2,9 @@
 
 import time
 import inspect
+import adarl.utils.dbg.dbg_img
 from jumping_leg.utils.modded_sac import SAC as SB3_SAC
-from jumping_leg.algorithms.sac import SAC
+from rreal.algorithms.sac import SAC
 from stable_baselines3.ppo import PPO
 import adarl.utils.dbg.ggLog as ggLog
 import adarl.utils.utils
@@ -23,6 +24,9 @@ import stable_baselines3.common.on_policy_algorithm
 import adarl.utils.dbg.dbg_img as dbg_img 
 from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
+import adarl.utils.sigint_handler
+
+import adarl.utils.dbg
 
 def load_model(model_path):
     try:
@@ -33,6 +37,8 @@ def load_model(model_path):
 
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
+
+    adarl.utils.dbg.dbg_img.helper.enable_web_dbg(True)
 
     env_builder_args = {
         "reward_contacts_weight" : 0.0,
@@ -49,7 +55,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "platform_randomization" : "single",
         "quiet" : False,
         "mode" : args["mode"],
-        "use_contacts" : args["mode"] == "pybullet"}
+        "use_contacts" : args["mode"] == "pybullet",
+        "ep_obs_noise_mustd" : 0.01,
+        "step_obs_noise_std" : 0.01}
 
     return play(seed, folderName, run_id, args, env_builder_args)
 
@@ -117,9 +125,11 @@ def play(seed, folderName, run_id, args, env_builder_args):
         done = False
         ep_reward = 0
         step_count = 0
+        step_wallduration = float("nan")
+        ep_wall_duration = 0
         while not done:
             t0 = time.monotonic()
-            ggLog.info(f"step = {step_count}")
+            ggLog.info(f"step = {step_count} realtimefactor = {env_builder_args['stepLength_sec']/step_wallduration:.2f}")
             # ggLog.info(f"ep_config = {info['ep_config']}")
             obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
             action, hidden_state = model.predict(obs_batch, deterministic = True)
@@ -149,9 +159,21 @@ def play(seed, folderName, run_id, args, env_builder_args):
             step_count += 1
 
             done = terminated or truncated
+            def f(): 
+                nonlocal done
+                done = True
+            adarl.utils.sigint_handler.run_on_sigint_received(f)
             ep_reward += reward
-            time.sleep(max(0,env_builder_args["stepLength_sec"] - (time.monotonic()-t0)))
-        ggLog.info(f"Episode reward = {ep_reward}")
+            step_wallduration = time.monotonic()-t0
+            ep_wall_duration += step_wallduration
+            time.sleep(max(0,env_builder_args["stepLength_sec"] - step_wallduration))
+        ggLog.info("\n"
+                   f"Episode reward =  {ep_reward}\n"
+                   f"Wall duration =   {ep_wall_duration:.2f}s\n"
+                   f"Sim  duration =   {step_count*env_builder_args['stepLength_sec']:.2f}s\n"
+                   f"Realtime factor = {step_count*env_builder_args['stepLength_sec']/ep_wall_duration:.2f}\n")
+        if interactive:
+            keyboard_listener.close()
 
 
 if __name__ == "__main__":

@@ -93,7 +93,9 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
                         reward_scale=500/max_steps,
                         platform_randomization = env_builder_args["platform_randomization"],
                         use_contacts=env_builder_args["use_contacts"],
-                        step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
+                        step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001,
+                        ep_obs_noise_mustd=env_builder_args["ep_obs_noise_mustd"],
+                        step_obs_noise_std=env_builder_args["step_obs_noise_std"]) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
     if no_dict:
         from adarl.envs.lr_wrappers.ObsDict2FlatBox import ObsDict2FlatBox
         lrenv = ObsDict2FlatBox(lrenv, "vec")
@@ -115,6 +117,7 @@ def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
                                 saveFrequency_ep=video_save_freq,
                                 vec_obs_key="vec",
                                 overlay_text_xy=(0.025,0.025),
+                                overlay_text_height=0.035,
                                 overlay_text_func=lambda vo, a, r, te, tr, info:   f"Step    {info['step_count']: .3f}\n"+
                                         f"ImpSum  {info['impulses_sum']: .3f}\n"+
                                         f"ExtWork {info['external_work']:+.3f}\n"+
@@ -136,6 +139,8 @@ def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
                                         f"rTorque {info['vstate'][LegJumpEnv.STATE.REWARD_TORQUE_WEIGHT.name]:.2f}\n"+
                                         f"rTrack  {info['vstate'][LegJumpEnv.STATE.REWARD_TRACKING_WEIGHT.name]:.2f}\n"+
                                         f"rVeloci {info['vstate'][LegJumpEnv.STATE.REWARD_VELOCITY_WEIGHT.name]:.2f}\n"
+                                        f"goal_z   {info['vstate'][LegJumpEnv.STATE.HIP_GOAL_Z.name]:.2f}\n"
+                                        f"hip_z    {info['vstate'][LegJumpEnv.STATE.HIP_POS_Z.name]:.2f}\n"
                                         f"torque   {info['vstate'][LegJumpEnv.STATE.HIP_JOINT_EFFORT.name]:.2f}, {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_EFFORT.name]:.2f}\n"
                                         f"position {info['vstate'][LegJumpEnv.STATE.HIP_JOINT_POS.name]:.2f}, {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_POS.name]:.2f}\n"
                                         f"velocity {info['vstate'][LegJumpEnv.STATE.HIP_JOINT_VEL.name]:.2f}, {info['vstate'][LegJumpEnv.STATE.KNEE_JOINT_VEL.name]:.2f}\n"

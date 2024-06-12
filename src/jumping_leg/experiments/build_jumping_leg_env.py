@@ -95,7 +95,8 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
                         use_contacts=env_builder_args["use_contacts"],
                         step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001,
                         ep_obs_noise_mustd=env_builder_args["ep_obs_noise_mustd"],
-                        step_obs_noise_std=env_builder_args["step_obs_noise_std"]) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
+                        step_obs_noise_std=env_builder_args["step_obs_noise_std"],
+                        stop_on_safety=env_builder_args["stop_on_safety"]) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
     if no_dict:
         from adarl.envs.lr_wrappers.ObsDict2FlatBox import ObsDict2FlatBox
         lrenv = ObsDict2FlatBox(lrenv, "vec")

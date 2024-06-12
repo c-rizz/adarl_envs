@@ -6,7 +6,7 @@ Based on ControlledEnv
 """
 
 
-
+from __future__ import annotations
 import adarl.utils.spaces as spaces
 import numpy as np
 from typing import Tuple, Dict, Any, Union, Optional, List, Literal
@@ -193,7 +193,8 @@ class LegJumpEnv(ControlledEnv):
                     real : bool = False,
                     step_precision_tolerance : float = 0.0,
                     ep_obs_noise_mustd : list[float] | th.Tensor = [0.0,0.0], 
-                    step_obs_noise_std : list[float] | float | th.Tensor = 0.0):
+                    step_obs_noise_std : list[float] | float | th.Tensor = 0.0,
+                    stop_on_safety = True):
         """Short summary.
 
         Parameters
@@ -328,7 +329,7 @@ class LegJumpEnv(ControlledEnv):
                                                             ep_obs_noise_mustd=th.empty((0,)),
                                                             step_obs_noise_std=th.empty((0,)),
                                                             action_noise_mustd=th.empty((0,)),
-                                                            stop_on_safety = True)
+                                                            stop_on_safety = stop_on_safety)
         if self._control_mode == self.CONTROL_MODES.IMPEDANCE:
             action_len = 10 
         elif self._control_mode == self.CONTROL_MODES.IMPEDANCE_NO_GAINS:
@@ -1095,7 +1096,10 @@ class LegJumpEnv(ControlledEnv):
                                                 self._configuration.velocity_safety_limits_knee,
                                                 self._configuration.torque_safety_limits_knee])
                     safety_triggered = th.any(jstate_th < j_safety_lims[:,0]) or th.any(jstate_th > j_safety_lims[:,1])
-                    # ggLog.info(f"jstate_th = {jstate_th}")
+                    if safety_triggered:                        
+                        ggLog.info(f"SAFETY TRIGGERED:\n"
+                                   f"    jstate_th      = {jstate_th}\n"
+                                   f"    j_safety_lims  = {j_safety_lims} ")
                 # ggLog.info(f"safety_triggered = {safety_triggered}")
 
                 current_vstate = th.tensor((jstates[self._hip_joint].position[0],
@@ -1259,7 +1263,7 @@ class LegJumpEnv(ControlledEnv):
             else:
                 self._environmentController.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
                                                                                                                           "gazebo/all_gazebo_xbot.launch"),
-                                                           launch_file_args={"gui":"true"})
+                                                           launch_file_args={"gui":"false"})
                 self._knee_joint = ("leg","knee_joint_1")
                 self._hip_joint = ("leg","hip_joint_1")
                 self._rail_joint = ("leg","rail_joint")
@@ -1347,6 +1351,8 @@ class LegJumpEnv(ControlledEnv):
     
         
     def reachedTerminalState(self, previousState, state) -> th.Tensor:
+        if not self._configuration.stop_on_safety:
+            return th.as_tensor(False, device=self._th_device)
         r = state[self.VECTOR_PART][0][self.STATE.SAFETY_TRIGGERED] > 0
         if r:
             ggLog.info(f"truncation at step {self._stepCounter}")

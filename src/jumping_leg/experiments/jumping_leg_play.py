@@ -56,8 +56,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "mode" : args["mode"],
         "use_contacts" : args["mode"] == "pybullet",
-        "ep_obs_noise_mustd" : 0.01,
-        "step_obs_noise_std" : 0.01}
+        "ep_obs_noise_mustd" : 0.0,
+        "step_obs_noise_std" : 0.0,
+        "stop_on_safety" : False}
 
     return play(seed, folderName, run_id, args, env_builder_args)
 

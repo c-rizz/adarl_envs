@@ -355,7 +355,8 @@ class LegJumpEnv(ControlledEnv):
         # max_dact_dt = 100 #max change in action, i.e. da/dt
         # self._max_act_change = th.tensor(max_dact_dt*stepLength_sec,dtype=th.float32, device=self._th_device)
         # self._hip_goal_z = th.tensor(0.5,dtype=th.float32, device=self._th_device)
-        self._last_out_action = th.zeros((action_len,),dtype=th.float32, device=self._th_device)
+        self._action_size = action_len
+        self._last_out_actions = th.empty((0,))
         self._history_length = 4
         self._frame_stack_length = 3
         self._vstate_history = th.zeros((self._history_length, len(self.STATE)), dtype=th.float32, device=self._th_device)
@@ -556,10 +557,12 @@ class LegJumpEnv(ControlledEnv):
         dt = self._configuration.stepLength_sec
         alpha = self._configuration.action_exp_smoothing_1s**(dt/1)
         if self._actionsCounter != 0:
-            action = action*(1-alpha) + self._last_out_action*alpha
+            action = action*(1-alpha) + self._last_out_actions[0]*alpha
         # action = th.clamp(action, min=self._last_out_action-self._max_act_change, max=self._last_out_action+self._max_act_change)
+        action = th.clamp(action, min=-1, max=1)
         # action = th.tensor([0.,0.])
-        self._last_out_action = action
+        self._last_out_actions[1:] = self._last_out_actions[:-1]
+        self._last_out_actions[0] = action
         if self._control_mode == self.CONTROL_MODES.VELOCITY:
             # hvel = self._unnormalize(action[0],self._configuration.velocity_command_scale_hip,self._configuration.velocity_limits_hip[0],self._configuration.velocity_limits_hip[1])
             # kvel = self._unnormalize(action[1],self._configuration.velocity_command_scale_knee,self._configuration.velocity_limits_knee[0],self._configuration.velocity_limits_knee[1])
@@ -831,6 +834,7 @@ class LegJumpEnv(ControlledEnv):
         self._last_external_work = 0
         self._last_step_got_state = -1
         self._last_abs_impulses_sum_avg = 0.0
+        self._last_out_actions = th.zeros(size=(10,self._action_size),dtype=self._obs_dtype,device=self._th_device)
 
         # Having conservative values here will not make the policy learn to behave nice in unfeasible cases
         # Having too broad value will have unfeasible cases in training

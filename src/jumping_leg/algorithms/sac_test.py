@@ -64,8 +64,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "mode" : "pybullet",
         "use_contacts" : True,
-        "ep_obs_noise_mustd" : 0.01,
-        "step_obs_noise_std" : 0.01}
+        "ep_obs_noise_mustd" : (0.01, 0.01),
+        "step_obs_noise_std" : 0.01,
+        "stop_on_safety" : True,
+        "action_delay_mustd" : (0.01,0.01)}
 
     hyperparams = {"train_freq" : 50,
                    "grad_steps" : 25,

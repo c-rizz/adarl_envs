@@ -132,18 +132,18 @@ def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
                                         f"ThiEner {info['new_thigh_energy']:+.3f}\n"+
                                         f"ShiEner {info['new_shin_energy']:+.3f}\n"+
                                         f"SliEner {info['new_slider_energy']:+.3f}\n"+
-                                        f"rContac {info['vstate'][LegJumpEnv.BASE_STATE_IDX.REWARD_CONTACTS_WEIGHT.name]:.2f}\n"+
-                                        f"rEnergy {info['vstate'][LegJumpEnv.BASE_STATE_IDX.REWARD_ENERGY_WEIGHT.name]:.2f}\n"+
-                                        f"rImpThr {info['vstate'][LegJumpEnv.BASE_STATE_IDX.REWARD_IMPULSE_THRESHOLD.name]:.2f}\n"+
-                                        f"rPosLim {info['vstate'][LegJumpEnv.BASE_STATE_IDX.REWARD_POSITION_LIMIT_WEIGHT.name]:.2f}\n"+
-                                        f"rTorLim {info['vstate'][LegJumpEnv.BASE_STATE_IDX.REWARD_TORQUE_LIMIT_WEIGHT.name]:.2f}\n"+
-                                        f"rTorque {info['vstate'][LegJumpEnv.BASE_STATE_IDX.REWARD_TORQUE_WEIGHT.name]:.2f}\n"+
-                                        f"rTrack  {info['vstate'][LegJumpEnv.BASE_STATE_IDX.REWARD_TRACKING_WEIGHT.name]:.2f}\n"+
-                                        f"rVeloci {info['vstate'][LegJumpEnv.BASE_STATE_IDX.REWARD_VELOCITY_WEIGHT.name]:.2f}\n"
-                                        f"goal_z   {info['vstate'][LegJumpEnv.BASE_STATE_IDX.HIP_GOAL_Z.name]:.2f}\n"
-                                        f"hip_z    {info['vstate'][LegJumpEnv.BASE_STATE_IDX.HIP_POS_Z.name]:.2f}\n"
-                                        f"torque   {info['vstate'][LegJumpEnv.BASE_STATE_IDX.HIP_JOINT_EFFORT.name]:.2f}, {info['vstate'][LegJumpEnv.BASE_STATE_IDX.KNEE_JOINT_EFFORT.name]:.2f}\n"
-                                        f"position {info['vstate'][LegJumpEnv.BASE_STATE_IDX.HIP_JOINT_POS.name]:.2f}, {info['vstate'][LegJumpEnv.BASE_STATE_IDX.KNEE_JOINT_POS.name]:.2f}\n"
-                                        f"velocity {info['vstate'][LegJumpEnv.BASE_STATE_IDX.HIP_JOINT_VEL.name]:.2f}, {info['vstate'][LegJumpEnv.BASE_STATE_IDX.KNEE_JOINT_VEL.name]:.2f}\n"
+                                        f"rContac {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT]:.2f}\n"+
+                                        f"rEnergy {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT]:.2f}\n"+
+                                        f"rImpThr {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD]:.2f}\n"+
+                                        f"rPosLim {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT]:.2f}\n"+
+                                        f"rTorLim {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT]:.2f}\n"+
+                                        f"rTorque {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]:.2f}\n"+
+                                        f"rTrack  {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]:.2f}\n"+
+                                        f"rVeloci {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]:.2f}\n"
+                                        f"goal_z   {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.HIP_GOAL_Z]:.2f}\n"
+                                        f"hip_z    {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.HIP_POS_Z]:.2f}\n"
+                                        f"torque   {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_EFFORT]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_EFFORT]:.2f}\n"
+                                        f"position {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_POS]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_POS]:.2f}\n"
+                                        f"velocity {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_VEL]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_VEL]:.2f}\n"
                                         f"act     "+str([f"{ae:.3f}" for ae in a] if a is not None else None)
                                         )

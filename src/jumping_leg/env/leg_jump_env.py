@@ -39,7 +39,7 @@ class LegJumpEnv(ControlledEnv):
     STATE_ACT = "act" # component of the state that is the last performed action (it has a different size depending onthe configuration)
     STATE_IMG = "img" # componento f thestate that contains the rendered image
 
-    BASE_STATE_IDX = IntEnum("BASE_STATE", [
+    BASE_STATE_IDXS = IntEnum("BASE_STATE", [
                             "HIP_JOINT_POS",
                             "HIP_JOINT_VEL",
                             "HIP_JOINT_EFFORT",
@@ -416,105 +416,105 @@ class LegJumpEnv(ControlledEnv):
         self._dbg_info["new_slider_energy"] = 0
         self._dbg_info["slider_work"] = 0
         
-        vstate_min_max = {  self.BASE_STATE_IDX.HIP_JOINT_POS : self._configuration.position_phys_limits_hip,
-                            self.BASE_STATE_IDX.HIP_JOINT_VEL : self._configuration.velocity_phys_limits_hip,
-                            self.BASE_STATE_IDX.HIP_JOINT_EFFORT : self._configuration.torque_phys_limits_hip,
-                            self.BASE_STATE_IDX.KNEE_JOINT_POS : self._configuration.position_phys_limits_knee,
-                            self.BASE_STATE_IDX.KNEE_JOINT_VEL : self._configuration.velocity_phys_limits_knee,
-                            self.BASE_STATE_IDX.KNEE_JOINT_EFFORT : self._configuration.torque_phys_limits_knee,
-                            self.BASE_STATE_IDX.HIP_POS_Z : [0,3],
-                            self.BASE_STATE_IDX.HIP_VEL_Z : [-100,100],
-                            self.BASE_STATE_IDX.SUPPORT1_X : [-2,2],
-                            self.BASE_STATE_IDX.SUPPORT1_Z : [0,2],
-                            self.BASE_STATE_IDX.SUPPORT2_X : [-2,2],
-                            self.BASE_STATE_IDX.SUPPORT2_Z : [0,2],
-                            self.BASE_STATE_IDX.HIP_GOAL_Z : [0,2],
-                            self.BASE_STATE_IDX.REWARD_TORQUE_LIMIT_WEIGHT : [0,10],
-                            self.BASE_STATE_IDX.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
-                            self.BASE_STATE_IDX.REWARD_VELOCITY_WEIGHT : [0,10],
-                            self.BASE_STATE_IDX.REWARD_ENERGY_WEIGHT : [0,10],
-                            self.BASE_STATE_IDX.REWARD_TRACKING_WEIGHT : [0,10],
-                            self.BASE_STATE_IDX.REWARD_TORQUE_WEIGHT : [0,10],
-                            self.BASE_STATE_IDX.REWARD_CONTACTS_WEIGHT : [0,10],
-                            self.BASE_STATE_IDX.REWARD_IMPULSE_THRESHOLD : [0,10],
-                            self.BASE_STATE_IDX.KNEE_TORQUE_CMD_SCALE : [0,150],
-                            self.BASE_STATE_IDX.HIP_TORQUE_CMD_SCALE : [0,150],
-                            self.BASE_STATE_IDX.HIP_POS_REF : self._configuration.position_phys_limits_hip,
-                            self.BASE_STATE_IDX.HIP_VEL_REF : self._configuration.velocity_phys_limits_hip,
-                            self.BASE_STATE_IDX.HIP_EFFORT_REF : self._configuration.torque_phys_limits_hip,
-                            self.BASE_STATE_IDX.HIP_STIFFNESS : [0,self._configuration.max_stiffness],
-                            self.BASE_STATE_IDX.HIP_DAMPING : [0,self._configuration.max_damping],
-                            self.BASE_STATE_IDX.KNEE_POS_REF : self._configuration.position_phys_limits_knee,
-                            self.BASE_STATE_IDX.KNEE_VEL_REF : self._configuration.velocity_phys_limits_knee,
-                            self.BASE_STATE_IDX.KNEE_EFFORT_REF : self._configuration.torque_phys_limits_knee,
-                            self.BASE_STATE_IDX.KNEE_STIFFNESS : [0,self._configuration.max_stiffness],
-                            self.BASE_STATE_IDX.KNEE_DAMPING : [0,self._configuration.max_damping],
+        vstate_min_max = {  self.BASE_STATE_IDXS.HIP_JOINT_POS : self._configuration.position_phys_limits_hip,
+                            self.BASE_STATE_IDXS.HIP_JOINT_VEL : self._configuration.velocity_phys_limits_hip,
+                            self.BASE_STATE_IDXS.HIP_JOINT_EFFORT : self._configuration.torque_phys_limits_hip,
+                            self.BASE_STATE_IDXS.KNEE_JOINT_POS : self._configuration.position_phys_limits_knee,
+                            self.BASE_STATE_IDXS.KNEE_JOINT_VEL : self._configuration.velocity_phys_limits_knee,
+                            self.BASE_STATE_IDXS.KNEE_JOINT_EFFORT : self._configuration.torque_phys_limits_knee,
+                            self.BASE_STATE_IDXS.HIP_POS_Z : [0,3],
+                            self.BASE_STATE_IDXS.HIP_VEL_Z : [-100,100],
+                            self.BASE_STATE_IDXS.SUPPORT1_X : [-2,2],
+                            self.BASE_STATE_IDXS.SUPPORT1_Z : [0,2],
+                            self.BASE_STATE_IDXS.SUPPORT2_X : [-2,2],
+                            self.BASE_STATE_IDXS.SUPPORT2_Z : [0,2],
+                            self.BASE_STATE_IDXS.HIP_GOAL_Z : [0,2],
+                            self.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT : [0,10],
+                            self.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
+                            self.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT : [0,10],
+                            self.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT : [0,10],
+                            self.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT : [0,10],
+                            self.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT : [0,10],
+                            self.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT : [0,10],
+                            self.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD : [0,10],
+                            self.BASE_STATE_IDXS.KNEE_TORQUE_CMD_SCALE : [0,150],
+                            self.BASE_STATE_IDXS.HIP_TORQUE_CMD_SCALE : [0,150],
+                            self.BASE_STATE_IDXS.HIP_POS_REF : self._configuration.position_phys_limits_hip,
+                            self.BASE_STATE_IDXS.HIP_VEL_REF : self._configuration.velocity_phys_limits_hip,
+                            self.BASE_STATE_IDXS.HIP_EFFORT_REF : self._configuration.torque_phys_limits_hip,
+                            self.BASE_STATE_IDXS.HIP_STIFFNESS : [0,self._configuration.max_stiffness],
+                            self.BASE_STATE_IDXS.HIP_DAMPING : [0,self._configuration.max_damping],
+                            self.BASE_STATE_IDXS.KNEE_POS_REF : self._configuration.position_phys_limits_knee,
+                            self.BASE_STATE_IDXS.KNEE_VEL_REF : self._configuration.velocity_phys_limits_knee,
+                            self.BASE_STATE_IDXS.KNEE_EFFORT_REF : self._configuration.torque_phys_limits_knee,
+                            self.BASE_STATE_IDXS.KNEE_STIFFNESS : [0,self._configuration.max_stiffness],
+                            self.BASE_STATE_IDXS.KNEE_DAMPING : [0,self._configuration.max_damping],
 
-                            self.BASE_STATE_IDX.THIGH_VEL_X : [-100,100],
-                            self.BASE_STATE_IDX.THIGH_VEL_Y : [-100,100],
-                            self.BASE_STATE_IDX.THIGH_VEL_Z : [-100,100],
-                            self.BASE_STATE_IDX.THIGH_ANG_VEL_X : [-100,100],
-                            self.BASE_STATE_IDX.THIGH_ANG_VEL_Y : [-100,100],
-                            self.BASE_STATE_IDX.THIGH_ANG_VEL_Z : [-100,100],
-                            self.BASE_STATE_IDX.SHIN_VEL_X : [-100,100],
-                            self.BASE_STATE_IDX.SHIN_VEL_Y : [-100,100],
-                            self.BASE_STATE_IDX.SHIN_VEL_Z : [-100,100],
-                            self.BASE_STATE_IDX.SHIN_ANG_VEL_X : [-100,100],
-                            self.BASE_STATE_IDX.SHIN_ANG_VEL_Y : [-100,100],
-                            self.BASE_STATE_IDX.SHIN_ANG_VEL_Z : [-100,100],
-                            self.BASE_STATE_IDX.THIGH_POS_X : [-2,2],
-                            self.BASE_STATE_IDX.THIGH_POS_Y : [-2,2],
-                            self.BASE_STATE_IDX.THIGH_POS_Z : [-2,2],
-                            self.BASE_STATE_IDX.THIGH_ANG_POS_X : [-100,100],
-                            self.BASE_STATE_IDX.THIGH_ANG_POS_Y : [-100,100],
-                            self.BASE_STATE_IDX.THIGH_ANG_POS_Z : [-100,100],
-                            self.BASE_STATE_IDX.SHIN_POS_X : [-2,2],
-                            self.BASE_STATE_IDX.SHIN_POS_Y : [-2,2],
-                            self.BASE_STATE_IDX.SHIN_POS_Z : [-2,2],
-                            self.BASE_STATE_IDX.SHIN_ANG_POS_X : [-100,100],
-                            self.BASE_STATE_IDX.SHIN_ANG_POS_Y : [-100,100],
-                            self.BASE_STATE_IDX.SHIN_ANG_POS_Z : [-100,100],
-                            self.BASE_STATE_IDX.IMPULSES_SUM : [0,100],
-                            self.BASE_STATE_IDX.FORCES_SUM : [0,1000],
-                            self.BASE_STATE_IDX.FORCES_NUM : [0,1000],
-                            self.BASE_STATE_IDX.IMPULSES_SUM_AVG : [0,100],
-                            self.BASE_STATE_IDX.SAFETY_TRIGGERED : [0,1]}        
-        self._configuration.bstate_minmax = th.tensor([vstate_min_max[k] for k in self.BASE_STATE_IDX], device = self._th_device)
+                            self.BASE_STATE_IDXS.THIGH_VEL_X : [-100,100],
+                            self.BASE_STATE_IDXS.THIGH_VEL_Y : [-100,100],
+                            self.BASE_STATE_IDXS.THIGH_VEL_Z : [-100,100],
+                            self.BASE_STATE_IDXS.THIGH_ANG_VEL_X : [-100,100],
+                            self.BASE_STATE_IDXS.THIGH_ANG_VEL_Y : [-100,100],
+                            self.BASE_STATE_IDXS.THIGH_ANG_VEL_Z : [-100,100],
+                            self.BASE_STATE_IDXS.SHIN_VEL_X : [-100,100],
+                            self.BASE_STATE_IDXS.SHIN_VEL_Y : [-100,100],
+                            self.BASE_STATE_IDXS.SHIN_VEL_Z : [-100,100],
+                            self.BASE_STATE_IDXS.SHIN_ANG_VEL_X : [-100,100],
+                            self.BASE_STATE_IDXS.SHIN_ANG_VEL_Y : [-100,100],
+                            self.BASE_STATE_IDXS.SHIN_ANG_VEL_Z : [-100,100],
+                            self.BASE_STATE_IDXS.THIGH_POS_X : [-2,2],
+                            self.BASE_STATE_IDXS.THIGH_POS_Y : [-2,2],
+                            self.BASE_STATE_IDXS.THIGH_POS_Z : [-2,2],
+                            self.BASE_STATE_IDXS.THIGH_ANG_POS_X : [-100,100],
+                            self.BASE_STATE_IDXS.THIGH_ANG_POS_Y : [-100,100],
+                            self.BASE_STATE_IDXS.THIGH_ANG_POS_Z : [-100,100],
+                            self.BASE_STATE_IDXS.SHIN_POS_X : [-2,2],
+                            self.BASE_STATE_IDXS.SHIN_POS_Y : [-2,2],
+                            self.BASE_STATE_IDXS.SHIN_POS_Z : [-2,2],
+                            self.BASE_STATE_IDXS.SHIN_ANG_POS_X : [-100,100],
+                            self.BASE_STATE_IDXS.SHIN_ANG_POS_Y : [-100,100],
+                            self.BASE_STATE_IDXS.SHIN_ANG_POS_Z : [-100,100],
+                            self.BASE_STATE_IDXS.IMPULSES_SUM : [0,100],
+                            self.BASE_STATE_IDXS.FORCES_SUM : [0,1000],
+                            self.BASE_STATE_IDXS.FORCES_NUM : [0,1000],
+                            self.BASE_STATE_IDXS.IMPULSES_SUM_AVG : [0,100],
+                            self.BASE_STATE_IDXS.SAFETY_TRIGGERED : [0,1]}        
+        self._configuration.bstate_minmax = th.tensor([vstate_min_max[k] for k in self.BASE_STATE_IDXS], device = self._th_device)
 
         # Part of the BASE_STATE that gets stacked
-        self._stacked_obs_part = th.as_tensor([ self.BASE_STATE_IDX.HIP_JOINT_POS,
-                                                self.BASE_STATE_IDX.HIP_JOINT_VEL,
-                                                self.BASE_STATE_IDX.HIP_JOINT_EFFORT,
-                                                self.BASE_STATE_IDX.KNEE_JOINT_POS,
-                                                self.BASE_STATE_IDX.KNEE_JOINT_VEL,
-                                                self.BASE_STATE_IDX.KNEE_JOINT_EFFORT,
-                                                self.BASE_STATE_IDX.HIP_POS_Z,
-                                                self.BASE_STATE_IDX.HIP_VEL_Z,
-                                                self.BASE_STATE_IDX.SUPPORT1_X,
-                                                self.BASE_STATE_IDX.SUPPORT1_Z,
-                                                self.BASE_STATE_IDX.SUPPORT2_X,
-                                                self.BASE_STATE_IDX.SUPPORT2_Z,
-                                                self.BASE_STATE_IDX.HIP_POS_REF,
-                                                self.BASE_STATE_IDX.HIP_VEL_REF,
-                                                self.BASE_STATE_IDX.HIP_EFFORT_REF,
-                                                self.BASE_STATE_IDX.HIP_STIFFNESS,
-                                                self.BASE_STATE_IDX.HIP_DAMPING,
-                                                self.BASE_STATE_IDX.KNEE_POS_REF,
-                                                self.BASE_STATE_IDX.KNEE_VEL_REF,
-                                                self.BASE_STATE_IDX.KNEE_EFFORT_REF,
-                                                self.BASE_STATE_IDX.KNEE_STIFFNESS,
-                                                self.BASE_STATE_IDX.KNEE_DAMPING], device=self._th_device)
+        self._stacked_obs_part = th.as_tensor([ self.BASE_STATE_IDXS.HIP_JOINT_POS,
+                                                self.BASE_STATE_IDXS.HIP_JOINT_VEL,
+                                                self.BASE_STATE_IDXS.HIP_JOINT_EFFORT,
+                                                self.BASE_STATE_IDXS.KNEE_JOINT_POS,
+                                                self.BASE_STATE_IDXS.KNEE_JOINT_VEL,
+                                                self.BASE_STATE_IDXS.KNEE_JOINT_EFFORT,
+                                                self.BASE_STATE_IDXS.HIP_POS_Z,
+                                                self.BASE_STATE_IDXS.HIP_VEL_Z,
+                                                self.BASE_STATE_IDXS.SUPPORT1_X,
+                                                self.BASE_STATE_IDXS.SUPPORT1_Z,
+                                                self.BASE_STATE_IDXS.SUPPORT2_X,
+                                                self.BASE_STATE_IDXS.SUPPORT2_Z,
+                                                self.BASE_STATE_IDXS.HIP_POS_REF,
+                                                self.BASE_STATE_IDXS.HIP_VEL_REF,
+                                                self.BASE_STATE_IDXS.HIP_EFFORT_REF,
+                                                self.BASE_STATE_IDXS.HIP_STIFFNESS,
+                                                self.BASE_STATE_IDXS.HIP_DAMPING,
+                                                self.BASE_STATE_IDXS.KNEE_POS_REF,
+                                                self.BASE_STATE_IDXS.KNEE_VEL_REF,
+                                                self.BASE_STATE_IDXS.KNEE_EFFORT_REF,
+                                                self.BASE_STATE_IDXS.KNEE_STIFFNESS,
+                                                self.BASE_STATE_IDXS.KNEE_DAMPING], device=self._th_device)
 
         # Part of the BASE_STATE that does not get stacked
-        self._constant_obs_part = th.as_tensor([self.BASE_STATE_IDX.HIP_GOAL_Z,
-                                                self.BASE_STATE_IDX.REWARD_TORQUE_LIMIT_WEIGHT,
-                                                self.BASE_STATE_IDX.REWARD_POSITION_LIMIT_WEIGHT,
-                                                self.BASE_STATE_IDX.REWARD_VELOCITY_WEIGHT,
-                                                self.BASE_STATE_IDX.REWARD_ENERGY_WEIGHT,
-                                                self.BASE_STATE_IDX.REWARD_TRACKING_WEIGHT,
-                                                self.BASE_STATE_IDX.REWARD_TORQUE_WEIGHT,
-                                                self.BASE_STATE_IDX.REWARD_CONTACTS_WEIGHT,
-                                                self.BASE_STATE_IDX.REWARD_IMPULSE_THRESHOLD], device=self._th_device)
+        self._constant_obs_part = th.as_tensor([self.BASE_STATE_IDXS.HIP_GOAL_Z,
+                                                self.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT,
+                                                self.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT,
+                                                self.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT,
+                                                self.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT,
+                                                self.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT,
+                                                self.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT,
+                                                self.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT,
+                                                self.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD], device=self._th_device)
         vec_obs_size = self._stacked_obs_part.size()[0]*self._frame_stack_length + self._constant_obs_part.size()[0]
         vec_obs_space_high = np.array( [1.0]*vec_obs_size)
         vec_obs_space = spaces.gym_spaces.Box(-vec_obs_space_high,vec_obs_space_high)
@@ -526,7 +526,7 @@ class LegJumpEnv(ControlledEnv):
         self._img_shape_chw = (img_channels,self._obs_img_height,self._obs_img_width)
         img_observation_space = spaces.gym_spaces.Box(low=0, high=255, shape=self._img_shape_chw, dtype=np.uint8)
 
-        state_space = spaces.gym_spaces.Dict({  self.STATE_BASE: spaces.gym_spaces.Box(low=-float("inf"), high=float("inf"), shape=(self._history_length,len(LegJumpEnv.BASE_STATE_IDX),)),
+        state_space = spaces.gym_spaces.Dict({  self.STATE_BASE: spaces.gym_spaces.Box(low=-float("inf"), high=float("inf"), shape=(self._history_length,len(LegJumpEnv.BASE_STATE_IDXS),)),
                                                 self.STATE_ACT: spaces.gym_spaces.Box(low=-float("inf"), high=float("inf"), shape=(self._history_length,action_len,)),
                                                 self.STATE_IMG: img_observation_space})
         
@@ -758,22 +758,22 @@ class LegJumpEnv(ControlledEnv):
         
         thigh_kin_energy = LegJumpEnv._kinetic_energy_2d(mass = thigh_mass,
                                                         inertia_moment=1/12*thigh_mass*thigh_length**2,
-                                                        vel_x=vstate_unnorm[LegJumpEnv.BASE_STATE_IDX.THIGH_VEL_X],
-                                                        vel_z=vstate_unnorm[LegJumpEnv.BASE_STATE_IDX.THIGH_VEL_Z],
-                                                        ang_vel_y=vstate_unnorm[LegJumpEnv.BASE_STATE_IDX.THIGH_ANG_VEL_Y])
+                                                        vel_x=vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.THIGH_VEL_X],
+                                                        vel_z=vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.THIGH_VEL_Z],
+                                                        ang_vel_y=vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.THIGH_ANG_VEL_Y])
         shin_kin_energy = LegJumpEnv._kinetic_energy_2d(mass = shin_mass,
                                                         inertia_moment=1/12*shin_mass*shin_length**2,
-                                                        vel_x=vstate_unnorm[LegJumpEnv.BASE_STATE_IDX.SHIN_VEL_X],
-                                                        vel_z=vstate_unnorm[LegJumpEnv.BASE_STATE_IDX.SHIN_VEL_Z],
-                                                        ang_vel_y=vstate_unnorm[LegJumpEnv.BASE_STATE_IDX.SHIN_ANG_VEL_Y])
+                                                        vel_x=vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.SHIN_VEL_X],
+                                                        vel_z=vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.SHIN_VEL_Z],
+                                                        ang_vel_y=vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.SHIN_ANG_VEL_Y])
         slider_kin_energy = LegJumpEnv._kinetic_energy_2d(mass = slider_mass,
                                                         inertia_moment=0,
                                                         vel_x=0,
-                                                        vel_z=vstate_unnorm[LegJumpEnv.BASE_STATE_IDX.HIP_VEL_Z],
+                                                        vel_z=vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.HIP_VEL_Z],
                                                         ang_vel_y=0)
-        thigh_pot_energy = thigh_mass*g*vstate_unnorm[LegJumpEnv.BASE_STATE_IDX.THIGH_POS_Z]
-        shin_pot_energy = shin_mass*g*vstate_unnorm[LegJumpEnv.BASE_STATE_IDX.SHIN_POS_Z]
-        slider_pot_energy = slider_mass*g*vstate_unnorm[LegJumpEnv.BASE_STATE_IDX.HIP_POS_Z]
+        thigh_pot_energy = thigh_mass*g*vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.THIGH_POS_Z]
+        shin_pot_energy = shin_mass*g*vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.SHIN_POS_Z]
+        slider_pot_energy = slider_mass*g*vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.HIP_POS_Z]
         return thigh_kin_energy+thigh_pot_energy, shin_kin_energy+shin_pot_energy, slider_kin_energy+slider_pot_energy
 
     @staticmethod
@@ -788,9 +788,9 @@ class LegJumpEnv(ControlledEnv):
         vstate_norm = state[LegJumpEnv.STATE_BASE][0]
         pvstate_norm = state[LegJumpEnv.STATE_BASE][-1]
 
-        normtorques = vstate_norm[[LegJumpEnv.BASE_STATE_IDX.HIP_JOINT_EFFORT,LegJumpEnv.BASE_STATE_IDX.KNEE_JOINT_EFFORT]]
-        normvelocities = vstate_norm[[LegJumpEnv.BASE_STATE_IDX.HIP_JOINT_VEL,LegJumpEnv.BASE_STATE_IDX.KNEE_JOINT_VEL]]
-        normpositions = vstate_norm[[LegJumpEnv.BASE_STATE_IDX.HIP_JOINT_POS,LegJumpEnv.BASE_STATE_IDX.KNEE_JOINT_POS]]
+        normtorques = vstate_norm[[LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_EFFORT,LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_EFFORT]]
+        normvelocities = vstate_norm[[LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_VEL,LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_VEL]]
+        normpositions = vstate_norm[[LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_POS,LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_POS]]
         # ntorques =       [vstate_norm[k] for k in [LegJumpEnv.STATE.HIP_JOINT_EFFORT,LegJumpEnv.STATE.KNEE_JOINT_EFFORT]]
         # nvelocities =    [vstate_norm[k] for k in [LegJumpEnv.STATE.HIP_JOINT_VEL,LegJumpEnv.STATE.KNEE_JOINT_VEL]]
         # npositions =     [vstate_norm[k] for k in [LegJumpEnv.STATE.HIP_JOINT_POS,LegJumpEnv.STATE.KNEE_JOINT_POS]]
@@ -810,17 +810,17 @@ class LegJumpEnv(ControlledEnv):
         vstate_un = LegJumpEnv._unnormalize(vstate_norm,env_conf["bstate_minmax"][:,0],env_conf["bstate_minmax"][:,1])
         pvstate_un = LegJumpEnv._unnormalize(pvstate_norm,env_conf["bstate_minmax"][:,0],env_conf["bstate_minmax"][:,1])
 
-        goal_dist = th.abs(vstate_un[LegJumpEnv.BASE_STATE_IDX.HIP_GOAL_Z] - vstate_un[LegJumpEnv.BASE_STATE_IDX.HIP_POS_Z])
+        goal_dist = th.abs(vstate_un[LegJumpEnv.BASE_STATE_IDXS.HIP_GOAL_Z] - vstate_un[LegJumpEnv.BASE_STATE_IDXS.HIP_POS_Z])
         # tracking_reward = 1 - goal_dist
         tracking_reward = 1/(1+goal_dist/0.05) # halves at 0.05m
-        impulse_threshold = pvstate_un[LegJumpEnv.BASE_STATE_IDX.REWARD_IMPULSE_THRESHOLD]
-        contacts_reward = th.clamp(-(vstate_un[LegJumpEnv.BASE_STATE_IDX.IMPULSES_SUM_AVG]/impulse_threshold)**4, min = -1)
+        impulse_threshold = pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD]
+        contacts_reward = th.clamp(-(vstate_un[LegJumpEnv.BASE_STATE_IDXS.IMPULSES_SUM_AVG]/impulse_threshold)**4, min = -1)
 
 
-        ktorque = vstate_un[LegJumpEnv.BASE_STATE_IDX.KNEE_JOINT_EFFORT]
-        htorque = vstate_un[LegJumpEnv.BASE_STATE_IDX.HIP_JOINT_EFFORT]
-        shin_rotation = vstate_un[LegJumpEnv.BASE_STATE_IDX.SHIN_ANG_POS_Y] - pvstate_un[LegJumpEnv.BASE_STATE_IDX.SHIN_ANG_POS_Y]
-        thigh_rotation = vstate_un[LegJumpEnv.BASE_STATE_IDX.THIGH_ANG_POS_Y] - pvstate_un[LegJumpEnv.BASE_STATE_IDX.THIGH_ANG_POS_Y]
+        ktorque = vstate_un[LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_EFFORT]
+        htorque = vstate_un[LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_EFFORT]
+        shin_rotation = vstate_un[LegJumpEnv.BASE_STATE_IDXS.SHIN_ANG_POS_Y] - pvstate_un[LegJumpEnv.BASE_STATE_IDXS.SHIN_ANG_POS_Y]
+        thigh_rotation = vstate_un[LegJumpEnv.BASE_STATE_IDXS.THIGH_ANG_POS_Y] - pvstate_un[LegJumpEnv.BASE_STATE_IDXS.THIGH_ANG_POS_Y]
 
         new_thigh_energy, new_shin_energy, new_slider_energy = LegJumpEnv._compute_mechanical_energies(vstate_un)
         old_thigh_energy, old_shin_energy, old_slider_energy = LegJumpEnv._compute_mechanical_energies(pvstate_un)
@@ -866,13 +866,13 @@ class LegJumpEnv(ControlledEnv):
             sub_rewards["energy_reward"] = global_energy_reward
             sub_rewards["contacts_reward"] = contacts_reward
 
-        torque_lim_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDX.REWARD_TORQUE_LIMIT_WEIGHT]
-        position_lim_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDX.REWARD_POSITION_LIMIT_WEIGHT]
-        velocity_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDX.REWARD_VELOCITY_WEIGHT]
-        energy_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDX.REWARD_ENERGY_WEIGHT]
-        tracking_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDX.REWARD_TRACKING_WEIGHT]
-        torque_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDX.REWARD_TORQUE_WEIGHT]
-        contacts_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDX.REWARD_CONTACTS_WEIGHT]
+        torque_lim_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT]
+        position_lim_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT]
+        velocity_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]
+        energy_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT]
+        tracking_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]
+        torque_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]
+        contacts_weight = pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT]
 
         return (tracking_weight*tracking_reward + 
                 torque_lim_weight*torque_limit_reward + 
@@ -886,7 +886,7 @@ class LegJumpEnv(ControlledEnv):
     def initializeEpisode(self, options = {}) -> None:
 
         
-        self._current_state = {self.STATE_BASE   : th.zeros((self._history_length, len(self.BASE_STATE_IDX)), dtype=th.float32, device=self._th_device),
+        self._current_state = {self.STATE_BASE   : th.zeros((self._history_length, len(self.BASE_STATE_IDXS)), dtype=th.float32, device=self._th_device),
                             self.STATE_ACT    : th.zeros((self._history_length, self._action_size), dtype=th.float32, device=self._th_device),
                             self.STATE_IMG    : th.zeros(self._img_shape_chw, dtype = th.uint8, device = self._th_device)}
         
@@ -1194,7 +1194,7 @@ class LegJumpEnv(ControlledEnv):
                 # ggLog.info(f"jstates = {jstates}")
 
                 bstate_history = self._current_state[self.STATE_BASE]
-                if len(self._current_state)!=0 and bstate_history[0][self.BASE_STATE_IDX.SAFETY_TRIGGERED] > 0:
+                if len(self._current_state)!=0 and bstate_history[0][self.BASE_STATE_IDXS.SAFETY_TRIGGERED] > 0:
                     safety_triggered = True
                 else:
                     jstate_th = th.as_tensor([jstates[self._hip_joint].position[0],
@@ -1336,13 +1336,13 @@ class LegJumpEnv(ControlledEnv):
                 self._ep_max_abs_contact = max(self._ep_max_abs_contact, max(abs_contacts))
                 self._ep_max_abs_contacts_sum = max(self._ep_max_abs_contacts_sum, sum(abs_contacts))
         vstate_unnorm = self._unnormalize(self._current_state[self.STATE_BASE][0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])
-        goal_dist = abs(vstate_unnorm[self.BASE_STATE_IDX.HIP_GOAL_Z]-vstate_unnorm[self.BASE_STATE_IDX.HIP_POS_Z])
+        goal_dist = abs(vstate_unnorm[self.BASE_STATE_IDXS.HIP_GOAL_Z]-vstate_unnorm[self.BASE_STATE_IDXS.HIP_POS_Z])
         self._cumulative_dist_to_goal += goal_dist
-        self._cumulative_knee_torque += abs(vstate_unnorm[self.BASE_STATE_IDX.KNEE_JOINT_EFFORT])
-        self._cumulative_hip_torque += abs(vstate_unnorm[self.BASE_STATE_IDX.HIP_JOINT_EFFORT])
-        self._max_knee_torque = th.maximum(self._max_knee_torque, abs(vstate_unnorm[self.BASE_STATE_IDX.KNEE_JOINT_EFFORT]))
-        self._max_hip_torque = th.maximum(self._max_hip_torque, th.abs(vstate_unnorm[self.BASE_STATE_IDX.HIP_JOINT_EFFORT]))
-        self._last_abs_impulses_sum = vstate_unnorm[self.BASE_STATE_IDX.IMPULSES_SUM]
+        self._cumulative_knee_torque += abs(vstate_unnorm[self.BASE_STATE_IDXS.KNEE_JOINT_EFFORT])
+        self._cumulative_hip_torque += abs(vstate_unnorm[self.BASE_STATE_IDXS.HIP_JOINT_EFFORT])
+        self._max_knee_torque = th.maximum(self._max_knee_torque, abs(vstate_unnorm[self.BASE_STATE_IDXS.KNEE_JOINT_EFFORT]))
+        self._max_hip_torque = th.maximum(self._max_hip_torque, th.abs(vstate_unnorm[self.BASE_STATE_IDXS.HIP_JOINT_EFFORT]))
+        self._last_abs_impulses_sum = vstate_unnorm[self.BASE_STATE_IDXS.IMPULSES_SUM]
         self._dists_to_goal[self._stepCounter%len(self._dists_to_goal)] = goal_dist
         self._cumulated_abs_impulses += self._last_abs_impulses_sum
 
@@ -1432,8 +1432,8 @@ class LegJumpEnv(ControlledEnv):
         i = super().getInfo(state=state)
         # ggLog.info(f"getInfo(): {self._stepCounter}")
         # i["step_count"] = self._stepCounter
-        current_vstate_unnorm = self._unnormalize(state[self.STATE_BASE][0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])
-        i["hip_goal_z"] = current_vstate_unnorm[self.BASE_STATE_IDX.HIP_GOAL_Z]
+        bstate_unnorm = self._unnormalize(state[self.STATE_BASE][0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])
+        i["hip_goal_z"] = bstate_unnorm[self.BASE_STATE_IDXS.HIP_GOAL_Z]
         i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter if self._stepCounter!=0 else float("nan")
         i["avg10_dist"] = th.mean(self._dists_to_goal)
         i["avg_knee_torque"] = self._cumulative_knee_torque/self._stepCounter if self._stepCounter!=0 else float("nan")
@@ -1449,14 +1449,16 @@ class LegJumpEnv(ControlledEnv):
         i["max_hip_torque"] = self._max_hip_torque
         i["impulses_sum"] = self._last_abs_impulses_sum
         i["step_count"] = self._stepCounter
-        i["thigh_vel_x_z"] = current_vstate_unnorm[[self.BASE_STATE_IDX.THIGH_VEL_X,self.BASE_STATE_IDX.THIGH_VEL_Z]]
-        i["shin_vel_x_z"] = current_vstate_unnorm[[self.BASE_STATE_IDX.SHIN_VEL_X,self.BASE_STATE_IDX.SHIN_VEL_Z]]
-        i["hip_joint_vel"] = current_vstate_unnorm[self.BASE_STATE_IDX.HIP_JOINT_VEL]
-        i["thigh_ang_vel_y"] = current_vstate_unnorm[self.BASE_STATE_IDX.THIGH_ANG_VEL_Y]
-        i["thigh_pos_z"] = current_vstate_unnorm[[self.BASE_STATE_IDX.THIGH_POS_Z]]
-        i["shin_pos_z"] = current_vstate_unnorm[[self.BASE_STATE_IDX.SHIN_POS_Z]]
-        statenames = [e.name for e in self.BASE_STATE_IDX]
-        i["vstate"] = {statenames[i]:current_vstate_unnorm[i] for i in range(len(statenames))}
+        i["thigh_vel_x_z"] = bstate_unnorm[[self.BASE_STATE_IDXS.THIGH_VEL_X,self.BASE_STATE_IDXS.THIGH_VEL_Z]]
+        i["shin_vel_x_z"] = bstate_unnorm[[self.BASE_STATE_IDXS.SHIN_VEL_X,self.BASE_STATE_IDXS.SHIN_VEL_Z]]
+        i["hip_joint_vel"] = bstate_unnorm[self.BASE_STATE_IDXS.HIP_JOINT_VEL]
+        i["thigh_ang_vel_y"] = bstate_unnorm[self.BASE_STATE_IDXS.THIGH_ANG_VEL_Y]
+        i["thigh_pos_z"] = bstate_unnorm[[self.BASE_STATE_IDXS.THIGH_POS_Z]]
+        i["shin_pos_z"] = bstate_unnorm[[self.BASE_STATE_IDXS.SHIN_POS_Z]]
+        statenames = [e.name for e in self.BASE_STATE_IDXS]
+        stateindxs = [e.value for e in self.BASE_STATE_IDXS]
+        i["cbstate"] = bstate_unnorm[stateindxs]
+        i["cbstate_labels"] = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in statenames]) # ugly, but simple
         i.update(self._dbg_info)
         # i["config"] = dataclasses.asdict(self._configuration)
         i["ep_config"] = dataclasses.asdict(self._current_episode_config)
@@ -1470,7 +1472,7 @@ class LegJumpEnv(ControlledEnv):
     def reachedTerminalState(self, previousState, state) -> th.Tensor:
         if not self._configuration.stop_on_safety:
             return th.as_tensor(False, device=self._th_device)
-        r = state[self.STATE_BASE][0][self.BASE_STATE_IDX.SAFETY_TRIGGERED] > 0
+        r = state[self.STATE_BASE][0][self.BASE_STATE_IDXS.SAFETY_TRIGGERED] > 0
         if r:
             ggLog.info(f"truncation at step {self._stepCounter}")
         return r

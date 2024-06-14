@@ -582,22 +582,9 @@ class LegJumpEnv(ControlledEnv):
 
 
 
-
-    def seed(self, seed : int) -> None:
-        super().seed(seed)
-        self._rng = self._rng.manual_seed(seed)
-        self.action_space.seed(seed)
-        self.observation_space.seed(seed)
-
-
-    @staticmethod
-    def _unnormalize(v : _T, min : _T, max : _T) -> _T:
-        return min+(v+1)/2*(max-min)
-    
-    @staticmethod        
-    def _normalize(value : _T, min : _T, max : _T):
-        return (value + (-min))/(max-min)*2-1
-
+    # --------------------------------------------------------------------------------------------------------------------
+    # Action
+    # --------------------------------------------------------------------------------------------------------------------
 
     def _pvesd_to_action(self, cmds_pvesd):
         
@@ -740,6 +727,30 @@ class LegJumpEnv(ControlledEnv):
                                                             delay_sec=action_delay.item())
             
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # --------------------------------------------------------------------------------------------------------------------
+    # Reward
+    # --------------------------------------------------------------------------------------------------------------------
 
 
     @staticmethod
@@ -1107,7 +1118,104 @@ class LegJumpEnv(ControlledEnv):
             self._last_out_action = self._pvesd_to_action(start_jimp)
         else:
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
-        
+
+
+
+
+    def buildSimulation(self):
+        # ggLog.info("Building env")
+        envCtrlName = type(self._environmentController).__name__
+        if envCtrlName == "PyBulletJointImpedanceAdapter":
+            self._environmentController.build_scenario(None)
+            self._rendering_cam_name = "simple_camera"
+
+            self._knee_joint = ("leg","knee_joint_1")
+            self._hip_joint = ("leg","hip_joint_1")
+            self._rail_joint = ("leg","rail_joint")
+
+            self._foot_link = ("leg","tip1")
+            self._thigh_base_link = ("leg", "thigh_link1")
+            self._shin_base_link = ("leg", "shin_link1")
+            self._thigh_com_link = ("leg", "thigh_link1_com")
+            self._shin_com_link = ("leg", "shin_link1_com")
+            self._rendering_cam_name = "simple_camera"
+            self._support1_base = ("support1","world")
+            self._support2_base = ("support2","world")
+            self._red_ball_base = ("red_ball","world")
+        elif envCtrlName in ["RosXbotAdapter", "RosXbotGazeboAdapter"]:
+            if self._real:
+                raise NotImplementedError()
+            else:
+                self._environmentController.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
+                                                                                                                          "gazebo/all_gazebo_xbot.launch"),
+                                                           launch_file_args={"gui":"false"})
+                self._knee_joint = ("leg","knee_joint_1")
+                self._hip_joint = ("leg","hip_joint_1")
+                self._rail_joint = ("leg","rail_joint")
+
+                self._foot_link = ("leg","tip1")
+                self._thigh_base_link = ("leg", "thigh_link1")
+                self._shin_base_link = ("leg", "shin_link1")
+                self._thigh_com_link = ("leg", "thigh_link1_com")
+                self._shin_com_link = ("leg", "shin_link1_com")
+                self._rendering_cam_name = "simple_camera"
+                self._support1_base = ("support1","plate")
+                self._support2_base = ("support2","plate")
+                self._red_ball_base = ("red_ball","sphere_link")
+        # elif envCtrlName in ["GazeboAdapter", "GazeboAdapterNoPlugin"]:
+        #     # ggLog.info(f"sim_img_width  = {sim_img_width}")
+        #     # ggLog.info(f"sim_img_height = {sim_img_height}")
+        #     if not self._rendering_enabled:
+        #         worldpath = "\"$(find adarl_ros)/worlds/ground_plane_world_plugin.world\""
+        #     else:
+        #         worldpath = "\"$(find adarl_ros)/worlds/fixed_camera_world_plugin.world\""
+        #     self._environmentController.build_scenario( launch_file_pkg_and_path=("adarl_ros","/launch/gazebo_server.launch"),
+        #                                                 launch_file_args={  "gui":"false",
+        #                                                                     "paused":"true",
+        #                                                                     "physics_engine":"bullet",
+        #                                                                     "limit_sim_speed":"false",
+        #                                                                     "world_name":worldpath,
+        #                                                                     "gazebo_seed":f"{self._envSeed}",
+        #                                                                     "wall_sim_speed":f"{self._wall_sim_speed}"})
+        #     self._rendering_cam_name = "camera"
+        # elif envCtrlName == "GzController":
+        #     self._environmentController.build_scenario(sdf_file = ("adarl_ros2","/worlds/empty_cams.sdf"))
+        #     # self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro"),
+        #     #                                         model_name=None,
+        #     #                                         pose=build_pose(0,2,0.5,0,0.0,-0.707,0.707),
+        #     #                                         model_kwargs={"camera_width":"1920","camera_height":"1080","frame_rate":1/self._intendedStepLength_sec},
+        #     #                                         model_format="sdf.xacro")
+        #     self._rendering_cam_name = "simple_camera"
+        else:
+            raise NotImplementedError("environmentController "+envCtrlName+" not supported")
+
+    def _destroySimulation(self):
+        self._environmentController.destroy_scenario()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # --------------------------------------------------------------------------------------------------------------------
+    # State & Observation
+    # --------------------------------------------------------------------------------------------------------------------
+
         
     def getUiRendering(self) -> Tuple[Union[np.ndarray, th.Tensor, None], float]:
         try:
@@ -1354,79 +1462,7 @@ class LegJumpEnv(ControlledEnv):
 
 
 
-    def buildSimulation(self):
-        # ggLog.info("Building env")
-        envCtrlName = type(self._environmentController).__name__
-        if envCtrlName == "PyBulletJointImpedanceAdapter":
-            self._environmentController.build_scenario(None)
-            self._rendering_cam_name = "simple_camera"
 
-            self._knee_joint = ("leg","knee_joint_1")
-            self._hip_joint = ("leg","hip_joint_1")
-            self._rail_joint = ("leg","rail_joint")
-
-            self._foot_link = ("leg","tip1")
-            self._thigh_base_link = ("leg", "thigh_link1")
-            self._shin_base_link = ("leg", "shin_link1")
-            self._thigh_com_link = ("leg", "thigh_link1_com")
-            self._shin_com_link = ("leg", "shin_link1_com")
-            self._rendering_cam_name = "simple_camera"
-            self._support1_base = ("support1","world")
-            self._support2_base = ("support2","world")
-            self._red_ball_base = ("red_ball","world")
-        elif envCtrlName in ["RosXbotAdapter", "RosXbotGazeboAdapter"]:
-            if self._real:
-                raise NotImplementedError()
-            else:
-                self._environmentController.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
-                                                                                                                          "gazebo/all_gazebo_xbot.launch"),
-                                                           launch_file_args={"gui":"false"})
-                self._knee_joint = ("leg","knee_joint_1")
-                self._hip_joint = ("leg","hip_joint_1")
-                self._rail_joint = ("leg","rail_joint")
-
-                self._foot_link = ("leg","tip1")
-                self._thigh_base_link = ("leg", "thigh_link1")
-                self._shin_base_link = ("leg", "shin_link1")
-                self._thigh_com_link = ("leg", "thigh_link1_com")
-                self._shin_com_link = ("leg", "shin_link1_com")
-                self._rendering_cam_name = "simple_camera"
-                self._support1_base = ("support1","plate")
-                self._support2_base = ("support2","plate")
-                self._red_ball_base = ("red_ball","sphere_link")
-        # elif envCtrlName in ["GazeboAdapter", "GazeboAdapterNoPlugin"]:
-        #     # ggLog.info(f"sim_img_width  = {sim_img_width}")
-        #     # ggLog.info(f"sim_img_height = {sim_img_height}")
-        #     if not self._rendering_enabled:
-        #         worldpath = "\"$(find adarl_ros)/worlds/ground_plane_world_plugin.world\""
-        #     else:
-        #         worldpath = "\"$(find adarl_ros)/worlds/fixed_camera_world_plugin.world\""
-        #     self._environmentController.build_scenario( launch_file_pkg_and_path=("adarl_ros","/launch/gazebo_server.launch"),
-        #                                                 launch_file_args={  "gui":"false",
-        #                                                                     "paused":"true",
-        #                                                                     "physics_engine":"bullet",
-        #                                                                     "limit_sim_speed":"false",
-        #                                                                     "world_name":worldpath,
-        #                                                                     "gazebo_seed":f"{self._envSeed}",
-        #                                                                     "wall_sim_speed":f"{self._wall_sim_speed}"})
-        #     self._rendering_cam_name = "camera"
-        # elif envCtrlName == "GzController":
-        #     self._environmentController.build_scenario(sdf_file = ("adarl_ros2","/worlds/empty_cams.sdf"))
-        #     # self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro"),
-        #     #                                         model_name=None,
-        #     #                                         pose=build_pose(0,2,0.5,0,0.0,-0.707,0.707),
-        #     #                                         model_kwargs={"camera_width":"1920","camera_height":"1080","frame_rate":1/self._intendedStepLength_sec},
-        #     #                                         model_format="sdf.xacro")
-        #     self._rendering_cam_name = "simple_camera"
-        else:
-            raise NotImplementedError("environmentController "+envCtrlName+" not supported")
-
-
-
-
-
-    def _destroySimulation(self):
-        self._environmentController.destroy_scenario()
 
     def getInfo(self,state=None) -> Dict[Any,Any]:
         i = super().getInfo(state=state)
@@ -1458,7 +1494,7 @@ class LegJumpEnv(ControlledEnv):
         statenames = [e.name for e in self.BASE_STATE_IDXS]
         stateindxs = [e.value for e in self.BASE_STATE_IDXS]
         i["cbstate"] = bstate_unnorm[stateindxs]
-        i["cbstate_labels"] = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in statenames]) # ugly, but simple
+        i["cbstate_labels"] = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in statenames], dtype=th.uint8) # ugly, but simple
         i.update(self._dbg_info)
         # i["config"] = dataclasses.asdict(self._configuration)
         i["ep_config"] = dataclasses.asdict(self._current_episode_config)
@@ -1476,3 +1512,18 @@ class LegJumpEnv(ControlledEnv):
         if r:
             ggLog.info(f"truncation at step {self._stepCounter}")
         return r
+    
+    def seed(self, seed : int) -> None:
+        super().seed(seed)
+        self._rng = self._rng.manual_seed(seed)
+        self.action_space.seed(seed)
+        self.observation_space.seed(seed)
+
+
+    @staticmethod
+    def _unnormalize(v : _T, min : _T, max : _T) -> _T:
+        return min+(v+1)/2*(max-min)
+    
+    @staticmethod        
+    def _normalize(value : _T, min : _T, max : _T):
+        return (value + (-min))/(max-min)*2-1

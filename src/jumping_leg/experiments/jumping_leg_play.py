@@ -27,6 +27,7 @@ from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
 
 import adarl.utils.dbg
+from ctypes.util import find_library
 
 def load_model(model_path):
     try:
@@ -82,10 +83,6 @@ def play(seed, folderName, run_id, args, env_builder_args):
                          env_builder_args = env_builder_args)
 
     ggLog.info("Built")
-#    env.action_space.seed(seed)
-
-    ep_duration = 5/env_builder_args["stepLength_sec"]
-
     model = load_model(args["pretrained"])
 
     play = True
@@ -130,6 +127,7 @@ def play(seed, folderName, run_id, args, env_builder_args):
         ep_wall_duration = 0
         while not done:
             t0 = time.monotonic()
+            session.run_info["collected_steps"] += 1
             ggLog.info(f"step = {step_count} realtimefactor = {env_builder_args['stepLength_sec']/step_wallduration:.2f}")
             # ggLog.info(f"ep_config = {info['ep_config']}")
             obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
@@ -168,6 +166,7 @@ def play(seed, folderName, run_id, args, env_builder_args):
             step_wallduration = time.monotonic()-t0
             ep_wall_duration += step_wallduration
             time.sleep(max(0,env_builder_args["stepLength_sec"] - step_wallduration))
+        session.run_info["collected_episodes"] += 1
         ggLog.info("\n"
                    f"Episode reward =  {ep_reward}\n"
                    f"Wall duration =   {ep_wall_duration:.2f}s\n"
@@ -175,6 +174,8 @@ def play(seed, folderName, run_id, args, env_builder_args):
                    f"Realtime factor = {step_count*env_builder_args['stepLength_sec']/ep_wall_duration:.2f}\n")
         if interactive:
             keyboard_listener.close()
+    env.reset() # trigger video saving
+    env.close()
 
 
 if __name__ == "__main__":

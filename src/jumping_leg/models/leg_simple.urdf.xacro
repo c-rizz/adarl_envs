@@ -239,7 +239,7 @@
 			</material>
       	</visual>
 		<contact>
-			<lateral_friction value="0.1"/>
+			<lateral_friction value="0.01"/>
 			<rolling_friction value="0.01"/>
 			<restitution value="0.05"/>
 		</contact>

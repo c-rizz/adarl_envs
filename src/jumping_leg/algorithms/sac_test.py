@@ -222,4 +222,4 @@ if __name__ == "__main__":
                 args = args,
                 debug_level = -10,
                 start_adarl=False,
-                pkgs_to_save=["adarl","jumping_leg"])
+                pkgs_to_save=["adarl","jumping_leg","rreal"])

@@ -171,6 +171,8 @@ class LegJumpEnv(ControlledEnv):
         max_damping : float
         min_stiffness : float
         min_damping : float
+        safe_stiffness : float
+        safe_damping : float
 
     @staticmethod
     def _sample(value_or_dist : Union[float,Tuple[str,float,float]], generator, device) -> th.Tensor:
@@ -360,10 +362,12 @@ class LegJumpEnv(ControlledEnv):
                                                             action_noise_mustd=th.empty((0,)),
                                                             stop_on_safety = stop_on_safety,
                                                             action_delay_mustd = th.as_tensor(action_delay_mustd, dtype=self._obs_dtype, device=self._th_device),
-                                                            max_stiffness=400,
-                                                            max_damping=100,
+                                                            max_stiffness=800,
+                                                            max_damping=200,
                                                             min_stiffness=10,
-                                                            min_damping=10)
+                                                            min_damping=10,
+                                                            safe_stiffness = 200,
+                                                            safe_damping = 50)
         if self._control_mode == self.CONTROL_MODES.IMPEDANCE:
             action_len = 10 
         elif self._control_mode == self.CONTROL_MODES.IMPEDANCE_NO_GAINS:
@@ -659,8 +663,10 @@ class LegJumpEnv(ControlledEnv):
 
                                           [[hp_lim[1], hv_lim, he_lim, max_stiffness, max_damping],
                                            [kp_lim[1], kv_lim, ke_lim, max_stiffness, max_damping]]])
-        hip_pvesd = th.tensor([0,0,0,0,0], dtype=self._obs_dtype, device=self._th_device)
-        knee_pvesd = th.tensor([0,0,0,0,0], dtype=self._obs_dtype, device=self._th_device)
+        s = self._normalize(self._configuration.safe_stiffness,min= self._configuration.min_stiffness,max=self._configuration.max_stiffness)
+        d = self._normalize(self._configuration.safe_damping,min= self._configuration.min_damping,max=self._configuration.max_damping)
+        hip_pvesd  = th.tensor([0,0,0,s,d], dtype=self._obs_dtype, device=self._th_device)
+        knee_pvesd = th.tensor([0,0,0,s,d], dtype=self._obs_dtype, device=self._th_device)
         
         if self._control_mode == self.CONTROL_MODES.VELOCITY:
             hip_pvesd[1] = action[0]
@@ -1505,6 +1511,7 @@ class LegJumpEnv(ControlledEnv):
         i["shin_pos_z"] = bstate_unnorm[[self.BASE_STATE_IDXS.SHIN_POS_Z]]
         statenames = [e.name for e in self.BASE_STATE_IDXS]
         stateindxs = [e.value for e in self.BASE_STATE_IDXS]
+        i["action"] = self._last_out_action
         i["cbstate"] = bstate_unnorm[stateindxs]
         i["cbstate_labels"] = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in statenames], dtype=th.uint8) # ugly, but simple
         i.update(self._dbg_info)

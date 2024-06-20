@@ -72,7 +72,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     hyperparams = {"train_freq" : 50,
                    "grad_steps" : 25,
                    "q_lr" : 0.005,
-                   "policy_lr" : 0.0005}
+                   "policy_lr" : 0.0005,
+                   "batch_size" : 16384}
     main(seed, folderName, run_id, args, env_builder_args, hyperparams)
 
 # import traceback
@@ -178,7 +179,7 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
     callbacks.append(CheckpointCallbackRB(save_path=log_folder+"/checkpoints",
                                           model=model,
                                           save_best=False,
-                                          save_freq_ep=100*num_envs))
+                                          save_freq_ep=20*num_envs))
     try:
         train_off_policy(collector=collector,
             model = model,
@@ -187,7 +188,7 @@ def main(seed, folderName, run_id, args, env_builder_args, hyperparams):
             train_freq = hyperparams["train_freq"],
             learning_starts=500*num_envs*5,
             grad_steps=hyperparams["grad_steps"],
-            batch_size=16384,
+            batch_size=hyperparams["batch_size"],
             log_freq=500,
             callbacks=callbacks)
     finally:

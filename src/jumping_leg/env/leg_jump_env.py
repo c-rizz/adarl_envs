@@ -22,11 +22,6 @@ import dataclasses
 from dataclasses import dataclass
 import time
 
-from dataclasses import dataclass
-
-
-import dataclasses
-from dataclasses import dataclass
 
 
 _T = TypeVar('_T', float, th.Tensor)
@@ -1014,7 +1009,7 @@ class LegJumpEnv(ControlledEnv):
         # These override previous configs
         if options is not None:
             if "support1_pos_x" in options: s1_xz[0] = options["support1_pos_x"]
-            if "support1_pos_z" in options: s1_xz[1] = options["support2_pos_z"]
+            if "support1_pos_z" in options: s1_xz[1] = options["support1_pos_z"]
             if "support2_pos_x" in options: s2_xz[0] = options["support2_pos_x"]
             if "support2_pos_z" in options: s2_xz[1] = options["support2_pos_z"]
             if "hip_goal_z" in options: hip_goal_z = options["hip_goal_z"]

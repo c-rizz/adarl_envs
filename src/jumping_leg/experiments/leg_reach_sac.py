@@ -1,6 +1,6 @@
 #!/usr/bin/env python3  
 
-from rreal.examples.solve_sac import solve_sac, SAC_hyperparams, gym_builder
+from rreal.examples.solve_sac import sac_train, SAC_hyperparams, gym_builder
 
 
 
@@ -136,7 +136,7 @@ def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
 
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
-    solve_sac(seed, folderName, run_id, args,
+    sac_train(seed, folderName, run_id, args,
               env_builder=gym_builder,
               env_builder_args = {  "env_name" : "HalfCheetah-v4",
                                     "forward_reward_weight" : 1.0,

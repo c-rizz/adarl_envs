@@ -1521,7 +1521,8 @@ class LegJumpEnv(ControlledEnv):
         i = super().getInfo(state=state)
         # ggLog.info(f"getInfo(): {self._stepCounter}")
         # i["step_count"] = self._stepCounter
-        bstate_unnorm = self._unnormalize(state[self.STATE_BASE][0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])
+        bstate = state[self.STATE_BASE][0]
+        bstate_unnorm = self._unnormalize(bstate,self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])
         i["hip_goal_z"] = bstate_unnorm[self.BASE_STATE_IDXS.HIP_GOAL_Z]
         i["avg_dist"] = self._cumulative_dist_to_goal/self._stepCounter if self._stepCounter!=0 else float("nan")
         i["avg10_dist"] = th.mean(self._dists_to_goal)
@@ -1547,6 +1548,7 @@ class LegJumpEnv(ControlledEnv):
         statenames = [e.name for e in self.BASE_STATE_IDXS]
         stateindxs = [e.value for e in self.BASE_STATE_IDXS]
         i["action"] = self._last_out_action
+        i["cbstate_norm"] = bstate[stateindxs]
         i["cbstate"] = bstate_unnorm[stateindxs]
         i["cbstate_labels"] = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in statenames], dtype=th.uint8) # ugly, but simple
         i.update(self._dbg_info)

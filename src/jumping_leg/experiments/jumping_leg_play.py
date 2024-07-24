@@ -58,7 +58,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "stepLength_sec" : step_length_sec,
         "platform_randomization" : "single",
         "quiet" : False,
-        "mode" : "pybullet",
+        "mode" : "pybullet", #"xbot-gazebo",
         "use_contacts" : False,
         "ep_obs_noise_mustd" : (0.01, 0.01),
         "step_obs_noise_std" : 0.01,
@@ -69,7 +69,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_smoothing_halflife_sec" : 0.01,
         "leg_min_height" : 0.4,
         "leg_max_height" : 0.65,
-        "leg_max_jump" : 0.4}
+        "leg_max_jump" : 0.3}
 
     return play(seed, folderName, run_id, args, env_builder, env_builder_args, video_recorder_kwargs)
 

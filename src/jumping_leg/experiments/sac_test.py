@@ -11,7 +11,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_energy_weight" : 0.0,
         "reward_position_limit_weight" : 1.0,
         "reward_torque_limit_weight" : 1.0,
-        "reward_torque_weight" : 0.1,
+        "reward_torque_weight" : 0.5,
         "reward_tracking_weight" : 1.0,
         "reward_velocity_weight" : 0.01,
         "th_device" : th.device("cpu"),
@@ -28,7 +28,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_delay_mustd" : (0.01,0.01),
         "max_steps_per_episode" : max_steps_per_episode,
         "obs_only_vec":True,
-        "action_smoothing_halflife_sec" : 0.01}
+        "action_smoothing_halflife_sec" : 0.01,
+        "leg_min_height" : 0.4,
+        "leg_max_height" : 0.65,
+        "leg_max_jump" : 0.6}
 
     sac_train(  seed,
                 folderName,

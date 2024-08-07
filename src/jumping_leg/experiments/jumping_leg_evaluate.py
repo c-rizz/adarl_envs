@@ -2,6 +2,7 @@
 
 import adarl.utils.dbg.dbg_img
 from rreal.algorithms.sac import SAC
+from rreal.algorithms.random_policy import RandomPolicy
 import adarl.utils.utils
 
 import torch as th
@@ -13,7 +14,7 @@ import adarl.utils.sigint_handler
 import adarl.utils.dbg
 from rreal.examples.evaluate import evaluate
 import adarl.utils.dbg.ggLog as ggLog
-
+import numpy as np
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
@@ -45,7 +46,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_smoothing_halflife_sec" : 0.01,
         "leg_min_height" : 0.4,
         "leg_max_height" : 0.65,
-        "leg_max_jump" : 0.3}
+        "leg_max_jump" : 0.3,
+        "enable_rendering" : True,
+        "goal_dist_smoothing_halflife_sec" : 0.01}
 
     results = evaluate( seed=seed,
                         folderName=folderName,
@@ -54,7 +57,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         env_builder=env_builder,
                         env_builder_args=env_builder_args,
                         video_recorder_kwargs=video_recorder_kwargs,
-                        model = SAC.load(args["pretrained"]),
+                        model_builder= lambda obs_space, act_space, hyperparams:SAC.load(path=args["pretrained"]),
+                        # model_builder = lambda obs_space, act_space, hyperparams: RandomPolicy(int(np.prod(act_space.shape)),
+                        #                                                         act_space.low.tolist(),
+                        #                                                         act_space.high.tolist()),
+                        model_kwargs = {},
                         num_envs=args["num_envs"],
                         episodes=args["vepisodes"]*args["num_envs"],
                         extra_info_stats=["avg10_dist","safety_triggered"],

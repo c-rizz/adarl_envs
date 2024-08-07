@@ -17,8 +17,6 @@ import adarl.utils.session
 from jumping_leg.experiments.build_jumping_leg_env import env_builder, video_recorder_kwargs
 from wandb.integration.sb3 import WandbCallback
 # from stable_baselines3.common.vec_env import SubprocVecEnv
-from adarl.utils.subproc_vec_env import SubprocVecEnv
-from adarl.envs.VecEnvLogger import VecEnvLogger
 from adarl.utils.sb3_callbacks import EvalCallback_ep, SigintHaltCallback, PrintLrRunInfo, CheckpointCallbackRB
 import stable_baselines3.common.base_class
 import stable_baselines3.common.on_policy_algorithm
@@ -30,6 +28,7 @@ from adarl.envs.RecorderGymWrapper import RecorderGymWrapper
 
 import adarl.utils.dbg
 from ctypes.util import find_library
+import readline
 
 def load_model(model_path):
     try:
@@ -69,7 +68,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_smoothing_halflife_sec" : 0.01,
         "leg_min_height" : 0.4,
         "leg_max_height" : 0.65,
-        "leg_max_jump" : 0.3}
+        "leg_max_jump" : 0.3,
+        "goal_dist_smoothing_halflife_sec" : 0.01,
+        "enable_rendering" : True,
+        "num_envs" : 1}
 
     return play(seed, folderName, run_id, args, env_builder, env_builder_args, video_recorder_kwargs)
 

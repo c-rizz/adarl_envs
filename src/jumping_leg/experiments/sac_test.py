@@ -5,7 +5,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     step_length_sec = 20/1024  # about 50Hz
     ep_duration_sec = 5
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    num_envs = 32
+    train_envs = 32
     env_builder_args = {
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
@@ -31,7 +31,40 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_smoothing_halflife_sec" : 0.01,
         "leg_min_height" : 0.4,
         "leg_max_height" : 0.65,
-        "leg_max_jump" : 0.6}
+        "leg_max_jump" : 0.6,
+        "goal_dist_smoothing_halflife_sec" : 0.01,
+        "enable_rendering" : False,
+        "num_envs" : train_envs}
+    video_eval_env_builder_args = copy.deepcopy(env_builder_args)
+    video_eval_env_builder_args["enable_rendering"] = True
+    video_eval_env_builder_args["video_save_freq"] = 1
+    video_eval_env_builder_args["num_envs"] = 1
+    eval_conf_video_det = {
+        "name" : "video_det",
+        "deterministic" : True,
+        "eval_freq_ep" : 10*train_envs,
+        "eval_eps" : 1,
+        "env_builder_args" : video_eval_env_builder_args
+    }
+    eval_conf_video_stoch = {
+        "name" : "video_stoch",
+        "deterministic" : False,
+        "eval_freq_ep" : 10*train_envs,
+        "eval_eps" : 1,
+        "env_builder_args" : video_eval_env_builder_args
+    }
+    feasible_env_builder_args = copy.deepcopy(env_builder_args)
+    feasible_env_builder_args["leg_max_jump"] = 0.3
+    feasible_env_builder_args["num_envs"] = 10
+    # feasible_env_builder_args["enable_rendering"] = True
+    # feasible_env_builder_args["video_save_freq"] = 1
+    eval_conf_feasible = {
+        "name" : "feasible",
+        "deterministic" : True,
+        "eval_freq_ep" : 10*train_envs,
+        "eval_eps" : 10,
+        "env_builder_args" : feasible_env_builder_args
+    }
 
     sac_train(  seed,
                 folderName,
@@ -39,6 +72,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 args,
                 env_builder = build_jumping_leg_env.env_builder,
                 env_builder_args = env_builder_args,
+                eval_env_builder_args = [eval_conf_video_det,
+                                         eval_conf_video_stoch,
+                                         eval_conf_feasible],
                 hyperparams = SAC_hyperparams( device = "cuda",
                                                 q_network_arch=[256,128],
                                                 q_lr=0.005,
@@ -51,10 +87,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 total_steps=10_000_000,
                                                 train_freq=25,
                                                 grad_steps=50,
-                                                learning_starts=max_steps_per_episode*num_envs*5,
-                                                parallel_envs=num_envs,
-                                                log_freq_vstep=max_steps_per_episode,
-                                                eval_freq_ep=10*num_envs),
+                                                learning_starts=max_steps_per_episode*train_envs*5,
+                                                parallel_envs=train_envs,
+                                                log_freq_vstep=max_steps_per_episode),
                 video_recorder_kwargs=build_jumping_leg_env.video_recorder_kwargs)
 
 
@@ -68,6 +103,7 @@ if __name__ == "__main__":
     import torch as th
     import jumping_leg.experiments.build_jumping_leg_env as build_jumping_leg_env
     from rreal.examples.solve_sac import sac_train, SAC_hyperparams
+    import copy
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--seedsNum", default=1, type=int, help="Number of seeds to test with")

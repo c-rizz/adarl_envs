@@ -18,7 +18,7 @@ from adarl.adapters.BaseJointPositionAdapter import BaseJointPositionAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 import dataclasses
 from dataclasses import dataclass
-
+import adarl.utils.simple_threndering as simple_threndering
 
 
 _T = TypeVar('_T', float, th.Tensor)
@@ -94,7 +94,8 @@ class LegJumpEnv(ControlledEnv):
                             "FORCES_SUM",
                             "FORCES_NUM",
                             "IMPULSES_SUM_AVG",
-                            "SAFETY_TRIGGERED"], start=0)
+                            "SAFETY_TRIGGERED",
+                            "SMOOTHED_GOAL_DIST"], start=0)
     
     EPISODE_CONFIG = IntEnum("EPISODE_CONFIG", ["HIP_GOAL_Z",
                                                 "SUPPORT1_POS_X",
@@ -165,6 +166,11 @@ class LegJumpEnv(ControlledEnv):
         min_damping : float
         safe_stiffness : float
         safe_damping : float
+        goal_dist_exp_smoothing_1s : float
+        leg_min_height : float
+        leg_max_height : float
+        leg_max_jump : float
+        randomize_initial_pose : bool
 
     @staticmethod
     def _sample(value_or_dist : Union[float,Tuple[str,float,float]], generator, device) -> th.Tensor:
@@ -219,7 +225,9 @@ class LegJumpEnv(ControlledEnv):
                     action_smoothing_halflife_sec = 0.05,
                     leg_min_height : float = 0.4,
                     leg_max_height : float = 0.65,
-                    leg_max_jump : float = 0.6):
+                    leg_max_jump : float = 0.6,
+                    goal_dist_smoothing_halflife_sec = 0.5,
+                    randomize_initial_pose : bool = False):
         """Short summary.
 
         Parameters
@@ -253,10 +261,8 @@ class LegJumpEnv(ControlledEnv):
         self._thigh_com_link = ("leg", "thigh_link_com")
         self._shin_com_link = ("leg", "shin_link_com")
         self._rendering_cam_name = "simple_camera"
+        self._use_threnderer = True
 
-        self._leg_min_height = leg_min_height
-        self._leg_max_height = leg_max_height
-        self._leg_max_jump = leg_max_jump
 
         control_mode = control_mode.strip().lower()
         if control_mode == "velocity":
@@ -324,7 +330,7 @@ class LegJumpEnv(ControlledEnv):
         # E.g. with a halving time of 0.01s:
         #   alpha = 0.5^(1/0.01) = 7.88e-31
         action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec)
-
+        goal_dist_exp_smoothing_1s = 0.5**(1/goal_dist_smoothing_halflife_sec)
 
         self._configuration = LegJumpEnv.EnvConfiguration(  reward_contacts_weight = reward_contacts_weight,
                                                             reward_energy_weight = reward_energy_weight,
@@ -334,7 +340,8 @@ class LegJumpEnv(ControlledEnv):
                                                             reward_torque_weight = reward_torque_weight,
                                                             reward_tracking_weight = reward_tracking_weight,
                                                             reward_velocity_weight = reward_velocity_weight,
-                                                            action_exp_smoothing_1s = action_exp_smoothing_1s, 
+                                                            action_exp_smoothing_1s = action_exp_smoothing_1s,
+                                                            goal_dist_exp_smoothing_1s = goal_dist_exp_smoothing_1s,
                                                             stepLength_sec=stepLength_sec,
                                                             position_phys_limits_hip =  (-2.4, 2.4),
                                                             position_phys_limits_knee = (-2.4, 2.4),
@@ -366,7 +373,11 @@ class LegJumpEnv(ControlledEnv):
                                                             min_stiffness=10,
                                                             min_damping=10,
                                                             safe_stiffness = 200,
-                                                            safe_damping = 50)
+                                                            safe_damping = 50,
+                                                            leg_min_height = leg_min_height,
+                                                            leg_max_height = leg_max_height,
+                                                            leg_max_jump = leg_max_jump,
+                                                            randomize_initial_pose = randomize_initial_pose)
         if self._control_mode == self.CONTROL_MODES.IMPEDANCE:
             action_len = 10 
         elif self._control_mode == self.CONTROL_MODES.IMPEDANCE_NO_GAINS:
@@ -416,16 +427,16 @@ class LegJumpEnv(ControlledEnv):
         self._ep_max_abs_contact = -1
         self._ep_max_abs_contacts_sum = -1
         self._last_external_work = 0
-        self._dbg_info = {}
-        self._dbg_info["external_work"] = 0
-        self._dbg_info["thigh_work"] = 0
-        self._dbg_info["shin_work"] = 0
-        self._dbg_info["thigh_joint_work"] = 0
-        self._dbg_info["shin_joint_work"] = 0
-        self._dbg_info["new_thigh_energy"] = 0
-        self._dbg_info["new_shin_energy"] = 0
-        self._dbg_info["new_slider_energy"] = 0
-        self._dbg_info["slider_work"] = 0
+        self._reward_dbg_info = {}
+        self._reward_dbg_info["external_work"] = 0
+        self._reward_dbg_info["thigh_work"] = 0
+        self._reward_dbg_info["shin_work"] = 0
+        self._reward_dbg_info["thigh_joint_work"] = 0
+        self._reward_dbg_info["shin_joint_work"] = 0
+        self._reward_dbg_info["new_thigh_energy"] = 0
+        self._reward_dbg_info["new_shin_energy"] = 0
+        self._reward_dbg_info["new_slider_energy"] = 0
+        self._reward_dbg_info["slider_work"] = 0
         
         vstate_min_max = {  self.BASE_STATE_IDXS.HIP_JOINT_POS : self._configuration.position_phys_limits_hip,
                             self.BASE_STATE_IDXS.HIP_JOINT_VEL : self._configuration.velocity_phys_limits_hip,
@@ -489,7 +500,8 @@ class LegJumpEnv(ControlledEnv):
                             self.BASE_STATE_IDXS.FORCES_SUM : [0,1000],
                             self.BASE_STATE_IDXS.FORCES_NUM : [0,1000],
                             self.BASE_STATE_IDXS.IMPULSES_SUM_AVG : [0,100],
-                            self.BASE_STATE_IDXS.SAFETY_TRIGGERED : [0,1]}        
+                            self.BASE_STATE_IDXS.SAFETY_TRIGGERED : [0,1],
+                            self.BASE_STATE_IDXS.SMOOTHED_GOAL_DIST : [0,10]}        
         self._configuration.bstate_minmax = th.tensor([vstate_min_max[k] for k in self.BASE_STATE_IDXS], device = self._th_device)
 
         # Part of the BASE_STATE that gets stacked
@@ -548,11 +560,7 @@ class LegJumpEnv(ControlledEnv):
         vec_obs_space_high = np.array( [1.0]*vec_obs_size)
         vec_obs_space = spaces.gym_spaces.Box(-vec_obs_space_high,vec_obs_space_high)
         
-        if self._obs_only_vec:
-            img_channels = 0
-        else:
-            img_channels = 3 if rgb else 1
-        self._img_shape_chw = (img_channels,self._obs_img_height,self._obs_img_width)
+        self._img_shape_chw = (3 if rgb else 1,self._obs_img_height,self._obs_img_width)
         img_observation_space = spaces.ThBox(low=0, high=255, shape=self._img_shape_chw, dtype=np.uint8, torch_device=self._th_device)
 
         state_space = spaces.gym_spaces.Dict({  self.STATE_BASE: spaces.ThBox(low=-float("inf"), high=float("inf"), shape=(self._history_length,len(LegJumpEnv.BASE_STATE_IDXS),), torch_device=self._th_device),
@@ -857,7 +865,7 @@ class LegJumpEnv(ControlledEnv):
         vstate_un = LegJumpEnv._unnormalize(vstate_norm,env_conf["bstate_minmax"][:,0],env_conf["bstate_minmax"][:,1])
         pvstate_un = LegJumpEnv._unnormalize(pvstate_norm,env_conf["bstate_minmax"][:,0],env_conf["bstate_minmax"][:,1])
 
-        goal_dist = th.abs(vstate_un[LegJumpEnv.BASE_STATE_IDXS.HIP_GOAL_Z] - vstate_un[LegJumpEnv.BASE_STATE_IDXS.HIP_POS_Z])
+        goal_dist = vstate_un[LegJumpEnv.BASE_STATE_IDXS.SMOOTHED_GOAL_DIST]
         # tracking_reward = 1 - goal_dist
         tracking_reward = 1/(1+goal_dist/0.05) # halves at 0.05m
         impulse_threshold = pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD]
@@ -887,29 +895,36 @@ class LegJumpEnv(ControlledEnv):
 
         if sub_rewards is None:
             sub_rewards : dict[str,th.Tensor] = {}
+        sub_rewards["reward_tracking"] = tracking_reward
+        sub_rewards["reward_torque"] = torque_reward
+        sub_rewards["reward_torque_limit"] = torque_limit_reward
+        sub_rewards["reward_velocity"] = velocity_reward
+        sub_rewards["reward_position_limit"] = position_limit_reward
+        sub_rewards["reward_energy"] = global_energy_reward
+        sub_rewards["reward_contacts"] = contacts_reward
+        sub_rewards["reward_health"] = th.tensor(1, device=vstate_norm.device)
+        sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards.items()}
 
-        sub_rewards["tracking_reward"] = tracking_reward
-        sub_rewards["torque_reward"] = torque_reward
-        sub_rewards["torque_limit_reward"] = torque_limit_reward
-        sub_rewards["velocity_reward"] = velocity_reward
-        sub_rewards["position_limit_reward"] = position_limit_reward
-        sub_rewards["energy_reward"] = global_energy_reward
-        sub_rewards["contacts_reward"] = contacts_reward
-
-        weights = { "tracking_reward" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT],
-                    "torque_reward" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT],
-                    "torque_limit_reward" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT],
-                    "velocity_reward" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT],
-                    "position_limit_reward" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT],
-                    "energy_reward" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT],
-                    "contacts_reward" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT]}
-        sub_rewards_scaled = {k:v*env_conf["reward_scale"]*weights[k] for k,v in sub_rewards.items()}
-        sub_rewards = {f"{k}_unscaled":v for k,v in sub_rewards.items()}
-        sub_rewards.update(sub_rewards_scaled)
-
-        reward = th.as_tensor(sum(list(sub_rewards_scaled.values())))
+        weights = { "reward_tracking" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT],
+                    "reward_torque" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT],
+                    "reward_torque_limit" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT],
+                    "reward_velocity" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT],
+                    "reward_position_limit" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT],
+                    "reward_energy" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT],
+                    "reward_contacts" : pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT],
+                    "reward_health" : 1}
+        for k in sub_rewards:
+            sub_rewards[k] = sub_rewards[k]*env_conf["reward_scale"]*weights[k]
+        reward = th.as_tensor(sum(list(sub_rewards.values())))
 
         if dbg_info is not None:
+            sub_rewards_scaled = {f"{k}_scaled":v for k,v in sub_rewards.items()}
+            sub_rewards_scaled_agg_names = [k for k in sub_rewards_scaled.keys()]
+            sub_rewards_scaled_agg = th.stack([sub_rewards_scaled[k] for k in sub_rewards_scaled_agg_names])
+            sub_rewards_scaled_agg_names = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in sub_rewards_scaled_agg_names], dtype=th.uint8)
+            sub_rewards_unscaled_agg_names = [k for k in sub_rewards_unscaled.keys()]
+            sub_rewards_unscaled_agg = th.stack([sub_rewards_unscaled[k] for k in sub_rewards_unscaled_agg_names])
+            sub_rewards_unscaled_agg_names = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in sub_rewards_unscaled_agg_names], dtype=th.uint8)
             dbg_info["external_work"] = external_work
             dbg_info["thigh_work"] = thigh_work
             dbg_info["shin_work"] = shin_work
@@ -919,16 +934,47 @@ class LegJumpEnv(ControlledEnv):
             dbg_info["new_thigh_energy"] = new_thigh_energy
             dbg_info["new_shin_energy"] = new_shin_energy
             dbg_info["new_slider_energy"] = new_slider_energy
-            dbg_info.update(sub_rewards)
+            dbg_info["sub_rewards_unscaled"] = sub_rewards_unscaled_agg
+            dbg_info["sub_rewards_unscaled_labels"] = sub_rewards_unscaled_agg_names
+            dbg_info["sub_rewards_scaled"] = sub_rewards_scaled_agg
+            dbg_info["sub_rewards_scaled_labels"] = sub_rewards_scaled_agg_names
+            dbg_info.update({k:r.cpu().item() if isinstance(r,th.Tensor) else r for k,r in sub_rewards.items()})
             dbg_info["reward"] = reward
-
+        if sub_rewards["reward_contacts"] != 0: raise RuntimeError(f"reward_contacts is {sub_rewards['reward_contacts']}, weights = {weights}, bstate = {state[LegJumpEnv.STATE_BASE]}")
         return reward
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # --------------------------------------------------------------------------------------------------------------------
+    # Initialization
+    # --------------------------------------------------------------------------------------------------------------------
 
 
     def initializeEpisode(self, options = {}) -> None:
 
         
-        self._current_state = {self.STATE_BASE   : th.zeros((self._history_length, len(self.BASE_STATE_IDXS)), dtype=th.float32, device=self._th_device),
+        self._current_state = {self.STATE_BASE   : th.full((self._history_length, len(self.BASE_STATE_IDXS)), fill_value=-1, dtype=th.float32, device=self._th_device),
                             self.STATE_ACT    : th.zeros((self._history_length, self._action_size), dtype=th.float32, device=self._th_device),
                             self.STATE_IMG    : th.zeros(self._img_shape_chw, dtype = th.uint8, device = self._th_device)}
         
@@ -993,16 +1039,82 @@ class LegJumpEnv(ControlledEnv):
 
         # Having conservative values here will not make the policy learn to behave nice in unfeasible cases
         # Having too broad value will have unfeasible cases in training
-        min_stretch_z = self._leg_min_height
-        max_stretch_z = self._leg_max_height
-        max_jump_z = self._leg_max_jump
-
-        min_goal_z = min_stretch_z
-        max_goal_z = max_jump_z + max_stretch_z
+        min_goal_z = self._configuration.leg_min_height
+        max_goal_z = self._configuration.leg_max_jump + self._configuration.leg_max_height
         hip_goal_z = min_goal_z + th.rand(size=(1,), generator=self._rng, device=self._th_device)*(max_goal_z-min_goal_z) # uniform(0.4,1.2)
+        
+        s1_xz,s2_xz = self._choose_platforms_positions(hip_goal_z)
+
+        reward_contacts_weights = self._sample(self._configuration.reward_contacts_weight,
+                                                self._rng,
+                                                self._th_device)
+        maxStepsPerEpisode = self._original_max_epsteps
+        # These override previous configs
+        if options is not None:
+            if "support1_pos_x" in options: s1_xz[0] = options["support1_pos_x"]
+            if "support1_pos_z" in options: s1_xz[1] = options["support1_pos_z"]
+            if "support2_pos_x" in options: s2_xz[0] = options["support2_pos_x"]
+            if "support2_pos_z" in options: s2_xz[1] = options["support2_pos_z"]
+            if "hip_goal_z" in options: hip_goal_z = options["hip_goal_z"]
+            if "reward_contacts_weights" in options: reward_contacts_weights = options["reward_contacts_weights"]
+            if "max_ep_steps" in options: maxStepsPerEpisode = options["max_ep_steps"]
+
+        self._maxStepsPerEpisode = maxStepsPerEpisode
+            
+        obs_noise_mu = self._configuration.ep_obs_noise_mustd[0] + self._configuration.ep_obs_noise_mustd[1]*th.randn(size=(len(self._stacked_obs_part),),
+                                                                                                                      generator=self._rng,
+                                                                                                                      dtype=self._obs_dtype,
+                                                                                                                      device=self._th_device)
+        #min 0.4, max support2_z+0.6
+        self._current_episode_config = LegJumpEnv.EpisodeConfiguration(hip_goal_z=hip_goal_z,
+                                                                       support1_pos_x=s1_xz[0],
+                                                                       support1_pos_z=s1_xz[1],
+                                                                       support2_pos_x=s2_xz[0],
+                                                                       support2_pos_z=s2_xz[1],
+                                                                       reward_contacts_weights=reward_contacts_weights,
+                                                                       obs_noise_mustd=th.stack([obs_noise_mu, self._configuration.step_obs_noise_std]))
+        if not self._configuration.randomize_initial_pose:
+            rail_pos, hip_pos, knee_pos = self._start_height, 3.4159/4,  3.14159/2
+            if self._current_episode_config.support2_pos_x < 0:
+                hip_pos, knee_pos = -hip_pos, -knee_pos
+        else:
+            rail_hip_knee_pos = th.rand(size=(3,), device=self._th_device, dtype = th.float32)*2-1
+            rail_hip_knee_pos = self._unnormalize(rail_hip_knee_pos,
+                                    min=th.tensor([ 0,
+                                                    self._configuration.position_cmd_limits_hip[0],
+                                                    self._configuration.position_cmd_limits_knee[0]]),
+                                    max=th.tensor([0,
+                                                   self._configuration.position_cmd_limits_hip[1],
+                                                   self._configuration.position_cmd_limits_knee[1]]))
+            rail_pos, hip_pos, knee_pos = rail_hip_knee_pos
+        self._dists_to_goal = th.full(size=(int(self._maxStepsPerEpisode/10),), fill_value=th.abs(th.as_tensor(hip_goal_z-rail_pos)).cpu().item(),
+                                      dtype=th.float32, device=self._th_device)
+
+        if isinstance(self._environmentController, BaseSimulationAdapter):
+            self._simulation_initialization(rail_pos, hip_pos, knee_pos)
+        else:
+            moved = False
+            while not moved:
+                ggLog.info(f"Cannot automatically initialize episode with non-simulated adapter. Lift up the robot and press ENTER. Be safe :)")
+                input()
+                if isinstance(self._environmentController, BaseJointPositionAdapter):
+                    try:
+                        self._environmentController.moveToJointPoseSync({self._hip_joint:  hip_pos,
+                                                                        self._knee_joint: knee_pos})
+                    except MoveFailError as e:
+                        ggLog.warn(f"Failed to move to joint position. Error = {exc_to_str(e)}")
+            # raise RuntimeError("")
+        self._update_state()
+        self._update_dbg_info()
+
+    def _choose_platforms_positions(self, hip_goal_z):
+        # Having conservative values here will not make the policy learn to behave nice in unfeasible cases
+        # Having too broad value will have unfeasible cases in training
+        min_stretch_z = self._configuration.leg_min_height
+        max_stretch_z = self._configuration.leg_max_height
+        max_jump_z = self._configuration.leg_max_jump
         min_plat_z = hip_goal_z-max_stretch_z
         max_plat_z = th.min(th.as_tensor([max_jump_z, hip_goal_z-min_stretch_z]))
-
         if self._platform_randomization == "double":
             raise NotImplementedError()
             # s1_area = th.tensor([[0.20, 0.30],  # minx, maxx
@@ -1034,57 +1146,17 @@ class LegJumpEnv(ControlledEnv):
         elif self._platform_randomization == "no_platforms":
             s1_xz = th.tensor([10, 10], device=self._th_device)
             s2_xz = th.tensor([10, 11], device=self._th_device)
+        elif self._platform_randomization == "single_full":
+            s1_xz : th.Tensor = None
+            min_pos = th.as_tensor([-0.5,-0.1])
+            max_pos = th.as_tensor([0.5,1.0])
+            for i in range(100000):
+                s1_xz = th.rand(size=(2,), device=self._th_device)*(max_pos-min_pos) + min_pos
+                if self._check_support_collision(sxz)
+            s2_xz = th.tensor([10, 11], device=self._th_device)
         else:
             raise RuntimeError(f"Invalid platform_randomization mode '{self._platform_randomization}'")
-
-
-        reward_contacts_weights = self._sample(self._configuration.reward_contacts_weight,
-                                                                                                self._rng,
-                                                                                                self._th_device)
-        maxStepsPerEpisode = self._original_max_epsteps
-        # These override previous configs
-        if options is not None:
-            if "support1_pos_x" in options: s1_xz[0] = options["support1_pos_x"]
-            if "support1_pos_z" in options: s1_xz[1] = options["support1_pos_z"]
-            if "support2_pos_x" in options: s2_xz[0] = options["support2_pos_x"]
-            if "support2_pos_z" in options: s2_xz[1] = options["support2_pos_z"]
-            if "hip_goal_z" in options: hip_goal_z = options["hip_goal_z"]
-            if "reward_contacts_weights" in options: reward_contacts_weights = options["reward_contacts_weights"]
-            if "max_ep_steps" in options: maxStepsPerEpisode = options["max_ep_steps"]
-
-        self._maxStepsPerEpisode = maxStepsPerEpisode
-            
-        obs_noise_mu = self._configuration.ep_obs_noise_mustd[0] + self._configuration.ep_obs_noise_mustd[1]*th.randn(size=(len(self._stacked_obs_part),),
-                                                                                                                      generator=self._rng,
-                                                                                                                      dtype=self._obs_dtype,
-                                                                                                                      device=self._th_device)
-        #min 0.4, max support2_z+0.6
-        self._current_episode_config = LegJumpEnv.EpisodeConfiguration(hip_goal_z=hip_goal_z,
-                                                                       support1_pos_x=s1_xz[0],
-                                                                       support1_pos_z=s1_xz[1],
-                                                                       support2_pos_x=s2_xz[0],
-                                                                       support2_pos_z=s2_xz[1],
-                                                                       reward_contacts_weights=reward_contacts_weights,
-                                                                       obs_noise_mustd=th.stack([obs_noise_mu, self._configuration.step_obs_noise_std]))
-
-        if isinstance(self._environmentController, BaseSimulationAdapter):
-            self._simulation_initialization()
-        else:
-            moved = False
-            while not moved:
-                ggLog.info(f"Cannot automatically initialize episode with non-simulated adapter. Lift up the robot and press ENTER. Be safe :)")
-                input()
-                if isinstance(self._environmentController, BaseJointPositionAdapter):
-                    if self._current_episode_config.support2_pos_x > 0:
-                        rpos, hpos, kpos = self._start_height, 3.4159/4,  3.14159/2
-                    else:
-                        rpos, hpos, kpos = self._start_height, -3.4159/4, -3.14159/2
-                    try:
-                        self._environmentController.moveToJointPoseSync({self._hip_joint:  hpos,
-                                                                        self._knee_joint: kpos})
-                    except MoveFailError as e:
-                        ggLog.warn(f"Failed to move to joint position. Error = {exc_to_str(e)}")
-            # raise RuntimeError("")
+        return s1_xz, s2_xz
 
     def _place_objects(self, support1_xz=None, support2_xz=None, goal_z=None):
         if not isinstance(self._environmentController, BaseSimulationAdapter):
@@ -1120,21 +1192,17 @@ class LegJumpEnv(ControlledEnv):
                                                                         pos_velocity_xyz = th.tensor((0.,0.,0), device=self._th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._th_device))})
 
-    def _simulation_initialization(self):
+    def _simulation_initialization(self, rail_pos, hip_pos, knee_pos):
         if isinstance(self._environmentController, BaseSimulationAdapter):
             self._place_objects(support1_xz=(10,10),
                                 support2_xz=(10,10),
                                 goal_z=10)
-            if self._current_episode_config.support2_pos_x > 0:
-                rpos, hpos, kpos = self._start_height, 3.4159/4,  3.14159/2
-            else:
-                rpos, hpos, kpos = self._start_height, -3.4159/4, -3.14159/2
             # ggLog.info(f"Directly setting jpos = {rpos, hpos, kpos}")
-            self._environmentController.setJointsStateDirect({  self._rail_joint: JointState(position = rpos, rate=0, effort=0),
-                                                                self._hip_joint:  JointState(position = hpos, rate=0, effort=0),
-                                                                self._knee_joint: JointState(position = kpos, rate=0, effort=0)})
-            start_jimp : dict[tuple[str,str], tuple] = {self._hip_joint: (hpos,0,0,200,50),
-                                                        self._knee_joint:(kpos,0,0,200,50)}         
+            self._environmentController.setJointsStateDirect({  self._rail_joint: JointState(position = rail_pos, rate=0, effort=0),
+                                                                self._hip_joint:  JointState(position = hip_pos, rate=0, effort=0),
+                                                                self._knee_joint: JointState(position = knee_pos, rate=0, effort=0)})
+            start_jimp : dict[tuple[str,str], tuple] = {self._hip_joint: (hip_pos,0,0,200,50),
+                                                        self._knee_joint:(knee_pos,0,0,200,50)}         
             self._environmentController.setJointsImpedanceCommand(start_jimp)
             self._environmentController.apply_joint_impedances(start_jimp)
             # if self._environmentController.__class__.__name__== "RosXbotGazeboAdapter":
@@ -1150,7 +1218,24 @@ class LegJumpEnv(ControlledEnv):
         else:
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
 
-
+    def _check_support_collision(self, bstate, sx, sy):
+        body_size = 0.1
+        thigh_height, thigh_width = 0.35, 0.1
+        shin_height, shin_width = 0.5, 0.1
+        bodies_xyahw = [th.as_tensor([0.0, bstate[0][self.BASE_STATE_IDXS.HIP_POS_Z], 0.0, body_size, body_size], device=self._th_device),
+                        th.as_tensor([  bstate[0][self.BASE_STATE_IDXS.THIGH_POS_X],
+                                        bstate[0][self.BASE_STATE_IDXS.THIGH_POS_Z],
+                                        bstate[0][self.BASE_STATE_IDXS.THIGH_ANG_POS_Y],
+                                        thigh_height, thigh_width], device=self._th_device),
+                        th.as_tensor([  bstate[0][self.BASE_STATE_IDXS.SHIN_POS_X],
+                                        bstate[0][self.BASE_STATE_IDXS.SHIN_POS_Z],
+                                        bstate[0][self.BASE_STATE_IDXS.SHIN_ANG_POS_Y],
+                                        shin_height, shin_width])]
+        support_width  = 0.20
+        support_height = 0.01
+        support_xyahw = th.as_tensor([sx, sy, 0.0, support_height, support_width])
+        for body in bodies_xyahw:
+            simple_threndering.are_rectangles_overlapping(body, support_xyahw)
 
 
     def buildSimulation(self):
@@ -1247,13 +1332,93 @@ class LegJumpEnv(ControlledEnv):
     # State & Observation
     # --------------------------------------------------------------------------------------------------------------------
 
-        
-    def getUiRendering(self) -> Tuple[Union[np.ndarray, th.Tensor, None], float]:
-        try:
+    def _render_image(self, bstate, th_render = None):
+        if not self._use_threnderer or (th_render is not None and not th_render):
+            import torchvision.transforms.functional # only import it if needed
             img, time = self._environmentController.getRenderings([self._rendering_cam_name])[self._rendering_cam_name]
+            img = th.tensor(img, dtype = th.uint8, device = self._th_device)
+            img = th.permute(img,(2,0,1)) # hwc to chw
+            if img.size()[0] == self._img_shape_chw[0]:
+                pass
+            elif img.size()[0] == 3 and self._img_shape_chw[0] == 1:
+                img = torchvision.transforms.functional.rgb_to_grayscale(img)
+            else:
+                raise RuntimeError(f"Cannot adapt image shape {img.size()} to required {self._img_shape_chw}")
+            img = torchvision.transforms.functional.resized_crop(img,
+                                                                top=0,
+                                                                left=int(0.29*img.size()[2]),
+                                                                height=img.size()[1],
+                                                                width=int(0.4*img.size()[2]),
+                                                                size = list(self._img_shape_chw[1:]))
+            img = img.permute(1,2,0)
+            img = img.cpu().numpy()
+            # ggLog.info(f"img = {img.shape}")
             if img is None:
                 time = -1
             return img, time
+        else:
+            draw_device = "cuda"
+            bstate = self._unnormalize(bstate,self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1]).to(device=draw_device)
+            image_chw = th.zeros(size=self._img_shape_chw, device=draw_device, dtype=th.uint8)
+            # ggLog.info(f"image_chw = {image_chw.size()}")
+            body_size = 0.1
+            thigh_width = 0.08
+            thigh_length = 0.3
+            shin_width = 0.07
+            shin_length = 0.45
+            support_height = 0.02
+            support_width = 0.2
+            
+            body_shape = simple_threndering.build_rectangle_hw(body_size, body_size).to(device=draw_device)
+            thigh_shape = simple_threndering.build_rectangle_hw(thigh_width, thigh_length+thigh_width, -thigh_length/2).to(device=draw_device)
+            shin_shape = simple_threndering.build_rectangle_hw(shin_width, shin_length+shin_width, -shin_length/2).to(device=draw_device)
+            shapes_Nxy = [body_shape, thigh_shape, shin_shape]
+            # rpos, hpos, kpos = 0.9, -3.14159/8, 3.14159/16
+            rpos, hpos, kpos = bstate[0][self.BASE_STATE_IDXS.HIP_POS_Z], bstate[0][self.BASE_STATE_IDXS.HIP_JOINT_POS], bstate[0][self.BASE_STATE_IDXS.KNEE_JOINT_POS]
+            # ggLog.info(f"rpos, kpos, hpos = {rpos, kpos, hpos}")
+            yoffset = -0.8
+            image_chw = simple_threndering.draw_chain(  images_bchw = image_chw.unsqueeze(0), 
+                                            shapes_BNxy=[s.unsqueeze(0) for s in shapes_Nxy],
+                                            # joints_BNax=th.as_tensor([[[3.14159/2, bstate[0][self.BASE_STATE_IDXS.HIP_POS_Z]],
+                                            #                            [bstate[0][self.BASE_STATE_IDXS.HIP_JOINT_POS]+1.5707,  thigh_length],
+                                            #                            [-bstate[0][self.BASE_STATE_IDXS.KNEE_JOINT_POS], shin_length] ]]),
+                                            joints_BNax=th.as_tensor( [[[0,              rpos],
+                                                                        [ hpos-3.14159,  thigh_length],
+                                                                        [ -kpos,          shin_length] ]], device=draw_device),
+                                            chain_colors_Brgb=[th.as_tensor([[128,128,128]], dtype=th.uint8, device=draw_device),
+                                                               th.as_tensor([[192,192,192]], dtype=th.uint8, device=draw_device),
+                                                               th.as_tensor([[255,255,255]], dtype=th.uint8, device=draw_device)],
+                                            scale=1,
+                                            origin_xya=th.as_tensor([0,yoffset, 3.14159/2], device=draw_device)).squeeze()
+            s1x = bstate[0][self.BASE_STATE_IDXS.SUPPORT1_X]
+            s1y = bstate[0][self.BASE_STATE_IDXS.SUPPORT1_Z]
+            s2x = bstate[0][self.BASE_STATE_IDXS.SUPPORT2_X]
+            s2y = bstate[0][self.BASE_STATE_IDXS.SUPPORT2_Z]
+            support_shape = simple_threndering.build_rectangle_hw(support_height,support_width).to(device=draw_device)
+            image_chw = simple_threndering.draw_shapes(images_bchw = image_chw.unsqueeze(0),
+                                                       shapes_BNxy=support_shape.unsqueeze(0),
+                                                        transform_Bxya=th.as_tensor([-s1x,s1y+yoffset,0.], device=draw_device).unsqueeze(0),
+                                                        color_Brgb=th.as_tensor([[255,0,0]], dtype=th.uint8, device=draw_device)).squeeze()
+            image_chw = simple_threndering.draw_shapes(images_bchw = image_chw.unsqueeze(0),
+                                                       shapes_BNxy=support_shape.unsqueeze(0),
+                                                        transform_Bxya=th.as_tensor([-s2x,s2y+yoffset,0.], device=draw_device).unsqueeze(0),
+                                                        color_Brgb=th.as_tensor([[255,0,0]], dtype=th.uint8, device=draw_device)).squeeze()
+            # ggLog.info(f"image_chw 2 = {image_chw.size()}")
+            img = image_chw.permute(1,2,0)
+            # ggLog.info(f"img = {img}")
+            # ggLog.info(f"nonzero = {img.count_nonzero()}")
+            img = img.cpu().numpy()
+            return img, self._last_step_simtime
+
+
+    def getUiRendering(self) -> Tuple[Union[np.ndarray, th.Tensor, None], float]:
+        try:
+            if not self._use_threnderer:
+                return self._render_image(self._current_state[self.STATE_BASE])            
+            else:
+                thrender_img, t = self._render_image(self._current_state[self.STATE_BASE])
+                real_img, t = self._render_image(self._current_state[self.STATE_BASE], th_render=False)
+                return np.hstack([thrender_img,real_img]), t
         except Exception as e:
             ggLog.warn(f"Exception getting ui image: {adarl.utils.utils.exc_to_str(e)}")
             return None, -1
@@ -1273,217 +1438,211 @@ class LegJumpEnv(ControlledEnv):
             return {self.STATE_IMG : img_obs,
                     self.STATE_BASE : vec_obs}
             
-    
-    def getState(self) -> Dict[Any, th.Tensor]:
-        """Update and return the current state
-        """
-        with th.no_grad():
-            if self._stepCounter>self._last_step_got_state:
-                # ggLog.info(f"_stepCounter = {self._stepCounter}")
-                self._last_step_got_state = self._stepCounter
-                
-                jstates = self._environmentController.getJointsState(requestedJoints=[self._knee_joint, self._hip_joint])
-                lstates : Dict[Tuple[str,str],LinkState] = self._environmentController.getLinksState(requestedLinks = [self._thigh_com_link,
-                                                                                    self._shin_com_link,
-                                                                                    self._thigh_base_link])
-                hip_height = lstates[self._thigh_base_link].pose.position[2]
-                hip_vel_z = lstates[self._thigh_base_link].pos_velocity_xyz[2]
+    def _update_state(self):
+        # ggLog.info(f"_stepCounter = {self._stepCounter}")
+        self._last_step_got_state = self._stepCounter
+        
+        jstates = self._environmentController.getJointsState(requestedJoints=[self._knee_joint, self._hip_joint])
+        lstates : Dict[Tuple[str,str],LinkState] = self._environmentController.getLinksState(requestedLinks = [self._thigh_com_link,
+                                                                            self._shin_com_link,
+                                                                            self._thigh_base_link])
+        hip_height = lstates[self._thigh_base_link].pose.position[2]
+        hip_vel_z = lstates[self._thigh_base_link].pos_velocity_xyz[2]
 
-                # n = '\n'
-                # ggLog.info(f"\nlstates = \n{n.join([str(i) for i in lstates.items()])}")
-                # ggLog.info(f"contacts == {n.join([str(c) for c in contacts])}")
-                thigh_ang_pos_x = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
-                                                                                    th.tensor([1.0,0.0,0.0], device=self._th_device))[1])
-                thigh_ang_pos_y = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
-                                                                                    th.tensor([0.0,1.0,0.0], device=self._th_device))[1])
-                thigh_ang_pos_z = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
-                                                                                    th.tensor([0.0,0.0,1.0], device=self._th_device))[1])
-                shin_ang_pos_x = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
-                                                                                    th.tensor([1.0,0.0,0.0], device=self._th_device))[1])
-                shin_ang_pos_y = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
-                                                                                    th.tensor([0.0,1.0,0.0], device=self._th_device))[1])
-                shin_ang_pos_z = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
-                                                                                    th.tensor([0.0,0.0,1.0], device=self._th_device))[1])
+        # n = '\n'
+        # ggLog.info(f"\nlstates = \n{n.join([str(i) for i in lstates.items()])}")
+        # ggLog.info(f"contacts == {n.join([str(c) for c in contacts])}")
+        thigh_ang_pos_x = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
+                                                                            th.tensor([1.0,0.0,0.0], device=self._th_device))[1])
+        thigh_ang_pos_y = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
+                                                                            th.tensor([0.0,1.0,0.0], device=self._th_device))[1])
+        thigh_ang_pos_z = quat_angle(quat_swing_twist_decomposition(lstates[self._thigh_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
+                                                                            th.tensor([0.0,0.0,1.0], device=self._th_device))[1])
+        shin_ang_pos_x = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
+                                                                            th.tensor([1.0,0.0,0.0], device=self._th_device))[1])
+        shin_ang_pos_y = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
+                                                                            th.tensor([0.0,1.0,0.0], device=self._th_device))[1])
+        shin_ang_pos_z = quat_angle(quat_swing_twist_decomposition(lstates[self._shin_com_link].pose.orientation_xyzw[[3,0,1,2]].to(self._th_device),
+                                                                            th.tensor([0.0,0.0,1.0], device=self._th_device))[1])
 
-                if self._use_contacts:
-                    contacts = self._environmentController.get_contacts()
-                    impulses = []
-                    forces = []
-                    clean_contacts = []
-                    for simstep_contacts in contacts:
-                        nonzero_contacts = [contact for contact in simstep_contacts if contact[3]!=0]
-                        if len(nonzero_contacts)>0:
-                            clean_contacts.append(nonzero_contacts)
-                    contacts = clean_contacts
-                    for simsteps_contacts in contacts:
-                        forces   += [contact[3] for contact in simsteps_contacts]
-                        impulses += [contact[3]*contact[4] for contact in simsteps_contacts]
-                    abs_impulses = [abs(i) for i in impulses]
-                    abs_forces = [abs(i) for i in forces]
-                    abs_forces_sum = sum(abs_forces)
-                    abs_forces_num = len(abs_forces)
-                    abs_impulses_sum = sum(abs_impulses)
-                    abs_impulses_sum_avg = self._impulses_avg_alpha*self._last_abs_impulses_sum_avg + self._impulses_avg_alpha*abs_impulses_sum
-                else:
-                    abs_impulses_sum = -1
-                    abs_forces_sum = -1
-                    abs_forces_num = -1
-                    abs_impulses_sum_avg = -1
-                # ggLog.info(f"jstates = {jstates}")
+        if self._use_contacts:
+            contacts = self._environmentController.get_contacts()
+            impulses = []
+            forces = []
+            clean_contacts = []
+            for simstep_contacts in contacts:
+                nonzero_contacts = [contact for contact in simstep_contacts if contact[3]!=0]
+                if len(nonzero_contacts)>0:
+                    clean_contacts.append(nonzero_contacts)
+            contacts = clean_contacts
+            for simsteps_contacts in contacts:
+                forces   += [contact[3] for contact in simsteps_contacts]
+                impulses += [contact[3]*contact[4] for contact in simsteps_contacts]
+            abs_impulses = [abs(i) for i in impulses]
+            abs_forces = [abs(i) for i in forces]
+            abs_forces_sum = sum(abs_forces)
+            abs_forces_num = len(abs_forces)
+            abs_impulses_sum = sum(abs_impulses)
+            abs_impulses_sum_avg = self._impulses_avg_alpha*self._last_abs_impulses_sum_avg + self._impulses_avg_alpha*abs_impulses_sum
+        else:
+            abs_impulses_sum = -1
+            abs_forces_sum = -1
+            abs_forces_num = -1
+            abs_impulses_sum_avg = -1
+        # ggLog.info(f"jstates = {jstates}")
 
-                bstate_history = self._current_state[self.STATE_BASE]
-                if len(self._current_state)!=0 and bstate_history[0][self.BASE_STATE_IDXS.SAFETY_TRIGGERED] > 0:
-                    safety_triggered = True
-                else:
-                    jstate_th = th.as_tensor([jstates[self._hip_joint].position[0],
-                                            jstates[self._hip_joint].rate[0],
-                                            jstates[self._hip_joint].effort[0],
-                                            jstates[self._knee_joint].position[0],
-                                            jstates[self._knee_joint].rate[0],
-                                            jstates[self._knee_joint].effort[0]])
-                    j_safety_lims = th.as_tensor([self._configuration.position_safety_limits_hip,
-                                                self._configuration.velocity_safety_limits_hip,
-                                                self._configuration.torque_safety_limits_hip,
-                                                self._configuration.position_safety_limits_knee,
-                                                self._configuration.velocity_safety_limits_knee,
-                                                self._configuration.torque_safety_limits_knee])
-                    triggered_limits = th.logical_or(jstate_th < j_safety_lims[:,0], jstate_th > j_safety_lims[:,1])
-                    safety_triggered = th.any(triggered_limits)
-                    if safety_triggered:       
-                        elements = ["hip_pos","hip_vel","hip_eff","knee_pos","knee_vel","knee_eff"]
-                        triggered = []
-                        for i in range(len(elements)):
-                            if triggered_limits[i]:
-                                triggered.append(elements[i])
-                        ggLog.info(f"SAFETY TRIGGERED:\n"
-                                   f"    triggered      = {triggered}\n"
-                                   f"    jstate_th      = {jstate_th}\n"
-                                   f"    j_safety_lims  = {j_safety_lims} ")
-
-
-
-
-
-                for i in range(bstate_history.size()[0]-2):
-                    bstate_history[i+1] = bstate_history[i]
-                bstate_history[0] = th.tensor((jstates[self._hip_joint].position[0],
+        bstate_history = self._current_state[self.STATE_BASE]
+        prev_bstate = self._unnormalize(bstate_history[0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])                
+        if len(self._current_state)!=0 and prev_bstate[self.BASE_STATE_IDXS.SAFETY_TRIGGERED] > 0:
+            safety_triggered = True
+        else:
+            jstate_th = th.as_tensor([jstates[self._hip_joint].position[0],
                                     jstates[self._hip_joint].rate[0],
                                     jstates[self._hip_joint].effort[0],
                                     jstates[self._knee_joint].position[0],
                                     jstates[self._knee_joint].rate[0],
-                                    jstates[self._knee_joint].effort[0],
-                                    hip_height,
-                                    hip_vel_z,
-                                    self._current_episode_config.support1_pos_x,
-                                    self._current_episode_config.support1_pos_z,
-                                    self._current_episode_config.support2_pos_x,
-                                    self._current_episode_config.support2_pos_z,
-                                    self._current_episode_config.hip_goal_z,
-                                    self._configuration.reward_torque_limit_weight,
-                                    self._configuration.reward_position_limit_weight,
-                                    self._configuration.reward_velocity_weight,
-                                    self._configuration.reward_energy_weight,
-                                    self._configuration.reward_tracking_weight,
-                                    self._configuration.reward_torque_weight,
-                                    self._current_episode_config.reward_contacts_weights,
-                                    self._configuration.reward_max_impulse,
-                                    self._configuration.torque_command_scale_knee,
-                                    self._configuration.torque_command_scale_hip,
-                                    self._last_sent_pvesd[self._hip_joint][0],
-                                    self._last_sent_pvesd[self._hip_joint][1],
-                                    self._last_sent_pvesd[self._hip_joint][2],
-                                    self._last_sent_pvesd[self._hip_joint][3],
-                                    self._last_sent_pvesd[self._hip_joint][4],
-                                    self._last_sent_pvesd[self._knee_joint][0],
-                                    self._last_sent_pvesd[self._knee_joint][1],
-                                    self._last_sent_pvesd[self._knee_joint][2],
-                                    self._last_sent_pvesd[self._knee_joint][3],
-                                    self._last_sent_pvesd[self._knee_joint][4],
-                                    lstates[self._thigh_com_link].pos_velocity_xyz[0],
-                                    lstates[self._thigh_com_link].pos_velocity_xyz[1],
-                                    lstates[self._thigh_com_link].pos_velocity_xyz[2],
-                                    lstates[self._thigh_com_link].ang_velocity_xyz[0],
-                                    lstates[self._thigh_com_link].ang_velocity_xyz[1],
-                                    lstates[self._thigh_com_link].ang_velocity_xyz[2],
-                                    lstates[self._shin_com_link].pos_velocity_xyz[0],
-                                    lstates[self._shin_com_link].pos_velocity_xyz[1],
-                                    lstates[self._shin_com_link].pos_velocity_xyz[2],
-                                    lstates[self._shin_com_link].ang_velocity_xyz[0],
-                                    lstates[self._shin_com_link].ang_velocity_xyz[1],
-                                    lstates[self._shin_com_link].ang_velocity_xyz[2],
-                                    lstates[self._thigh_com_link].pose.position[0],
-                                    lstates[self._thigh_com_link].pose.position[1],
-                                    lstates[self._thigh_com_link].pose.position[2],
-                                    thigh_ang_pos_x,
-                                    thigh_ang_pos_y,
-                                    thigh_ang_pos_z,
-                                    lstates[self._shin_com_link].pose.position[0],
-                                    lstates[self._shin_com_link].pose.position[1],
-                                    lstates[self._shin_com_link].pose.position[2],
-                                    shin_ang_pos_x,
-                                    shin_ang_pos_y,
-                                    shin_ang_pos_z,
-                                    abs_impulses_sum,
-                                    abs_forces_sum,
-                                    abs_forces_num,
-                                    abs_impulses_sum_avg,
-                                    1 if safety_triggered else 0),
-                                dtype = self._obs_dtype,
-                                device=self._th_device)
-                
+                                    jstates[self._knee_joint].effort[0]])
+            j_safety_lims = th.as_tensor([self._configuration.position_safety_limits_hip,
+                                        self._configuration.velocity_safety_limits_hip,
+                                        self._configuration.torque_safety_limits_hip,
+                                        self._configuration.position_safety_limits_knee,
+                                        self._configuration.velocity_safety_limits_knee,
+                                        self._configuration.torque_safety_limits_knee])
+            triggered_limits = th.logical_or(jstate_th < j_safety_lims[:,0], jstate_th > j_safety_lims[:,1])
+            safety_triggered = th.any(triggered_limits)
+            if safety_triggered:       
+                elements = ["hip_pos","hip_vel","hip_eff","knee_pos","knee_vel","knee_eff"]
+                triggered = []
+                for i in range(len(elements)):
+                    if triggered_limits[i]:
+                        triggered.append(elements[i])
+                ggLog.info(f"SAFETY TRIGGERED:\n"
+                            f"    triggered      = {triggered}\n"
+                            f"    jstate_th      = {jstate_th}\n"
+                            f"    j_safety_lims  = {j_safety_lims} ")
 
-                # ggLog.info(f"current_vstate = {current_vstate}")
-                bstate_history[0] = self._normalize(bstate_history[0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])                
-                bstate_history[0][self._stacked_obs_part] += adarl.utils.utils.randn_like(bstate_history[0][self._stacked_obs_part],
-                                                                                       mu  = self._current_episode_config.obs_noise_mustd[0],
-                                                                                       std = self._current_episode_config.obs_noise_mustd[1],
-                                                                                       generator=self._rng)
-                
-                astate_history = self._current_state[self.STATE_ACT]
-                for i in range(astate_history.size()[0]-2):
-                    astate_history[i+1] = astate_history[i]
-                astate_history[0] = self._last_out_action
-                
-                if self._stepCounter == 0:
-                    bstate_history[1:] = bstate_history[0].expand(bstate_history.size()[0]-1,-1)
-                    astate_history[1:] = astate_history[0].expand(astate_history.size()[0]-1,-1)
 
-                if self._obs_only_vec:
-                    istate = th.empty(size=(0,), dtype = th.uint8, device = self._th_device)
-                else:
-                    import torchvision.transforms.functional # only import it if needed
-                    istate, _ = self._environmentController.getRenderings([self._rendering_cam_name])[self._rendering_cam_name]
-                    istate = th.tensor(istate, dtype = th.uint8, device = self._th_device)
-                    istate = th.permute(istate,(2,0,1)) # hwc to chw
-                    if istate.size()[0] == self._img_shape_chw[0]:
-                        pass
-                    elif istate.size()[0] == 3 and self._img_shape_chw[0] == 1:
-                        istate = torchvision.transforms.functional.rgb_to_grayscale(istate)
-                    else:
-                        raise RuntimeError(f"Cannot adapt image shape {istate.size()} to required {self._img_shape_chw}")
-                    istate = torchvision.transforms.functional.resized_crop(istate,
-                                                                       top=0,
-                                                                       left=int(0.29*istate.size()[2]),
-                                                                       height=istate.size()[1],
-                                                                       width=int(0.4*istate.size()[2]),
-                                                                       size = list(self._img_shape_chw[1:]))
-                    # ggLog.info(f"img size = {istate.size()}")
 
-                self._current_state = {self.STATE_BASE : bstate_history.detach().clone(),
-                                    self.STATE_ACT  : astate_history.detach().clone(),
-                                    self.STATE_IMG  : istate}
-                
-            return self._current_state
 
-    def _compute_dbg_info(self):
+        goal_dist = abs(hip_height - self._current_episode_config.hip_goal_z)
+        prev_goal_dist = prev_bstate[self.BASE_STATE_IDXS.SMOOTHED_GOAL_DIST]
+        alpha = self._configuration.goal_dist_exp_smoothing_1s**(self._configuration.stepLength_sec)
+        # ggLog.info(f"prev_goal_dist = {prev_goal_dist}")
+        # ggLog.info(f"alpha = {alpha}")
+        if prev_goal_dist > 0:
+            smoothed_goal_dist = goal_dist*(1-alpha) + prev_goal_dist*alpha
+        else:
+            smoothed_goal_dist = 1
+        # ggLog.info(f"smoothed_goal_dist = {smoothed_goal_dist}")
+
+        for i in range(bstate_history.size()[0]-2):
+            bstate_history[i+1] = bstate_history[i]
+        bstate_history[0] = th.tensor((jstates[self._hip_joint].position[0],
+                            jstates[self._hip_joint].rate[0],
+                            jstates[self._hip_joint].effort[0],
+                            jstates[self._knee_joint].position[0],
+                            jstates[self._knee_joint].rate[0],
+                            jstates[self._knee_joint].effort[0],
+                            hip_height,
+                            hip_vel_z,
+                            self._current_episode_config.support1_pos_x,
+                            self._current_episode_config.support1_pos_z,
+                            self._current_episode_config.support2_pos_x,
+                            self._current_episode_config.support2_pos_z,
+                            self._current_episode_config.hip_goal_z,
+                            self._configuration.reward_torque_limit_weight,
+                            self._configuration.reward_position_limit_weight,
+                            self._configuration.reward_velocity_weight,
+                            self._configuration.reward_energy_weight,
+                            self._configuration.reward_tracking_weight,
+                            self._configuration.reward_torque_weight,
+                            self._current_episode_config.reward_contacts_weights,
+                            self._configuration.reward_max_impulse,
+                            self._configuration.torque_command_scale_knee,
+                            self._configuration.torque_command_scale_hip,
+                            self._last_sent_pvesd[self._hip_joint][0],
+                            self._last_sent_pvesd[self._hip_joint][1],
+                            self._last_sent_pvesd[self._hip_joint][2],
+                            self._last_sent_pvesd[self._hip_joint][3],
+                            self._last_sent_pvesd[self._hip_joint][4],
+                            self._last_sent_pvesd[self._knee_joint][0],
+                            self._last_sent_pvesd[self._knee_joint][1],
+                            self._last_sent_pvesd[self._knee_joint][2],
+                            self._last_sent_pvesd[self._knee_joint][3],
+                            self._last_sent_pvesd[self._knee_joint][4],
+                            lstates[self._thigh_com_link].pos_velocity_xyz[0],
+                            lstates[self._thigh_com_link].pos_velocity_xyz[1],
+                            lstates[self._thigh_com_link].pos_velocity_xyz[2],
+                            lstates[self._thigh_com_link].ang_velocity_xyz[0],
+                            lstates[self._thigh_com_link].ang_velocity_xyz[1],
+                            lstates[self._thigh_com_link].ang_velocity_xyz[2],
+                            lstates[self._shin_com_link].pos_velocity_xyz[0],
+                            lstates[self._shin_com_link].pos_velocity_xyz[1],
+                            lstates[self._shin_com_link].pos_velocity_xyz[2],
+                            lstates[self._shin_com_link].ang_velocity_xyz[0],
+                            lstates[self._shin_com_link].ang_velocity_xyz[1],
+                            lstates[self._shin_com_link].ang_velocity_xyz[2],
+                            lstates[self._thigh_com_link].pose.position[0],
+                            lstates[self._thigh_com_link].pose.position[1],
+                            lstates[self._thigh_com_link].pose.position[2],
+                            thigh_ang_pos_x,
+                            thigh_ang_pos_y,
+                            thigh_ang_pos_z,
+                            lstates[self._shin_com_link].pose.position[0],
+                            lstates[self._shin_com_link].pose.position[1],
+                            lstates[self._shin_com_link].pose.position[2],
+                            shin_ang_pos_x,
+                            shin_ang_pos_y,
+                            shin_ang_pos_z,
+                            abs_impulses_sum,
+                            abs_forces_sum,
+                            abs_forces_num,
+                            abs_impulses_sum_avg,
+                            1 if safety_triggered else 0,
+                            smoothed_goal_dist),
+                        dtype = self._obs_dtype,
+                        device=self._th_device)
+        
+
+        # ggLog.info(f"current_vstate = {current_vstate}")
+        bstate_history[0] = self._normalize(bstate_history[0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])                
+        bstate_history[0][self._stacked_obs_part] += adarl.utils.utils.randn_like(bstate_history[0][self._stacked_obs_part],
+                                                                                mu  = self._current_episode_config.obs_noise_mustd[0],
+                                                                                std = self._current_episode_config.obs_noise_mustd[1],
+                                                                                generator=self._rng)
+        
+        astate_history = self._current_state[self.STATE_ACT]
+        for i in range(astate_history.size()[0]-2):
+            astate_history[i+1] = astate_history[i]
+        astate_history[0] = self._last_out_action
+        
+        if self._stepCounter == 0:
+            bstate_history[1:] = bstate_history[0].expand(bstate_history.size()[0]-1,-1)
+            astate_history[1:] = astate_history[0].expand(astate_history.size()[0]-1,-1)
+
+        if self._obs_only_vec:
+            istate = th.empty(size=(0,), dtype = th.uint8, device = self._th_device)
+        else:
+            import torchvision.transforms.functional # only import it if needed
+            istate, _ = self._render_image(bstate_history)
+            # ggLog.info(f"img size = {istate.size()}")
+
+        self._current_state = {self.STATE_BASE : bstate_history.detach().clone(),
+                            self.STATE_ACT  : astate_history.detach().clone(),
+                            self.STATE_IMG  : istate}
+        
+    def getState(self) -> Dict[Any, th.Tensor]:
+        """Update and return the current state
+        """                
+        return self._current_state
+
+    def _update_dbg_info(self):
         rew_dbg_info = {}
-        sub_rewards = {}
         r = self.computeReward(None,
                                self._current_state, 
                                None, 
                                env_conf=self.get_configuration(),
-                               dbg_info=rew_dbg_info,
-                               sub_rewards=sub_rewards)
+                               dbg_info=rew_dbg_info)
         if self._use_contacts:
             contacts = self._environmentController.get_contacts()
             abs_impulses = []
@@ -1506,12 +1665,14 @@ class LegJumpEnv(ControlledEnv):
         self._last_abs_impulses_sum = vstate_unnorm[self.BASE_STATE_IDXS.IMPULSES_SUM]
         self._dists_to_goal[self._stepCounter%len(self._dists_to_goal)] = goal_dist
         self._cumulated_abs_impulses += self._last_abs_impulses_sum
-
+        self._reward_dbg_info = rew_dbg_info
         return rew_dbg_info
 
     def performStep(self):
         super().performStep()
-        self._dbg_info = self._compute_dbg_info()
+        self._update_state()
+        self._update_dbg_info()
+        self._last_step_simtime = self._environmentController.getEnvTimeFromReset()
 
 
 
@@ -1551,7 +1712,7 @@ class LegJumpEnv(ControlledEnv):
         i["cbstate_norm"] = bstate[stateindxs]
         i["cbstate"] = bstate_unnorm[stateindxs]
         i["cbstate_labels"] = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in statenames], dtype=th.uint8) # ugly, but simple
-        i.update(self._dbg_info)
+        i.update(self._reward_dbg_info)
         # i["config"] = dataclasses.asdict(self._configuration)
         i["ep_config"] = dataclasses.asdict(self._current_episode_config)
         i["safety_triggered"] = bstate_unnorm[self.BASE_STATE_IDXS.SAFETY_TRIGGERED]

@@ -70,7 +70,7 @@ def env_builder(seed,
                                                        restore_on_reset=False,
                                                        debug_gui=False,
                                                        simulation_step=1/1024,
-                                                       enable_redering=is_eval)
+                                                       enable_redering=env_builder_args["enable_rendering"])
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)
@@ -84,8 +84,8 @@ def env_builder(seed,
                         seed=seed,
                         obs_only_vec=env_builder_args["obs_only_vec"],
                         obs_only_img=False,
-                        obs_img_height=64,
-                        obs_img_width=64,
+                        obs_img_height=100,
+                        obs_img_width=100,
                         rgb=True,
                         th_device=th_device,
                         reward_torque_limit_weight = env_builder_args["reward_torque_limit_weight"],
@@ -105,12 +105,14 @@ def env_builder(seed,
                         stop_on_safety=env_builder_args["stop_on_safety"],
                         leg_min_height = env_builder_args["leg_min_height"],
                         leg_max_height = env_builder_args["leg_max_height"],
-                        leg_max_jump = env_builder_args["leg_max_jump"]) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
+                        leg_max_jump = env_builder_args["leg_max_jump"],
+                        goal_dist_smoothing_halflife_sec = env_builder_args["goal_dist_smoothing_halflife_sec"]) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
     if no_dict:
         from adarl.envs.lr_wrappers.ObsDict2FlatBox import ObsDict2FlatBox
         lrenv = ObsDict2FlatBox(lrenv, "vec")
     env = GymEnvWrapper(env=lrenv, episodeInfoLogFile=log_folder+f"/GymEnvWrapperLog.{seed}.log",
-                        quiet=env_builder_args["quiet"])
+                        quiet=env_builder_args["quiet"],
+                        use_wandb=False)
     
     if video_save_freq >0:
         env = wrap_with_recorder(env,

@@ -34,7 +34,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "leg_max_jump" : 0.6,
         "goal_dist_smoothing_halflife_sec" : 0.01,
         "enable_rendering" : False,
-        "num_envs" : train_envs}
+        "num_envs" : train_envs,
+        "randomize_initial_pose" : True}
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["video_save_freq"] = 1
@@ -65,6 +66,18 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 10,
         "env_builder_args" : feasible_env_builder_args
     }
+    video_feasible_env_builder_args = copy.deepcopy(feasible_env_builder_args)
+    video_feasible_env_builder_args["enable_rendering"] = True
+    video_feasible_env_builder_args["video_save_freq"] = 1
+    video_feasible_env_builder_args["num_envs"] = 1
+    video_feasible_env_builder_args["randomize_initial_pose"] = False
+    eval_conf_video_feasible = {
+        "name" : "video_feasible",
+        "deterministic" : True,
+        "eval_freq_ep" : 10*train_envs,
+        "eval_eps" : 1,
+        "env_builder_args" : video_feasible_env_builder_args
+    }
 
     sac_train(  seed,
                 folderName,
@@ -74,7 +87,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder_args = env_builder_args,
                 eval_env_builder_args = [eval_conf_video_det,
                                          eval_conf_video_stoch,
-                                         eval_conf_feasible],
+                                         eval_conf_feasible,
+                                         eval_conf_video_feasible],
                 hyperparams = SAC_hyperparams( device = "cuda",
                                                 q_network_arch=[256,128],
                                                 q_lr=0.005,

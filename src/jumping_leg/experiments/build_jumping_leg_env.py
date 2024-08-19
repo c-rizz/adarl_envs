@@ -106,7 +106,8 @@ def env_builder(seed,
                         leg_min_height = env_builder_args["leg_min_height"],
                         leg_max_height = env_builder_args["leg_max_height"],
                         leg_max_jump = env_builder_args["leg_max_jump"],
-                        goal_dist_smoothing_halflife_sec = env_builder_args["goal_dist_smoothing_halflife_sec"]) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
+                        goal_dist_smoothing_halflife_sec = env_builder_args["goal_dist_smoothing_halflife_sec"],
+                        randomize_initial_pose = env_builder_args["randomize_initial_pose"])
     if no_dict:
         from adarl.envs.lr_wrappers.ObsDict2FlatBox import ObsDict2FlatBox
         lrenv = ObsDict2FlatBox(lrenv, "vec")

@@ -18,10 +18,10 @@ from adarl.adapters.BaseJointPositionAdapter import BaseJointPositionAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 import dataclasses
 from dataclasses import dataclass
-import adarl.utils.simple_threndering as simple_threndering
 from adarl.utils.robot_helpers import Robot
 from pathlib import Path
-
+import time
+import os
 
 _T = TypeVar('_T', float, th.Tensor)
 
@@ -169,6 +169,7 @@ class LegJumpEnv(ControlledEnv):
         leg_max_height : float
         leg_max_jump : float
         randomize_initial_pose : bool
+        rail_initial_position_limits : tuple[float,float]
 
     @staticmethod
     def _sample(value_or_dist : Union[float,Tuple[str,float,float]], generator, device) -> th.Tensor:
@@ -259,7 +260,7 @@ class LegJumpEnv(ControlledEnv):
         self._thigh_com_link = ("leg", "thigh_link_com")
         self._shin_com_link = ("leg", "shin_link_com")
         self._rendering_cam_name = "simple_camera"
-        self._use_threnderer = True
+        self._use_threnderer = False
 
 
         control_mode = control_mode.strip().lower()
@@ -375,7 +376,8 @@ class LegJumpEnv(ControlledEnv):
                                                             leg_min_height = leg_min_height,
                                                             leg_max_height = leg_max_height,
                                                             leg_max_jump = leg_max_jump,
-                                                            randomize_initial_pose = randomize_initial_pose)
+                                                            randomize_initial_pose = randomize_initial_pose,
+                                                            rail_initial_position_limits = (0.1,1.5))
         if self._control_mode == self.CONTROL_MODES.IMPEDANCE:
             action_len = 10 
         elif self._control_mode == self.CONTROL_MODES.IMPEDANCE_NO_GAINS:
@@ -1026,11 +1028,19 @@ class LegJumpEnv(ControlledEnv):
             self._support1_co_id = self._robot_model.add_collision_box( pose_xyz_xyzw=support1_pose.array_xyz_xyzw(type=np.ndarray),
                                                                         collision_box_size_xyz=(supports_xacro_args["size_x"],
                                                                                                 supports_xacro_args["size_y"],
-                                                                                                supports_xacro_args["size_z"]))
+                                                                                                supports_xacro_args["size_z"]),
+                                                                        collision_obj_id="support1_collision")
             self._support2_co_id = self._robot_model.add_collision_box( pose_xyz_xyzw=support2_pose.array_xyz_xyzw(type=np.ndarray),
                                                                         collision_box_size_xyz=(supports_xacro_args["size_x"],
                                                                                                 supports_xacro_args["size_y"],
-                                                                                                supports_xacro_args["size_z"]))
+                                                                                                supports_xacro_args["size_z"]),
+                                                                        collision_obj_id="support2_collision")
+            self._ground_co_id = self._robot_model.add_collision_box( pose_xyz_xyzw=np.array([0.,0.,-0.1,0.,0.,0.,1.]),
+                                                                    collision_box_size_xyz=(10,10,0.05),
+                                                                    collision_obj_id="ground_collision")
+            self._robot_model.remove_collision_pairs([("support1_collision","ground_collision")])
+            self._robot_model.remove_collision_pairs([("support1_collision","support2_collision")])
+            self._robot_model.remove_collision_pairs([("support2_collision","ground_collision")])
         
 
         self._set_current_ep_config(reset_options = options)
@@ -1088,28 +1098,43 @@ class LegJumpEnv(ControlledEnv):
                                                                                                                       generator=self._rng,
                                                                                                                       dtype=self._obs_dtype,
                                                                                                                       device=self._th_device)
-        
-        if not self._configuration.randomize_initial_pose:
-            rail_pos, hip_pos, knee_pos = self._start_height, 3.4159/4,  3.14159/2
-            if s2_xz[0] < 0:
-                hip_pos, knee_pos = -hip_pos, -knee_pos
-            rail_hip_knee_pos = th.tensor((rail_pos, hip_pos, knee_pos), device=self._th_device, dtype=self._obs_dtype)
-        else:
-            found_good_configuration = False
-            while not found_good_configuration:
+        found_good_configuration = False
+        if self._configuration.randomize_initial_pose:
+            collisions = []
+            for i in range(10000):
                 rail_hip_knee_pos = th.rand(size=(3,), device=self._th_device, dtype = th.float32)*2-1
                 rail_hip_knee_pos = self._unnormalize(rail_hip_knee_pos,
-                                        min=th.tensor([ 0,
+                                        min=th.tensor([ self._configuration.rail_initial_position_limits[0],
                                                         self._configuration.position_cmd_limits_hip[0],
                                                         self._configuration.position_cmd_limits_knee[0]]),
-                                        max=th.tensor([0,
+                                        max=th.tensor([self._configuration.rail_initial_position_limits[1],
                                                     self._configuration.position_cmd_limits_hip[1],
                                                     self._configuration.position_cmd_limits_knee[1]]))
                 self._robot_model.set_joint_pose(rail_hip_knee_pos.cpu().numpy())
                 self._robot_model.move_collision_object(self._support1_co_id, np.array((s1_xz[0], 0.3, s1_xz[1], 0.0,0.0,0.0,1.0)))
                 self._robot_model.move_collision_object(self._support2_co_id, np.array((s2_xz[0], 0.3, s2_xz[1], 0.0,0.0,0.0,1.0)))
-                if len(self._robot_model.get_all_collisions()) == 0:
+                collisions = self._robot_model.get_all_collisions()
+                if len(collisions) == 0:
                     found_good_configuration = True
+                    break
+            if not found_good_configuration:
+                import cv2
+                imgfile = f"failed_spawn_{int(time.time()*1000_000)}.png"
+                ggLog.error(f"Couldn't sample initial pose, last pos= {rail_hip_knee_pos.cpu().tolist()} last collisions = {collisions}")
+                # ggLog.error(f"saving image at {imgfile}")
+                # cv2.imwrite(imgfile, self._robot_model.get_dbg_image())
+
+            ggLog.info(f"{os.getpid()} init: last pos= {rail_hip_knee_pos.cpu().tolist()} last collisions = {collisions}")
+            link_poses = self._robot_model.get_frame_poses()
+            if link_poses["foot_center_link"][0][2] <0:
+                ggLog.error("foot is under the ground! link_poses = "+"\n".join([f"{n}:{p}" for n,p in link_poses.items()]))
+                ggLog.error(f"{self._robot_model._collision_pairs}")
+
+        if not found_good_configuration:
+            rail_pos, hip_pos, knee_pos = self._start_height, 3.4159/4,  3.14159/2
+            if s2_xz[0] < 0:
+                hip_pos, knee_pos = -hip_pos, -knee_pos
+            rail_hip_knee_pos = th.tensor((rail_pos, hip_pos, knee_pos), device=self._th_device, dtype=self._obs_dtype)
         
         self._current_episode_config = LegJumpEnv.EpisodeConfiguration(hip_goal_z=hip_goal_z,
                                                                        support1_pos_x=s1_xz[0],
@@ -1189,7 +1214,7 @@ class LegJumpEnv(ControlledEnv):
             self._place_objects(support1_xz=(10,10),
                                 support2_xz=(10,10),
                                 goal_z=10)
-            # ggLog.info(f"Directly setting jpos = {rpos, hpos, kpos}")
+            ggLog.info(f"Directly setting jpos = {rail_pos, hip_pos, knee_pos}")
             self._environmentController.setJointsStateDirect({  self._rail_joint: JointState(position = rail_pos, rate=0, effort=0),
                                                                 self._hip_joint:  JointState(position = hip_pos, rate=0, effort=0),
                                                                 self._knee_joint: JointState(position = knee_pos, rate=0, effort=0)})
@@ -1198,7 +1223,7 @@ class LegJumpEnv(ControlledEnv):
             self._environmentController.setJointsImpedanceCommand(start_jimp)
             self._environmentController.apply_joint_impedances(start_jimp)
             # if self._environmentController.__class__.__name__== "RosXbotGazeboAdapter":
-            self._environmentController.run(3.0) # let the leg fall
+            # self._environmentController.run(3.0) # let the leg fall
             # ggLog.info(f"jpos set")
             self._place_objects(support1_xz=(self._current_episode_config.support1_pos_x,self._current_episode_config.support1_pos_z),
                                 support2_xz=(self._current_episode_config.support2_pos_x, self._current_episode_config.support2_pos_z),
@@ -1365,6 +1390,8 @@ class LegJumpEnv(ControlledEnv):
                     time = -1
                 return img, time
             else:
+                import adarl.utils.simple_threndering as simple_threndering
+
                 draw_device = "cuda"
                 bstate = self._unnormalize(bstate,self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1]).to(device=draw_device)
                 image_chw = th.zeros(size=self._img_shape_chw, device=draw_device, dtype=th.uint8)

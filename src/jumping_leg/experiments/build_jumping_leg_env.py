@@ -70,7 +70,8 @@ def env_builder(seed,
                                                        restore_on_reset=False,
                                                        debug_gui=False,
                                                        simulation_step=1/1024,
-                                                       enable_redering=env_builder_args["enable_rendering"])
+                                                       enable_redering=env_builder_args["enable_rendering"],
+                                                       global_max_torque_position_control = 100)
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)

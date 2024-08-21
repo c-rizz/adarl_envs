@@ -139,7 +139,7 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, video_re
             if not play:
                 break
         else:
-            if session.run_info["collected_episodes"] >= args["evaluate"]:
+            if session.run_info["collected_episodes"].value >= args["evaluate"]:
                 break
         obs : TensorTree[th.Tensor]
         obs, info = env.reset(options = options)  #type: ignore
@@ -151,7 +151,7 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, video_re
         ep_wall_duration = 0
         while not done:
             t0 = time.monotonic()
-            session.run_info["collected_steps"] += 1
+            session.run_info["collected_steps"].value += 1
             ggLog.info(f"step = {step_count} realtimefactor = {env_builder_args['stepLength_sec']/step_wallduration:.2f}")
             # ggLog.info(f"ep_config = {info['ep_config']}")
             obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
@@ -194,7 +194,8 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, video_re
             rewards.append(ep_reward)
             durations.append(step_count)
             avg10_dists.append(info["avg10_dist"])
-        session.run_info["collected_episodes"] += 1
+        with session.run_info["collected_episodes"].get_lock():
+            session.run_info["collected_episodes"].value += 1
         ggLog.info("\n"
                    f"Episode reward =  {ep_reward}\n"
                    f"Wall duration =   {ep_wall_duration:.2f}s\n"

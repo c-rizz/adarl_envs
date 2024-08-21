@@ -433,7 +433,7 @@ class LegReachEnv(ControlledEnv):
             leg_pose = build_pose(0,0,0,0,0,0,1)
             self._spawned = True
             if isinstance(self._environmentController, PyBulletAdapter):
-                leg_file = adarl.utils.utils.pkgutil_get_path("jumping_leg","models/leg_simple.urdf.xacro")
+                leg_file = adarl.utils.utils.pkgutil_get_path("jumping_leg","models/leg_rig_simple.urdf.xacro")
                 # import rospkg
                 # leg_file = rospkg.RosPack().get_path("protoleg")+"/description/urdf/protoleg_test_rig.urdf.xacro"
                 name = self._environmentController.spawn_model(model_file=leg_file,

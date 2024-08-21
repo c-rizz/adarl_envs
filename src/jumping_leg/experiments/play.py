@@ -72,8 +72,8 @@ def oscillate_policy(obs):
 def ep_done_cb(episodeReward, steps, episode):
     global policy_time
     policy_time = 0
-    adarl.utils.session.default_session.run_info["collected_episodes"] += 1
-    adarl.utils.session.default_session.run_info["collected_steps"] += steps
+    adarl.utils.session.default_session.run_info["collected_episodes"].value += 1
+    adarl.utils.session.default_session.run_info["collected_steps"].value += steps
 
 keep_h = 0
 keep_k = 0

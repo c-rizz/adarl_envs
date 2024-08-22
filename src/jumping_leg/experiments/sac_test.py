@@ -22,8 +22,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "mode" : "pybullet",
         "use_contacts" : False,
-        "ep_obs_noise_mustd" : (0.01, 0.01),
-        "step_obs_noise_std" : 0.01,
+        "ep_obs_noise_mustd" : (0.0, 0.001),
+        "step_obs_noise_std" : 0.001,
         "stop_on_safety" : False,
         "action_delay_mustd" : (0.01,0.01),
         "max_steps_per_episode" : max_steps_per_episode,
@@ -35,7 +35,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_dist_smoothing_halflife_sec" : 0.0,
         "enable_rendering" : False,
         "num_envs" : train_envs,
-        "randomize_initial_pose" : False}
+        "randomize_initial_pose" : True}
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["video_save_freq"] = 1

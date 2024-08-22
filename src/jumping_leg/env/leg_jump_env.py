@@ -25,21 +25,69 @@ import os
 
 _T = TypeVar('_T', float, th.Tensor)
 
+
+
+
+def unnormalize(v : _T, min : _T, max : _T) -> _T:
+    return min+(v+1)/2*(max-min)
+
+def normalize(value : _T, min : _T, max : _T):
+    return (value + (-min))/(max-min)*2-1
+@dataclass
+class RobotStateHelper:
+    joint_state_pve : th.Tensor
+    control_state_pvesd : th.Tensor
+    joint_limits_pve : th.Tensor
+    control_limits_pvesd : th.Tensor
+    def __init__(self, joints : list[str], obs_dtype : th.dtype, th_device : th.device,
+                        joint_limits_minmax_pve : dict[str,th.Tensor], control_limits_minmax_pvesd : dict[str,th.Tensor],
+                        joint_state_history_length : int = 1, control_state_history_len : int = 1):
+        joints_num = len(joints)
+        self._joint_names = joints
+        self.joint_state_pve     = th.zeros(size=(joint_state_history_length, joints_num, 3,),
+                                            dtype=obs_dtype, device=th_device)
+        self.control_state_pvesd = th.zeros(size=(control_state_history_len, joints_num, 5,),
+                                            dtype=obs_dtype, device=th_device)
+        self.joint_state_name = "jstate"
+        self.control_state_name = "ctrlstate"
+        
+        self.joint_limits_pve = th.stack([joint_limits_minmax_pve[jn] for jn in joints])
+        self.control_limits_pvesd = th.stack([control_limits_minmax_pvesd[jn] for jn in joints])
+
+        if self.joint_limits_pve.size() != (2, joints_num,3):
+            raise RuntimeError(f"Joint limits shape does not match shape, should be {(2, joints_num,3)}, but it's {self.joint_limits_pve.size()}")
+        if self.control_limits_pvesd.size() != (2, joints_num,5):
+            raise RuntimeError(f"Joint limits shape does not match shape, should be {(2, joints_num,5)}, but it's {self.control_limits_pvesd.size()}")
+        
+       
+        
+    def update(self, joint_state_pve : th.Tensor, control_state_pvesd : th.Tensor):
+        for i in range(1,self.joint_state_pve.size()[0]):
+            self.joint_state_pve[i] = self.joint_state_pve[i-1]
+        for i in range(1,self.control_state_pvesd.size()[0]):
+            self.control_state_pvesd[i] = self.control_state_pvesd[i-1]
+        self.joint_state_pve[0] = joint_state_pve
+        self.control_state_pvesd[0] = control_state_pvesd
+
+    def get_state_normalized(self):
+        return {self.joint_state_name   : normalize(self.joint_state_pve, self.joint_limits_pve[0], self.joint_limits_pve[1]),
+                self.control_state_name : normalize(self.control_state_pvesd, self.control_limits_pvesd[0], self.control_limits_pvesd[1]),}
+
+    def get_space(self):
+        return spaces.gym_spaces.Dict(spaces = {self.joint_state_name : spaces.ThBox(low = th.full_like(self.joint_state_pve, fill_value=-1.0),
+                                                                                     high= th.full_like(self.joint_state_pve, fill_value=1.0)),
+                                                self.control_state_name : spaces.ThBox(low = th.full_like(self.control_state_pvesd, fill_value=-1.0),
+                                                                                       high= th.full_like(self.control_state_pvesd, fill_value=1.0))})
+
+
 class LegJumpEnv(ControlledEnv):
-    """This class implements an OpenAI-gym environment with Gazebo, representing the classic cart-pole setup."""
 
     metadata = {'render.modes': ['rgb_array']}
-    STATE_BASE = "vec" # component of the state that is a vector and is always the same regardless of the configuration
-    STATE_ACT = "act" # component of the state that is the last performed action (it has a different size depending onthe configuration)
-    STATE_IMG = "img" # componento f thestate that contains the rendered image
+    STATE_BASE = "b" # component of the state that is a vector and is always the same regardless of the configuration
+    STATE_ACT = "a" # component of the state that is the last performed action (it has a different size depending onthe configuration)
+    STATE_IMG = "i" # componento f thestate that contains the rendered image
 
     BASE_STATE_IDXS = IntEnum("BASE_STATE", [
-                            "HIP_JOINT_POS",
-                            "HIP_JOINT_VEL",
-                            "HIP_JOINT_EFFORT",
-                            "KNEE_JOINT_POS",
-                            "KNEE_JOINT_VEL",
-                            "KNEE_JOINT_EFFORT",
                             "HIP_POS_Z",
                             "HIP_VEL_Z",
                             "SUPPORT1_X",
@@ -57,6 +105,12 @@ class LegJumpEnv(ControlledEnv):
                             "REWARD_IMPULSE_THRESHOLD",
                             "KNEE_TORQUE_CMD_SCALE",
                             "HIP_TORQUE_CMD_SCALE",
+                            "HIP_JOINT_POS",
+                            "HIP_JOINT_VEL",
+                            "HIP_JOINT_EFFORT",
+                            "KNEE_JOINT_POS",
+                            "KNEE_JOINT_VEL",
+                            "KNEE_JOINT_EFFORT",
                             "HIP_POS_REF",
                             "HIP_VEL_REF",
                             "HIP_EFFORT_REF",
@@ -99,6 +153,13 @@ class LegJumpEnv(ControlledEnv):
                             "SAFETY_TRIGGERED",
                             "SMOOTHED_GOAL_DIST"], start=0)
     
+    # NullState = {
+    #     EXTRINSIC_STATE : th.zeros(size=(len(EXTRINSIC_STATES),), dtype=obs_dtype),
+    #     JOINT_STATE : th.zeros(size=(joints_num*JOINT_STATE_FIELDS,), dtype=obs_dtype),
+    #     CONTROL_STATE : th.zeros(size=(joints_num*JOINT_CTRL_FIELDS,), dtype=obs_dtype),
+    #     ACTION_HISTORY : th.zeros(size=(action_len*action_history_len,), dtype=obs_dtype),
+    #     CURRENT_IMAGE : th.zeros(size=img_size_chw, dtype=obs_dtype)
+    # }
     
     CONTROL_MODES = IntEnum("CONTROL_MODES", [  "VELOCITY",
                                                 "TORQUE",
@@ -443,6 +504,28 @@ class LegJumpEnv(ControlledEnv):
                                                                        initial_joint_pose_rhk=th.tensor([1.0,1.0,1.0], device=self._configuration.th_device),
                                                                        max_ep_steps=th.tensor(self._configuration.original_max_epsteps, device=self._configuration.th_device))
         
+
+        self._robot_state_helper = RobotStateHelper(joints=["knee","hip"],
+                                                    obs_dtype=obs_dtype,
+                                                    th_device=th_device,
+                                                    joint_limits_minmax_pve={"knee" : th.as_tensor([self._configuration.position_phys_limits_knee,
+                                                                                                     self._configuration.velocity_phys_limits_knee,
+                                                                                                     self._configuration.torque_phys_limits_knee]).permute(1,0),
+                                                                             "hip" : th.as_tensor([ self._configuration.position_phys_limits_hip,
+                                                                                                    self._configuration.velocity_phys_limits_hip,
+                                                                                                    self._configuration.torque_phys_limits_hip]).permute(1,0)},
+                                                    control_limits_minmax_pvesd={"knee" : th.as_tensor([self._configuration.position_phys_limits_knee,
+                                                                                                     self._configuration.velocity_phys_limits_knee,
+                                                                                                     self._configuration.torque_phys_limits_knee,
+                                                                                                     self._configuration.min_stiffness,
+                                                                                                     self._configuration.min_damping]).permute(1,0),
+                                                                             "hip" : th.as_tensor([ self._configuration.position_phys_limits_hip,
+                                                                                                    self._configuration.velocity_phys_limits_hip,
+                                                                                                    self._configuration.torque_phys_limits_hip,
+                                                                                                    self._configuration.min_stiffness,
+                                                                                                    self._configuration.min_damping]).permute(1,0)},
+                                                    joint_state_history_length=self._configuration.frame_stack_length,
+                                                    control_state_history_len=self._configuration.frame_stack_length)
         vstate_min_max = {  self.BASE_STATE_IDXS.HIP_JOINT_POS : self._configuration.position_phys_limits_hip,
                             self.BASE_STATE_IDXS.HIP_JOINT_VEL : self._configuration.velocity_phys_limits_hip,
                             self.BASE_STATE_IDXS.HIP_JOINT_EFFORT : self._configuration.torque_phys_limits_hip,
@@ -511,18 +594,18 @@ class LegJumpEnv(ControlledEnv):
 
         # Part of the BASE_STATE that gets stacked
         if self._configuration.obs_only_vec:
-            self._stacked_obs_part = th.as_tensor([ self.BASE_STATE_IDXS.HIP_JOINT_POS,
-                                                    self.BASE_STATE_IDXS.HIP_JOINT_VEL,
-                                                    self.BASE_STATE_IDXS.HIP_JOINT_EFFORT,
-                                                    self.BASE_STATE_IDXS.KNEE_JOINT_POS,
-                                                    self.BASE_STATE_IDXS.KNEE_JOINT_VEL,
-                                                    self.BASE_STATE_IDXS.KNEE_JOINT_EFFORT,
-                                                    self.BASE_STATE_IDXS.HIP_POS_Z,
+            self._stacked_obs_part = th.as_tensor([ self.BASE_STATE_IDXS.HIP_POS_Z,
                                                     self.BASE_STATE_IDXS.HIP_VEL_Z,
                                                     self.BASE_STATE_IDXS.SUPPORT1_X,
                                                     self.BASE_STATE_IDXS.SUPPORT1_Z,
                                                     self.BASE_STATE_IDXS.SUPPORT2_X,
                                                     self.BASE_STATE_IDXS.SUPPORT2_Z,
+                                                    self.BASE_STATE_IDXS.HIP_JOINT_POS,
+                                                    self.BASE_STATE_IDXS.HIP_JOINT_VEL,
+                                                    self.BASE_STATE_IDXS.HIP_JOINT_EFFORT,
+                                                    self.BASE_STATE_IDXS.KNEE_JOINT_POS,
+                                                    self.BASE_STATE_IDXS.KNEE_JOINT_VEL,
+                                                    self.BASE_STATE_IDXS.KNEE_JOINT_EFFORT,
                                                     self.BASE_STATE_IDXS.HIP_POS_REF,
                                                     self.BASE_STATE_IDXS.HIP_VEL_REF,
                                                     self.BASE_STATE_IDXS.HIP_EFFORT_REF,
@@ -657,7 +740,7 @@ class LegJumpEnv(ControlledEnv):
                                             cmds_pvesd[self._knee_joint][3],
                                             cmds_pvesd[self._hip_joint][4],
                                             cmds_pvesd[self._knee_joint][4]], device=self._configuration.th_device)
-        act_pvesd_interleaved = self._normalize(act_pvesd_interleaved,
+        act_pvesd_interleaved = normalize(act_pvesd_interleaved,
                                                 minmax_hipknee_pvesd[[0,0],[0,1]].flatten(),
                                                 minmax_hipknee_pvesd[[1,1],[1,0]].flatten())
         if self._configuration.control_mode == self.CONTROL_MODES.IMPEDANCE:
@@ -695,8 +778,8 @@ class LegJumpEnv(ControlledEnv):
 
                                           [[hp_lim[1], hv_lim, he_lim, max_stiffness, max_damping],
                                            [kp_lim[1], kv_lim, ke_lim, max_stiffness, max_damping]]], device=self._configuration.th_device)
-        s = self._normalize(self._configuration.safe_stiffness,min= self._configuration.min_stiffness,max=self._configuration.max_stiffness)
-        d = self._normalize(self._configuration.safe_damping,min= self._configuration.min_damping,max=self._configuration.max_damping)
+        s = normalize(self._configuration.safe_stiffness,min= self._configuration.min_stiffness,max=self._configuration.max_stiffness)
+        d = normalize(self._configuration.safe_damping,min= self._configuration.min_damping,max=self._configuration.max_damping)
         hip_pvesd  = th.tensor([0,0,0,s,d], dtype=self._configuration.obs_dtype, device=self._configuration.th_device)
         knee_pvesd = th.tensor([0,0,0,s,d], dtype=self._configuration.obs_dtype, device=self._configuration.th_device)
         
@@ -746,8 +829,8 @@ class LegJumpEnv(ControlledEnv):
         else:
             raise RuntimeError(f"Invalid control mode {self._configuration.control_mode}")
         
-        hip_pvesd = self._unnormalize(hip_pvesd, min=minmax_hipknee_pvesd[0][0], max=minmax_hipknee_pvesd[1][0])
-        knee_pvesd = self._unnormalize(knee_pvesd, min=minmax_hipknee_pvesd[0][1], max=minmax_hipknee_pvesd[1][1])
+        hip_pvesd = unnormalize(hip_pvesd, min=minmax_hipknee_pvesd[0][0], max=minmax_hipknee_pvesd[1][0])
+        knee_pvesd = unnormalize(knee_pvesd, min=minmax_hipknee_pvesd[0][1], max=minmax_hipknee_pvesd[1][1])
         return {self._hip_joint :  tuple(hip_pvesd.tolist()),
                 self._knee_joint:  tuple(knee_pvesd.tolist())}
 
@@ -761,12 +844,9 @@ class LegJumpEnv(ControlledEnv):
             prev_action = self._current_state[self.STATE_ACT][0].detach().cpu()
             if self._actionsCounter != 0:
                 action = action*(1-alpha) + prev_action*alpha
-            # action = th.clamp(action, min=prev_action-self._max_act_change, max=prev_action+self._max_act_change)
             action = th.clamp(action, min=-1, max=1)
-            # action = th.tensor([0.,0.])
-            self._last_out_action = action
-            # action_l = action.tolist()
             jimp_pvesd = self._action_to_pvesd(action)
+            self._last_out_action = action
             self._last_sent_pvesd = jimp_pvesd
             n = th.randn(size=(1,),
                         generator=self._rng,
@@ -874,7 +954,8 @@ class LegJumpEnv(ControlledEnv):
 
         goal_dist = vstate_un[LegJumpEnv.BASE_STATE_IDXS.SMOOTHED_GOAL_DIST]
         # tracking_reward = 1 - goal_dist
-        tracking_reward = 1/(1+goal_dist/0.05) # halves at 0.05m
+        # tracking_reward = 1/(1+goal_dist/0.05)       # 0.50 at 0.05m, 0.35 at 0.10m, 0.2 at 0.2
+        tracking_reward = 1/(1+(goal_dist/0.1)**2) # 0.75 at 0.05m, 0.50 at 0.10m, 0.2 at 0.2
         impulse_threshold = pvstate_un[LegJumpEnv.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD]
         contacts_reward = th.clamp(-(vstate_un[LegJumpEnv.BASE_STATE_IDXS.IMPULSES_SUM_AVG]/impulse_threshold)**4, min = -1)
 
@@ -1094,7 +1175,7 @@ class LegJumpEnv(ControlledEnv):
             collisions = []
             for i in range(10000):
                 rail_hip_knee_pos = th.rand(size=(3,), device=self._configuration.th_device, dtype = th.float32)*2-1
-                rail_hip_knee_pos = self._unnormalize(rail_hip_knee_pos,
+                rail_hip_knee_pos = unnormalize(rail_hip_knee_pos,
                                         min=th.tensor([ self._configuration.rail_initial_position_limits[0],
                                                         self._configuration.position_cmd_limits_hip[0],
                                                         self._configuration.position_cmd_limits_knee[0]]),
@@ -1269,20 +1350,17 @@ class LegJumpEnv(ControlledEnv):
     def buildSimulation(self):
         # ggLog.info("Building env")
         envCtrlName = type(self._environmentController).__name__
+        self._knee_joint = ("leg","knee_joint_1")
+        self._hip_joint = ("leg","hip_joint_1")
+        self._rail_joint = ("leg","rail_joint")
+        self._foot_link = ("leg","tip1")
+        self._thigh_base_link = ("leg", "thigh_link1")
+        self._shin_base_link = ("leg", "shin_link1")
+        self._thigh_com_link = ("leg", "thigh_link1_com")
+        self._shin_com_link = ("leg", "shin_link1_com")
+        self._rendering_cam_name = "simple_camera"
         if envCtrlName == "PyBulletJointImpedanceAdapter":
             self._environmentController.build_scenario(None)
-            self._rendering_cam_name = "simple_camera"
-
-            self._knee_joint = ("leg","knee_joint_1")
-            self._hip_joint = ("leg","hip_joint_1")
-            self._rail_joint = ("leg","rail_joint")
-
-            self._foot_link = ("leg","tip1")
-            self._thigh_base_link = ("leg", "thigh_link1")
-            self._shin_base_link = ("leg", "shin_link1")
-            self._thigh_com_link = ("leg", "thigh_link1_com")
-            self._shin_com_link = ("leg", "shin_link1_com")
-            self._rendering_cam_name = "simple_camera"
             self._support1_base = ("support1","world")
             self._support2_base = ("support2","world")
             self._red_ball_base = ("red_ball","world")
@@ -1293,43 +1371,9 @@ class LegJumpEnv(ControlledEnv):
                 self._environmentController.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
                                                                                                                           "gazebo/all_gazebo_xbot.launch"),
                                                            launch_file_args={"gui":"false"})
-                self._knee_joint = ("leg","knee_joint_1")
-                self._hip_joint = ("leg","hip_joint_1")
-                self._rail_joint = ("leg","rail_joint")
-
-                self._foot_link = ("leg","tip1")
-                self._thigh_base_link = ("leg", "thigh_link1")
-                self._shin_base_link = ("leg", "shin_link1")
-                self._thigh_com_link = ("leg", "thigh_link1_com")
-                self._shin_com_link = ("leg", "shin_link1_com")
-                self._rendering_cam_name = "simple_camera"
                 self._support1_base = ("support1","plate")
                 self._support2_base = ("support2","plate")
                 self._red_ball_base = ("red_ball","sphere_link")
-        # elif envCtrlName in ["GazeboAdapter", "GazeboAdapterNoPlugin"]:
-        #     # ggLog.info(f"sim_img_width  = {sim_img_width}")
-        #     # ggLog.info(f"sim_img_height = {sim_img_height}")
-        #     if not self._rendering_enabled:
-        #         worldpath = "\"$(find adarl_ros)/worlds/ground_plane_world_plugin.world\""
-        #     else:
-        #         worldpath = "\"$(find adarl_ros)/worlds/fixed_camera_world_plugin.world\""
-        #     self._environmentController.build_scenario( launch_file_pkg_and_path=("adarl_ros","/launch/gazebo_server.launch"),
-        #                                                 launch_file_args={  "gui":"false",
-        #                                                                     "paused":"true",
-        #                                                                     "physics_engine":"bullet",
-        #                                                                     "limit_sim_speed":"false",
-        #                                                                     "world_name":worldpath,
-        #                                                                     "gazebo_seed":f"{self._envSeed}",
-        #                                                                     "wall_sim_speed":f"{self._wall_sim_speed}"})
-        #     self._rendering_cam_name = "camera"
-        # elif envCtrlName == "GzController":
-        #     self._environmentController.build_scenario(sdf_file = ("adarl_ros2","/worlds/empty_cams.sdf"))
-        #     # self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro"),
-        #     #                                         model_name=None,
-        #     #                                         pose=build_pose(0,2,0.5,0,0.0,-0.707,0.707),
-        #     #                                         model_kwargs={"camera_width":"1920","camera_height":"1080","frame_rate":1/self._intendedStepLength_sec},
-        #     #                                         model_format="sdf.xacro")
-        #     self._rendering_cam_name = "simple_camera"
         else:
             raise NotImplementedError("environmentController "+envCtrlName+" not supported")
 
@@ -1389,7 +1433,7 @@ class LegJumpEnv(ControlledEnv):
                 import adarl.utils.simple_threndering as simple_threndering
 
                 draw_device = "cuda"
-                bstate = self._unnormalize(bstate,self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1]).to(device=draw_device)
+                bstate = unnormalize(bstate,self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1]).to(device=draw_device)
                 image_chw = th.zeros(size=self._img_shape_chw, device=draw_device, dtype=th.uint8)
                 # ggLog.info(f"image_chw = {image_chw.size()}")
                 body_size = 0.1
@@ -1529,7 +1573,7 @@ class LegJumpEnv(ControlledEnv):
         # ggLog.info(f"jstates = {jstates}")
 
         bstate_history = self._current_state[self.STATE_BASE]
-        prev_bstate = self._unnormalize(bstate_history[0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])                
+        prev_bstate = unnormalize(bstate_history[0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])                
         if len(self._current_state)!=0 and prev_bstate[self.BASE_STATE_IDXS.SAFETY_TRIGGERED] > 0:
             safety_triggered = True
         else:
@@ -1649,7 +1693,7 @@ class LegJumpEnv(ControlledEnv):
         # ggLog.info(f"comp shin_pose = {self._robot_model.get_frame_poses()[self._shin_com_link[1]]}")
 
         # ggLog.info(f"current_vstate = {current_vstate}")
-        bstate_history[0] = self._normalize(bstate_history[0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])                
+        bstate_history[0] = normalize(bstate_history[0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])                
         bstate_history[0][self._stacked_obs_part] += adarl.utils.utils.randn_like(bstate_history[0][self._stacked_obs_part],
                                                                                 mu  = self._current_episode_config.obs_noise_mustd[0],
                                                                                 std = self._current_episode_config.obs_noise_mustd[1],
@@ -1701,7 +1745,7 @@ class LegJumpEnv(ControlledEnv):
                 self._stats.ep_max_abs_impulses_sum = max(self._stats.ep_max_abs_impulses_sum, sum(abs_impulses))
                 self._stats.ep_max_abs_contact = max(self._stats.ep_max_abs_contact, max(abs_contacts))
                 self._stats.ep_max_abs_contacts_sum = max(self._stats.ep_max_abs_contacts_sum, sum(abs_contacts))
-        vstate_unnorm = self._unnormalize(self._current_state[self.STATE_BASE][0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])
+        vstate_unnorm = unnormalize(self._current_state[self.STATE_BASE][0],self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])
         goal_dist = abs(vstate_unnorm[self.BASE_STATE_IDXS.HIP_GOAL_Z]-vstate_unnorm[self.BASE_STATE_IDXS.HIP_POS_Z])
         self._stats.cumulative_dist_to_goal += goal_dist
         self._stats.cumulative_knee_torque += abs(vstate_unnorm[self.BASE_STATE_IDXS.KNEE_JOINT_EFFORT])
@@ -1729,7 +1773,7 @@ class LegJumpEnv(ControlledEnv):
         # ggLog.info(f"getInfo(): {self._stepCounter}")
         # i["step_count"] = self._stepCounter
         bstate = state[self.STATE_BASE][0]
-        bstate_unnorm = self._unnormalize(bstate,self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])
+        bstate_unnorm = unnormalize(bstate,self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1])
         i["hip_goal_z"] = bstate_unnorm[self.BASE_STATE_IDXS.HIP_GOAL_Z]
         i["avg_dist"] = self._stats.cumulative_dist_to_goal/self._stepCounter if self._stepCounter!=0 else float("nan")
         i["avg10_dist"] = th.mean(self._stats.dists_to_goal)
@@ -1783,12 +1827,3 @@ class LegJumpEnv(ControlledEnv):
         self._rng = self._rng.manual_seed(seed)
         self.action_space.seed(seed)
         self.observation_space.seed(seed)
-
-
-    @staticmethod
-    def _unnormalize(v : _T, min : _T, max : _T) -> _T:
-        return min+(v+1)/2*(max-min)
-    
-    @staticmethod        
-    def _normalize(value : _T, min : _T, max : _T):
-        return (value + (-min))/(max-min)*2-1

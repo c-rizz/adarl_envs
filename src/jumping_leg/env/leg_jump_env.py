@@ -22,6 +22,7 @@ from adarl.utils.robot_helpers import Robot
 from pathlib import Path
 import time
 import os
+from adarl.utils.state_helper import RobotStateHelper, StateHelper, DictStateHelper
 
 _T = TypeVar('_T', float, th.Tensor)
 
@@ -33,51 +34,6 @@ def unnormalize(v : _T, min : _T, max : _T) -> _T:
 
 def normalize(value : _T, min : _T, max : _T):
     return (value + (-min))/(max-min)*2-1
-@dataclass
-class RobotStateHelper:
-    joint_state_pve : th.Tensor
-    control_state_pvesd : th.Tensor
-    joint_limits_pve : th.Tensor
-    control_limits_pvesd : th.Tensor
-    def __init__(self, joints : list[str], obs_dtype : th.dtype, th_device : th.device,
-                        joint_limits_minmax_pve : dict[str,th.Tensor], control_limits_minmax_pvesd : dict[str,th.Tensor],
-                        joint_state_history_length : int = 1, control_state_history_len : int = 1):
-        joints_num = len(joints)
-        self._joint_names = joints
-        self.joint_state_pve     = th.zeros(size=(joint_state_history_length, joints_num, 3,),
-                                            dtype=obs_dtype, device=th_device)
-        self.control_state_pvesd = th.zeros(size=(control_state_history_len, joints_num, 5,),
-                                            dtype=obs_dtype, device=th_device)
-        self.joint_state_name = "jstate"
-        self.control_state_name = "ctrlstate"
-        
-        self.joint_limits_pve = th.stack([joint_limits_minmax_pve[jn] for jn in joints])
-        self.control_limits_pvesd = th.stack([control_limits_minmax_pvesd[jn] for jn in joints])
-
-        if self.joint_limits_pve.size() != (2, joints_num,3):
-            raise RuntimeError(f"Joint limits shape does not match shape, should be {(2, joints_num,3)}, but it's {self.joint_limits_pve.size()}")
-        if self.control_limits_pvesd.size() != (2, joints_num,5):
-            raise RuntimeError(f"Joint limits shape does not match shape, should be {(2, joints_num,5)}, but it's {self.control_limits_pvesd.size()}")
-        
-       
-        
-    def update(self, joint_state_pve : th.Tensor, control_state_pvesd : th.Tensor):
-        for i in range(1,self.joint_state_pve.size()[0]):
-            self.joint_state_pve[i] = self.joint_state_pve[i-1]
-        for i in range(1,self.control_state_pvesd.size()[0]):
-            self.control_state_pvesd[i] = self.control_state_pvesd[i-1]
-        self.joint_state_pve[0] = joint_state_pve
-        self.control_state_pvesd[0] = control_state_pvesd
-
-    def get_state_normalized(self):
-        return {self.joint_state_name   : normalize(self.joint_state_pve, self.joint_limits_pve[0], self.joint_limits_pve[1]),
-                self.control_state_name : normalize(self.control_state_pvesd, self.control_limits_pvesd[0], self.control_limits_pvesd[1]),}
-
-    def get_space(self):
-        return spaces.gym_spaces.Dict(spaces = {self.joint_state_name : spaces.ThBox(low = th.full_like(self.joint_state_pve, fill_value=-1.0),
-                                                                                     high= th.full_like(self.joint_state_pve, fill_value=1.0)),
-                                                self.control_state_name : spaces.ThBox(low = th.full_like(self.control_state_pvesd, fill_value=-1.0),
-                                                                                       high= th.full_like(self.control_state_pvesd, fill_value=1.0))})
 
 
 class LegJumpEnv(ControlledEnv):
@@ -85,73 +41,50 @@ class LegJumpEnv(ControlledEnv):
     metadata = {'render.modes': ['rgb_array']}
     STATE_BASE = "b" # component of the state that is a vector and is always the same regardless of the configuration
     STATE_ACT = "a" # component of the state that is the last performed action (it has a different size depending onthe configuration)
-    STATE_IMG = "i" # componento f thestate that contains the rendered image
+    STATE_IMG = "o" # componento f thestate that contains the rendered image
+    STATE_ROBOT = "r"
+    STATE_EXTRINSIC = "e"
+    STATE_INTERNAL = "i"
 
-    BASE_STATE_IDXS = IntEnum("BASE_STATE", [
-                            "HIP_POS_Z",
-                            "HIP_VEL_Z",
-                            "SUPPORT1_X",
-                            "SUPPORT1_Z",
-                            "SUPPORT2_X",
-                            "SUPPORT2_Z",
-                            "HIP_GOAL_Z",
-                            "REWARD_TORQUE_LIMIT_WEIGHT",
-                            "REWARD_POSITION_LIMIT_WEIGHT",
-                            "REWARD_VELOCITY_WEIGHT",
-                            "REWARD_ENERGY_WEIGHT",
-                            "REWARD_TRACKING_WEIGHT",
-                            "REWARD_TORQUE_WEIGHT",
-                            "REWARD_CONTACTS_WEIGHT",
-                            "REWARD_IMPULSE_THRESHOLD",
-                            "KNEE_TORQUE_CMD_SCALE",
-                            "HIP_TORQUE_CMD_SCALE",
-                            "HIP_JOINT_POS",
-                            "HIP_JOINT_VEL",
-                            "HIP_JOINT_EFFORT",
-                            "KNEE_JOINT_POS",
-                            "KNEE_JOINT_VEL",
-                            "KNEE_JOINT_EFFORT",
-                            "HIP_POS_REF",
-                            "HIP_VEL_REF",
-                            "HIP_EFFORT_REF",
-                            "HIP_STIFFNESS",
-                            "HIP_DAMPING",
-                            "KNEE_POS_REF",
-                            "KNEE_VEL_REF",
-                            "KNEE_EFFORT_REF",
-                            "KNEE_STIFFNESS",
-                            "KNEE_DAMPING",
 
-                            "THIGH_VEL_X",
-                            "THIGH_VEL_Y",
-                            "THIGH_VEL_Z",
-                            "THIGH_ANG_VEL_X",
-                            "THIGH_ANG_VEL_Y",
-                            "THIGH_ANG_VEL_Z",
-                            "SHIN_VEL_X",
-                            "SHIN_VEL_Y",
-                            "SHIN_VEL_Z",
-                            "SHIN_ANG_VEL_X",
-                            "SHIN_ANG_VEL_Y",
-                            "SHIN_ANG_VEL_Z",
-                            # "THIGH_POS_X",
-                            # "THIGH_POS_Y",
-                            # "THIGH_POS_Z",
-                            # "THIGH_ANG_POS_X",
-                            # "THIGH_ANG_POS_Y",
-                            # "THIGH_ANG_POS_Z",
-                            # "SHIN_POS_X",
-                            # "SHIN_POS_Y",
-                            # "SHIN_POS_Z",
-                            # "SHIN_ANG_POS_X",
-                            # "SHIN_ANG_POS_Y",
-                            # "SHIN_ANG_POS_Z",
-                            "IMPULSES_SUM",
-                            "FORCES_SUM",
-                            "FORCES_NUM",
-                            "IMPULSES_SUM_AVG",
-                            "SAFETY_TRIGGERED",
-                            "SMOOTHED_GOAL_DIST"], start=0)
+    EXTRINSIC_STATE = IntEnum("EXTRINSIC_STATE", [  "HIP_POS_Z",
+                                                    "HIP_VEL_Z",
+                                                    "SUPPORT1_X",
+                                                    "SUPPORT1_Z",
+                                                    "SUPPORT2_X",
+                                                    "SUPPORT2_Z"])
+    # I don't like the GOAL_STATE name, but for now let's call it like that
+    INTERNAL_STATE = IntEnum("INTERNAL_STATE", ["HIP_GOAL_Z",
+                                                "REWARD_TORQUE_LIMIT_WEIGHT",
+                                                "REWARD_POSITION_LIMIT_WEIGHT",
+                                                "REWARD_VELOCITY_WEIGHT",
+                                                "REWARD_ENERGY_WEIGHT",
+                                                "REWARD_TRACKING_WEIGHT",
+                                                "REWARD_TORQUE_WEIGHT",
+                                                "REWARD_CONTACTS_WEIGHT",
+                                                "REWARD_IMPULSE_THRESHOLD",
+                                                "KNEE_TORQUE_CMD_SCALE",
+                                                "HIP_TORQUE_CMD_SCALE",
+                                                "IMPULSES_SUM",
+                                                "FORCES_SUM",
+                                                "FORCES_NUM",
+                                                "IMPULSES_SUM_AVG",
+                                                "SAFETY_TRIGGERED",
+                                                "SMOOTHED_GOAL_DIST"])
+    # BASE_STATE_IDXS = IntEnum("BASE_STATE", [
+                            
+    #                         "THIGH_VEL_X",
+    #                         "THIGH_VEL_Y",
+    #                         "THIGH_VEL_Z",
+    #                         "THIGH_ANG_VEL_X",
+    #                         "THIGH_ANG_VEL_Y",
+    #                         "THIGH_ANG_VEL_Z",
+    #                         "SHIN_VEL_X",
+    #                         "SHIN_VEL_Y",
+    #                         "SHIN_VEL_Z",
+    #                         "SHIN_ANG_VEL_X",
+    #                         "SHIN_ANG_VEL_Y",
+    #                         "SHIN_ANG_VEL_Z"], start=0)
     
     # NullState = {
     #     EXTRINSIC_STATE : th.zeros(size=(len(EXTRINSIC_STATES),), dtype=obs_dtype),
@@ -209,8 +142,7 @@ class LegJumpEnv(ControlledEnv):
         min_damping : float
         min_stiffness : float
         obs_dtype : th.dtype
-        obs_img_height : int
-        obs_img_width : int
+        img_shape_chw : tuple[int,int,int]
         obs_only_img : bool
         obs_only_vec : bool
         original_max_epsteps : int
@@ -441,8 +373,7 @@ class LegJumpEnv(ControlledEnv):
                                                             max_stiffness=1000,
                                                             min_damping=10,
                                                             min_stiffness=10,
-                                                            obs_img_height=obs_img_height,
-                                                            obs_img_width=obs_img_width,
+                                                            img_shape_chw=((3 if rgb else 1),obs_img_height,obs_img_width),
                                                             obs_only_img=obs_only_img,
                                                             obs_only_vec=obs_only_vec,
                                                             position_cmd_limits_hip =  (-2.2, 2.2),
@@ -505,34 +436,79 @@ class LegJumpEnv(ControlledEnv):
                                                                        max_ep_steps=th.tensor(self._configuration.original_max_epsteps, device=self._configuration.th_device))
         
 
-        self._robot_state_helper = RobotStateHelper(joints=["knee","hip"],
-                                                    obs_dtype=obs_dtype,
-                                                    th_device=th_device,
-                                                    joint_limits_minmax_pve={"knee" : th.as_tensor([self._configuration.position_phys_limits_knee,
-                                                                                                     self._configuration.velocity_phys_limits_knee,
-                                                                                                     self._configuration.torque_phys_limits_knee]).permute(1,0),
-                                                                             "hip" : th.as_tensor([ self._configuration.position_phys_limits_hip,
-                                                                                                    self._configuration.velocity_phys_limits_hip,
-                                                                                                    self._configuration.torque_phys_limits_hip]).permute(1,0)},
-                                                    control_limits_minmax_pvesd={"knee" : th.as_tensor([self._configuration.position_phys_limits_knee,
-                                                                                                     self._configuration.velocity_phys_limits_knee,
-                                                                                                     self._configuration.torque_phys_limits_knee,
-                                                                                                     self._configuration.min_stiffness,
-                                                                                                     self._configuration.min_damping]).permute(1,0),
-                                                                             "hip" : th.as_tensor([ self._configuration.position_phys_limits_hip,
-                                                                                                    self._configuration.velocity_phys_limits_hip,
-                                                                                                    self._configuration.torque_phys_limits_hip,
+        robot_state_helper = RobotStateHelper(joints=["knee","hip"],
+                                                obs_dtype=obs_dtype,
+                                                th_device=th_device,
+                                                joint_limits_minmax_pve={"knee" : th.as_tensor([self._configuration.position_phys_limits_knee,
+                                                                                                    self._configuration.velocity_phys_limits_knee,
+                                                                                                    self._configuration.torque_phys_limits_knee]).permute(1,0),
+                                                                            "hip" : th.as_tensor([ self._configuration.position_phys_limits_hip,
+                                                                                                self._configuration.velocity_phys_limits_hip,
+                                                                                                self._configuration.torque_phys_limits_hip]).permute(1,0)},
+                                                control_limits_minmax_pvesd={"knee" : th.as_tensor([self._configuration.position_phys_limits_knee,
+                                                                                                    self._configuration.velocity_phys_limits_knee,
+                                                                                                    self._configuration.torque_phys_limits_knee,
                                                                                                     self._configuration.min_stiffness,
-                                                                                                    self._configuration.min_damping]).permute(1,0)},
-                                                    joint_state_history_length=self._configuration.frame_stack_length,
-                                                    control_state_history_len=self._configuration.frame_stack_length)
-        vstate_min_max = {  self.BASE_STATE_IDXS.HIP_JOINT_POS : self._configuration.position_phys_limits_hip,
-                            self.BASE_STATE_IDXS.HIP_JOINT_VEL : self._configuration.velocity_phys_limits_hip,
-                            self.BASE_STATE_IDXS.HIP_JOINT_EFFORT : self._configuration.torque_phys_limits_hip,
-                            self.BASE_STATE_IDXS.KNEE_JOINT_POS : self._configuration.position_phys_limits_knee,
-                            self.BASE_STATE_IDXS.KNEE_JOINT_VEL : self._configuration.velocity_phys_limits_knee,
-                            self.BASE_STATE_IDXS.KNEE_JOINT_EFFORT : self._configuration.torque_phys_limits_knee,
-                            self.BASE_STATE_IDXS.HIP_POS_Z : [0,3],
+                                                                                                    self._configuration.min_damping]).permute(1,0),
+                                                                            "hip" : th.as_tensor([ self._configuration.position_phys_limits_hip,
+                                                                                                self._configuration.velocity_phys_limits_hip,
+                                                                                                self._configuration.torque_phys_limits_hip,
+                                                                                                self._configuration.min_stiffness,
+                                                                                                self._configuration.min_damping]).permute(1,0)},
+                                                joint_state_history_length=self._configuration.frame_stack_length,
+                                                control_state_history_len=self._configuration.frame_stack_length)
+        internal_state_helper =   StateHelper(field_names=[e.value for e in self.INTERNAL_STATE],
+                                              obs_dtype=th.float32,
+                                              th_device=th_device,
+                                              field_size=(1,),
+                                              fields_minmax={   self.INTERNAL_STATE.HIP_GOAL_Z : [0,2],
+                                                                self.INTERNAL_STATE.REWARD_TORQUE_LIMIT_WEIGHT : [0,10],
+                                                                self.INTERNAL_STATE.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
+                                                                self.INTERNAL_STATE.REWARD_VELOCITY_WEIGHT : [0,10],
+                                                                self.INTERNAL_STATE.REWARD_ENERGY_WEIGHT : [0,10],
+                                                                self.INTERNAL_STATE.REWARD_TRACKING_WEIGHT : [0,10],
+                                                                self.INTERNAL_STATE.REWARD_TORQUE_WEIGHT : [0,10],
+                                                                self.INTERNAL_STATE.REWARD_CONTACTS_WEIGHT : [0,10],
+                                                                self.INTERNAL_STATE.REWARD_IMPULSE_THRESHOLD : [0,10],
+                                                                self.INTERNAL_STATE.KNEE_TORQUE_CMD_SCALE : [0,150],
+                                                                self.INTERNAL_STATE.HIP_TORQUE_CMD_SCALE : [0,150],
+                                                                self.INTERNAL_STATE.IMPULSES_SUM : [0,100],
+                                                                self.INTERNAL_STATE.FORCES_SUM : [0,1000],
+                                                                self.INTERNAL_STATE.FORCES_NUM : [0,1000],
+                                                                self.INTERNAL_STATE.IMPULSES_SUM_AVG : [0,100],
+                                                                self.INTERNAL_STATE.SAFETY_TRIGGERED : [0,1],
+                                                                self.INTERNAL_STATE.SMOOTHED_GOAL_DIST : [0,10]})
+        extrinsic_state_helper =  StateHelper(field_names=[e.value for e in self.EXTRINSIC_STATE],
+                                              obs_dtype=th.float32,
+                                              th_device=th_device,
+                                              field_size=(1,),
+                                              fields_minmax={   self.EXTRINSIC_STATE.HIP_POS_Z : [0,3],
+                                                                self.EXTRINSIC_STATE.HIP_VEL_Z : [-100,100],
+                                                                self.EXTRINSIC_STATE.SUPPORT1_X : [-2,2],
+                                                                self.EXTRINSIC_STATE.SUPPORT1_Z : [0,2],
+                                                                self.EXTRINSIC_STATE.SUPPORT2_X : [-2,2],
+                                                                self.EXTRINSIC_STATE.SUPPORT2_Z : [0,2]},
+                                               history_length=self._configuration.frame_stack_length)
+        act_history_state_helper = StateHelper(field_names=["action"],
+                                               obs_dtype=th.float32,
+                                               th_device=th_device,
+                                               field_size=(self._configuration.action_len,),
+                                               fields_minmax = {"action" : th.as_tensor([[-1.0,1.0]], dtype=obs_dtype, device=th_device).expand(self._configuration.action_len,1)})
+        
+        img_state_helper = StateHelper(field_names=["image"],
+                                       obs_dtype=th.uint8,
+                                       th_device=th_device,
+                                       field_size=self._configuration.img_shape_chw,
+                                       fields_minmax={"image":[th.zeros(self._configuration.img_shape_chw,device=th_device,dtype=th.uint8),
+                                                               255*th.ones(self._configuration.img_shape_chw,device=th_device,dtype=th.uint8)]})
+        self._state_helper = DictStateHelper({self.STATE_ROBOT : robot_state_helper,
+                                              self.STATE_EXTRINSIC : extrinsic_state_helper,
+                                              self.STATE_INTERNAL : internal_state_helper,
+                                              self.STATE_IMG : img_state_helper,
+                                              self.STATE_ACT: act_history_state_helper})
+        state_space = self._state_helper.get_space()
+        obs_space = self._state_helper.get_obs_space()
+        vstate_min_max = {  self.BASE_STATE_IDXS.HIP_POS_Z : [0,3],
                             self.BASE_STATE_IDXS.HIP_VEL_Z : [-100,100],
                             self.BASE_STATE_IDXS.SUPPORT1_X : [-2,2],
                             self.BASE_STATE_IDXS.SUPPORT1_Z : [0,2],
@@ -549,17 +525,7 @@ class LegJumpEnv(ControlledEnv):
                             self.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD : [0,10],
                             self.BASE_STATE_IDXS.KNEE_TORQUE_CMD_SCALE : [0,150],
                             self.BASE_STATE_IDXS.HIP_TORQUE_CMD_SCALE : [0,150],
-                            self.BASE_STATE_IDXS.HIP_POS_REF : self._configuration.position_phys_limits_hip,
-                            self.BASE_STATE_IDXS.HIP_VEL_REF : self._configuration.velocity_phys_limits_hip,
-                            self.BASE_STATE_IDXS.HIP_EFFORT_REF : self._configuration.torque_phys_limits_hip,
-                            self.BASE_STATE_IDXS.HIP_STIFFNESS : [self._configuration.min_stiffness,self._configuration.max_stiffness],
-                            self.BASE_STATE_IDXS.HIP_DAMPING : [self._configuration.min_damping,self._configuration.max_damping],
-                            self.BASE_STATE_IDXS.KNEE_POS_REF : self._configuration.position_phys_limits_knee,
-                            self.BASE_STATE_IDXS.KNEE_VEL_REF : self._configuration.velocity_phys_limits_knee,
-                            self.BASE_STATE_IDXS.KNEE_EFFORT_REF : self._configuration.torque_phys_limits_knee,
-                            self.BASE_STATE_IDXS.KNEE_STIFFNESS : [self._configuration.min_stiffness,self._configuration.max_stiffness],
-                            self.BASE_STATE_IDXS.KNEE_DAMPING : [self._configuration.min_damping,self._configuration.max_damping],
-
+                            
                             self.BASE_STATE_IDXS.THIGH_VEL_X : [-100,100],
                             self.BASE_STATE_IDXS.THIGH_VEL_Y : [-100,100],
                             self.BASE_STATE_IDXS.THIGH_VEL_Z : [-100,100],
@@ -599,40 +565,9 @@ class LegJumpEnv(ControlledEnv):
                                                     self.BASE_STATE_IDXS.SUPPORT1_X,
                                                     self.BASE_STATE_IDXS.SUPPORT1_Z,
                                                     self.BASE_STATE_IDXS.SUPPORT2_X,
-                                                    self.BASE_STATE_IDXS.SUPPORT2_Z,
-                                                    self.BASE_STATE_IDXS.HIP_JOINT_POS,
-                                                    self.BASE_STATE_IDXS.HIP_JOINT_VEL,
-                                                    self.BASE_STATE_IDXS.HIP_JOINT_EFFORT,
-                                                    self.BASE_STATE_IDXS.KNEE_JOINT_POS,
-                                                    self.BASE_STATE_IDXS.KNEE_JOINT_VEL,
-                                                    self.BASE_STATE_IDXS.KNEE_JOINT_EFFORT,
-                                                    self.BASE_STATE_IDXS.HIP_POS_REF,
-                                                    self.BASE_STATE_IDXS.HIP_VEL_REF,
-                                                    self.BASE_STATE_IDXS.HIP_EFFORT_REF,
-                                                    self.BASE_STATE_IDXS.HIP_STIFFNESS,
-                                                    self.BASE_STATE_IDXS.HIP_DAMPING,
-                                                    self.BASE_STATE_IDXS.KNEE_POS_REF,
-                                                    self.BASE_STATE_IDXS.KNEE_VEL_REF,
-                                                    self.BASE_STATE_IDXS.KNEE_EFFORT_REF,
-                                                    self.BASE_STATE_IDXS.KNEE_STIFFNESS,
-                                                    self.BASE_STATE_IDXS.KNEE_DAMPING], device=self._configuration.th_device)
+                                                    self.BASE_STATE_IDXS.SUPPORT2_Z,], device=self._configuration.th_device)
         else:
-            self._stacked_obs_part = th.as_tensor([ self.BASE_STATE_IDXS.HIP_JOINT_POS,
-                                                    self.BASE_STATE_IDXS.HIP_JOINT_VEL,
-                                                    self.BASE_STATE_IDXS.HIP_JOINT_EFFORT,
-                                                    self.BASE_STATE_IDXS.KNEE_JOINT_POS,
-                                                    self.BASE_STATE_IDXS.KNEE_JOINT_VEL,
-                                                    self.BASE_STATE_IDXS.KNEE_JOINT_EFFORT,
-                                                    self.BASE_STATE_IDXS.HIP_POS_REF,
-                                                    self.BASE_STATE_IDXS.HIP_VEL_REF,
-                                                    self.BASE_STATE_IDXS.HIP_EFFORT_REF,
-                                                    self.BASE_STATE_IDXS.HIP_STIFFNESS,
-                                                    self.BASE_STATE_IDXS.HIP_DAMPING,
-                                                    self.BASE_STATE_IDXS.KNEE_POS_REF,
-                                                    self.BASE_STATE_IDXS.KNEE_VEL_REF,
-                                                    self.BASE_STATE_IDXS.KNEE_EFFORT_REF,
-                                                    self.BASE_STATE_IDXS.KNEE_STIFFNESS,
-                                                    self.BASE_STATE_IDXS.KNEE_DAMPING], device=self._configuration.th_device)
+            self._stacked_obs_part = th.as_tensor([], device=self._configuration.th_device, dtype=th.int32)
 
         # Part of the BASE_STATE that does not get stacked
         self._constant_obs_part = th.as_tensor([self.BASE_STATE_IDXS.HIP_GOAL_Z,
@@ -653,7 +588,8 @@ class LegJumpEnv(ControlledEnv):
 
         state_space = spaces.gym_spaces.Dict({  self.STATE_BASE: spaces.ThBox(low=-float("inf"), high=float("inf"), shape=(self._configuration.history_length,len(LegJumpEnv.BASE_STATE_IDXS),), torch_device=self._configuration.th_device),
                                                 self.STATE_ACT: spaces.ThBox(low=-float("inf"), high=float("inf"), shape=(self._configuration.history_length,self._configuration.action_len,), torch_device=self._configuration.th_device),
-                                                self.STATE_IMG: img_observation_space})
+                                                self.STATE_IMG: img_observation_space
+                                                self.STATE_ROBOT : self._robot_state_helper.get_space()})
         
         if self._configuration.obs_only_vec:
             observation_space = spaces.gym_spaces.Dict({ self.STATE_BASE : vec_obs_space})     

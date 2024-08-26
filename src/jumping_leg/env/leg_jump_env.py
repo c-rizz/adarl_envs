@@ -477,7 +477,8 @@ class LegJumpEnv(ControlledEnv):
                                                                 self.INTERNAL_STATE.FORCES_NUM : [0,1000],
                                                                 self.INTERNAL_STATE.IMPULSES_SUM_AVG : [0,100],
                                                                 self.INTERNAL_STATE.SAFETY_TRIGGERED : [0,1],
-                                                                self.INTERNAL_STATE.SMOOTHED_GOAL_DIST : [0,10]})
+                                                                self.INTERNAL_STATE.SMOOTHED_GOAL_DIST : [0,10]},
+                                                observable_fields=[self.INTERNAL_STATE.HIP_GOAL_Z])
         extrinsic_state_helper =  StateHelper(field_names=[e.value for e in self.EXTRINSIC_STATE],
                                               obs_dtype=th.float32,
                                               th_device=th_device,
@@ -494,110 +495,31 @@ class LegJumpEnv(ControlledEnv):
                                                th_device=th_device,
                                                field_size=(self._configuration.action_len,),
                                                fields_minmax = {"action" : th.as_tensor([[-1.0,1.0]], dtype=obs_dtype, device=th_device).expand(self._configuration.action_len,1)})
-        
         img_state_helper = StateHelper(field_names=["image"],
                                        obs_dtype=th.uint8,
                                        th_device=th_device,
                                        field_size=self._configuration.img_shape_chw,
                                        fields_minmax={"image":[th.zeros(self._configuration.img_shape_chw,device=th_device,dtype=th.uint8),
                                                                255*th.ones(self._configuration.img_shape_chw,device=th_device,dtype=th.uint8)]})
+        if self._configuration.obs_only_vec:
+            observable_fields = [   self.STATE_ROBOT,
+                                    self.STATE_EXTRINSIC,
+                                    self.STATE_INTERNAL]
+        elif self._configuration.obs_only_img:
+            observable_fields = [self.STATE_IMG]
+        else:
+            observable_fields = [   self.STATE_ROBOT,
+                                    self.STATE_INTERNAL,
+                                    self.STATE_IMG]
         self._state_helper = DictStateHelper({self.STATE_ROBOT : robot_state_helper,
                                               self.STATE_EXTRINSIC : extrinsic_state_helper,
                                               self.STATE_INTERNAL : internal_state_helper,
                                               self.STATE_IMG : img_state_helper,
-                                              self.STATE_ACT: act_history_state_helper})
+                                              self.STATE_ACT: act_history_state_helper},
+                                              observable_fields=observable_fields)
         state_space = self._state_helper.get_space()
-        obs_space = self._state_helper.get_obs_space()
-        vstate_min_max = {  self.BASE_STATE_IDXS.HIP_POS_Z : [0,3],
-                            self.BASE_STATE_IDXS.HIP_VEL_Z : [-100,100],
-                            self.BASE_STATE_IDXS.SUPPORT1_X : [-2,2],
-                            self.BASE_STATE_IDXS.SUPPORT1_Z : [0,2],
-                            self.BASE_STATE_IDXS.SUPPORT2_X : [-2,2],
-                            self.BASE_STATE_IDXS.SUPPORT2_Z : [0,2],
-                            self.BASE_STATE_IDXS.HIP_GOAL_Z : [0,2],
-                            self.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT : [0,10],
-                            self.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
-                            self.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT : [0,10],
-                            self.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT : [0,10],
-                            self.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT : [0,10],
-                            self.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT : [0,10],
-                            self.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT : [0,10],
-                            self.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD : [0,10],
-                            self.BASE_STATE_IDXS.KNEE_TORQUE_CMD_SCALE : [0,150],
-                            self.BASE_STATE_IDXS.HIP_TORQUE_CMD_SCALE : [0,150],
-                            
-                            self.BASE_STATE_IDXS.THIGH_VEL_X : [-100,100],
-                            self.BASE_STATE_IDXS.THIGH_VEL_Y : [-100,100],
-                            self.BASE_STATE_IDXS.THIGH_VEL_Z : [-100,100],
-                            self.BASE_STATE_IDXS.THIGH_ANG_VEL_X : [-100,100],
-                            self.BASE_STATE_IDXS.THIGH_ANG_VEL_Y : [-100,100],
-                            self.BASE_STATE_IDXS.THIGH_ANG_VEL_Z : [-100,100],
-                            self.BASE_STATE_IDXS.SHIN_VEL_X : [-100,100],
-                            self.BASE_STATE_IDXS.SHIN_VEL_Y : [-100,100],
-                            self.BASE_STATE_IDXS.SHIN_VEL_Z : [-100,100],
-                            self.BASE_STATE_IDXS.SHIN_ANG_VEL_X : [-100,100],
-                            self.BASE_STATE_IDXS.SHIN_ANG_VEL_Y : [-100,100],
-                            self.BASE_STATE_IDXS.SHIN_ANG_VEL_Z : [-100,100],
-                            # self.BASE_STATE_IDXS.THIGH_POS_X : [-2,2],
-                            # self.BASE_STATE_IDXS.THIGH_POS_Y : [-2,2],
-                            # self.BASE_STATE_IDXS.THIGH_POS_Z : [-2,2],
-                            # self.BASE_STATE_IDXS.THIGH_ANG_POS_X : [-100,100],
-                            # self.BASE_STATE_IDXS.THIGH_ANG_POS_Y : [-100,100],
-                            # self.BASE_STATE_IDXS.THIGH_ANG_POS_Z : [-100,100],
-                            # self.BASE_STATE_IDXS.SHIN_POS_X : [-2,2],
-                            # self.BASE_STATE_IDXS.SHIN_POS_Y : [-2,2],
-                            # self.BASE_STATE_IDXS.SHIN_POS_Z : [-2,2],
-                            # self.BASE_STATE_IDXS.SHIN_ANG_POS_X : [-100,100],
-                            # self.BASE_STATE_IDXS.SHIN_ANG_POS_Y : [-100,100],
-                            # self.BASE_STATE_IDXS.SHIN_ANG_POS_Z : [-100,100],
-                            self.BASE_STATE_IDXS.IMPULSES_SUM : [0,100],
-                            self.BASE_STATE_IDXS.FORCES_SUM : [0,1000],
-                            self.BASE_STATE_IDXS.FORCES_NUM : [0,1000],
-                            self.BASE_STATE_IDXS.IMPULSES_SUM_AVG : [0,100],
-                            self.BASE_STATE_IDXS.SAFETY_TRIGGERED : [0,1],
-                            self.BASE_STATE_IDXS.SMOOTHED_GOAL_DIST : [0,10]}        
-        self._configuration.bstate_minmax = th.tensor([vstate_min_max[k] for k in self.BASE_STATE_IDXS], device = self._configuration.th_device)
-
-        # Part of the BASE_STATE that gets stacked
-        if self._configuration.obs_only_vec:
-            self._stacked_obs_part = th.as_tensor([ self.BASE_STATE_IDXS.HIP_POS_Z,
-                                                    self.BASE_STATE_IDXS.HIP_VEL_Z,
-                                                    self.BASE_STATE_IDXS.SUPPORT1_X,
-                                                    self.BASE_STATE_IDXS.SUPPORT1_Z,
-                                                    self.BASE_STATE_IDXS.SUPPORT2_X,
-                                                    self.BASE_STATE_IDXS.SUPPORT2_Z,], device=self._configuration.th_device)
-        else:
-            self._stacked_obs_part = th.as_tensor([], device=self._configuration.th_device, dtype=th.int32)
-
-        # Part of the BASE_STATE that does not get stacked
-        self._constant_obs_part = th.as_tensor([self.BASE_STATE_IDXS.HIP_GOAL_Z,
-                                                self.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT,
-                                                self.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT,
-                                                self.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT,
-                                                self.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT,
-                                                self.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT,
-                                                self.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT,
-                                                self.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT,
-                                                self.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD], device=self._configuration.th_device)
-        vec_obs_size = self._stacked_obs_part.size()[0]*self._configuration.frame_stack_length + self._constant_obs_part.size()[0]
-        vec_obs_space_high = np.array( [1.0]*vec_obs_size)
-        vec_obs_space = spaces.gym_spaces.Box(-vec_obs_space_high,vec_obs_space_high)
-        
-        self._img_shape_chw = (3 if rgb else 1,self._configuration.obs_img_height,self._configuration.obs_img_width)
-        img_observation_space = spaces.ThBox(low=0, high=255, shape=self._img_shape_chw, dtype=np.uint8, torch_device=self._configuration.th_device)
-
-        state_space = spaces.gym_spaces.Dict({  self.STATE_BASE: spaces.ThBox(low=-float("inf"), high=float("inf"), shape=(self._configuration.history_length,len(LegJumpEnv.BASE_STATE_IDXS),), torch_device=self._configuration.th_device),
-                                                self.STATE_ACT: spaces.ThBox(low=-float("inf"), high=float("inf"), shape=(self._configuration.history_length,self._configuration.action_len,), torch_device=self._configuration.th_device),
-                                                self.STATE_IMG: img_observation_space
-                                                self.STATE_ROBOT : self._robot_state_helper.get_space()})
-        
-        if self._configuration.obs_only_vec:
-            observation_space = spaces.gym_spaces.Dict({ self.STATE_BASE : vec_obs_space})     
-        elif self._configuration.obs_only_img:
-            observation_space = spaces.gym_spaces.Dict({ self.STATE_IMG  : img_observation_space})
-        else:
-            observation_space = spaces.gym_spaces.Dict({ self.STATE_BASE : vec_obs_space,
-                                                            self.STATE_IMG  : img_observation_space})
+        observation_space = self._state_helper.get_obs_space()
+                
             
         action_space_high = np.array([1]*self._configuration.action_len)
         action_space = spaces.gym_spaces.Box(-action_space_high,action_space_high, seed=seed)
@@ -997,7 +919,14 @@ class LegJumpEnv(ControlledEnv):
 
     def initializeEpisode(self, options = {}) -> None:
 
-        
+        self._current_state = self._state_helper.build_state(initial_values={
+            self.STATE_EXTRINSIC : 0.0,
+            self.STATE_ROBOT : 0.0,
+            self.STATE_ACT : 0.0,
+            self.STATE_INTERNAL : 0.0,
+            self.STATE_IMG : th.zeros(size=self._configuration.img_shape_chw, device=self._configuration.th_device, dtype=th.uint8)
+        })
+
         self._current_state = {self.STATE_BASE   : th.full((self._configuration.history_length, len(self.BASE_STATE_IDXS)), fill_value=-1, dtype=th.float32, device=self._configuration.th_device),
                             self.STATE_ACT    : th.zeros((self._configuration.history_length, self._configuration.action_len), dtype=th.float32, device=self._configuration.th_device),
                             self.STATE_IMG    : th.zeros(self._img_shape_chw, dtype = th.uint8, device = self._configuration.th_device)}
@@ -1347,18 +1276,18 @@ class LegJumpEnv(ControlledEnv):
                 img, time = self._environmentController.getRenderings([self._rendering_cam_name])[self._rendering_cam_name]
                 img = th.tensor(img, dtype = th.uint8, device = self._configuration.th_device)
                 img = th.permute(img,(2,0,1)) # hwc to chw
-                if img.size()[0] == self._img_shape_chw[0]:
+                if img.size()[0] == self._configuration.img_shape_chw[0]:
                     pass
-                elif img.size()[0] == 3 and self._img_shape_chw[0] == 1:
+                elif img.size()[0] == 3 and self._configuration.img_shape_chw[0] == 1:
                     img = torchvision.transforms.functional.rgb_to_grayscale(img)
                 else:
-                    raise RuntimeError(f"Cannot adapt image shape {img.size()} to required {self._img_shape_chw}")
+                    raise RuntimeError(f"Cannot adapt image shape {img.size()} to required {self._configuration.img_shape_chw}")
                 img = torchvision.transforms.functional.resized_crop(img,
                                                                     top=0,
                                                                     left=int(0.29*img.size()[2]),
                                                                     height=img.size()[1],
                                                                     width=int(0.4*img.size()[2]),
-                                                                    size = list(self._img_shape_chw[1:]))
+                                                                    size = list(self._configuration.img_shape_chw[1:]))
                 img = img.permute(1,2,0)
                 img = img.cpu().numpy()
                 # ggLog.info(f"img = {img.shape}")
@@ -1370,7 +1299,7 @@ class LegJumpEnv(ControlledEnv):
 
                 draw_device = "cuda"
                 bstate = unnormalize(bstate,self._configuration.bstate_minmax[:,0],self._configuration.bstate_minmax[:,1]).to(device=draw_device)
-                image_chw = th.zeros(size=self._img_shape_chw, device=draw_device, dtype=th.uint8)
+                image_chw = th.zeros(size=self._configuration.img_shape_chw, device=draw_device, dtype=th.uint8)
                 # ggLog.info(f"image_chw = {image_chw.size()}")
                 body_size = 0.1
                 thigh_width = 0.08

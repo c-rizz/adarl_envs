@@ -521,12 +521,30 @@ class LegJumpEnv(ControlledEnv):
             observable_fields = [   self.STATE_ROBOT,
                                     self.STATE_INTERNAL,
                                     self.STATE_IMG]
+            
+        robot_state_noise =  StateNoiseGenerator(robot_state_helper,
+                                            self._rng, 
+                                            mu_std = {
+                                                self._knee_joint : th.as_tensor([ [mu,  mu,  mu,  mu,  mu,  mu,  mu,  mu],
+                                                                                  [std, std, std, std, std, std, std, std]]),
+                                                self._hip_joint : th.as_tensor([  [mu,  mu,  mu,  mu,  mu,  mu,  mu,  mu],
+                                                                                  [std, std, std, std, std, std, std, std]])})
+        extrinsic_state_noise =  StateNoiseGenerator(extrinsic_state_helper, self._rng, 
+                                            mu_std = {  self.EXTRINSIC_FIELDS.HIP_POS_Z : [mu, std],
+                                                        self.EXTRINSIC_FIELDS.HIP_VEL_Z : [mu, std],
+                                                        self.EXTRINSIC_FIELDS.SUPPORT1_X : [mu, std],
+                                                        self.EXTRINSIC_FIELDS.SUPPORT1_Z : [mu, std],
+                                                        self.EXTRINSIC_FIELDS.SUPPORT2_X : [mu, std],
+                                                        self.EXTRINSIC_FIELDS.SUPPORT2_Z : [mu, std]},)
         self._state_helper = DictStateHelper({self.STATE_ROBOT : robot_state_helper,
                                               self.STATE_EXTRINSIC : extrinsic_state_helper,
                                               self.STATE_INTERNAL : internal_state_helper,
                                               self.STATE_IMG : img_state_helper,
                                               self.STATE_ACT: act_history_state_helper},
-                                              observable_fields=observable_fields)
+                                              observable_fields=observable_fields,
+                                              noise = {
+                                                    self.STATE_ROBOT : robot_state_noise,
+                                                    self.STATE_EXTRINSIC : extrinsic_state_noise})
         state_space = self._state_helper.get_space()
         observation_space = self._state_helper.get_obs_space()
 

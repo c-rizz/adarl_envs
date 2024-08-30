@@ -552,10 +552,7 @@ class LegReachEnv(ControlledEnv):
             else:
                 self._environmentController.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
                                                                                                                           "gazebo/all_gazebo_xbot.launch"),
-                                                           launch_file_args={"gui":"false"})
-                
-                self._red_ball_base = ("red_ball","sphere_link")
-            raise NotImplementedError("environmentController "+envCtrlName+" not supported")
+                                                           launch_file_args={"gui":"true"})
 
     def _destroySimulation(self):
         self._environmentController.destroy_scenario()

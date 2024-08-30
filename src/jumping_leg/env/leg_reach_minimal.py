@@ -7,6 +7,7 @@ from adarl_ros.adapters.RosXbotAdapter import RosXbotAdapter
 from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
 from adarl.adapters.BaseJointImpedanceAdapter import BaseJointImpedanceAdapter
 from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
+from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 import torch as th
 import numpy as np
@@ -16,26 +17,37 @@ import adarl.utils.dbg.ggLog as ggLog
 
 
 class LegReachMinimal(gym.Env):
-    def __init__(self, show_gui : bool= False):
+    def __init__(self, show_gui : bool= False, mode : str ="gazebo-xbot"):
         self.observation_space = gym.spaces.Box(low = -1.0, high = 1.0, shape=(19,))
         self.action_space = gym.spaces.Box(low = -1.0, high = 1.0, shape = (10,))
         self._stepLength_sec = 0.02
         self._show_gui = show_gui
-        self._adapter : BaseJointImpedanceAdapter = RosXbotGazeboAdapter(model_name = "leg",
-                                                                        stepLength_sec = self._stepLength_sec,
-                                                                        forced_ros_master_uri = None,
-                                                                        maxObsDelay = float("+inf"),
-                                                                        blocking_observation = False,
-                                                                        is_floating_base = True,
-                                                                        reference_frame = "base_link",
-                                                                        torch_device = th.device("cpu"),
-                                                                        fallback_cmd_stiffness = 200.0,
-                                                                        fallback_cmd_damping = 100.0,
-                                                                        allow_fallback = True,
-                                                                        jpos_cmd_max_vel = {},
-                                                                        jpos_cmd_max_vel_default = 10.0,
-                                                                        jpos_cmd_max_acc = {},
-                                                                        jpos_cmd_max_acc_default = 10.0)
+
+        if mode == "gazebo-xbot":
+            self._adapter : BaseJointImpedanceAdapter = RosXbotGazeboAdapter(model_name = "leg",
+                                                                            stepLength_sec = self._stepLength_sec,
+                                                                            forced_ros_master_uri = None,
+                                                                            maxObsDelay = float("+inf"),
+                                                                            blocking_observation = False,
+                                                                            is_floating_base = True,
+                                                                            reference_frame = "base_link",
+                                                                            torch_device = th.device("cpu"),
+                                                                            fallback_cmd_stiffness = 200.0,
+                                                                            fallback_cmd_damping = 100.0,
+                                                                            allow_fallback = True,
+                                                                            jpos_cmd_max_vel = {},
+                                                                            jpos_cmd_max_vel_default = 10.0,
+                                                                            jpos_cmd_max_acc = {},
+                                                                            jpos_cmd_max_acc_default = 10.0)
+        elif mode == "pybullet":
+            self._adapter = PyBulletJointImpedanceAdapter(  stepLength_sec=self._stepLength_sec,
+                                                            restore_on_reset=False,
+                                                            debug_gui=show_gui,
+                                                            simulation_step=1/1024,
+                                                            enable_redering=False,
+                                                            global_max_torque_position_control = 100)
+        else:
+            raise NotImplementedError()
         self._knee_joint = ("leg","knee_joint_1")
         self._hip_joint = ("leg","hip_joint_1")
         self._thigh_base_link = ("leg", "thigh_link1")
@@ -145,7 +157,7 @@ class LegReachMinimal(gym.Env):
             leg_pose = build_pose(0,0,0,0,0,0,1)
             self._spawned = True
             if isinstance(self._adapter, PyBulletAdapter):
-                leg_file = pkgutil_get_path("jumping_leg","models/leg_simple.urdf.xacro")
+                leg_file = pkgutil_get_path("jumping_leg","models/leg_rig_simple.urdf.xacro")
                 # import rospkg
                 # leg_file = rospkg.RosPack().get_path("protoleg")+"/description/urdf/protoleg_test_rig.urdf.xacro"
                 self._adapter.spawn_model(  model_file=leg_file,
@@ -215,7 +227,7 @@ class LegReachMinimal(gym.Env):
     
 
 if __name__ == "__main__":
-    env = LegReachMinimal(show_gui = True)
+    env = LegReachMinimal(show_gui = True, mode="pybullet")
 
     def zero(obs):
         return th.zeros(size=(10,)), None

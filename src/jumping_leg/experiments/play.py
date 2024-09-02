@@ -26,11 +26,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "th_device" : th.device("cpu"),
         "control_mode" : "position_and_gains",
         "video_save_freq" : 1,
-        "stepLength_sec" : 1/1024,
+        "stepLength_sec" : 20/1024,
         "platform_randomization" : "no_platforms",
         "quiet" : False,
         "mode" : args["mode"],
-        "use_contacts" : args["mode"].lower().strip() == "pybullet"}
+        "use_contacts" : args["mode"].lower().strip() == "pybullet",
+        "ep_obs_noise_mustd" : 0.01,
+        "step_obs_noise_std" : 0.01,
+        "stop_on_safety" : False}
 
     hyperparams = {"train_freq" : 50,
                    "grad_steps" : 25,
@@ -50,8 +53,8 @@ policy_time = 0
 hdirection = 1
 kdirection = 1
 def oscillate_policy(obs):
-    hz = 1000 # expected call freq
-    hip_pos = obs["vec"][0]
+    hz = 1024/20 # expected call freq
+    hip_pos = 0 #obs["vec"][0]
     knee_pos = obs["vec"][3]
 
     rate = 0.5
@@ -66,7 +69,7 @@ def oscillate_policy(obs):
     href = hip_range*math.sin(t*(2*3.14159)*rate)
     kref = knee_range*math.sin(t*(2*3.14159)*rate)
 
-    # print(f"t = {t} href = {href:.3f}={href*2.4:.3f} kref {kref:.3f}={kref*2.4:.3f}")
+    print(f"t = {t} href = {href:.3f}={href*2.4:.3f} kref {kref:.3f}={kref*2.4:.3f}")
     return th.tensor([href,kref,1,1]), None
 
 def ep_done_cb(episodeReward, steps, episode):

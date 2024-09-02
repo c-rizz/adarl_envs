@@ -9,13 +9,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args = {
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
-        "reward_position_limit_weight" : 0.0,
+        "reward_position_limit_weight" : 0.1,
+        "reward_velocity_limit_weight" : 0.1,
         "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 0.0,
+        "reward_torque_weight" : 0.5,
         "reward_tracking_weight" : 1.0,
         "reward_velocity_weight" : 0.0,
         "th_device" : th.device("cpu"),
-        "control_mode" : "position_and_gains",
+        "control_mode" : "impedance",
         "video_save_freq" : 0,
         "stepLength_sec" : step_length_sec,
         "platform_randomization" : "single",
@@ -35,7 +36,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_dist_smoothing_halflife_sec" : 0.0,
         "enable_rendering" : False,
         "num_envs" : train_envs,
-        "randomize_initial_pose" : True}
+        "randomize_initial_pose" : False}
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["video_save_freq"] = 1
@@ -55,7 +56,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "env_builder_args" : video_eval_env_builder_args
     }
     feasible_env_builder_args = copy.deepcopy(env_builder_args)
-    feasible_env_builder_args["leg_max_jump"] = 0.3
+    feasible_env_builder_args["leg_max_jump"] = 0.2
     feasible_env_builder_args["num_envs"] = 32
     feasible_env_builder_args["randomize_initial_pose"] = False
     feasible_env_builder_args["platform_randomization"] = "single"
@@ -106,7 +107,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 learning_starts=max_steps_per_episode*train_envs*5,
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode),
-                video_recorder_kwargs=build_jumping_leg_env.video_recorder_kwargs)
+                video_recorder_kwargs=build_jumping_leg_env.video_recorder_kwargs,
+                checkpoint_freq=100)
 
 
 

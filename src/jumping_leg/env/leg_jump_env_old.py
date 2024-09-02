@@ -800,8 +800,7 @@ class LegJumpEnv(ControlledEnv):
         slider_pot_energy = slider_mass*g*vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.HIP_POS_Z]
         return thigh_kin_energy+thigh_pot_energy, shin_kin_energy+shin_pot_energy, slider_kin_energy+slider_pot_energy
 
-    @staticmethod
-    def computeReward(previousState : Dict[str,th.Tensor],
+    def computeReward(self, previousState : Dict[str,th.Tensor],
                       state : Dict[str,th.Tensor],
                       action : th.Tensor,
                       env_conf,

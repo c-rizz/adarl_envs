@@ -91,6 +91,7 @@ def env_builder(seed,
                         th_device=th_device,
                         reward_torque_limit_weight = env_builder_args["reward_torque_limit_weight"],
                         reward_position_limit_weight = env_builder_args["reward_position_limit_weight"],
+                        reward_velocity_limit_weight = env_builder_args["reward_velocity_limit_weight"],
                         reward_velocity_weight = env_builder_args["reward_velocity_weight"],
                         reward_energy_weight = env_builder_args["reward_energy_weight"],
                         reward_tracking_weight = env_builder_args["reward_tracking_weight"],
@@ -128,31 +129,31 @@ video_recorder_kwargs : dict[str,typing.Any]  = dict(vec_obs_key="vec",
                             overlay_text_xy=(0.025,0.025),
                             overlay_text_height=0.035,
                             overlay_text_func=lambda vo, a, r, te, tr, info:   f"Step    {info['step_count']: .3f}\n"+
-                                    f"ImpSum  {info['impulses_sum']: .3f}\n"+
-                                    f"ExtWork {info['external_work']:+.3f}\n"+
-                                    f"TotEner {info['new_thigh_energy']+info['new_shin_energy']+info['new_slider_energy']:+.3f}\n"+
-                                    f"ThiWork {info['thigh_work']:+.3f}\n"+
-                                    f"ShiWork {info['shin_work']:+.3f}\n"+
-                                    f"SliWork {info['slider_work']:+.3f}\n"+
-                                    f"TotWork {info['slider_work']+info['shin_work']+info['thigh_work']:+.3f}\n"+
-                                    f"ThiJWor {info['thigh_joint_work']:+.3f}\n"+
-                                    f"ShiJWor {info['shin_joint_work']:+.3f}\n"+
-                                    f"ThiEner {info['new_thigh_energy']:+.3f}\n"+
-                                    f"ShiEner {info['new_shin_energy']:+.3f}\n"+
-                                    f"SliEner {info['new_slider_energy']:+.3f}\n"+
-                                    f"rContac {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT]:.2f}\n"+
-                                    f"rEnergy {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT]:.2f}\n"+
-                                    f"rImpThr {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD]:.2f}\n"+
-                                    f"rPosLim {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT]:.2f}\n"+
-                                    f"rTorLim {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT]:.2f}\n"+
-                                    f"rTorque {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]:.2f}\n"+
-                                    f"rTrack  {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]:.2f}\n"+
-                                    f"rVeloci {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]:.2f}\n"
-                                    f"goal_z   {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.HIP_GOAL_Z]:.2f}\n"
-                                    f"hip_z    {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.HIP_POS_Z]:.2f}\n"
-                                    f"torque   {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_EFFORT]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_EFFORT]:.2f}\n"
-                                    f"position {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_POS]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_POS]:.2f}\n"
-                                    f"velocity {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_VEL]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_VEL]:.2f}\n"
+                                    # f"ImpSum  {info['impulses_sum']: .3f}\n"+
+                                    # f"ExtWork {info['external_work']:+.3f}\n"+
+                                    # f"TotEner {info['new_thigh_energy']+info['new_shin_energy']+info['new_slider_energy']:+.3f}\n"+
+                                    # f"ThiWork {info['thigh_work']:+.3f}\n"+
+                                    # f"ShiWork {info['shin_work']:+.3f}\n"+
+                                    # f"SliWork {info['slider_work']:+.3f}\n"+
+                                    # f"TotWork {info['slider_work']+info['shin_work']+info['thigh_work']:+.3f}\n"+
+                                    # f"ThiJWor {info['thigh_joint_work']:+.3f}\n"+
+                                    # f"ShiJWor {info['shin_joint_work']:+.3f}\n"+
+                                    # f"ThiEner {info['new_thigh_energy']:+.3f}\n"+
+                                    # f"ShiEner {info['new_shin_energy']:+.3f}\n"+
+                                    # f"SliEner {info['new_slider_energy']:+.3f}\n"+
+                                    # f"rContac {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT]:.2f}\n"+
+                                    # f"rEnergy {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT]:.2f}\n"+
+                                    # f"rImpThr {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD]:.2f}\n"+
+                                    # f"rPosLim {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT]:.2f}\n"+
+                                    # f"rTorLim {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT]:.2f}\n"+
+                                    # f"rTorque {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]:.2f}\n"+
+                                    # f"rTrack  {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]:.2f}\n"+
+                                    # f"rVeloci {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]:.2f}\n"
+                                    # f"goal_z   {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_GOAL_Z]:.2f}\n"
+                                    # f"hip_z    {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_POS_Z]:.2f}\n"
+                                    # f"torque   {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_EFFORT]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_EFFORT]:.2f}\n"
+                                    # f"position {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_POS]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_POS]:.2f}\n"
+                                    # f"velocity {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_VEL]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_VEL]:.2f}\n"
                                     f"act     "+str([f"{ae:.3f}" for ae in a] if a is not None else None)
                                     )
 def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):

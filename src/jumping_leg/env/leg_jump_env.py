@@ -24,6 +24,7 @@ import numpy as np
 import os
 import time
 import torch as th
+import copy
 
 _T = TypeVar('_T', float, th.Tensor)
 
@@ -67,6 +68,7 @@ class LegJumpEnv(ControlledEnv):
                                                 "REWARD_POSITION_LIMIT_WEIGHT",
                                                 "REWARD_VELOCITY_LIMIT_WEIGHT",
                                                 "REWARD_VELOCITY_WEIGHT",
+                                                "REWARD_ACCELERATION_WEIGHT",
                                                 "REWARD_ENERGY_WEIGHT",
                                                 "REWARD_TRACKING_WEIGHT",
                                                 "REWARD_TORQUE_WEIGHT",
@@ -180,6 +182,7 @@ class LegJumpEnv(ControlledEnv):
         reward_torque_weight : float
         reward_tracking_weight : float
         reward_velocity_weight : float
+        reward_acceleration_weight : float
         safe_damping : float
         safe_stiffness : float
         show_goal : bool
@@ -264,6 +267,7 @@ class LegJumpEnv(ControlledEnv):
                     reward_position_limit_weight = 1.0,
                     reward_velocity_limit_weight = 1.0,
                     reward_velocity_weight = 0.0,
+                    reward_acceleration_weight = 0.0,
                     reward_energy_weight = 0.01,
                     reward_tracking_weight = 1.0,
                     reward_torque_weight = 0.0,
@@ -327,7 +331,7 @@ class LegJumpEnv(ControlledEnv):
         self._spawned = False
 
         self._rng = th.Generator(device=th_device)
-        self._stats = self.Statistics(dists_to_goal=th.empty((0,)))
+        self._stats = copy.deepcopy(self.Statistics(dists_to_goal=th.empty((0,))))
         self._reward_dbg_info = {   "external_work" : 0,
                                     "thigh_work" : 0,
                                     "shin_work" : 0,
@@ -390,6 +394,7 @@ class LegJumpEnv(ControlledEnv):
                                                             reward_torque_weight = reward_torque_weight,
                                                             reward_tracking_weight = reward_tracking_weight,
                                                             reward_velocity_weight = reward_velocity_weight,
+                                                            reward_acceleration_weight = reward_acceleration_weight,
                                                             safe_damping = 50,
                                                             safe_stiffness = 200,
                                                             stepLength_sec=stepLength_sec,
@@ -478,6 +483,7 @@ class LegJumpEnv(ControlledEnv):
                                                                 self.INTERNAL_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
                                                                 self.INTERNAL_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : [0,10],
                                                                 self.INTERNAL_FIELDS.REWARD_VELOCITY_WEIGHT : [0,10],
+                                                                self.INTERNAL_FIELDS.REWARD_ACCELERATION_WEIGHT : [0,10],
                                                                 self.INTERNAL_FIELDS.REWARD_ENERGY_WEIGHT : [0,10],
                                                                 self.INTERNAL_FIELDS.REWARD_TRACKING_WEIGHT : [0,10],
                                                                 self.INTERNAL_FIELDS.REWARD_TORQUE_WEIGHT : [0,10],
@@ -485,24 +491,24 @@ class LegJumpEnv(ControlledEnv):
                                                                 self.INTERNAL_FIELDS.REWARD_IMPULSE_THRESHOLD : [0,10],
                                                                 self.INTERNAL_FIELDS.KNEE_TORQUE_CMD_SCALE : [0,150],
                                                                 self.INTERNAL_FIELDS.HIP_TORQUE_CMD_SCALE : [0,150],
-                                                                self.INTERNAL_FIELDS.IMPULSES_SUM : [0,100],
-                                                                self.INTERNAL_FIELDS.FORCES_SUM : [0,1000],
-                                                                self.INTERNAL_FIELDS.FORCES_NUM : [0,1000],
-                                                                self.INTERNAL_FIELDS.IMPULSES_SUM_AVG : [0,100],
+                                                                self.INTERNAL_FIELDS.IMPULSES_SUM : [-1,10000],
+                                                                self.INTERNAL_FIELDS.FORCES_SUM : [-1,100000],
+                                                                self.INTERNAL_FIELDS.FORCES_NUM : [-1,100000],
+                                                                self.INTERNAL_FIELDS.IMPULSES_SUM_AVG : [-1,10000],
                                                                 self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1],
                                                                 self.INTERNAL_FIELDS.SMOOTHED_GOAL_DIST : [0,10],
-                                                                self.INTERNAL_FIELDS.STEP_COUNT : [0,1000_000_000]},
+                                                                self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000_000]},
                                                 observable_fields=[self.INTERNAL_FIELDS.HIP_GOAL_Z])
         extrinsic_state_helper =  ThBoxStateHelper(field_names=[e.value for e in self.EXTRINSIC_FIELDS],
                                               obs_dtype=th.float32,
                                               th_device=th_device,
                                               field_size=(1,),
-                                              fields_minmax={   self.EXTRINSIC_FIELDS.HIP_POS_Z : [0,3],
+                                              fields_minmax={   self.EXTRINSIC_FIELDS.HIP_POS_Z : [-0.5,3],
                                                                 self.EXTRINSIC_FIELDS.HIP_VEL_Z : [-100,100],
                                                                 self.EXTRINSIC_FIELDS.SUPPORT1_X : [-2,2],
-                                                                self.EXTRINSIC_FIELDS.SUPPORT1_Z : [0,2],
+                                                                self.EXTRINSIC_FIELDS.SUPPORT1_Z : [-1,3],
                                                                 self.EXTRINSIC_FIELDS.SUPPORT2_X : [-2,2],
-                                                                self.EXTRINSIC_FIELDS.SUPPORT2_Z : [0,2]},
+                                                                self.EXTRINSIC_FIELDS.SUPPORT2_Z : [-1,3]},
                                                history_length=self._configuration.frame_stack_length)
         act_history_state_helper = ThBoxStateHelper(field_names=[self.ACT_FIELDS.ACTION],
                                                obs_dtype=th.float32,
@@ -597,12 +603,11 @@ class LegJumpEnv(ControlledEnv):
     # Action
     # --------------------------------------------------------------------------------------------------------------------
 
-    def _pvesd_to_action(self, cmds_pvesd):
-        
-        hp_lim = self._configuration.position_phys_limits_hip
+    def _minmax_pvesd(self):
+        hp_lim = self._configuration.position_cmd_limits_hip
         hv_lim = self._configuration.velocity_command_scale_hip
         he_lim = self._configuration.torque_command_scale_hip
-        kp_lim = self._configuration.position_phys_limits_knee
+        kp_lim = self._configuration.position_cmd_limits_knee
         kv_lim = self._configuration.velocity_command_scale_knee
         ke_lim = self._configuration.torque_command_scale_knee
         min_stiffness, max_stiffness = self._configuration.stiffness_minmax
@@ -612,19 +617,19 @@ class LegJumpEnv(ControlledEnv):
 
                                           [[hp_lim[1], hv_lim, he_lim, max_stiffness, max_damping],
                                            [kp_lim[1], kv_lim, ke_lim, max_stiffness, max_damping]]], device=self._configuration.th_device)
-        act_pvesd_interleaved = th.tensor([ cmds_pvesd[self._hip_joint][0],
-                                            cmds_pvesd[self._knee_joint][0],
-                                            cmds_pvesd[self._hip_joint][1],
-                                            cmds_pvesd[self._knee_joint][1],
-                                            cmds_pvesd[self._hip_joint][2],
-                                            cmds_pvesd[self._knee_joint][2],
-                                            cmds_pvesd[self._hip_joint][3],
-                                            cmds_pvesd[self._knee_joint][3],
-                                            cmds_pvesd[self._hip_joint][4],
-                                            cmds_pvesd[self._knee_joint][4]], device=self._configuration.th_device)
-        act_pvesd_interleaved = normalize(act_pvesd_interleaved,
-                                                minmax_hipknee_pvesd[[0,0],[0,1]].flatten(),
-                                                minmax_hipknee_pvesd[[1,1],[1,0]].flatten())
+        return minmax_hipknee_pvesd
+
+    def _pvesd_to_action(self, cmds_pvesd):
+
+
+        minmax_hipknee_pvesd = self._minmax_pvesd()
+        hip_pvesd = normalize(th.as_tensor(cmds_pvesd[self._hip_joint]), min=minmax_hipknee_pvesd[0][0], max=minmax_hipknee_pvesd[1][0])
+        knee_pvesd = normalize(th.as_tensor(cmds_pvesd[self._knee_joint]), min=minmax_hipknee_pvesd[0][1], max=minmax_hipknee_pvesd[1][1])
+        act_pvesd_interleaved = th.tensor([ hip_pvesd[0], knee_pvesd[0],
+                                            hip_pvesd[1], knee_pvesd[1],
+                                            hip_pvesd[2], knee_pvesd[2],
+                                            hip_pvesd[3], knee_pvesd[3],
+                                            hip_pvesd[4], knee_pvesd[4]], device=self._configuration.th_device)
         if self._configuration.control_mode == self.CONTROL_MODES.IMPEDANCE:
             act = act_pvesd_interleaved
         elif self._configuration.control_mode == self.CONTROL_MODES.IMPEDANCE_NO_GAINS:
@@ -644,20 +649,9 @@ class LegJumpEnv(ControlledEnv):
         return act
     
     def _action_to_pvesd(self, action) -> dict[tuple[str,str],tuple[float,float,float,float,float]]:
-
-        hp_lim = self._configuration.position_cmd_limits_hip
-        hv_lim = self._configuration.velocity_command_scale_hip
-        he_lim = self._configuration.torque_command_scale_hip
-        kp_lim = self._configuration.position_cmd_limits_knee
-        kv_lim = self._configuration.velocity_command_scale_knee
-        ke_lim = self._configuration.torque_command_scale_knee
         min_stiffness, max_stiffness = self._configuration.stiffness_minmax
         min_damping, max_damping = self._configuration.damping_minmax
-        minmax_hipknee_pvesd = th.tensor([[[hp_lim[0], -hv_lim, -he_lim, min_stiffness, min_damping],
-                                           [kp_lim[0], -kv_lim, -ke_lim, min_stiffness, min_damping]],
-
-                                          [[hp_lim[1], hv_lim, he_lim, max_stiffness, max_damping],
-                                           [kp_lim[1], kv_lim, ke_lim, max_stiffness, max_damping]]], device=self._configuration.th_device)
+        minmax_hipknee_pvesd = self._minmax_pvesd()
         s = normalize(self._configuration.safe_stiffness,min= min_stiffness,max=max_stiffness)
         d = normalize(self._configuration.safe_damping,min= min_damping,max=max_damping)
         hip_pvesd  = th.tensor([0,0,0,s,d], dtype=self._configuration.obs_dtype, device=self._configuration.th_device)
@@ -684,16 +678,8 @@ class LegJumpEnv(ControlledEnv):
             hip_pvesd[2] = action[4]
             knee_pvesd[2] = action[5]
         elif self._configuration.control_mode == self.CONTROL_MODES.IMPEDANCE:
-            hip_pvesd[0]  = action[0]
-            knee_pvesd[0] = action[1]
-            hip_pvesd[1]  = action[2]
-            knee_pvesd[1] = action[3]
-            hip_pvesd[2]  = action[4]
-            knee_pvesd[2] = action[5]
-            hip_pvesd[3]  = action[6]
-            knee_pvesd[3] = action[7]
-            hip_pvesd[4]  = action[8]
-            knee_pvesd[4] = action[9]
+            hip_pvesd = action[[0,2,4,6,8]]
+            knee_pvesd = action[[1,3,5,7,9]]
         elif self._configuration.control_mode == self.CONTROL_MODES.POSITION_AND_GAINS:
             hip_pvesd[0]  = action[0]
             knee_pvesd[0] = action[1]
@@ -711,6 +697,8 @@ class LegJumpEnv(ControlledEnv):
         
         hip_pvesd = unnormalize(hip_pvesd, min=minmax_hipknee_pvesd[0][0], max=minmax_hipknee_pvesd[1][0])
         knee_pvesd = unnormalize(knee_pvesd, min=minmax_hipknee_pvesd[0][1], max=minmax_hipknee_pvesd[1][1])
+        if hip_pvesd[3]<0 or knee_pvesd[3]<0 or hip_pvesd[4]<0 or knee_pvesd[4]<0:
+            ggLog.warn(f"Negative stiffness or damping!! {hip_pvesd}, {knee_pvesd}")
         return {self._hip_joint :  tuple(hip_pvesd.tolist()),
                 self._knee_joint:  tuple(knee_pvesd.tolist())}
 
@@ -807,14 +795,17 @@ class LegJumpEnv(ControlledEnv):
 
         max_rew = 100
 
-        robot_state_norm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT])[0]
+        robot_state_norm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT])
         # normpositions = robot_state_norm[:,0]
-        normvelocities = robot_state_norm[:,1]
-        normtorques = robot_state_norm[:,2]
+        normvelocities = robot_state_norm[0][:,1]
+        normtorques = robot_state_norm[0][:,2]
+        normaccelerations = robot_state_norm[0][:,1] - robot_state_norm[1][:,1]
+
         torque_reward = - th.clamp(th.mean(th.pow(normtorques,4)),-max_rew,max_rew)
-        velocity_reward = - th.clamp(th.mean(th.pow(normvelocities,2)),-max_rew,max_rew)
+        velocity_reward = - th.clamp(th.mean(th.pow(normvelocities,4)),-max_rew,max_rew)
+        acceleration_reward = - th.clamp(th.mean(th.pow(normaccelerations,2)),-max_rew,max_rew)
         
-        robot_state_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits)[0]
+        robot_state_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)[0]
         position_safenorm = robot_state_safenorm[:,0]
         velocities_safenorm = robot_state_safenorm[:,1]
         torque_safenorm = robot_state_safenorm[:,2]
@@ -864,6 +855,7 @@ class LegJumpEnv(ControlledEnv):
         sub_rewards["reward_torque"] = torque_reward
         sub_rewards["reward_torque_limit"] = torque_limit_reward
         sub_rewards["reward_velocity"] = velocity_reward
+        sub_rewards["reward_acceleration"] = acceleration_reward
         sub_rewards["reward_position_limit"] = position_limit_reward
         sub_rewards["reward_velocity_limit"] = velocity_limit_reward
         # sub_rewards["reward_energy"] = global_energy_reward
@@ -875,6 +867,7 @@ class LegJumpEnv(ControlledEnv):
                     "reward_torque" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_TORQUE_WEIGHT],
                     "reward_torque_limit" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT],
                     "reward_velocity" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_VELOCITY_WEIGHT],
+                    "reward_acceleration" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_ACCELERATION_WEIGHT],
                     "reward_position_limit" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_POSITION_LIMIT_WEIGHT],
                     "reward_velocity_limit" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT],
                     "reward_energy" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_ENERGY_WEIGHT],
@@ -1018,15 +1011,17 @@ class LegJumpEnv(ControlledEnv):
         self._set_current_ep_config(reset_options = options)
 
         initial_dist = th.abs(self._current_episode_config.hip_goal_z-self._current_episode_config.initial_joint_pose_rhk[0]).cpu().item()
-        self._stats = self.Statistics(dists_to_goal=th.full(size=(int(self._maxStepsPerEpisode/10),),
+        self._stats = copy.deepcopy(self.Statistics(dists_to_goal=th.full(size=(int(self._maxStepsPerEpisode/10),),
                                                     fill_value=initial_dist,
-                                                    dtype=th.float32, device=self._configuration.th_device))
+                                                    dtype=th.float32, device=self._configuration.th_device)))
         
         if isinstance(self._environmentController, BaseSimulationAdapter):
             self._simulation_initialization()
         else:
             self._realworld_initialization()
-        self._last_out_action = self._pvesd_to_action(self._last_sent_pvesd)        
+        self._last_out_action = th.clamp(self._pvesd_to_action(self._last_sent_pvesd), min=-1, max=1)
+        ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
+
         self._update_state()
         self._update_dbg_info()
 
@@ -1491,6 +1486,7 @@ class LegJumpEnv(ControlledEnv):
                         self.INTERNAL_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : self._configuration.reward_position_limit_weight,
                         self.INTERNAL_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : self._configuration.reward_velocity_limit_weight,
                         self.INTERNAL_FIELDS.REWARD_VELOCITY_WEIGHT : self._configuration.reward_velocity_weight,
+                        self.INTERNAL_FIELDS.REWARD_ACCELERATION_WEIGHT : self._configuration.reward_acceleration_weight,
                         self.INTERNAL_FIELDS.REWARD_ENERGY_WEIGHT : self._configuration.reward_energy_weight,
                         self.INTERNAL_FIELDS.REWARD_TRACKING_WEIGHT : self._configuration.reward_tracking_weight,
                         self.INTERNAL_FIELDS.REWARD_TORQUE_WEIGHT : self._configuration.reward_torque_weight,
@@ -1513,6 +1509,8 @@ class LegJumpEnv(ControlledEnv):
                                                             jstates[self._knee_joint].rate[[0]],
                                                             jstates[self._knee_joint].effort[[0]],
                                                             th.as_tensor(self._last_sent_pvesd[self._knee_joint])])}
+        if th.any(th.concat([new_robot_state[self._hip_joint][6:],new_robot_state[self._knee_joint][6:]])<0):
+            ggLog.warn(f"negative gains in new_robot_state = {new_robot_state}")
         new_extrinsic_state = { self.EXTRINSIC_FIELDS.HIP_POS_Z : hip_height,
                                 self.EXTRINSIC_FIELDS.HIP_VEL_Z : hip_vel_z,
                                 self.EXTRINSIC_FIELDS.SUPPORT1_X : self._current_episode_config.support1_pos_x,
@@ -1536,9 +1534,8 @@ class LegJumpEnv(ControlledEnv):
               
         
         
-        if step_count == 0:
-            for _ in range(self._configuration.history_length):
-                self._current_state = self._state_helper.reset_state(instantaneous_state)
+        if step_count <= 0:
+            self._current_state = self._state_helper.reset_state(instantaneous_state)
         else:
             self._state_helper.update(instantaneous_state, state=self._current_state)
         
@@ -1624,8 +1621,11 @@ class LegJumpEnv(ControlledEnv):
 
         i["state"] = self._state_helper.flatten(state, include_only=[self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT])
         state_names = self._state_helper.flatten_names(include_only=[self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT])
-        i["state_labels"] = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in state_names], dtype=th.uint8) # ugly, but simple
-        
+        state_names = ["knee" if n==self._knee_joint else n for n in state_names]
+        state_names = ["hip" if n==self._hip_joint else n for n in state_names]
+        i["state_labels"] = th.as_tensor([list(n.encode("utf-8").ljust(64)[:64]) for n in state_names], dtype=th.uint8) # ugly, but simple
+        i["statenorm"] = self._state_helper.flatten(self._state_helper.normalize(state), include_only=[self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT])
+        i["statenorm_labels"] = i["state_labels"]
         # statenames = [e.name for e in self.BASE_STATE_IDXS]
         # stateindxs = [e.value for e in self.BASE_STATE_IDXS]
         # i["action"] = self._last_out_action

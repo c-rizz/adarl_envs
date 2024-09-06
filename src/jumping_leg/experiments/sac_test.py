@@ -2,7 +2,7 @@
 
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
-    step_length_sec = 20/1024  # about 50Hz
+    step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     ep_duration_sec = 5
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     train_envs = 32
@@ -13,6 +13,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_limit_weight" : 0.5,
         "reward_torque_limit_weight" : 0.0,
         "reward_torque_weight" : 0.5,
+        "reward_torquediff_weight" : 0.5,
         "reward_tracking_weight" : 1.0,
         "reward_velocity_weight" : 0.1,
         "reward_acceleration_weight" : 0.5,
@@ -25,7 +26,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : "pybullet",
         "use_contacts" : False,
         "ep_obs_noise_mustd" : (0.0, 0.001),
-        "step_obs_noise_std" : 0.001,
+        "step_obs_noise_std" : 0.01,
         "stop_on_safety" : False,
         "action_delay_mustd" : (0.01,0.01),
         "max_steps_per_episode" : max_steps_per_episode,

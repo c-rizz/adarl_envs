@@ -608,23 +608,27 @@ class LegJumpEnv(ControlledEnv):
         else:
             raise RuntimeError(f"Invalid control mode {self._configuration.control_mode}")
         self._base_pvesd = th.as_tensor(base_pvesd).repeat(jnums,1)
-        self._act_to_pvesd_idx = th.as_tensor([[[j,i] for i in act_to_pvesd] for j in range(jnums)],
+        self._act_to_pvesd_idx = th.as_tensor(act_to_pvesd,
                                               dtype=th.int32,
                                               device=self._configuration.th_device)
+        # self._act_to_pvesd_idx = th.as_tensor([[[j,i] for i in act_to_pvesd] for j in range(jnums)],
+        #                                       dtype=th.int32,
+        #                                       device=self._configuration.th_device)
         
 
     def _pvesd_to_action(self, cmds_pvesd : dict[tuple[str,str], tuple[float,float,float,float,float]]):
         minmax_hipknee_pvesd = self._minmax_pvesd()
         cmd_joint_pvesd = th.as_tensor([cmds_pvesd[self._hip_joint], cmds_pvesd[self._knee_joint]])
         cmd_joint_pvesd = normalize(th.as_tensor(cmds_pvesd[self._hip_joint]), min=minmax_hipknee_pvesd[0], max=minmax_hipknee_pvesd[1])
-        action = cmd_joint_pvesd[self._act_to_pvesd_idx]
+        action = cmd_joint_pvesd[:,self._act_to_pvesd_idx].flatten()
         return action
 
     def _action_to_pvesd(self, action: th.Tensor) -> dict[tuple[str,str],tuple[float,float,float,float,float]]:
         minmax_hipknee_pvesd = self._minmax_pvesd()
 
+        jnums = 2
         cmd_joint_pvesd = self._base_pvesd.detach().clone()
-        cmd_joint_pvesd[self._act_to_pvesd_idx] = action
+        cmd_joint_pvesd[:,self._act_to_pvesd_idx] = action.view((jnums, -1))
         cmd_joint_pvesd = unnormalize(cmd_joint_pvesd, min=minmax_hipknee_pvesd[0], max=minmax_hipknee_pvesd[1])
         if th.any(cmd_joint_pvesd[:,[3,4]] <0 ):
             ggLog.warn(f"Negative stiffness or damping!! {cmd_joint_pvesd}")

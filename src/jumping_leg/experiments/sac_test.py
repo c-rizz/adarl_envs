@@ -23,7 +23,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : "pybullet",
         "use_contacts" : False,
         "ep_obs_noise_mustd" : (0.0, 0.001),
-        "step_obs_noise_std" : 0.001,
+        "step_obs_noise_std" : 0.01,
         "stop_on_safety" : False,
         "action_delay_mustd" : (0.01,0.01),
         "max_steps_per_episode" : max_steps_per_episode,

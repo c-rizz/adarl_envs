@@ -112,7 +112,7 @@ class LegJumpEnv(ControlledEnv):
                                                 "IMPEDANCE",
                                                 "IMPEDANCE_NO_GAINS",
                                                 "POSITION_AND_TORQUES",
-                                                "POSITION_AND_GAINS"], start=0)
+                                                "POSITION_AND_STIFFNESS"], start=0)
 
 
     @dataclass
@@ -267,7 +267,7 @@ class LegJumpEnv(ControlledEnv):
         elif control_mode == "position_and_torque":
             self._control_mode = self.CONTROL_MODES.POSITION_AND_TORQUES
         elif control_mode == "position_and_gains":
-            self._control_mode = self.CONTROL_MODES.POSITION_AND_GAINS
+            self._control_mode = self.CONTROL_MODES.POSITION_AND_STIFFNESS
         self._platform_randomization = platform_randomization
 
 
@@ -369,7 +369,7 @@ class LegJumpEnv(ControlledEnv):
             action_len = 6
         elif self._control_mode == self.CONTROL_MODES.POSITION_AND_TORQUES:
             action_len = 4
-        elif self._control_mode == self.CONTROL_MODES.POSITION_AND_GAINS:
+        elif self._control_mode == self.CONTROL_MODES.POSITION_AND_STIFFNESS:
             action_len = 4
         elif self._control_mode == self.CONTROL_MODES.TORQUE:
             action_len = 2
@@ -629,7 +629,7 @@ class LegJumpEnv(ControlledEnv):
             act = act_pvesd_interleaved[[0,1,2,3,4,5]]
         elif self._control_mode == self.CONTROL_MODES.POSITION_AND_TORQUES:
             act = act_pvesd_interleaved[[0,1,4,5]]
-        elif self._control_mode == self.CONTROL_MODES.POSITION_AND_GAINS:
+        elif self._control_mode == self.CONTROL_MODES.POSITION_AND_STIFFNESS:
             act = act_pvesd_interleaved[[0,1,6,7]]
         elif self._control_mode == self.CONTROL_MODES.TORQUE:
             act = act_pvesd_interleaved[[4,5]]
@@ -694,7 +694,7 @@ class LegJumpEnv(ControlledEnv):
             knee_pvesd[3] = action[7]
             hip_pvesd[4]  = action[8]
             knee_pvesd[4] = action[9]
-        elif self._control_mode == self.CONTROL_MODES.POSITION_AND_GAINS:
+        elif self._control_mode == self.CONTROL_MODES.POSITION_AND_STIFFNESS:
             hip_pvesd[0]  = action[0]
             knee_pvesd[0] = action[1]
             hip_pvesd[3]  = action[2]
@@ -800,8 +800,7 @@ class LegJumpEnv(ControlledEnv):
         slider_pot_energy = slider_mass*g*vstate_unnorm[LegJumpEnv.BASE_STATE_IDXS.HIP_POS_Z]
         return thigh_kin_energy+thigh_pot_energy, shin_kin_energy+shin_pot_energy, slider_kin_energy+slider_pot_energy
 
-    @staticmethod
-    def computeReward(previousState : Dict[str,th.Tensor],
+    def computeReward(self, previousState : Dict[str,th.Tensor],
                       state : Dict[str,th.Tensor],
                       action : th.Tensor,
                       env_conf,

@@ -366,8 +366,7 @@ class LegReachEnv(ControlledEnv):
     # --------------------------------------------------------------------------------------------------------------------
 
 
-    @staticmethod
-    def computeReward(previousState : Dict[str,th.Tensor],
+    def computeReward(self, previousState : Dict[str,th.Tensor],
                       state : Dict[str,th.Tensor],
                       action : th.Tensor,
                       env_conf,

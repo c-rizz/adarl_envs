@@ -2,20 +2,23 @@
 
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
-    step_length_sec = 20/1024  # about 50Hz
+    step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     ep_duration_sec = 5
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     train_envs = 32
     env_builder_args = {
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
-        "reward_position_limit_weight" : 0.0,
+        "reward_position_limit_weight" : 0.1,
+        "reward_velocity_limit_weight" : 0.5,
         "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 0.0,
+        "reward_torque_weight" : 0.5,
+        "reward_torquediff_weight" : 0.5,
         "reward_tracking_weight" : 1.0,
-        "reward_velocity_weight" : 0.0,
+        "reward_velocity_weight" : 0.1,
+        "reward_acceleration_weight" : 0.5,
         "th_device" : th.device("cpu"),
-        "control_mode" : "position_and_gains",
+        "control_mode" : "impedance",
         "video_save_freq" : 0,
         "stepLength_sec" : step_length_sec,
         "platform_randomization" : "single",
@@ -35,7 +38,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_dist_smoothing_halflife_sec" : 0.0,
         "enable_rendering" : False,
         "num_envs" : train_envs,
-        "randomize_initial_pose" : True}
+        "randomize_initial_pose" : False}
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["video_save_freq"] = 1
@@ -55,8 +58,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "env_builder_args" : video_eval_env_builder_args
     }
     feasible_env_builder_args = copy.deepcopy(env_builder_args)
-    feasible_env_builder_args["leg_max_jump"] = 0.3
+    feasible_env_builder_args["leg_max_jump"] = 0.2
     feasible_env_builder_args["num_envs"] = 32
+    feasible_env_builder_args["ep_obs_noise_mustd"] = (0.0, 0.0)
+    feasible_env_builder_args["step_obs_noise_std"] = 0.0
     feasible_env_builder_args["randomize_initial_pose"] = False
     feasible_env_builder_args["platform_randomization"] = "single"
     # feasible_env_builder_args["enable_rendering"] = True
@@ -100,13 +105,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 target_tau = 0.005,
                                                 batch_size=16384,
                                                 buffer_size=1_000_000,
-                                                total_steps=10_000_000,
+                                                total_steps=100_000_000,
                                                 train_freq=25,
                                                 grad_steps=50,
                                                 learning_starts=max_steps_per_episode*train_envs*5,
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode),
-                video_recorder_kwargs=build_jumping_leg_env.video_recorder_kwargs)
+                video_recorder_kwargs=build_jumping_leg_env.video_recorder_kwargs,
+                checkpoint_freq=100)
 
 
 

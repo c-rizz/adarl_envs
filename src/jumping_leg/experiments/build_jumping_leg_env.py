@@ -158,6 +158,7 @@ video_recorder_kwargs : dict[str,typing.Any]  = dict(vec_obs_key="vec",
                                     # f"velocity {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_VEL]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_VEL]:.2f}\n"
                                     f"act     "+str([f"{ae:.3f}" for ae in a] if a is not None else None)
                                     )
+
 def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
     return RecorderGymWrapper(  env=env,
                                 fps = 1/stepLength_sec,

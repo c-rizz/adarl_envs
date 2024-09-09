@@ -2,6 +2,12 @@
 
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
+
+    import copy
+    import torch as th
+    import jumping_leg.experiments.build_jumping_leg_env as build_jumping_leg_env
+    from rreal.examples.solve_sac import sac_train, SAC_hyperparams
+    
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     ep_duration_sec = 5
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
@@ -59,7 +65,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     }
     feasible_env_builder_args = copy.deepcopy(env_builder_args)
     feasible_env_builder_args["leg_max_jump"] = 0.2
-    feasible_env_builder_args["num_envs"] = 32
+    feasible_env_builder_args["num_envs"] = 16
     feasible_env_builder_args["randomize_initial_pose"] = False
     feasible_env_builder_args["platform_randomization"] = "single"
     # feasible_env_builder_args["enable_rendering"] = True
@@ -116,14 +122,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
 if __name__ == "__main__":
 
-    import os
     import argparse
     import multiprocessing
     from adarl.utils.session import launchRun
-    import torch as th
-    import jumping_leg.experiments.build_jumping_leg_env as build_jumping_leg_env
-    from rreal.examples.solve_sac import sac_train, SAC_hyperparams
-    import copy
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--seedsNum", default=1, type=int, help="Number of seeds to test with")

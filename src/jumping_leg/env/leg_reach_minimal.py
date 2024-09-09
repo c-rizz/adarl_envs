@@ -95,6 +95,7 @@ class LegReachMinimal(gym.Env):
 
     def _get_obs_rew(self):
         jstates = self._adapter.getJointsState(requestedJoints=[self._knee_joint, self._hip_joint])
+        # ggLog.info(f"jstates = {jstates}")
         lstates : dict[tuple[str,str],LinkState] = self._adapter.getLinksState(requestedLinks = [self._thigh_com_link,
                                                                                                     self._shin_com_link,
                                                                                                     self._thigh_base_link])
@@ -183,7 +184,7 @@ class LegReachMinimal(gym.Env):
     def _simulation_initialization(self):
         if isinstance(self._adapter, BaseSimulationAdapter):
             ggLog.info(f"Moving to initial pose...")
-            rpos, hpos, kpos = 0.8, 3.4159/4,  3.14159/2
+            rpos, hpos, kpos = 0.8, 3.14159/4,  3.14159/2
             self._adapter.setJointsStateDirect({self._rail_joint: JointState(position = rpos, rate=0, effort=0),
                                                 self._hip_joint:  JointState(position = hpos, rate=0, effort=0),
                                                 self._knee_joint: JointState(position = kpos, rate=0, effort=0)})
@@ -227,7 +228,14 @@ class LegReachMinimal(gym.Env):
     
 
 if __name__ == "__main__":
-    env = LegReachMinimal(show_gui = True, mode="pybullet")
+
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.set_defaults(feature=True)
+    ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use ('pybullet','gazebo-xbot')")
+    args = vars(ap.parse_args())
+
+    env = LegReachMinimal(show_gui = True, mode=args["mode"])
 
     def zero(obs):
         return th.zeros(size=(10,)), None
@@ -241,17 +249,19 @@ if __name__ == "__main__":
         knee_range_rad = 2.2
         global policy_time
         hip_pos_rad = obs[0]*2.4
-        # print(f"hip pos = {hip_pos}")
-        if policy_time == 0:
-            policy_time = (math.asin(hip_pos_rad/hip_range_rad)+2*3.14159)/(rate*2*3.14159)
-        t = policy_time
+        start_hip_pos = 3.14159/4
+        #time offset to make the starting pose correspond with time 0
+        time_offset = (math.asin(start_hip_pos/hip_range_rad)+2*3.14159)/(rate*2*3.14159)
+        
+        t = policy_time + time_offset
         policy_time+=1/hz
 
         href_rad = hip_range_rad*math.sin(t*(2*3.14159)*rate)
         kref_rad = knee_range_rad*math.sin(t*(2*3.14159)*rate)
 
         print(f"t = {t} href = {href_rad:.3f}={href_rad/2.4:.3f} kref {kref_rad:.3f}={kref_rad/2.4:.3f}")
-        return th.tensor([kref_rad/2.4,0,0,0.5,0.5,href_rad/2.4,0,0,0.5,0.5]), None
+        return th.tensor([kref_rad/2.4, 0, 0, 0.0, -0.5,
+                          href_rad/2.4, 0, 0, 0.0, -0.5]), None
     def ep_done_cb(episodeReward, steps, episode):
         global policy_time
         policy_time = 0 # reset time

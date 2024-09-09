@@ -60,6 +60,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     feasible_env_builder_args = copy.deepcopy(env_builder_args)
     feasible_env_builder_args["leg_max_jump"] = 0.2
     feasible_env_builder_args["num_envs"] = 32
+    feasible_env_builder_args["ep_obs_noise_mustd"] = (0.0, 0.0)
+    feasible_env_builder_args["step_obs_noise_std"] = 0.0
     feasible_env_builder_args["randomize_initial_pose"] = False
     feasible_env_builder_args["platform_randomization"] = "single"
     # feasible_env_builder_args["enable_rendering"] = True

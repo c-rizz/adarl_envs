@@ -540,7 +540,6 @@ class LegJumpEnv(ControlledEnv):
         if not isinstance(self._environmentController , BaseJointImpedanceAdapter):
             raise RuntimeError()
         self.seed(seed)
-        self._environmentController.set_monitored_joints([self._knee_joint,self._hip_joint, self._rail_joint])
         self._environmentController.set_monitored_links([self._foot_link, self._shin_com_link, self._thigh_com_link, self._shin_base_link, self._thigh_base_link])
         self._environmentController.set_monitored_cameras([self._rendering_cam_name])
         if self._configuration.use_contacts:
@@ -942,6 +941,8 @@ class LegJumpEnv(ControlledEnv):
             self._robot_model.remove_collision_pairs([("support1_collision","support2_collision")])
             self._robot_model.remove_collision_pairs([("support2_collision","ground_collision")])
             self._robot_model.remove_collision_pairs([("rail_link_0","ground_collision")])
+            self._environmentController.set_monitored_joints([self._knee_joint,self._hip_joint, self._rail_joint])
+
         
 
         self._set_current_ep_config(reset_options = options)

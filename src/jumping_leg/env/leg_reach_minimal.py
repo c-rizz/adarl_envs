@@ -101,6 +101,7 @@ class LegReachMinimal(gym.Env):
         hip_height = lstates[self._thigh_base_link].pose.position[2]
         hip_vel_z = lstates[self._thigh_base_link].pos_velocity_xyz[2]
         print(f"Position: knee = {jstates[0,0]:.3f} hip = {jstates[1,0]:.3f}")
+        print(f"Effort:   knee = {jstates[0,2]:.3f} hip = {jstates[1,2]:.3f}")
         obs = np.concatenate([jstates.detach().flatten().cpu().numpy(),
                               np.array([hip_height,
                                         hip_vel_z,
@@ -165,6 +166,11 @@ class LegReachMinimal(gym.Env):
             # ggLog.info(f"Stepping")
             dt = self._adapter.step()
             # ggLog.info(f"Stepped of {dt}s")
+
+            th.set_printoptions(sci_mode=False)
+            ggLog.info(f"Joint stats:\n{self._adapter.get_joints_state_step_stats()}")
+            th.set_printoptions()
+
 
             obs, reward = self._get_obs_rew()
             truncated = self._step_count > 500

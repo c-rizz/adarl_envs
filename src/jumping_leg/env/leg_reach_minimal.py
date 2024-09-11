@@ -138,22 +138,30 @@ class LegReachMinimal(gym.Env):
         reward = 1-hip_height-self._hip_goal_z
         return obs, reward
 
-    def _action_to_jimp(self, action) -> Mapping[tuple[str,str], tuple[int,int,int,int,int]]:
+    def _action_to_jimp(self, action) -> Mapping[tuple[str,str], tuple[float,float,float,float,float]]:
         action = (action+1)/2*(self._action_max_pvesd-self._action_min_pvesd)+self._action_min_pvesd
         return {self._knee_joint : action[0:5],
                 self._hip_joint  : action[5:10]}
     
-    def _jimp_to_action(self, jimp : Mapping[tuple[str,str], tuple[int,int,int,int,int]]) -> np.ndarray:
+    def _jimp_to_action(self, jimp : Mapping[tuple[str,str], tuple[float,float,float,float,float]]) -> np.ndarray:
         action = np.concatenate([jimp[self._knee_joint], jimp[self._hip_joint]])
         action = (action - self._action_min_pvesd)/(self._action_max_pvesd-self._action_min_pvesd)*2-1
         return action
 
-    def step(self, action: Any) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
+    def step(self, action: th.Tensor) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
             # ggLog.info(f"Step {self._step_count}")
             self._last_sent_pvesd = self._action_to_jimp(action)
             # ggLog.info(f"Setting jimp cmd {self._last_sent_pvesd}")
-            self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_pvesd,
-                                                    delay_sec = 0.0)
+            use_th_interface = True
+            if use_th_interface:
+                action_unnorm = (action+1)/2*(self._action_max_pvesd-self._action_min_pvesd)+self._action_min_pvesd
+                self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = action_unnorm.reshape(2,5),
+                                                        delay_sec = 0.0)
+            else:
+                self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_pvesd,
+                                                        delay_sec = 0.0)
+            
+            
             # ggLog.info(f"Stepping")
             dt = self._adapter.step()
             # ggLog.info(f"Stepped of {dt}s")
@@ -186,6 +194,7 @@ class LegReachMinimal(gym.Env):
             #                             model_format="sdf.xacro")
             
         self._adapter.set_monitored_joints([self._knee_joint,self._hip_joint])
+        self._adapter.set_impedance_controlled_joints([self._knee_joint,self._hip_joint])
 
         if isinstance(self._adapter, BaseSimulationAdapter):
             self._simulation_initialization()
@@ -207,8 +216,8 @@ class LegReachMinimal(gym.Env):
             ggLog.info(f"Moved to initial pose.")
             # start_action = np.zeros(shape=(10,),dtype = np.float32)
             # start_jimp = self._action_to_jimp(start_action)         
-            start_jimp = {self._knee_joint : (kpos,0.,0.,200.,50.),
-                          self._hip_joint  : (hpos,0.,0.,200.,50.)}
+            start_jimp : dict[tuple[str,str], tuple[float,float,float,float,float]] = { self._knee_joint : (kpos,0.,0.,200.,50.),
+                                                                                        self._hip_joint  : (hpos,0.,0.,200.,50.)}
             start_action = self._jimp_to_action(start_jimp)
             ggLog.info(f"Setting initial jimp command")
             self._adapter.setJointsImpedanceCommand(start_jimp)

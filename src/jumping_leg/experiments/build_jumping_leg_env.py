@@ -151,11 +151,12 @@ video_recorder_kwargs : dict[str,typing.Any]  = dict(vec_obs_key="vec",
                                     # f"rTorque {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]:.2f}\n"+
                                     # f"rTrack  {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]:.2f}\n"+
                                     # f"rVeloci {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]:.2f}\n"
-                                    # f"goal_z   {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_GOAL_Z]:.2f}\n"
-                                    # f"hip_z    {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_POS_Z]:.2f}\n"
-                                    # f"torque   {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_EFFORT]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_EFFORT]:.2f}\n"
-                                    # f"position {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_POS]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_POS]:.2f}\n"
-                                    # f"velocity {info['state'][LegJumpEnv.BASE_STATE_IDXS.HIP_JOINT_VEL]:.2f}, {info['cbstate'][LegJumpEnv.BASE_STATE_IDXS.KNEE_JOINT_VEL]:.2f}\n"
+                                    f"goal_z   {info['state_internal'][LegJumpEnv.INTERNAL_FIELDS.HIP_GOAL_Z]:.2f}\n"
+                                    f"safety   {info['state_internal'][LegJumpEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]:.2f}\n"
+                                    f"hip_z    {info['state_extrinsic'][LegJumpEnv.EXTRINSIC_FIELDS.HIP_POS_Z]:.2f}\n"
+                                    f"position {info['state_robot'][0]:.2f}, {info['state_robot'][8]:.2f}\n"
+                                    f"velocity {info['state_robot'][1]:.2f}, {info['state_robot'][8+1]:.2f}\n"
+                                    f"torque   {info['state_robot'][2]:.2f}, {info['state_robot'][8+2]:.2f}\n"
                                     f"act     "+str([f"{ae:.3f}" for ae in a] if a is not None else None)
                                     )
 

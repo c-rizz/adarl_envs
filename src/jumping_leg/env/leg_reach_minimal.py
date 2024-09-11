@@ -87,8 +87,6 @@ class LegReachMinimal(gym.Env):
         self._real = False # some day
         self._spawned = False
         self._build_scenario()
-        self._adapter.set_monitored_joints([self._knee_joint,self._hip_joint,self._rail_joint])
-        self._adapter.set_monitored_links([self._shin_com_link,self._shin_base_link,self._thigh_com_link,self._thigh_base_link])
         # self._adapter.set_monitored_cameras([self._camera_name])
         self._adapter.startup()
         super().__init__()
@@ -171,6 +169,8 @@ class LegReachMinimal(gym.Env):
             #                             model_kwargs={"camera_width":"256","camera_height":"144","frame_rate":1/self._stepLength_sec},
             #                             model_format="sdf.xacro")
             
+        self._adapter.set_monitored_joints([self._knee_joint,self._hip_joint,self._rail_joint])
+        self._adapter.set_monitored_links([self._shin_com_link,self._shin_base_link,self._thigh_com_link,self._thigh_base_link])
         if isinstance(self._adapter, BaseSimulationAdapter):
             self._simulation_initialization()
         else:

@@ -9,7 +9,7 @@ from adarl.envs.ControlledEnv import ControlledEnv
 from adarl.utils.robot_helpers import Robot
 from adarl.utils.state_helper import StateNoiseGenerator, ThBoxStateHelper, DictStateHelper, RobotStateHelper
 from adarl.utils.tensor_trees import TensorDict, map_tensor_tree
-from adarl.utils.utils import build_pose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle, MoveFailError, exc_to_str
+from adarl.utils.utils import build_pose, JointState, LinkState, quat_swing_twist_decomposition, quat_angle, MoveFailError, exc_to_str, to_string_tensor
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -192,7 +192,6 @@ class LegJumpEnv(ControlledEnv):
         stiffness_minmax : tuple[float,float]
         stop_on_safety : bool
         th_device : th.device
-        th_device : th.device
         torque_command_scale_hip : float
         torque_command_scale_knee : float
         use_contacts : bool
@@ -336,7 +335,7 @@ class LegJumpEnv(ControlledEnv):
         self._leg_file = adarl.utils.utils.pkgutil_get_path("jumping_leg","models/leg_rig_simple.urdf.xacro")
         self._robot_model = Robot(adarl.utils.utils.compile_xacro_string(  model_definition_string=Path(self._leg_file).read_text()))
         phys_limits_minmax_pve = {("leg",k):l for k,l in self._robot_model.get_joint_limits([self._hip_joint[1],self._knee_joint[1]]).items()}
-        safe_limits_minmax_pve = {k:(lims_minmax-(lims_minmax[1]-lims_minmax[0]))*safety_limits_factor+(lims_minmax[1]-lims_minmax[0])
+        safe_limits_minmax_pve = {k:(lims_minmax-0.5*(lims_minmax[1]+lims_minmax[0]))*safety_limits_factor+0.5*(lims_minmax[1]+lims_minmax[0])
                                    for k,lims_minmax in phys_limits_minmax_pve.items()}
         # alpha = r^(1/t) where r is the residual value and t is the elapsed time. 
         # So if we want a transition from 1 to 0 to be at 0.05 after 0.1 seconds
@@ -1491,14 +1490,12 @@ class LegJumpEnv(ControlledEnv):
         # i["shin_pos_z"] = bstate_unnorm[[self.BASE_STATE_IDXS.SHIN_POS_Z]]
         
 
-
-        i["state"] = self._state_helper.flatten(state, include_only=[self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT])
-        state_names = self._state_helper.flat_state_names(include_only=[self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT])
-        state_names = ["knee" if n==self._knee_joint else n for n in state_names]
-        state_names = ["hip" if n==self._hip_joint else n for n in state_names]
-        i["state_labels"] = th.as_tensor([list(n.encode("utf-8").ljust(64)[:64]) for n in state_names], dtype=th.uint8) # ugly, but simple
-        i["statenorm"] = self._state_helper.flatten(self._state_helper.normalize(state), include_only=[self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT])
-        i["statenorm_labels"] = i["state_labels"]
+        statenorm = self._state_helper.normalize(state)
+        for substate in [self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT]:
+            i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
+            i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+            i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
+            i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
         # statenames = [e.name for e in self.BASE_STATE_IDXS]
         # stateindxs = [e.value for e in self.BASE_STATE_IDXS]
         # i["action"] = self._last_out_action

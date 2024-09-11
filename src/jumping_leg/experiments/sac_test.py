@@ -11,7 +11,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     ep_duration_sec = 5
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 32
+    train_envs = 1
     env_builder_args = {
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
@@ -32,7 +32,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : "pybullet",
         "use_contacts" : False,
         "ep_obs_noise_mustd" : (0.0, 0.001),
-        "step_obs_noise_std" : 0.01,
+        "step_obs_noise_std" : 0.001,
         "stop_on_safety" : False,
         "action_delay_mustd" : (0.01,0.01),
         "max_steps_per_episode" : max_steps_per_episode,
@@ -85,12 +85,24 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_feasible_env_builder_args["num_envs"] = 1
     video_feasible_env_builder_args["randomize_initial_pose"] = False
     eval_conf_video_feasible = {
-        "name" : "video_feasible",
+        "name" : "video_jump_feasible",
         "deterministic" : True,
         "eval_freq_ep" : 10*train_envs,
         "eval_eps" : 1,
         "env_builder_args" : video_feasible_env_builder_args
     }
+    video_feasible_jump_env_builder_args = copy.deepcopy(video_feasible_env_builder_args)
+    # max_goal is leg_max_height+leg_max_jump
+    # min_goal is leg_min_height
+    video_feasible_jump_env_builder_args["leg_min_height"] = 0.7 # just a bit more than leg_max_height, so he is forced to jump
+    eval_conf_video_jump_feasible = {
+        "name" : "video_feasible",
+        "deterministic" : True,
+        "eval_freq_ep" : 10*train_envs,
+        "eval_eps" : 1,
+        "env_builder_args" : video_feasible_jump_env_builder_args
+    }
+    
 
     sac_train(  seed,
                 folderName,
@@ -101,7 +113,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 eval_env_builder_args = [eval_conf_video_det,
                                          eval_conf_video_stoch,
                                          eval_conf_feasible,
-                                         eval_conf_video_feasible],
+                                         eval_conf_video_feasible,
+                                         eval_conf_video_jump_feasible],
                 hyperparams = SAC_hyperparams(  device = "cuda",
                                                 q_network_arch=[256,128],
                                                 q_lr=0.001,
@@ -118,7 +131,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode),
                 video_recorder_kwargs=build_jumping_leg_env.video_recorder_kwargs,
-                checkpoint_freq=100)
+                checkpoint_freq=100,
+                collector_device=th.device("cuda"))
 
 
 

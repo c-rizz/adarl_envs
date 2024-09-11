@@ -3,8 +3,6 @@ from __future__ import annotations
 from typing import Any, SupportsFloat
 import gymnasium as gym
 from typing import Any, SupportsFloat, Mapping
-from adarl_ros.adapters.RosXbotAdapter import RosXbotAdapter
-from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
 from adarl.adapters.BaseJointImpedanceAdapter import BaseJointImpedanceAdapter
 from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
@@ -24,6 +22,7 @@ class LegReachMinimal(gym.Env):
         self._show_gui = show_gui
 
         if mode == "gazebo-xbot":
+            from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
             self._adapter : BaseJointImpedanceAdapter = RosXbotGazeboAdapter(model_name = "leg",
                                                                             stepLength_sec = self._stepLength_sec,
                                                                             forced_ros_master_uri = None,
@@ -87,60 +86,90 @@ class LegReachMinimal(gym.Env):
         self._real = False # some day
         self._spawned = False
         self._build_scenario()
+        self._adapter.set_monitored_links([self._shin_com_link,self._shin_base_link,self._thigh_com_link,self._thigh_base_link])
         # self._adapter.set_monitored_cameras([self._camera_name])
         self._adapter.startup()
         super().__init__()
 
     def _get_obs_rew(self):
-        jstates = self._adapter.getJointsState(requestedJoints=[self._knee_joint, self._hip_joint])
-        # ggLog.info(f"jstates = {jstates}")
-        lstates : dict[tuple[str,str],LinkState] = self._adapter.getLinksState(requestedLinks = [self._thigh_com_link,
-                                                                                                    self._shin_com_link,
-                                                                                                    self._thigh_base_link])
+        jstates = self._adapter.getJointsState()
+        # jstates = self._adapter.getJointsState(requestedJoints=[self._knee_joint, self._hip_joint])
+        lstates = self._adapter.getLinksState(requestedLinks = [self._thigh_com_link,
+                                                                self._shin_com_link,
+                                                                self._thigh_base_link])
         hip_height = lstates[self._thigh_base_link].pose.position[2]
         hip_vel_z = lstates[self._thigh_base_link].pos_velocity_xyz[2]
-        obs = np.array([jstates[self._hip_joint].position[0],
-                        jstates[self._hip_joint].rate[0],
-                        jstates[self._hip_joint].effort[0],
-                        jstates[self._knee_joint].position[0],
-                        jstates[self._knee_joint].rate[0],
-                        jstates[self._knee_joint].effort[0],
-                        hip_height,
-                        hip_vel_z,
-                        self._hip_goal_z,
-                        self._last_sent_pvesd[self._hip_joint][0],
-                        self._last_sent_pvesd[self._hip_joint][1],
-                        self._last_sent_pvesd[self._hip_joint][2],
-                        self._last_sent_pvesd[self._hip_joint][3],
-                        self._last_sent_pvesd[self._hip_joint][4],
-                        self._last_sent_pvesd[self._knee_joint][0],
-                        self._last_sent_pvesd[self._knee_joint][1],
-                        self._last_sent_pvesd[self._knee_joint][2],
-                        self._last_sent_pvesd[self._knee_joint][3],
-                        self._last_sent_pvesd[self._knee_joint][4]])
+        print(f"Position: knee = {jstates[0,0]:.3f} hip = {jstates[1,0]:.3f}")
+        print(f"Effort:   knee = {jstates[0,2]:.3f} hip = {jstates[1,2]:.3f}")
+        obs = np.concatenate([jstates.detach().flatten().cpu().numpy(),
+                              np.array([hip_height,
+                                        hip_vel_z,
+                                        self._hip_goal_z,
+                                        self._last_sent_pvesd[self._hip_joint][0],
+                                        self._last_sent_pvesd[self._hip_joint][1],
+                                        self._last_sent_pvesd[self._hip_joint][2],
+                                        self._last_sent_pvesd[self._hip_joint][3],
+                                        self._last_sent_pvesd[self._hip_joint][4],
+                                        self._last_sent_pvesd[self._knee_joint][0],
+                                        self._last_sent_pvesd[self._knee_joint][1],
+                                        self._last_sent_pvesd[self._knee_joint][2],
+                                        self._last_sent_pvesd[self._knee_joint][3],
+                                        self._last_sent_pvesd[self._knee_joint][4]])])
+        # np.array([jstates[self._hip_joint].position[0],
+        #                 jstates[self._hip_joint].rate[0],
+        #                 jstates[self._hip_joint].effort[0],
+        #                 jstates[self._knee_joint].position[0],
+        #                 jstates[self._knee_joint].rate[0],
+        #                 jstates[self._knee_joint].effort[0],
+        #                 hip_height,
+        #                 hip_vel_z,
+        #                 self._hip_goal_z,
+        #                 self._last_sent_pvesd[self._hip_joint][0],
+        #                 self._last_sent_pvesd[self._hip_joint][1],
+        #                 self._last_sent_pvesd[self._hip_joint][2],
+        #                 self._last_sent_pvesd[self._hip_joint][3],
+        #                 self._last_sent_pvesd[self._hip_joint][4],
+        #                 self._last_sent_pvesd[self._knee_joint][0],
+        #                 self._last_sent_pvesd[self._knee_joint][1],
+        #                 self._last_sent_pvesd[self._knee_joint][2],
+        #                 self._last_sent_pvesd[self._knee_joint][3],
+        #                 self._last_sent_pvesd[self._knee_joint][4]])
         obs = (obs-self._obs_min)/(self._obs_max-self._obs_min)*2-1
         reward = 1-hip_height-self._hip_goal_z
         return obs, reward
 
-    def _action_to_jimp(self, action) -> Mapping[tuple[str,str], tuple[int,int,int,int,int]]:
+    def _action_to_jimp(self, action) -> Mapping[tuple[str,str], tuple[float,float,float,float,float]]:
         action = (action+1)/2*(self._action_max_pvesd-self._action_min_pvesd)+self._action_min_pvesd
         return {self._knee_joint : action[0:5],
                 self._hip_joint  : action[5:10]}
     
-    def _jimp_to_action(self, jimp : Mapping[tuple[str,str], tuple[int,int,int,int,int]]) -> np.ndarray:
+    def _jimp_to_action(self, jimp : Mapping[tuple[str,str], tuple[float,float,float,float,float]]) -> np.ndarray:
         action = np.concatenate([jimp[self._knee_joint], jimp[self._hip_joint]])
         action = (action - self._action_min_pvesd)/(self._action_max_pvesd-self._action_min_pvesd)*2-1
         return action
 
-    def step(self, action: Any) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
-            ggLog.info(f"Step {self._step_count}")
+    def step(self, action: th.Tensor) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
+            # ggLog.info(f"Step {self._step_count}")
             self._last_sent_pvesd = self._action_to_jimp(action)
-            ggLog.info(f"Setting jimp cmd {self._last_sent_pvesd}")
-            self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_pvesd,
-                                                    delay_sec = 0.0)
-            ggLog.info(f"Stepping")
+            # ggLog.info(f"Setting jimp cmd {self._last_sent_pvesd}")
+            use_th_interface = True
+            if use_th_interface:
+                action_unnorm = (action+1)/2*(self._action_max_pvesd-self._action_min_pvesd)+self._action_min_pvesd
+                self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = action_unnorm.reshape(2,5),
+                                                        delay_sec = 0.0)
+            else:
+                self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_pvesd,
+                                                        delay_sec = 0.0)
+            
+            
+            # ggLog.info(f"Stepping")
             dt = self._adapter.step()
-            ggLog.info(f"Stepped of {dt}s")
+            # ggLog.info(f"Stepped of {dt}s")
+
+            th.set_printoptions(sci_mode=False)
+            ggLog.info(f"Joint stats:\n{self._adapter.get_joints_state_step_stats()}")
+            th.set_printoptions()
+
 
             obs, reward = self._get_obs_rew()
             truncated = self._step_count > 500
@@ -169,8 +198,10 @@ class LegReachMinimal(gym.Env):
             #                             model_kwargs={"camera_width":"256","camera_height":"144","frame_rate":1/self._stepLength_sec},
             #                             model_format="sdf.xacro")
             
-        self._adapter.set_monitored_joints([self._knee_joint,self._hip_joint,self._rail_joint])
         self._adapter.set_monitored_links([self._shin_com_link,self._shin_base_link,self._thigh_com_link,self._thigh_base_link])
+        self._adapter.set_monitored_joints([self._knee_joint,self._hip_joint])
+        self._adapter.set_impedance_controlled_joints([self._knee_joint,self._hip_joint])
+
         if isinstance(self._adapter, BaseSimulationAdapter):
             self._simulation_initialization()
         else:
@@ -191,8 +222,8 @@ class LegReachMinimal(gym.Env):
             ggLog.info(f"Moved to initial pose.")
             # start_action = np.zeros(shape=(10,),dtype = np.float32)
             # start_jimp = self._action_to_jimp(start_action)         
-            start_jimp = {self._knee_joint : (kpos,0.,0.,200.,50.),
-                          self._hip_joint  : (hpos,0.,0.,200.,50.)}
+            start_jimp : dict[tuple[str,str], tuple[float,float,float,float,float]] = { self._knee_joint : (kpos,0.,0.,200.,50.),
+                                                                                        self._hip_joint  : (hpos,0.,0.,200.,50.)}
             start_action = self._jimp_to_action(start_jimp)
             ggLog.info(f"Setting initial jimp command")
             self._adapter.setJointsImpedanceCommand(start_jimp)

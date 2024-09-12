@@ -81,7 +81,7 @@ def env_builder(seed,
 
     lrenv = LegJumpEnv( maxStepsPerEpisode=max_steps,
                         stepLength_sec=stepLength_sec,
-                        environmentController=env_controller,
+                        adapter=env_controller,
                         seed=seed,
                         obs_only_vec=env_builder_args["obs_only_vec"],
                         obs_only_img=False,
@@ -110,6 +110,7 @@ def env_builder(seed,
                         leg_min_height = env_builder_args["leg_min_height"],
                         leg_max_height = env_builder_args["leg_max_height"],
                         leg_max_jump = env_builder_args["leg_max_jump"],
+                        leg_min_jump = env_builder_args["leg_min_jump"],
                         goal_dist_smoothing_halflife_sec = env_builder_args["goal_dist_smoothing_halflife_sec"],
                         randomize_initial_pose = env_builder_args["randomize_initial_pose"])
     if no_dict:

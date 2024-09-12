@@ -11,7 +11,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     ep_duration_sec = 5
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 1
+    train_envs = 32
     env_builder_args = {
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
@@ -41,6 +41,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "leg_min_height" : 0.4,
         "leg_max_height" : 0.65,
         "leg_max_jump" : 0.6,
+        "leg_min_jump" : -0.1,
         "goal_dist_smoothing_halflife_sec" : 0.0,
         "enable_rendering" : False,
         "num_envs" : train_envs,
@@ -85,18 +86,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_feasible_env_builder_args["num_envs"] = 1
     video_feasible_env_builder_args["randomize_initial_pose"] = False
     eval_conf_video_feasible = {
-        "name" : "video_jump_feasible",
+        "name" : "video_feasible",
         "deterministic" : True,
         "eval_freq_ep" : 10*train_envs,
         "eval_eps" : 1,
         "env_builder_args" : video_feasible_env_builder_args
     }
     video_feasible_jump_env_builder_args = copy.deepcopy(video_feasible_env_builder_args)
-    # max_goal is leg_max_height+leg_max_jump
-    # min_goal is leg_min_height
-    video_feasible_jump_env_builder_args["leg_min_height"] = 0.7 # just a bit more than leg_max_height, so he is forced to jump
+    video_feasible_jump_env_builder_args["leg_min_jump"] = 0.1 
     eval_conf_video_jump_feasible = {
-        "name" : "video_feasible",
+        "name" : "video_jump_feasible",
         "deterministic" : True,
         "eval_freq_ep" : 10*train_envs,
         "eval_eps" : 1,

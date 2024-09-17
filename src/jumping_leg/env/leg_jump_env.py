@@ -8,7 +8,9 @@ from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 from adarl.envs.ControlledEnv import ControlledEnv
 from adarl.utils.robot_helpers import Robot
 from adarl.utils.state_helper import StateNoiseGenerator, ThBoxStateHelper, DictStateHelper, RobotStateHelper, RobotStatsStateHelper, JointImpedanceActionHelper
+import adarl.utils.tensor_struct
 from adarl.utils.tensor_trees import map_tensor_tree
+import adarl.utils.tensor_trees
 from adarl.utils.utils import build_pose, JointState, LinkState, \
                                 MoveFailError, exc_to_str, to_string_tensor, unnormalize, normalize
 from dataclasses import dataclass
@@ -26,7 +28,7 @@ import numpy as np
 import time
 import torch as th
 import copy
-
+from strenum import StrEnum
 
 
 
@@ -169,7 +171,6 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         ep_max_abs_contact : float = 0.0
         ep_max_abs_contacts_sum : float = 0.0
         last_external_work : float = 0.0
-        last_step_got_state : int = -1
         last_abs_impulses_sum_avg : th.Tensor = dataclasses.field(default_factory=lambda: th.tensor(0.0))
         avg_dist_to_goal : th.Tensor = dataclasses.field(default_factory=lambda: th.tensor(-1.0))
         avg_knee_torque : th.Tensor = dataclasses.field(default_factory=lambda: th.tensor(-1.0))
@@ -310,11 +311,11 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                                               dtype=obs_dtype,
                                                                                               device=th_device),
                                                             action_exp_smoothing_1s = action_exp_smoothing_1s,
-                                                            action_len = JointImpedanceActionHelper.action_lengths[control_mode_enum],
+                                                            action_len = JointImpedanceActionHelper.action_lengths[control_mode_enum]*2,
                                                             action_noise_mustd=th.empty((0,)),
                                                             bstate_minmax = th.empty((0,)),
                                                             control_mode=control_mode_enum,
-                                                            damping_minmax=(10,200),
+                                                            damping_minmax=(1,30),
                                                             ep_obs_noise_mustd=ep_obs_noise_mustd,
                                                             frame_stack_length = 3,
                                                             goal_dist_exp_smoothing_1s = goal_dist_exp_smoothing_1s,
@@ -350,7 +351,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             reward_tracking_weight = reward_tracking_weight,
                                                             reward_velocity_limit_weight = reward_velocity_limit_weight,
                                                             reward_velocity_weight = reward_velocity_weight,
-                                                            safe_damping = 50,
+                                                            safe_damping = 10,
                                                             safe_stiffness = 200,
                                                             show_goal = True,
                                                             start_height = 0.9,
@@ -379,16 +380,19 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         if self._configuration.obs_only_vec:
             observable_fields = [   self.STATE_ROBOT,
                                     self.STATE_EXTRINSIC,
-                                    self.STATE_INTERNAL]
+                                    self.STATE_INTERNAL,
+                                    self.STATE_ROBOT_STATS]
             vec_fields = observable_fields
         elif self._configuration.obs_only_img:
             observable_fields = [self.STATE_IMG]
         else:
             observable_fields = [   self.STATE_ROBOT,
                                     self.STATE_INTERNAL,
-                                    self.STATE_IMG]
-            vec_fields = [self.STATE_ROBOT, 
-                          self.STATE_INTERNAL]
+                                    self.STATE_IMG,
+                                    self.STATE_ROBOT_STATS]
+            vec_fields = [  self.STATE_ROBOT, 
+                            self.STATE_INTERNAL,
+                            self.STATE_ROBOT_STATS]
         
         robot_state_helper = RobotStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
                                               stiffness_minmax=self._configuration.stiffness_minmax,
@@ -399,7 +403,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         robot_stats_state_helper = RobotStatsStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
                                                         obs_dtype=self._configuration.obs_dtype,
                                                         th_device=self._configuration.th_device)
-        internal_state_helper =   ThBoxStateHelper(field_names=[e.value for e in self.INTERNAL_FIELDS],
+        internal_state_helper =   ThBoxStateHelper(field_names=list(self.INTERNAL_FIELDS),
                                               obs_dtype=th.float32,
                                               th_device=th_device,
                                               field_size=(1,),
@@ -494,9 +498,9 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
         state_space = self._state_helper.get_space()
         observation_space = self._state_helper.get_obs_space()
-        action_space = spaces.gym_spaces.Box(-np.ones(self._configuration.action_len),np.ones(self._configuration.action_len), seed=seed)
+        action_space = self._action_helper.action_space(seed=seed)
 
-        self._configuration.action_noise_mustd = 0.0 * th.ones(size=(self._configuration.action_len,), dtype=th.float32, device=self._configuration.th_device)
+        self._configuration.action_noise_mustd = 0.0 * th.ones(size=(self._action_helper.action_len(),), dtype=th.float32, device=self._configuration.th_device)
         
 
         if not isinstance(adapter , BaseJointImpedanceAdapter):
@@ -633,7 +637,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         torque_reward = - th.clamp(th.mean(th.pow(normtorques,4)),-max_rew,max_rew)
         velocity_reward = - th.clamp(th.mean(th.pow(normvelocities,4)),-max_rew,max_rew)
         acceleration_reward = - th.clamp(th.mean(th.pow(normaccelerations,2)),-max_rew,max_rew)
-        torquediff_reward = - th.clamp(th.mean(th.pow(normaccelerations,2)),-max_rew,max_rew)
+        torquediff_reward = - th.clamp(th.mean(th.pow(normtorquediff,2)),-max_rew,max_rew)
         
         robot_state_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)[0]
         position_safenorm = robot_state_safenorm[:,0]
@@ -864,6 +868,8 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         # Having conservative values here will not make the policy learn to behave nice in unfeasible cases
         # Having too broad value will have unfeasible cases in training
         min_goal_z = self._configuration.leg_min_height
+        if self._configuration.leg_min_jump >0:
+            min_goal_z = self._configuration.leg_max_height+0.05 # force the leg to
         max_goal_z = self._configuration.leg_max_jump + self._configuration.leg_max_height        
         hip_goal_z = reset_options.get("hip_goal_z",
                                         min_goal_z + th.rand(size=(1,), generator=self._rng, device=self._configuration.th_device)*(max_goal_z-min_goal_z)) # uniform(0.4,1.2)
@@ -1142,9 +1148,13 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     
     @override
     def getObservation(self, state) -> Dict[Any, th.Tensor]:
+        if not adarl.utils.tensor_trees.is_all_finite(state):
+            ggLog.warn(f"Non-finite values in state {state}")
         self._last_obs = self._state_helper.observe(state)
         if th.any(th.abs(self._last_obs["vec"]) > 100):
             raise RuntimeError(f"Values over 100 in obs {self._last_obs}")
+        if not adarl.utils.tensor_trees.is_all_finite(self._last_obs):
+            raise RuntimeError(f"Non-finite values in obs {self._last_obs}")
         return self._last_obs
 
     @override
@@ -1153,7 +1163,6 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     
     def _update_state(self):
         # ggLog.info(f"_stepCounter = {self._stepCounter}")
-        self._stats.last_step_got_state = self._stepCounter
         
         jstates = self._environmentController.getJointsState(requestedJoints=[self._knee_joint, self._hip_joint])
         lstates : Dict[Tuple[str,str],LinkState] = self._environmentController.getLinksState(requestedLinks = [self._thigh_com_link,
@@ -1192,6 +1201,8 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         # ggLog.info(f"jstates = {jstates}")
 
         stats_minmaxavgstd_hipknee_pve = self._environmentController.get_joints_state_step_stats()
+        if not th.all(th.isfinite(stats_minmaxavgstd_hipknee_pve)):
+            raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_hipknee_pve}")
 
         internal_state = self._current_state[self.STATE_INTERNAL][0]
         step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
@@ -1373,7 +1384,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         
 
         statenorm = self._state_helper.normalize(state)
-        for substate in [self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT]:
+        for substate in [self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT, self.STATE_ROBOT_STATS]:
             i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
             i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
             i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])

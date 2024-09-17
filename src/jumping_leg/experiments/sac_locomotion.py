@@ -5,7 +5,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
-    import jumping_leg.experiments.build_jumping_leg_env as build_jumping_leg_env
+    import jumping_leg.experiments.build_locomotion_env as build_locomotion_env
     from rreal.examples.solve_sac import sac_train, SAC_hyperparams
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
@@ -13,39 +13,41 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     train_envs = 32
     env_builder_args = {
+        "action_delay_mustd" : (0.01,0.01),
+        "action_smoothing_halflife_sec" : 0.01,
+        "control_mode" : "position",
+        "enable_rendering" : False,
+        "ep_obs_noise_mustd" : (0.0, 0.001),
+        "goal_err_smoothing_halflife_sec" : 0.0,
+        "leg_max_height" : 0.65,
+        "leg_max_jump" : 0.6,
+        "leg_min_height" : 0.4,
+        "leg_min_jump" : -0.1,
+        "max_steps_per_episode" : max_steps_per_episode,
+        "mode" : "pybullet",
+        "num_envs" : train_envs,
+        "obs_only_vec":True,
+        "platform_randomization" : "single",
+        "quiet" : False,
+        "randomize_initial_pose" : False,
+        "reward_acceleration_weight" : 0.5,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
         "reward_position_limit_weight" : 0.1,
-        "reward_velocity_limit_weight" : 1.0,
         "reward_torque_limit_weight" : 0.0,
         "reward_torque_weight" : 0.5,
         "reward_torquediff_weight" : 0.5,
         "reward_tracking_weight" : 1.0,
+        "reward_velocity_limit_weight" : 0.5,
         "reward_velocity_weight" : 0.1,
-        "reward_acceleration_weight" : 0.5,
-        "th_device" : th.device("cpu"),
-        "control_mode" : "impedance",
-        "video_save_freq" : 0,
+        "safe_stiffness" : 300,
+        "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
-        "platform_randomization" : "single",
-        "quiet" : False,
-        "mode" : "pybullet",
-        "use_contacts" : False,
-        "ep_obs_noise_mustd" : (0.0, 0.001),
         "step_obs_noise_std" : 0.001,
         "stop_on_safety" : False,
-        "action_delay_mustd" : (0.01,0.01),
-        "max_steps_per_episode" : max_steps_per_episode,
-        "obs_only_vec":True,
-        "action_smoothing_halflife_sec" : 0.01,
-        "leg_min_height" : 0.4,
-        "leg_max_height" : 0.65,
-        "leg_max_jump" : 0.6,
-        "leg_min_jump" : -0.1,
-        "goal_dist_smoothing_halflife_sec" : 0.0,
-        "enable_rendering" : False,
-        "num_envs" : train_envs,
-        "randomize_initial_pose" : False}
+        "th_device" : th.device("cpu"),
+        "use_contacts" : False,
+        "video_save_freq" : 0}
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["video_save_freq"] = 1
@@ -57,63 +59,64 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 1,
         "env_builder_args" : video_eval_env_builder_args
     }
-    eval_conf_video_stoch = {
-        "name" : "video_stoch",
-        "deterministic" : False,
-        "eval_freq_ep" : 10*train_envs,
-        "eval_eps" : 1,
-        "env_builder_args" : video_eval_env_builder_args
-    }
-    feasible_env_builder_args = copy.deepcopy(env_builder_args)
-    feasible_env_builder_args["leg_max_jump"] = 0.2
-    feasible_env_builder_args["num_envs"] = 16
-    feasible_env_builder_args["ep_obs_noise_mustd"] = (0.0, 0.0)
-    feasible_env_builder_args["step_obs_noise_std"] = 0.0
-    feasible_env_builder_args["randomize_initial_pose"] = False
-    feasible_env_builder_args["platform_randomization"] = "single"
-    # feasible_env_builder_args["enable_rendering"] = True
-    # feasible_env_builder_args["video_save_freq"] = 1
-    eval_conf_feasible = {
-        "name" : "feasible",
-        "deterministic" : True,
-        "eval_freq_ep" : 10*train_envs,
-        "eval_eps" : 32,
-        "env_builder_args" : feasible_env_builder_args
-    }
-    video_feasible_env_builder_args = copy.deepcopy(feasible_env_builder_args)
-    video_feasible_env_builder_args["enable_rendering"] = True
-    video_feasible_env_builder_args["video_save_freq"] = 1
-    video_feasible_env_builder_args["num_envs"] = 1
-    video_feasible_env_builder_args["randomize_initial_pose"] = False
-    eval_conf_video_feasible = {
-        "name" : "video_feasible",
-        "deterministic" : True,
-        "eval_freq_ep" : 10*train_envs,
-        "eval_eps" : 1,
-        "env_builder_args" : video_feasible_env_builder_args
-    }
-    video_feasible_jump_env_builder_args = copy.deepcopy(video_feasible_env_builder_args)
-    video_feasible_jump_env_builder_args["leg_min_jump"] = 0.2
-    eval_conf_video_jump_feasible = {
-        "name" : "video_jump_feasible",
-        "deterministic" : True,
-        "eval_freq_ep" : 10*train_envs,
-        "eval_eps" : 1,
-        "env_builder_args" : video_feasible_jump_env_builder_args
-    }
+    # eval_conf_video_stoch = {
+    #     "name" : "video_stoch",
+    #     "deterministic" : False,
+    #     "eval_freq_ep" : 10*train_envs,
+    #     "eval_eps" : 1,
+    #     "env_builder_args" : video_eval_env_builder_args
+    # }
+    # feasible_env_builder_args = copy.deepcopy(env_builder_args)
+    # feasible_env_builder_args["leg_max_jump"] = 0.2
+    # feasible_env_builder_args["num_envs"] = 16
+    # feasible_env_builder_args["ep_obs_noise_mustd"] = (0.0, 0.0)
+    # feasible_env_builder_args["step_obs_noise_std"] = 0.0
+    # feasible_env_builder_args["randomize_initial_pose"] = False
+    # feasible_env_builder_args["platform_randomization"] = "single"
+    # # feasible_env_builder_args["enable_rendering"] = True
+    # # feasible_env_builder_args["video_save_freq"] = 1
+    # eval_conf_feasible = {
+    #     "name" : "feasible",
+    #     "deterministic" : True,
+    #     "eval_freq_ep" : 10*train_envs,
+    #     "eval_eps" : 32,
+    #     "env_builder_args" : feasible_env_builder_args
+    # }
+    # video_feasible_env_builder_args = copy.deepcopy(feasible_env_builder_args)
+    # video_feasible_env_builder_args["enable_rendering"] = True
+    # video_feasible_env_builder_args["video_save_freq"] = 1
+    # video_feasible_env_builder_args["num_envs"] = 1
+    # video_feasible_env_builder_args["randomize_initial_pose"] = False
+    # eval_conf_video_feasible = {
+    #     "name" : "video_feasible",
+    #     "deterministic" : True,
+    #     "eval_freq_ep" : 10*train_envs,
+    #     "eval_eps" : 1,
+    #     "env_builder_args" : video_feasible_env_builder_args
+    # }
+    # video_feasible_jump_env_builder_args = copy.deepcopy(video_feasible_env_builder_args)
+    # video_feasible_jump_env_builder_args["leg_min_jump"] = 0.2
+    # eval_conf_video_jump_feasible = {
+    #     "name" : "video_jump_feasible",
+    #     "deterministic" : True,
+    #     "eval_freq_ep" : 10*train_envs,
+    #     "eval_eps" : 1,
+    #     "env_builder_args" : video_feasible_jump_env_builder_args
+    # }
     
 
     sac_train(  seed,
                 folderName,
                 run_id,
                 args,
-                env_builder = build_jumping_leg_env.env_builder,
+                env_builder = build_locomotion_env.env_builder,
                 env_builder_args = env_builder_args,
                 eval_env_builder_args = [eval_conf_video_det,
-                                         eval_conf_video_stoch,
-                                         eval_conf_feasible,
-                                         eval_conf_video_feasible,
-                                         eval_conf_video_jump_feasible],
+                                        #  eval_conf_video_stoch,
+                                        #  eval_conf_feasible,
+                                        #  eval_conf_video_feasible,
+                                        #  eval_conf_video_jump_feasible
+                                         ],
                 hyperparams = SAC_hyperparams(  device = "cuda",
                                                 q_network_arch=[256,128],
                                                 q_lr=0.001,
@@ -129,7 +132,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 learning_starts=max_steps_per_episode*train_envs*5,
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode),
-                video_recorder_kwargs=build_jumping_leg_env.video_recorder_kwargs,
+                video_recorder_kwargs=build_locomotion_env.video_recorder_kwargs,
                 checkpoint_freq=100,
                 collector_device=th.device("cuda"))
 

@@ -2,7 +2,7 @@
 <robot name="quad_simple" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
     <xacro:include filename="package://jumping_leg/models/commons.xacro"/>
-    <xacro:include filename="package://jumping_leg/models/leg_simple.xacro"/>
+    <xacro:include filename="$(find jumping_leg)/models/leg_simple.xacro"/>
 
 	<!-- <xacro:arg name="hip_out_offset" default="0.2146" />  -->
 	<xacro:arg name="hip_out_offset" default="0.05" />
@@ -58,7 +58,6 @@
 	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
 
 
-    <link name="world"/>
 
     <link name="body_link">
 		<visual name = "body_link_v">
@@ -148,9 +147,10 @@
                         parent_link = "body_link"
                         leg_name = "back_right"/>
 
+    <!-- <link name="world"/>
 	<joint name="world_to_body" type="floating">
         <parent link="world"/>
         <child link="body_link"/>
-    </joint>
+    </joint> -->
 
 </robot>

@@ -32,7 +32,7 @@ class LegReachMinimal(gym.Env):
                                                                             reference_frame = "base_link",
                                                                             torch_device = th.device("cpu"),
                                                                             fallback_cmd_stiffness = 200.0,
-                                                                            fallback_cmd_damping = 100.0,
+                                                                            fallback_cmd_damping = 10.0,
                                                                             allow_fallback = True,
                                                                             jpos_cmd_max_vel = {},
                                                                             jpos_cmd_max_vel_default = 10.0,
@@ -43,7 +43,7 @@ class LegReachMinimal(gym.Env):
                                                             restore_on_reset=False,
                                                             debug_gui=show_gui,
                                                             simulation_step=1/1024,
-                                                            enable_redering=False,
+                                                            enable_rendering=False,
                                                             global_max_torque_position_control = 100)
         else:
             raise NotImplementedError()
@@ -59,8 +59,8 @@ class LegReachMinimal(gym.Env):
                                  self._knee_joint : [0,0,0,0,0]}
         self._hip_goal_z = 0.6
         self._step_count = 0
-        self._action_max_pvesd = np.array([ 2.4, 20, 100,1000, 400, 2.4, 20, 100,1000, 400])
-        self._action_min_pvesd = np.array([-2.4,-20,-100,  10,  10,-2.4,-20,-100,  10,  10])
+        self._action_max_pvesd = np.array([ 2.4, 20, 100,1000, 400, 2.4, 20, 100,1000, 30])
+        self._action_min_pvesd = np.array([-2.4,-20,-100,  10,  10,-2.4,-20,-100,  10,  1])
         
         self._obs_max = np.array([  2.5,
                                     30,

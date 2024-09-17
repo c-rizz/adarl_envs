@@ -1,4 +1,5 @@
 
+from __future__ import annotations
 from jumping_leg.env.LocomotionEnv import LocomotionEnv
 from adarl.envs.GymEnvWrapper import GymEnvWrapper
 from adarl.envs.RecorderGymWrapper import RecorderGymWrapper
@@ -74,7 +75,9 @@ def env_builder(seed,
                                                        debug_gui=False,
                                                        simulation_step=1/1024,
                                                        enable_rendering=env_builder_args.pop("enable_rendering"),
-                                                       global_max_torque_position_control = 100)
+                                                       global_max_torque_position_control = 100,
+                                                       real_time_factor=None
+                                                       )
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)
@@ -117,7 +120,19 @@ def env_builder(seed,
                             stop_on_safety=env_builder_args.pop("stop_on_safety"),
                             th_device=th_device,
                             safe_damping=env_builder_args.pop("safe_damping"),
-                            safe_stiffness=env_builder_args.pop("safe_stiffness")
+                            safe_stiffness=env_builder_args.pop("safe_stiffness"),
+                            homing_joint_pose={("quadruped","hip_joint_x_back_left") : 0.1,
+                                               ("quadruped","hip_joint_x_back_right") : 0.1,
+                                               ("quadruped","hip_joint_x_front_left") : 0.1,
+                                               ("quadruped","hip_joint_x_front_right") : 0.1,
+                                               ("quadruped","hip_joint_y_back_left") : 0.75,
+                                               ("quadruped","hip_joint_y_back_right") : 0.75,
+                                               ("quadruped","hip_joint_y_front_left") : 0.75,
+                                               ("quadruped","hip_joint_y_front_right") : 0.75,
+                                               ("quadruped","hip_joint_knee_back_left") : 1.5,
+                                               ("quadruped","hip_joint_knee_back_right") : 1.5,
+                                               ("quadruped","hip_joint_knee_front_left") : 1.5,
+                                               ("quadruped","hip_joint_knee_front_right") : 1.5}
                             )
     if no_dict:
         from adarl.envs.lr_wrappers.ObsDict2FlatBox import ObsDict2FlatBox

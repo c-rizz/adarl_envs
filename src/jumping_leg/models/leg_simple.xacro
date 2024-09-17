@@ -17,7 +17,15 @@
 											hip_friction
 											knee_friction
 											parent_link
-											leg_name">
+											leg_name
+											is_left_leg:=true">
+
+			<xacro:if value="${is_left_leg}">
+				<xacro:property name="exterior_y_direction" value="1"/>
+			</xacro:if>
+			<xacro:unless value="${is_left_leg}">
+				<xacro:property name="exterior_y_direction" value="-1"/>
+			</xacro:unless>
 
 			<link name="prethigh_link_${leg_name}">
 				<xacro:small_inertial/>
@@ -143,21 +151,21 @@
 			</link>
 
 			
-			<joint name="hip_joint1_${leg_name}" type="revolute">
+			<joint name="hip_joint_y_${leg_name}" type="revolute">
 				<parent link="${parent_link}"/>
 				<child link="prethigh_link_${leg_name}"/>
-				<origin xyz="${hip_x_offset} ${hip_y_offset} ${hip_z_offset}" rpy="0 0 0"/>
+				<origin xyz="${hip_x_offset} ${exterior_y_direction*hip_y_offset} ${hip_z_offset}" rpy="0 0 0"/>
 				<dynamics damping="0.0" friction="${hip_friction}"/>
 				<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
 				<axis xyz="0 1 0"/>
 			</joint>
-			<joint name="hip_joint2_${leg_name}" type="revolute">
+			<joint name="hip_joint_x_${leg_name}" type="revolute">
 				<parent link="prethigh_link_${leg_name}"/>
 				<child link="thigh_link_${leg_name}"/>
 				<origin xyz="0 0 0" rpy="0 0 0"/>
 				<dynamics damping="0.0" friction="${hip_friction}"/>
 				<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
-				<axis xyz="1 0 0"/>
+				<axis xyz="${exterior_y_direction} 0 0"/>
 			</joint>
 			<joint name="thigh_link_com_${leg_name}" type="fixed">
 				<parent link="thigh_link_${leg_name}"/>
@@ -168,7 +176,7 @@
 			<joint name="knee_joint_${leg_name}" type="revolute">
 				<parent link="thigh_link_${leg_name}"/>
 				<child link="shin_link_${leg_name}"/>
-				<origin xyz="0 ${knee_y_offset} -${thigh_height}" rpy="0 0 0"/>
+				<origin xyz="0 ${exterior_y_direction*knee_y_offset} -${thigh_height}" rpy="0 0 0"/>
 				<dynamics damping="0.0" friction="${knee_friction}"/>
 				<limit lower="-2.4" upper="2.4" effort="112" velocity="20"/>
 				<axis xyz="0 -1 0"/>

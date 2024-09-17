@@ -111,7 +111,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 args,
                 env_builder = build_locomotion_env.env_builder,
                 env_builder_args = env_builder_args,
-                eval_env_builder_args = [eval_conf_video_det,
+                eval_env_builder_args = [
+                                        eval_conf_video_det,
                                         #  eval_conf_video_stoch,
                                         #  eval_conf_feasible,
                                         #  eval_conf_video_feasible,

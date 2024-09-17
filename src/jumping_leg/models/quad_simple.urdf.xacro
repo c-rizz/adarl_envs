@@ -94,16 +94,17 @@
                         hip_friction = "${hip_friction}"
                         knee_friction = "${knee_friction}"
                         parent_link = "body_link"
-                        leg_name = "front_left"/>
+                        leg_name = "front_left"
+                        is_left_leg = "true"/>
 
     <xacro:leg_simple   hip_x_offset = "${front_legs_pos}"
-                        hip_y_offset = "${-body_width/2 - legs_out_offset}"
+                        hip_y_offset = "${body_width/2 + legs_out_offset}"
                         hip_z_offset = "0"
                         thigh_width  = "${thigh_width}"
                         thigh_height = "${thigh_height}"
                         thigh_mass = "${thigh_mass}"
                         thigh_color = "${thigh_color}"
-                        knee_y_offset = "${-knee_y_offset}"
+                        knee_y_offset = "${knee_y_offset}"
                         shin_width = "${shin_width}"
                         shin_height = "${shin_height}"
                         shin_mass = "${shin_mass}"
@@ -111,7 +112,8 @@
                         hip_friction = "${hip_friction}"
                         knee_friction = "${knee_friction}"
                         parent_link = "body_link"
-                        leg_name = "front_right"/>
+                        leg_name = "front_right"
+                        is_left_leg = "false"/>
 
     <xacro:leg_simple   hip_x_offset = "${back_legs_pos}"
                         hip_y_offset = "${body_width/2 + legs_out_offset}"
@@ -128,16 +130,17 @@
                         hip_friction = "${hip_friction}"
                         knee_friction = "${knee_friction}"
                         parent_link = "body_link"
-                        leg_name = "back_left"/>
+                        leg_name = "back_left"
+                        is_left_leg = "true"/>
 
     <xacro:leg_simple   hip_x_offset = "${back_legs_pos}"
-                        hip_y_offset = "${-body_width/2 - legs_out_offset}"
+                        hip_y_offset = "${body_width/2 + legs_out_offset}"
                         hip_z_offset = "0"
                         thigh_width  = "${thigh_width}"
                         thigh_height = "${thigh_height}"
                         thigh_mass = "${thigh_mass}"
                         thigh_color = "${thigh_color}"
-                        knee_y_offset = "${-knee_y_offset}"
+                        knee_y_offset = "${knee_y_offset}"
                         shin_width = "${shin_width}"
                         shin_height = "${shin_height}"
                         shin_mass = "${shin_mass}"
@@ -145,7 +148,8 @@
                         hip_friction = "${hip_friction}"
                         knee_friction = "${knee_friction}"
                         parent_link = "body_link"
-                        leg_name = "back_right"/>
+                        leg_name = "back_right"
+                        is_left_leg = "false"/>
 
     <!-- <link name="world"/>
 	<joint name="world_to_body" type="floating">

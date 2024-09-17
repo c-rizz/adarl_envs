@@ -158,7 +158,8 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         stepLength_sec,
                         step_precision_tolerance : float,
                         stop_on_safety : bool,
-                        th_device : th.device
+                        th_device : th.device,
+                        homing_joint_pose : dict[tuple[str,str], float] = {}
                         ):
         
         self._rng = th.Generator(device=th_device)
@@ -191,7 +192,10 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             minmax_damping_thdict = {(robot_name,k):th.as_tensor(minmax, device=th_device) for k,minmax in minmax_damping.items()}
         action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec) if action_smoothing_halflife_sec>0 else 0.0
         goal_err_exp_smoothing_1s = 0.5**(1/goal_err_smoothing_halflife_sec) if goal_err_smoothing_halflife_sec>0 else 0.0
-        homing_joint_pose = {jn: unnormalize(0.75, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item()) for jn in controlled_joints_rn}
+        default_homing_joint_pose = {jn: unnormalize(0.5, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item()) for jn in controlled_joints_rn}
+        for jn in controlled_joints_rn:
+            if jn not in homing_joint_pose:
+                homing_joint_pose[jn] = default_homing_joint_pose[jn]
         ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
 
         self._configuration = LocomotionEnv.Configuration(  action_delay_mustd = th.as_tensor(action_delay_mustd, device=th_device),

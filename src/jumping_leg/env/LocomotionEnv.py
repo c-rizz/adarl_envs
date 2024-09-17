@@ -32,6 +32,7 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         action_exp_smoothing_1s : float
         action_noise_mustd : th.Tensor
         control_mode : JointImpedanceActionHelper.CONTROL_MODES
+        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor]
         controlled_joints : Sequence[tuple[str,str]]
         frame_stack_length : int
         goal_err_exp_smoothing_1s : float
@@ -159,7 +160,8 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         step_precision_tolerance : float,
                         stop_on_safety : bool,
                         th_device : th.device,
-                        homing_joint_pose : dict[tuple[str,str], float] = {}
+                        homing_joint_pose : dict[tuple[str,str], float] = {},
+                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] = {}
                         ):
         
         self._rng = th.Generator(device=th_device)
@@ -180,8 +182,11 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                     for k,l in self._robot_model.get_joint_limits(controlled_joints_str).items()}
         safe_limits_minmax_pve = {k:(lims_minmax-0.5*(lims_minmax[1]+lims_minmax[0]))*safety_limits_factor+0.5*(lims_minmax[1]+lims_minmax[0])
                                     for k,lims_minmax in phys_limits_minmax_pve.items()}
-        ggLog.info(f"phys_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in phys_limits_minmax_pve.items()]))
-        ggLog.info(f"safe_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
+
+        for jn in safe_limits_minmax_pve.keys():
+            if jn not in control_limits_minmax_pve:
+                control_limits_minmax_pve[jn] = safe_limits_minmax_pve[jn]
+
         if isinstance(minmax_stiffness, tuple):
             minmax_stiffness_thdict = {k:th.as_tensor(minmax_stiffness, device=th_device) for k in phys_limits_minmax_pve.keys()}
         else:
@@ -192,16 +197,22 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             minmax_damping_thdict = {(robot_name,k):th.as_tensor(minmax, device=th_device) for k,minmax in minmax_damping.items()}
         action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec) if action_smoothing_halflife_sec>0 else 0.0
         goal_err_exp_smoothing_1s = 0.5**(1/goal_err_smoothing_halflife_sec) if goal_err_smoothing_halflife_sec>0 else 0.0
-        default_homing_joint_pose = {jn: unnormalize(0.5, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item()) for jn in controlled_joints_rn}
+        default_homing_joint_pose = {jn: unnormalize(0.5, control_limits_minmax_pve[jn][0,0].item(), control_limits_minmax_pve[jn][1,0].item()) 
+                                     for jn in controlled_joints_rn}
         for jn in controlled_joints_rn:
             if jn not in homing_joint_pose:
                 homing_joint_pose[jn] = default_homing_joint_pose[jn]
+
+        ggLog.info(f"phys_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in phys_limits_minmax_pve.items()]))
+        ggLog.info(f"safe_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
+        ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
         ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
 
         self._configuration = LocomotionEnv.Configuration(  action_delay_mustd = th.as_tensor(action_delay_mustd, device=th_device),
                                                             action_exp_smoothing_1s = action_exp_smoothing_1s,
                                                             action_noise_mustd = th.as_tensor(action_noise_mustd, device=th_device),
                                                             control_mode = JointImpedanceActionHelper.CONTROL_MODES[control_mode.upper()],
+                                                            control_limits_minmax_pve = control_limits_minmax_pve,
                                                             controlled_joints = controlled_joints_rn,
                                                             frame_stack_length = 3,
                                                             goal_err_exp_smoothing_1s = goal_err_exp_smoothing_1s,
@@ -246,7 +257,7 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
         self._action_helper= JointImpedanceActionHelper(control_mode=self._configuration.control_mode,
                                 joints=controlled_joints_rn,
-                                joints_minmax_pvesd={jn:th.cat([safe_limits_minmax_pve[jn],
+                                joints_minmax_pvesd={jn:th.cat([control_limits_minmax_pve[jn],
                                                                 minmax_stiffness_thdict[jn].unsqueeze(1),
                                                                 minmax_damping_thdict[jn].unsqueeze(1)], dim=1) 
                                                         for jn in controlled_joints_rn},

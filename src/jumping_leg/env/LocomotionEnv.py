@@ -36,6 +36,7 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         frame_stack_length : int
         goal_err_exp_smoothing_1s : float
         history_length : int
+        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float]
         homing_joint_pose : dict[tuple[str,str],th.Tensor]
         joint_physical_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_damping : dict[tuple[str,str],th.Tensor]
@@ -159,6 +160,7 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         step_precision_tolerance : float,
                         stop_on_safety : bool,
                         th_device : th.device,
+                        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float] = (0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0),
                         homing_joint_pose : dict[tuple[str,str], float] = {}
                         ):
         
@@ -193,6 +195,9 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec) if action_smoothing_halflife_sec>0 else 0.0
         goal_err_exp_smoothing_1s = 0.5**(1/goal_err_smoothing_halflife_sec) if goal_err_smoothing_halflife_sec>0 else 0.0
         default_homing_joint_pose = {jn: unnormalize(0.5, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item()) for jn in controlled_joints_rn}
+        for jn in homing_joint_pose:
+            if jn not in controlled_joints_rn:
+                raise RuntimeError(f"homing_joint_pose contains non-controlled joint {jn}")
         for jn in controlled_joints_rn:
             if jn not in homing_joint_pose:
                 homing_joint_pose[jn] = default_homing_joint_pose[jn]
@@ -207,6 +212,7 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             goal_err_exp_smoothing_1s = goal_err_exp_smoothing_1s,
                                                             history_length = 3,
                                                             homing_joint_pose = homing_joint_pose,
+                                                            homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
                                                             joint_physical_limits_minmax_pve = phys_limits_minmax_pve,
                                                             joint_safe_limits_minmax_damping = minmax_damping_thdict,
                                                             joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
@@ -251,7 +257,7 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                 minmax_damping_thdict[jn].unsqueeze(1)], dim=1) 
                                                         for jn in controlled_joints_rn},
                                 safe_stiffness=th.as_tensor([self._configuration.safe_stiffness]).repeat(len(controlled_joints_rn)),
-                                safe_damping=th.as_tensor([self._configuration.safe_stiffness]).repeat(len(controlled_joints_rn)),
+                                safe_damping=th.as_tensor([self._configuration.safe_damping]).repeat(len(controlled_joints_rn)),
                                 th_device=self._configuration.th_device)
 
         robot_state_helper = RobotStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
@@ -559,8 +565,8 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
         
         self._environmentController.setLinksStateDirect({self._configuration.main_body_link :
-                                                        LinkState( position_xyz = th.tensor((0.0, 0.0, 0.75), device=self._configuration.th_device),
-                                                                    orientation_xyzw = th.tensor((0.,0.,0.,1.0), device=self._configuration.th_device),
+                                                        LinkState( position_xyz = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[:3], device=self._configuration.th_device),
+                                                                    orientation_xyzw = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[3:7], device=self._configuration.th_device),
                                                                     pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                     ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
         self._environmentController.setJointsStateDirect({jn:JointState(position=self._configuration.homing_joint_pose[jn],

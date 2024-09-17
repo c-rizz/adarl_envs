@@ -57,6 +57,26 @@
 	<xacro:property name="knee_friction" default="$(arg knee_friction)" />
 	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
 
+    <xacro:macro name="default_contact_params" params="">
+        <contact>
+        <!-- 
+        Defaults maybe are these (from bullet3/examples/Importers/ImportURDFDemo/URDFJointTypes.h line 33)
+        URDFLinkContactInfo()
+            : m_lateralFriction(0.5),
+            m_rollingFriction(0),
+            m_spinningFriction(0),
+            m_restitution(0),
+            m_inertiaScaling(1),
+            m_contactCfm(0),
+            m_contactErp(0),
+            m_contactStiffness(1e4),
+            m_contactDamping(1)
+        -->
+            <lateral_friction value="1"/>
+            <rolling_friction value="0.00001"/>
+        </contact>
+    </xacro:macro>
+
 
 
     <link name="body_link">
@@ -76,6 +96,7 @@
                             x="${body_width}" y="${body_length}" z="${body_height}"
                             pose_xyz = "0 0 0"
                             pose_rpy = "0 0 0"/>
+        <xacro:default_contact_params />
 	</link>
 
 

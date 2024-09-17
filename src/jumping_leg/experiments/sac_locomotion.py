@@ -59,13 +59,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 1,
         "env_builder_args" : video_eval_env_builder_args
     }
-    # eval_conf_video_stoch = {
-    #     "name" : "video_stoch",
-    #     "deterministic" : False,
-    #     "eval_freq_ep" : 10*train_envs,
-    #     "eval_eps" : 1,
-    #     "env_builder_args" : video_eval_env_builder_args
-    # }
+    eval_conf_video_stoch = {
+        "name" : "video_stoch",
+        "deterministic" : False,
+        "eval_freq_ep" : 10*train_envs,
+        "eval_eps" : 1,
+        "env_builder_args" : video_eval_env_builder_args
+    }
     # feasible_env_builder_args = copy.deepcopy(env_builder_args)
     # feasible_env_builder_args["leg_max_jump"] = 0.2
     # feasible_env_builder_args["num_envs"] = 16
@@ -113,7 +113,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder_args = env_builder_args,
                 eval_env_builder_args = [
                                         eval_conf_video_det,
-                                        #  eval_conf_video_stoch,
+                                        eval_conf_video_stoch,
                                         #  eval_conf_feasible,
                                         #  eval_conf_video_feasible,
                                         #  eval_conf_video_jump_feasible

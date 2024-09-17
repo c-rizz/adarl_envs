@@ -493,7 +493,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                         self._configuration.damping_minmax
                                                                     ]).permute(1,0)},
                                 safe_stiffness=th.as_tensor([self._configuration.safe_stiffness]).repeat(2),
-                                safe_damping=th.as_tensor([self._configuration.safe_stiffness]).repeat(2),
+                                safe_damping=th.as_tensor([self._configuration.safe_damping]).repeat(2),
                                 th_device=self._configuration.th_device)
 
         state_space = self._state_helper.get_space()

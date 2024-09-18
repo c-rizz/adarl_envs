@@ -273,15 +273,15 @@ class LegReachEnv(ControlledEnv):
                          action_space = action_space,
                          state_space=state_space,
                          step_precision_tolerance=step_precision_tolerance)
-        self._environmentController = environmentController
-        if not isinstance(self._environmentController , BaseJointImpedanceAdapter):
+        self._adapter = environmentController
+        if not isinstance(self._adapter , BaseJointImpedanceAdapter):
             raise RuntimeError()
         self.seed(seed)
-        self._environmentController.set_monitored_joints([self._knee_joint,self._hip_joint, self._rail_joint])
-        self._environmentController.set_monitored_links([self._foot_link, self._shin_com_link, self._thigh_com_link, self._shin_base_link, self._thigh_base_link])
-        self._environmentController.set_monitored_cameras([self._rendering_cam_name])
+        self._adapter.set_monitored_joints([self._knee_joint,self._hip_joint, self._rail_joint])
+        self._adapter.set_monitored_links([self._foot_link, self._shin_com_link, self._thigh_com_link, self._shin_base_link, self._thigh_base_link])
+        self._adapter.set_monitored_cameras([self._rendering_cam_name])
         
-        self._environmentController.startup()
+        self._adapter.startup()
 
 
 
@@ -337,7 +337,7 @@ class LegReachEnv(ControlledEnv):
         # action_l = action.tolist()
         jimp_pvesd = self._action_to_pvesd(action)
         self._last_sent_pvesd = jimp_pvesd
-        self._environmentController.setJointsImpedanceCommand(joint_impedances_pvesd = jimp_pvesd)
+        self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = jimp_pvesd)
             
 
 
@@ -426,20 +426,20 @@ class LegReachEnv(ControlledEnv):
     def initializeEpisode(self, options = {}) -> None:
         self._current_state = {self.STATE_BASE   : th.zeros(len(self.BASE_STATE_IDXS), dtype=th.float32, device=self._th_device)}
         
-        if not self._spawned and isinstance(self._environmentController, BaseSimulationAdapter):
+        if not self._spawned and isinstance(self._adapter, BaseSimulationAdapter):
             leg_model_name = "leg"
             cam_model_name = "camera"
             leg_pose = build_pose(0,0,0,0,0,0,1)
             self._spawned = True
-            if isinstance(self._environmentController, PyBulletAdapter):
+            if isinstance(self._adapter, PyBulletAdapter):
                 leg_file = adarl.utils.utils.pkgutil_get_path("jumping_leg","models/leg_rig_simple.urdf.xacro")
                 # import rospkg
                 # leg_file = rospkg.RosPack().get_path("protoleg")+"/description/urdf/protoleg_test_rig.urdf.xacro"
-                name = self._environmentController.spawn_model(model_file=leg_file,
+                name = self._adapter.spawn_model(model_file=leg_file,
                                                                 model_name=leg_model_name,
                                                                 pose=leg_pose,
                                                                 model_format="urdf.xacro")
-            self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro"),
+            self._adapter.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro"),
                                                     model_name=cam_model_name,
                                                     pose=build_pose(0,2.5,0.7, 0.0,0.0,-0.707,0.707),
                                                     model_kwargs={"camera_width":"256","camera_height":"144","frame_rate":1/self._intendedStepLength_sec},
@@ -447,11 +447,11 @@ class LegReachEnv(ControlledEnv):
             # ggLog.info(f"Model spawned with name {name}")
 
             if self._show_goal:
-                self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/red_intangible_ball.urdf.xacro"),
+                self._adapter.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/red_intangible_ball.urdf.xacro"),
                                                         model_name="red_ball",
                                                         pose=leg_pose,
                                                         model_format="urdf.xacro",
-                                                        model_kwargs={"add_world_link":str(isinstance(self._environmentController, PyBulletAdapter))})
+                                                        model_kwargs={"add_world_link":str(isinstance(self._adapter, PyBulletAdapter))})
             
             
         
@@ -485,29 +485,29 @@ class LegReachEnv(ControlledEnv):
             
         #min 0.4, max support2_z+0.6
         self._current_episode_config = LegReachEnv.EpisodeConfiguration(hip_goal_z=hip_goal_z)
-        if isinstance(self._environmentController, BaseSimulationAdapter):
+        if isinstance(self._adapter, BaseSimulationAdapter):
             self._simulation_initialization()
         else:
             moved = False
             while not moved:
                 ggLog.info(f"Cannot automatically initialize episode with non-simulated adapter. Lift up the robot and press ENTER. Be safe :)")
                 input()
-                if isinstance(self._environmentController, BaseJointPositionAdapter):
+                if isinstance(self._adapter, BaseJointPositionAdapter):
                     rpos, hpos, kpos = self._start_height, 3.4159/4,  3.14159/2
                     try:
-                        self._environmentController.moveToJointPoseSync({self._hip_joint:  hpos,
+                        self._adapter.moveToJointPoseSync({self._hip_joint:  hpos,
                                                                         self._knee_joint: kpos})
                     except MoveFailError as e:
                         ggLog.warn(f"Failed to move to joint position. Error = {exc_to_str(e)}")
             # raise RuntimeError("")
 
     def _place_objects(self, goal_z=None):
-        if not isinstance(self._environmentController, BaseSimulationAdapter):
+        if not isinstance(self._adapter, BaseSimulationAdapter):
             raise RuntimeError("Cannot place objects in the real")
         if goal_z is None:
             goal_z = self._current_episode_config.hip_goal_z
         if self._show_goal:
-            self._environmentController.setLinksStateDirect({self._red_ball_base :
+            self._adapter.setLinksStateDirect({self._red_ball_base :
                                                             LinkState( position_xyz = th.tensor((0.,
                                                                                                 0.2,
                                                                                                 goal_z)),
@@ -516,19 +516,19 @@ class LegReachEnv(ControlledEnv):
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.)))})
 
     def _simulation_initialization(self):
-        if isinstance(self._environmentController, BaseSimulationAdapter):
+        if isinstance(self._adapter, BaseSimulationAdapter):
             self._place_objects(goal_z=10)
             rpos, hpos, kpos = self._start_height, 3.4159/4,  3.14159/2
-            self._environmentController.setJointsStateDirect({  self._rail_joint: JointState(position = rpos, rate=0, effort=0),
+            self._adapter.setJointsStateDirect({  self._rail_joint: JointState(position = rpos, rate=0, effort=0),
                                                                 self._hip_joint:  JointState(position = hpos, rate=0, effort=0),
                                                                 self._knee_joint: JointState(position = kpos, rate=0, effort=0)})
             start_jimp : dict[tuple[str,str], tuple] = {self._hip_joint: (hpos,0,0,200,50),
                                                         self._knee_joint:(kpos,0,0,200,50)}         
-            self._environmentController.setJointsImpedanceCommand(start_jimp)
-            self._environmentController.apply_joint_impedances(start_jimp)
-            self._environmentController.run(3.0) # let the leg fall
+            self._adapter.setJointsImpedanceCommand(start_jimp)
+            self._adapter.apply_joint_impedances(start_jimp)
+            self._adapter.run(3.0) # let the leg fall
             self._place_objects(goal_z=self._current_episode_config.hip_goal_z)
-            # jpos = {k:v.position for k,v in self._environmentController.getJointsState(requestedJoints=[self._rail_joint, self._hip_joint, self._knee_joint]).items()}
+            # jpos = {k:v.position for k,v in self._adapter.getJointsState(requestedJoints=[self._rail_joint, self._hip_joint, self._knee_joint]).items()}
             # ggLog.info(f"Init: current jpos = {jpos}")
             self._last_sent_pvesd = start_jimp
             self._last_out_action = self._pvesd_to_action(start_jimp)
@@ -540,21 +540,21 @@ class LegReachEnv(ControlledEnv):
 
     def buildSimulation(self):
         # ggLog.info("Building env")
-        envCtrlName = type(self._environmentController).__name__
+        envCtrlName = type(self._adapter).__name__
         if envCtrlName == "PyBulletJointImpedanceAdapter":
-            self._environmentController.build_scenario()
+            self._adapter.build_scenario()
 
             self._red_ball_base = ("red_ball","world")
         elif envCtrlName in ["RosXbotAdapter", "RosXbotGazeboAdapter"]:
             if self._real:
                 raise NotImplementedError()
             else:
-                self._environmentController.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
+                self._adapter.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
                                                                                                                           "gazebo/all_gazebo_xbot.launch"),
                                                            launch_file_args={"gui":"true"})
 
     def _destroySimulation(self):
-        self._environmentController.destroy_scenario()
+        self._adapter.destroy_scenario()
 
 
 
@@ -583,7 +583,7 @@ class LegReachEnv(ControlledEnv):
         
     def getUiRendering(self) -> Tuple[Union[np.ndarray, th.Tensor, None], float]:
         try:
-            img, time = self._environmentController.getRenderings([self._rendering_cam_name])[self._rendering_cam_name]
+            img, time = self._adapter.getRenderings([self._rendering_cam_name])[self._rendering_cam_name]
             if img is None:
                 time = -1
             return img, time
@@ -603,8 +603,8 @@ class LegReachEnv(ControlledEnv):
                 # ggLog.info(f"_stepCounter = {self._stepCounter}")
                 self._last_step_got_state = self._stepCounter
                 
-                jstates = self._environmentController.getJointsState(requestedJoints=[self._knee_joint, self._hip_joint])
-                lstates : Dict[Tuple[str,str],LinkState] = self._environmentController.getLinksState(requestedLinks = [self._thigh_com_link,
+                jstates = self._adapter.getJointsState(requestedJoints=[self._knee_joint, self._hip_joint])
+                lstates : Dict[Tuple[str,str],LinkState] = self._adapter.getLinksState(requestedLinks = [self._thigh_com_link,
                                                                                     self._shin_com_link,
                                                                                     self._thigh_base_link])
                 hip_height = lstates[self._thigh_base_link].pose.position[2]

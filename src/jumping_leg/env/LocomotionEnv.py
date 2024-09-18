@@ -307,8 +307,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                          startSimulation = True,
                          step_precision_tolerance = step_precision_tolerance)
         
-        self._environmentController.set_monitored_links([self._configuration.main_body_link])
-        self._environmentController.startup()
+        self._adapter.set_monitored_links([self._configuration.main_body_link])
+        self._adapter.startup()
 
 
     # --------------------------------------------------------------------------------------------------------------------
@@ -335,7 +335,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         device=self._configuration.th_device)
             action_delay = self._configuration.action_delay_mustd[0] + self._configuration.action_delay_mustd[1]*n
             action_delay = th.clamp(action_delay, min = 0.0)
-            self._environmentController.setJointsImpedanceCommand(joint_impedances_pvesd = jimp_pvesd,
+            self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = jimp_pvesd,
                                                                 delay_sec=action_delay.item())
             
 
@@ -359,39 +359,39 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         self._current_state[self.STATE_INTERNAL][0,self.INTERNAL_FIELDS.STEP_COUNT] = th.tensor(-1.)
         self._last_obs = None
 
-        if not self._spawned and isinstance(self._environmentController, BaseSimulationAdapter):
+        if not self._spawned and isinstance(self._adapter, BaseSimulationAdapter):
             robot_pose = build_pose(0,0,1,0,0,0,1)
             camera_pose = build_pose(0,2.5,0.7, 0.0,0.0,-0.707,0.707)
             red_ball_pose = robot_pose
             self._spawned = True
             camera_file = adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro")
-            if isinstance(self._environmentController, PyBulletAdapter):
-                self._environmentController.spawn_model(model_definition_string=self._configuration.model_urdf_string,
+            if isinstance(self._adapter, PyBulletAdapter):
+                self._adapter.spawn_model(model_definition_string=self._configuration.model_urdf_string,
                                                         model_name=self._configuration.robot_name,
                                                         pose=robot_pose,
                                                         model_format="urdf")
-            self._environmentController.spawn_model(model_file=camera_file,
+            self._adapter.spawn_model(model_file=camera_file,
                                                     model_name="simple_camera",
                                                     pose=camera_pose,
                                                     model_format="sdf.xacro",
                                                     model_kwargs={"camera_width":"256","camera_height":"144","frame_rate":1/self._intendedStepLength_sec})
             if self._configuration.show_goal:
-                self._environmentController.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/red_intangible_ball.urdf.xacro"),
+                self._adapter.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/red_intangible_ball.urdf.xacro"),
                                                         model_name="red_ball",
                                                         pose=red_ball_pose,
                                                         model_format="urdf.xacro",
-                                                        model_kwargs={"add_world_link":str(isinstance(self._environmentController, PyBulletAdapter))})
+                                                        model_kwargs={"add_world_link":str(isinstance(self._adapter, PyBulletAdapter))})
             # self._robot_model.disable_tree_self_collisions("rail_joint")
             # self._robot_model.remove_collision_pairs([("rail_link_0","slider_link_0")])            
             # self._ground_co_id = self._robot_model.add_collision_box( pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
             #                                                         collision_box_size_xyz=(10,10,1),
             #                                                         collision_obj_id="ground_collision")
-            self._environmentController.set_monitored_joints(self._configuration.controlled_joints)
+            self._adapter.set_monitored_joints(self._configuration.controlled_joints)
 
         
         self._set_current_ep_config(reset_options = options)
         
-        if isinstance(self._environmentController, BaseSimulationAdapter):
+        if isinstance(self._adapter, BaseSimulationAdapter):
             self._simulation_initialization()
         else:
             self._realworld_initialization()
@@ -419,15 +419,15 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         raise NotImplementedError()
     
     def _simulation_initialization(self):
-        if not isinstance(self._environmentController, BaseSimulationAdapter):
+        if not isinstance(self._adapter, BaseSimulationAdapter):
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
         
-        self._environmentController.setLinksStateDirect({self._configuration.main_body_link :
+        self._adapter.setLinksStateDirect({self._configuration.main_body_link :
                                                         LinkState( position_xyz = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[:3], device=self._configuration.th_device),
                                                                     orientation_xyzw = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[3:7], device=self._configuration.th_device),
                                                                     pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                     ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
-        self._environmentController.setJointsStateDirect({jn:JointState(position=self._configuration.homing_joint_pose[jn],
+        self._adapter.setJointsStateDirect({jn:JointState(position=self._configuration.homing_joint_pose[jn],
                                                                         rate = 0,
                                                                         effort = 0) for jn in self._configuration.controlled_joints})
         start_jimp : dict[tuple[str,str], tuple] = {jn:(self._configuration.homing_joint_pose[jn],
@@ -436,21 +436,21 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                         self._configuration.safe_stiffness,
                                                         self._configuration.safe_damping) 
                                                     for jn in self._configuration.controlled_joints}         
-        self._environmentController.setJointsImpedanceCommand(start_jimp)
-        self._environmentController.apply_joint_impedances(start_jimp)
+        self._adapter.setJointsImpedanceCommand(start_jimp)
+        self._adapter.apply_joint_impedances(start_jimp)
         self._last_sent_pvesd = start_jimp
 
     @override
     def buildSimulation(self):
-        envCtrlName = type(self._environmentController).__name__
+        envCtrlName = type(self._adapter).__name__
         if envCtrlName == "PyBulletJointImpedanceAdapter":
-            self._environmentController.build_scenario()
+            self._adapter.build_scenario()
             self._red_ball_base = ("red_ball","world")
         elif envCtrlName in ["RosXbotAdapter", "RosXbotGazeboAdapter"]:
             if self._configuration.real:
                 raise NotImplementedError()
             else:
-                self._environmentController.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
+                self._adapter.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
                                                                                                                           "gazebo/all_gazebo_xbot.launch"),
                                                            launch_file_args={"gui":"false"})
                 self._red_ball_base = ("red_ball","sphere_link")
@@ -459,7 +459,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
     @override
     def _destroySimulation(self):
-        self._environmentController.destroy_scenario()
+        self._adapter.destroy_scenario()
 
 
 
@@ -470,16 +470,16 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     @override
     def getUiRendering(self) -> tuple[np.ndarray | th.Tensor | None, float]:
         try:
-            if isinstance(self._environmentController, BaseSimulationAdapter):
-                body_state : LinkState = self._environmentController.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
-                self._environmentController.setLinksStateDirect({self._configuration.ui_camera_link :
+            if isinstance(self._adapter, BaseSimulationAdapter):
+                body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
+                self._adapter.setLinksStateDirect({self._configuration.ui_camera_link :
                                                                 LinkState( position_xyz = th.tensor((body_state.pose.position[0],
                                                                                                     body_state.pose.position[1]+2.5,
                                                                                                     0.7), device=self._configuration.th_device),
                                                                             orientation_xyzw = th.tensor((0.,0.,-0.707,0.707), device=self._configuration.th_device),
                                                                             pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                             ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
-            img, time = self._environmentController.getRenderings([self._configuration.ui_camera_name])[self._configuration.ui_camera_name]
+            img, time = self._adapter.getRenderings([self._configuration.ui_camera_name])[self._configuration.ui_camera_name]
             if img is None:
                 time = -1
             return img, time
@@ -508,20 +508,20 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         super().performStep()
         self._update_state()
         self._update_stats()
-        self._last_step_simtime = self._environmentController.getEnvTimeFromReset()
+        self._last_step_simtime = self._adapter.getEnvTimeFromReset()
 
 
     def _get_new_instantaneous_state(self):
         # ggLog.info(f"_stepCounter = {self._stepCounter}")
         
-        jstates = self._environmentController.getJointsState(requestedJoints=self._configuration.controlled_joints)
-        body_state : LinkState = self._environmentController.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
+        jstates = self._adapter.getJointsState(requestedJoints=self._configuration.controlled_joints)
+        body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
         body_linvel_xyz = body_state.pos_velocity_xyz
         body_angvel_xyz = body_state.ang_velocity_xyz
         body_position_xyz = body_state.pose.position
 
 
-        stats_minmaxavgstd_j_pve = self._environmentController.get_joints_state_step_stats()
+        stats_minmaxavgstd_j_pve = self._adapter.get_joints_state_step_stats()
         if not th.all(th.isfinite(stats_minmaxavgstd_j_pve)):
             raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_j_pve}")
 
@@ -554,7 +554,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                             th.as_tensor(self._last_sent_pvesd[jn])])
                                 for jn in self._configuration.controlled_joints}
         new_robot_stats_state = {jname : stats_minmaxavgstd_j_pve[:,i,:].flatten()
-                                 for i,jname in enumerate(self._environmentController.get_monitored_joints())}
+                                 for i,jname in enumerate(self._adapter.get_monitored_joints())}
         if th.any(th.concat([new_robot_state[jn][6:] for jn in self._configuration.controlled_joints])<0):
             ggLog.warn(f"negative gains in new_robot_state = {new_robot_state}")
         new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_LINVEL_X : body_linvel_xyz[0],
@@ -787,7 +787,7 @@ class LocomotionEnv(RobotEnv):
         internal_state = self._current_state[self.STATE_INTERNAL][0]
         step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
         
-        body_state : LinkState = self._environmentController.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
+        body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
         body_linvel_xyz = body_state.pos_velocity_xyz
         tracking_error = th.linalg.norm(body_linvel_xyz[:2]-self._locomotion_episode_config.goal_velocity_xy).cpu().item()
         prev_tracking_error = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
@@ -932,11 +932,11 @@ class LocomotionEnv(RobotEnv):
 
 
     def _simulation_initialization(self):
-        if not isinstance(self._environmentController, BaseSimulationAdapter):
+        if not isinstance(self._adapter, BaseSimulationAdapter):
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
         super()._simulation_initialization()
         if self._configuration.show_goal:
-            self._environmentController.setLinksStateDirect({self._red_ball_base :
+            self._adapter.setLinksStateDirect({self._red_ball_base :
                                                             LinkState( position_xyz = th.tensor((self._locomotion_episode_config.goal_velocity_xy[0],
                                                                                                  self._locomotion_episode_config.goal_velocity_xy[1],
                                                                                                  0.5), device=self._configuration.th_device),

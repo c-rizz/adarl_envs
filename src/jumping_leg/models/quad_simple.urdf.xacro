@@ -6,25 +6,25 @@
 
 	<!-- <xacro:arg name="hip_out_offset" default="0.2146" />  -->
 	<xacro:arg name="hip_out_offset" default="0.05" />
-	<xacro:arg name="front_legs_pos" default="0.25" />
-	<xacro:arg name="back_legs_pos" default="-0.25" />
+	<xacro:arg name="front_legs_pos" default="0.35" />
+	<xacro:arg name="back_legs_pos" default="-0.35" />
 
-	<xacro:arg name="thigh_width" default="0.05" />
+	<xacro:arg name="thigh_width" default="0.09" />
 	<xacro:arg name="thigh_height" default="0.3" />
-	<xacro:arg name="thigh_mass" default="3.3712777" />
+	<xacro:arg name="thigh_mass" default="2" />
 	<xacro:arg name="thigh_color" default="1 0.5088 0.0468 1" />
 
 	<xacro:arg name="knee_y_offset" default="-0.05" />
 
-	<xacro:arg name="shin_width" default="0.05" />
-	<xacro:arg name="shin_height" default="0.451" />
-	<xacro:arg name="shin_mass" default="1.3106594" />
+	<xacro:arg name="shin_width" default="0.06" />
+	<xacro:arg name="shin_height" default="0.35" />
+	<xacro:arg name="shin_mass" default="1" />
 	<xacro:arg name="shin_color" default="1 0.5088 0.0468 1" />
 
-	<xacro:arg name="body_width" default="0.3" />
-	<xacro:arg name="body_length" default="0.6" />
-	<xacro:arg name="body_height" default="0.15" />
-	<xacro:arg name="body_mass" default="8" />
+	<xacro:arg name="body_width" default="0.45" />
+	<xacro:arg name="body_length" default="0.8" />
+	<xacro:arg name="body_height" default="0.20" />
+	<xacro:arg name="body_mass" default="12" />
 
 	<xacro:arg name="hip_friction" default="0.1" />
 	<xacro:arg name="knee_friction" default="0.1" />

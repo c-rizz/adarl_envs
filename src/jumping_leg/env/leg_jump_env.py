@@ -771,7 +771,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     @override
     def initializeEpisode(self, options = {}) -> None:
 
-        self._current_state : LegJumpEnv.State = self._state_helper.reset_state(initial_values={
+        self._current_state : LegJumpEnv.State = self._state_helper.init_state(initial_values={
             self.STATE_EXTRINSIC : th.tensor(0.0),
             self.STATE_ROBOT : th.tensor(0.0),
             self.STATE_ROBOT_STATS : th.tensor(0.0),
@@ -1298,7 +1298,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         
         
         if step_count <= 0:
-            self._current_state = self._state_helper.reset_state(instantaneous_state)
+            self._current_state = self._state_helper.init_state(instantaneous_state)
         else:
             self._state_helper.update(instantaneous_state, state=self._current_state)
         

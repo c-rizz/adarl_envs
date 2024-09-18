@@ -87,9 +87,9 @@ def env_builder(seed,
     model_file = adarl.utils.utils.pkgutil_get_path("jumping_leg","models/quad_simple.urdf.xacro")
     urdf_string = adarl.utils.utils.compile_xacro_string(  model_definition_string=Path(model_file).read_text())
 
-    lrenv = LocomotionEnv(  action_delay_mustd = (0.0,0.0),
-                            action_noise_mustd = (0.0,0.0), 
-                            action_smoothing_halflife_sec=0.01,
+    lrenv = LocomotionEnv(  action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
+                            action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
+                            action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                             adapter=env_controller,
                             control_mode = env_builder_args.pop("control_mode"),
                             controlled_joints=[LocomotionEnv.JOINT_FILTERS.ALL_REVOLUTE],
@@ -98,8 +98,8 @@ def env_builder(seed,
                             maxStepsPerEpisode=max_steps,
                             minmax_damping=(1.0,30.0),
                             minmax_stiffness=(50.0,1000.0),
-                            obs_noise_ep_mustd=(0.0,0.0),
-                            obs_noise_step_std=0.0,
+                            obs_noise_ep_mustd=env_builder_args.pop("obs_noise_ep_mustd"),
+                            obs_noise_step_std=env_builder_args.pop("obs_noise_step_std"),
                             reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
                             reward_contacts_weight = env_builder_args.pop("reward_contacts_weight"),
                             reward_energy_weight = env_builder_args.pop("reward_energy_weight"),
@@ -121,10 +121,10 @@ def env_builder(seed,
                             th_device=th_device,
                             safe_damping=env_builder_args.pop("safe_damping"),
                             safe_stiffness=env_builder_args.pop("safe_stiffness"),
-                            homing_joint_pose={("quad","hip_joint_x_back_left") : 0.4,
-                                               ("quad","hip_joint_x_back_right") : 0.4,
-                                               ("quad","hip_joint_x_front_left") : 0.4,
-                                               ("quad","hip_joint_x_front_right") : 0.4,
+                            homing_joint_pose={("quad","hip_joint_x_back_left") : -3.14159*0.4,
+                                               ("quad","hip_joint_x_back_right") : -3.14159*0.4,
+                                               ("quad","hip_joint_x_front_left") : -3.14159*0.4,
+                                               ("quad","hip_joint_x_front_right") : -3.14159*0.4,
                                                ("quad","hip_joint_y_back_left") : 0.75,
                                                ("quad","hip_joint_y_back_right") : 0.75,
                                                ("quad","hip_joint_y_front_left") : 0.75,
@@ -134,6 +134,11 @@ def env_builder(seed,
                                                ("quad","knee_joint_front_left") : 1.8,
                                                ("quad","knee_joint_front_right") : 1.8}
                             )
+    ggLog.info(f"state_space = {lrenv.state_space}")
+    ggLog.info(f"observation_space = {lrenv.observation_space}")
+    ggLog.info(f"action_space = {lrenv.action_space.shape}")
+
+
     if no_dict:
         from adarl.envs.lr_wrappers.ObsDict2FlatBox import ObsDict2FlatBox
         lrenv = ObsDict2FlatBox(lrenv, "vec")
@@ -177,7 +182,7 @@ video_recorder_kwargs : dict[str,typing.Any]  = dict(vec_obs_key="vec",
                                     # f"rTorque {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]:.2f}\n"+
                                     # f"rTrack  {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]:.2f}\n"+
                                     # f"rVeloci {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]:.2f}\n"
-                                    f"goal_xy  {info['state_internal'][[LocomotionEnv.INTERNAL_FIELDS.GOAL_VELOCITY_X,LocomotionEnv.INTERNAL_FIELDS.GOAL_VELOCITY_Y]].cpu().tolist()}\n"
+                                    f"goal_xy  {info['state_internal'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_X,LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y]].cpu().tolist()}\n"
                                     f"safety   {info['state_internal'][LocomotionEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]:.2f}\n"
                                     # f"position {info['state_robot'][0]:.2f}, {info['state_robot'][8]:.2f}\n"
                                     # f"velocity {info['state_robot'][1]:.2f}, {info['state_robot'][8+1]:.2f}\n"

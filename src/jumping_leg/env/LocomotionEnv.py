@@ -24,7 +24,7 @@ import dataclasses
 import numpy as np
 import torch as th
 
-class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
+class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
     @dataclass
     class Configuration:
@@ -48,21 +48,10 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         obs_dtype : th.dtype
         obs_noise_ep_mustd : th.Tensor
         obs_noise_step_std : th.Tensor
+        observe_body_state : bool
         original_max_epsteps : int
         randomize_initial_pose : bool
         real : bool
-        reward_acceleration_weight : float
-        reward_contacts_weight : float
-        reward_energy_weight : float
-        reward_max_impulse : float
-        reward_position_limit_weight : float
-        reward_scale : float
-        reward_torque_limit_weight : float
-        reward_torque_weight : float
-        reward_torquediff_weight : float
-        reward_tracking_weight : float
-        reward_velocity_limit_weight : float
-        reward_velocity_weight : float
         robot_name : str
         safe_damping : float
         safe_stiffness : float
@@ -83,23 +72,16 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     STATE_INTERNAL = "internal"
     
     
-    INTERNAL_FIELDS = IntEnum("INTERNAL_FIELDS", [  "GOAL_VELOCITY_X",
-                                                    "GOAL_VELOCITY_Y",
-                                                    "SAFETY_TRIGGERED",
-                                                    "STEP_COUNT",
-                                                    "REWARD_TRACKING_WEIGHT",
-                                                    "REWARD_TORQUE_WEIGHT",
-                                                    "REWARD_TORQUE_LIMIT_WEIGHT",
-                                                    "REWARD_VELOCITY_WEIGHT",
-                                                    "REWARD_ACCELERATION_WEIGHT",
-                                                    "REWARD_POSITION_LIMIT_WEIGHT",
-                                                    "REWARD_VELOCITY_LIMIT_WEIGHT",
-                                                    "REWARD_TORQUEDIFF_WEIGHT",
-                                                    "SMOOTHED_TRACKING_ERROR"], start=0)
+    INTERNAL_FIELDS = IntEnum("INTERNAL_FIELDS", [  "SAFETY_TRIGGERED",
+                                                    "STEP_COUNT"], start=0)
 
-    EXTRINSIC_FIELDS = IntEnum("EXTRINSIC_FIELS", ["BODY_VEL_X",
-                                                   "BODY_VEL_Y",
-                                                   "BODY_VEL_Z"], start=0)
+    EXTRINSIC_FIELDS = IntEnum("EXTRINSIC_FIELS", ["BODY_LINVEL_X",
+                                                   "BODY_LINVEL_Y",
+                                                   "BODY_LINVEL_Z",
+                                                   "BODY_ANGVEL_X",
+                                                   "BODY_ANGVEL_Y",
+                                                   "BODY_ANGVEL_Z",
+                                                   "BODY_POS_Z"], start=0)
     ACT_FIELDS = IntEnum("ACT_FIELDS", ["ACTION"], start=0)
     
     JOINT_FILTERS = Enum("JointFilters",["ALL_REVOLUTE",
@@ -108,16 +90,8 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     joint_filters = {JOINT_FILTERS.ALL : lambda joint_name, robot_model: True,
                      JOINT_FILTERS.ALL_REVOLUTE : lambda joint_name, robot_model: robot_model.get_joint_properties([joint_name])[joint_name]["type"] == Robot.JOINT_TYPES.REVOLUTE}
 
-    class State(TypedDict):
-        action : th.Tensor
-        robot : th.Tensor
-        robot_stats : th.Tensor
-        extrinsic : th.Tensor
-        internal : th.Tensor
-
     @dataclass
     class EpisodeConfiguration:
-        goal_velocity_xy : th.Tensor
         initial_joint_pose : th.Tensor
         max_ep_steps : th.Tensor
 
@@ -139,17 +113,6 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
                         obs_noise_ep_mustd : Sequence[float] | th.Tensor, 
                         obs_noise_step_std : Sequence[float] | float | th.Tensor,
-                        reward_acceleration_weight : float,
-                        reward_contacts_weight : float,
-                        reward_energy_weight : float,
-                        reward_position_limit_weight : float,
-                        reward_scale : float,
-                        reward_torque_limit_weight : float,
-                        reward_torque_weight : float,
-                        reward_torquediff_weight : float,
-                        reward_tracking_weight : float,
-                        reward_velocity_limit_weight : float,
-                        reward_velocity_weight : float,
                         robot_main_body_link : str,
                         robot_name : str,
                         robot_urdf_string : str,
@@ -163,12 +126,14 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         th_device : th.device,
                         homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float] = (0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0),
                         homing_joint_pose : dict[tuple[str,str], float] = {},
-                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] = {}
+                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] = {},
+                        observe_body_velocity : bool = True
                         ):
         
         self._rng = th.Generator(device=th_device)
         self._spawned = False
         self._robot_model = Robot(adarl.utils.utils.compile_xacro_string(  model_definition_string=robot_urdf_string))
+        self._current_state = {}
 
         controlled_joints_str = []
         for j in controlled_joints:
@@ -210,20 +175,20 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
         ggLog.info(f"phys_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in phys_limits_minmax_pve.items()]))
         ggLog.info(f"safe_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
-        ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
+        ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
         ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
 
         self._configuration = LocomotionEnv.Configuration(  action_delay_mustd = th.as_tensor(action_delay_mustd, device=th_device),
                                                             action_exp_smoothing_1s = action_exp_smoothing_1s,
                                                             action_noise_mustd = th.as_tensor(action_noise_mustd, device=th_device),
-                                                            control_mode = JointImpedanceActionHelper.CONTROL_MODES[control_mode.upper()],
                                                             control_limits_minmax_pve = control_limits_minmax_pve,
+                                                            control_mode = JointImpedanceActionHelper.CONTROL_MODES[control_mode.upper()],
                                                             controlled_joints = controlled_joints_rn,
                                                             frame_stack_length = 3,
                                                             goal_err_exp_smoothing_1s = goal_err_exp_smoothing_1s,
                                                             history_length = 3,
-                                                            homing_joint_pose = homing_joint_pose,
                                                             homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
+                                                            homing_joint_pose = map_tensor_tree(homing_joint_pose, lambda v: th.as_tensor(v, device=th_device)),
                                                             joint_physical_limits_minmax_pve = phys_limits_minmax_pve,
                                                             joint_safe_limits_minmax_damping = minmax_damping_thdict,
                                                             joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
@@ -233,31 +198,20 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             obs_dtype = th.float32,
                                                             obs_noise_ep_mustd = th.as_tensor(obs_noise_ep_mustd, device=th_device),
                                                             obs_noise_step_std = th.as_tensor(obs_noise_step_std, device=th_device),
+                                                            observe_body_state = observe_body_velocity,
                                                             original_max_epsteps = maxStepsPerEpisode,
                                                             randomize_initial_pose = False,
                                                             real = False,
-                                                            reward_acceleration_weight = reward_acceleration_weight,
-                                                            reward_contacts_weight = reward_contacts_weight,
-                                                            reward_energy_weight = reward_energy_weight,
-                                                            reward_max_impulse = 10,
-                                                            reward_position_limit_weight = reward_position_limit_weight,
-                                                            reward_scale = reward_scale,
-                                                            reward_torque_limit_weight = reward_torque_limit_weight,
-                                                            reward_torque_weight = reward_torque_weight,
-                                                            reward_torquediff_weight = reward_torquediff_weight,
-                                                            reward_tracking_weight = reward_tracking_weight,
-                                                            reward_velocity_limit_weight = reward_velocity_limit_weight,
-                                                            reward_velocity_weight = reward_velocity_weight,
                                                             robot_name = robot_name,
                                                             safe_damping = safe_damping,
                                                             safe_stiffness = safe_stiffness,
+                                                            seed = seed,
                                                             show_goal = True,
                                                             stepLength_sec = stepLength_sec,
                                                             stop_on_safety = stop_on_safety,
                                                             th_device = th_device,
-                                                            seed = seed,
-                                                            ui_camera_name="simple_camera",
-                                                            ui_camera_link = ("simple_camera", "simple_camera_link")
+                                                            ui_camera_link = ("simple_camera", "simple_camera_link"),
+                                                            ui_camera_name="simple_camera"
                                                             )
 
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
@@ -284,27 +238,20 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                               obs_dtype=th.float32,
                                               th_device=th_device,
                                               field_size=(1,),
-                                              fields_minmax={   self.INTERNAL_FIELDS.GOAL_VELOCITY_X : [-10,10],
-                                                                self.INTERNAL_FIELDS.GOAL_VELOCITY_Y : [-10,10],
-                                                                self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1],
-                                                                self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000_000],                                                                
-                                                                self.INTERNAL_FIELDS.REWARD_TRACKING_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_TORQUE_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_VELOCITY_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_ACCELERATION_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_TORQUEDIFF_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.SMOOTHED_TRACKING_ERROR : [0,10]},
-                                                observable_fields=[self.INTERNAL_FIELDS.GOAL_VELOCITY_X,self.INTERNAL_FIELDS.GOAL_VELOCITY_Y])
+                                              fields_minmax={   self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1],
+                                                                self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000_000]},
+                                                observable_fields=[])
         extrinsic_state_helper =  ThBoxStateHelper(field_names=[e.value for e in self.EXTRINSIC_FIELDS],
                                               obs_dtype=th.float32,
                                               th_device=th_device,
                                               field_size=(1,),
-                                              fields_minmax={   self.EXTRINSIC_FIELDS.BODY_VEL_X : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_VEL_Y : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_VEL_Z : [-100,100]},
+                                              fields_minmax={   self.EXTRINSIC_FIELDS.BODY_LINVEL_X : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Y : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Z : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_X : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Y : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Z : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_POS_Z : [-10,10]},
                                                history_length=self._configuration.frame_stack_length)
         act_history_state_helper = ThBoxStateHelper(field_names=[self.ACT_FIELDS.ACTION],
                                                obs_dtype=th.float32,
@@ -319,14 +266,22 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                             self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
                                             episode_mu_std = self._configuration.obs_noise_ep_mustd,
                                             step_std = self._configuration.obs_noise_step_std)        
-        self._state_helper = DictStateHelper({self.STATE_ROBOT : robot_state_helper,
-                                              self.STATE_ROBOT_STATS : robot_stats_state_helper,
-                                              self.STATE_EXTRINSIC : extrinsic_state_helper,
-                                              self.STATE_INTERNAL : internal_state_helper,
-                                              self.STATE_ACT: act_history_state_helper},
-                                              observable_fields=[   self.STATE_ROBOT,
-                                                                    self.STATE_EXTRINSIC,
-                                                                    self.STATE_INTERNAL],
+        if self._configuration.observe_body_state:
+            observable_fields = [   self.STATE_ROBOT,
+                                    self.STATE_EXTRINSIC,
+                                    self.STATE_INTERNAL]
+        else:
+            observable_fields = [   self.STATE_ROBOT,
+                                    self.STATE_INTERNAL]
+        statehelpers : dict[str,ThBoxStateHelper] = {self.STATE_ROBOT : robot_state_helper,
+                        self.STATE_ROBOT_STATS : robot_stats_state_helper,
+                        self.STATE_EXTRINSIC : extrinsic_state_helper,
+                        self.STATE_INTERNAL : internal_state_helper,
+                        self.STATE_ACT: act_history_state_helper}
+        # ggLog.info("\n".join([f"{k} : state={s._state_space.shape}  obs ={s._obs_space.shape}" for k,s in statehelpers.items()]))
+
+        self._state_helper = DictStateHelper(statehelpers,
+                                              observable_fields=observable_fields,
                                               noise = {
                                                     self.STATE_ROBOT : robot_state_noise,
                                                     self.STATE_EXTRINSIC : extrinsic_state_noise},
@@ -342,12 +297,6 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         state_space = self._state_helper.get_space()
         observation_space = self._state_helper.get_obs_space()
         action_space = self._action_helper.action_space(seed=seed)
-
-        self._current_state : LocomotionEnv.State = LocomotionEnv.State(action=th.empty(0),
-                                                              robot=th.empty(0),
-                                                              robot_stats=th.empty(0),
-                                                              extrinsic=th.empty(0),
-                                                              internal=th.empty(0))
 
         super().__init__(maxStepsPerEpisode,
                          stepLength_sec,
@@ -394,86 +343,6 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
 
 
-    @override
-    def computeReward(self, previousState : dict[str,th.Tensor],
-                      state : dict[str,th.Tensor],
-                      action : th.Tensor,
-                      env_conf,
-                      sub_rewards : dict[str,th.Tensor] = {}, dbg_info = None) -> th.Tensor:
-
-        # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
-
-        max_rew = 100
-
-        robot_state_norm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT])
-        # normpositions = robot_state_norm[:,0]
-        normvelocities = robot_state_norm[0][:,1]
-        normtorques = robot_state_norm[0][:,2]
-        normaccelerations = robot_state_norm[0][:,1] - robot_state_norm[1][:,1]
-        normtorquediff = robot_state_norm[0][:,2] - robot_state_norm[1][:,2]
-
-        robot_state_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)[0]
-        position_safenorm = robot_state_safenorm[:,0]
-        velocities_safenorm = robot_state_safenorm[:,1]
-        torque_safenorm = robot_state_safenorm[:,2]
-
-        torque_reward = - th.clamp(th.mean(th.pow(normtorques,4)),-max_rew,max_rew)
-        velocity_reward = - th.clamp(th.mean(th.pow(normvelocities,4)),-max_rew,max_rew)
-        acceleration_reward = - th.clamp(th.mean(th.pow(normaccelerations,2)),-max_rew,max_rew)
-        torquediff_reward = - th.clamp(th.mean(th.pow(normtorquediff,2)),-max_rew,max_rew)
-
-        torque_limit_reward = -th.clamp(th.mean(th.pow(torque_safenorm,50)),-max_rew,max_rew)
-        position_limit_reward = -th.clamp(th.mean(th.pow(position_safenorm,50)),-max_rew,max_rew)
-        velocity_limit_reward = -th.clamp(th.mean(th.pow(velocities_safenorm,50)),-max_rew,max_rew)
-
-
-        internal_state = state[self.STATE_INTERNAL][0]
-        goal_dist = internal_state[self.INTERNAL_FIELDS.SMOOTHED_TRACKING_ERROR]
-        # tracking_reward = 1 - goal_dist
-        # tracking_reward = 1/(1+goal_dist/0.05)       # 0.50 at 0.05m, 0.35 at 0.10m, 0.2 at 0.2
-        tracking_reward = 1/(1+(goal_dist/0.1)**2) # 0.75 at 0.05m, 0.50 at 0.10m, 0.2 at 0.2
-
-        sub_rewards["reward_tracking"] = tracking_reward
-        sub_rewards["reward_torque"] = torque_reward
-        sub_rewards["reward_torque_limit"] = torque_limit_reward
-        sub_rewards["reward_torquediff"] = torquediff_reward
-        sub_rewards["reward_velocity"] = velocity_reward
-        sub_rewards["reward_velocity_limit"] = velocity_limit_reward
-        sub_rewards["reward_acceleration"] = acceleration_reward
-        sub_rewards["reward_position_limit"] = position_limit_reward
-        sub_rewards["reward_health"] = th.tensor(1, device=internal_state.device)
-        sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards.items()}
-
-        weights = { "reward_tracking" : internal_state[self.INTERNAL_FIELDS.REWARD_TRACKING_WEIGHT],
-                    "reward_torque" : internal_state[self.INTERNAL_FIELDS.REWARD_TORQUE_WEIGHT],
-                    "reward_torque_limit" : internal_state[self.INTERNAL_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT],
-                    "reward_torquediff" : internal_state[self.INTERNAL_FIELDS.REWARD_TORQUEDIFF_WEIGHT],
-                    "reward_velocity" : internal_state[self.INTERNAL_FIELDS.REWARD_VELOCITY_WEIGHT],
-                    "reward_velocity_limit" : internal_state[self.INTERNAL_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT],
-                    "reward_acceleration" : internal_state[self.INTERNAL_FIELDS.REWARD_ACCELERATION_WEIGHT],
-                    "reward_position_limit" : internal_state[self.INTERNAL_FIELDS.REWARD_POSITION_LIMIT_WEIGHT],
-                    "reward_health" : 1}
-        for k in sub_rewards:
-            sub_rewards[k] = sub_rewards[k]*env_conf["reward_scale"]*weights[k]
-        sub_rewards = {k:v.squeeze() for k,v in sub_rewards.items()}
-        sub_rewards_unscaled = {k:v.squeeze() for k,v in sub_rewards_unscaled.items()}
-        reward = th.as_tensor(sum(list(sub_rewards.values())))
-
-        if dbg_info is not None:
-            sub_rewards_scaled = {f"{k}_scaled":v for k,v in sub_rewards.items()}
-            sub_rewards_scaled_agg_names = [k for k in sub_rewards_scaled.keys()]
-            sub_rewards_scaled_agg = th.stack([sub_rewards_scaled[k] for k in sub_rewards_scaled_agg_names])
-            sub_rewards_scaled_agg_names = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in sub_rewards_scaled_agg_names], dtype=th.uint8)
-            sub_rewards_unscaled_agg_names = [k for k in sub_rewards_unscaled.keys()]
-            sub_rewards_unscaled_agg = th.stack([sub_rewards_unscaled[k] for k in sub_rewards_unscaled_agg_names])
-            sub_rewards_unscaled_agg_names = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in sub_rewards_unscaled_agg_names], dtype=th.uint8)
-            dbg_info["sub_rewards_unscaled"] = sub_rewards_unscaled_agg
-            dbg_info["sub_rewards_unscaled_labels"] = sub_rewards_unscaled_agg_names
-            dbg_info["sub_rewards_scaled"] = sub_rewards_scaled_agg
-            dbg_info["sub_rewards_scaled_labels"] = sub_rewards_scaled_agg_names
-            dbg_info.update({k:r.cpu().item() if isinstance(r,th.Tensor) else r for k,r in sub_rewards.items()})
-            dbg_info["reward"] = reward
-        return reward
     
 
 
@@ -486,13 +355,7 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     @override
     def initializeEpisode(self, options = {}) -> None:
 
-        self._current_state : LocomotionEnv.State = self._state_helper.reset_state(initial_values={
-            self.STATE_EXTRINSIC : th.tensor(0.0),
-            self.STATE_ROBOT : th.tensor(0.0),
-            self.STATE_ROBOT_STATS : th.tensor(0.0),
-            self.STATE_ACT : th.tensor(0.0),
-            self.STATE_INTERNAL : th.tensor(0.0)
-        })
+        self._current_state = self._state_helper.reset_state()
         self._current_state[self.STATE_INTERNAL][0,self.INTERNAL_FIELDS.STEP_COUNT] = th.tensor(-1.)
         self._last_obs = None
 
@@ -527,12 +390,6 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
         
         self._set_current_ep_config(reset_options = options)
-
-        body_state = self._environmentController.getLinksState([self._configuration.main_body_link], use_com_frame=True)[self._configuration.main_body_link]
-        initial_tracking_error = th.linalg.norm(body_state.pos_velocity_xyz[:2]-self._current_episode_config.goal_velocity_xy).cpu().item()
-        self._stats = copy.deepcopy(self.Statistics(tracking_errors=th.full(  size=(int(self._maxStepsPerEpisode/10),),
-                                                                            fill_value=initial_tracking_error,
-                                                                            dtype=th.float32, device=self._configuration.th_device)))
         
         if isinstance(self._environmentController, BaseSimulationAdapter):
             self._simulation_initialization()
@@ -545,26 +402,16 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         self._update_stats()
 
 
-    def _set_current_ep_config(self, reset_options : dict):
-        if reset_options is not None:
-            reset_options = {}
-        # Having conservative values here will not make the policy learn to behave nice in unfeasible cases
-        # Having too broad value will have unfeasible cases in training
-        goal_velocity_xy = th.tanh(th.randn(size=(2,),generator=self._rng)/5)*5 * 2        
-        if "goal_velocity_xy" in reset_options: goal_velocity_xy = reset_options["goal_velocity_xy"]
-        goal_velocity_xy = th.as_tensor((1.,0.), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
-
-        maxStepsPerEpisode = reset_options.get("max_ep_steps", self._configuration.original_max_epsteps)
-           
+    def _set_current_ep_config(self, reset_options : dict = {}):
+        maxStepsPerEpisode = reset_options.get("max_ep_steps", self._configuration.original_max_epsteps)           
         found_good_configuration = False
         if self._configuration.randomize_initial_pose:
             raise NotImplementedError()
         if not found_good_configuration:
-            initial_joint_pose = th.as_tensor([self._configuration.homing_joint_pose[jn] for jn in self._configuration.controlled_joints], device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
-        
-        # ggLog.info(f"{os.getpid()} init: chosen jpos= {rail_hip_knee_pos.cpu().tolist()}")        
-        self._current_episode_config = LocomotionEnv.EpisodeConfiguration(   goal_velocity_xy=goal_velocity_xy,
-                                                                        initial_joint_pose = initial_joint_pose,
+            initial_joint_pose = th.as_tensor([self._configuration.homing_joint_pose[jn] for jn in self._configuration.controlled_joints],
+                                              device=self._configuration.th_device,
+                                              dtype=self._configuration.obs_dtype)
+        self._current_episode_config = RobotEnv.EpisodeConfiguration(   initial_joint_pose = initial_joint_pose,
                                                                         max_ep_steps = maxStepsPerEpisode)
         self.set_max_episode_steps(self._current_episode_config.max_ep_steps)
 
@@ -592,16 +439,6 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         self._environmentController.setJointsImpedanceCommand(start_jimp)
         self._environmentController.apply_joint_impedances(start_jimp)
         self._last_sent_pvesd = start_jimp
-
-        if self._configuration.show_goal:
-            self._environmentController.setLinksStateDirect({self._red_ball_base :
-                                                            LinkState( position_xyz = th.tensor((self._current_episode_config.goal_velocity_xy[0],
-                                                                                                 self._current_episode_config.goal_velocity_xy[1],
-                                                                                                 0.5), device=self._configuration.th_device),
-                                                                        orientation_xyzw = th.tensor((0.,0.,0.,1.0), device=self._configuration.th_device),
-                                                                        pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
-                                                                        ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
-    
 
     @override
     def buildSimulation(self):
@@ -674,12 +511,14 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         self._last_step_simtime = self._environmentController.getEnvTimeFromReset()
 
 
-    def _update_state(self):
+    def _get_new_instantaneous_state(self):
         # ggLog.info(f"_stepCounter = {self._stepCounter}")
         
         jstates = self._environmentController.getJointsState(requestedJoints=self._configuration.controlled_joints)
-        lstates = self._environmentController.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)
-        body_vel_xyz = lstates[self._configuration.main_body_link].pos_velocity_xyz
+        body_state : LinkState = self._environmentController.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
+        body_linvel_xyz = body_state.pos_velocity_xyz
+        body_angvel_xyz = body_state.ang_velocity_xyz
+        body_position_xyz = body_state.pose.position
 
 
         stats_minmaxavgstd_j_pve = self._environmentController.get_joints_state_step_stats()
@@ -695,41 +534,20 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                              stats_minmaxavgstd_j_pve[1] > self._safe_limits_minmax_j_pve[1])
             safety_triggered = th.any(triggered_limits)
             if safety_triggered:       
-                elements = np.array([[f"{jn}_pos",f"{jn}_vel",f"{jn}_eff"] for jn in self._configuration.controlled_joints], dtype=object) #type: ignore
+                elements = np.array([[f"{jn[1]}_pos",f"{jn[1]}_vel",f"{jn[1]}_eff"] for jn in self._configuration.controlled_joints], dtype=object) #type: ignore
                 triggered = []
                 for i in np.ndindex(elements.shape):
                     if triggered_limits[i]:
                         triggered.append(elements[i])
-                ggLog.info( f"SAFETY TRIGGERED:\n"
-                            f"    triggered ({len(triggered)}) = {triggered}\n"
-                            # f"    joints_minmax = \n{stats_minmaxavgstd_j_pve[:2]}\n"
-                            # f"    j_safety_lims  = \n{self._safe_limits_minmax_j_pve} "
+                ggLog.info( f"SAFETY TRIGGERED:"
+                            f"\n    triggered ({len(triggered)}) = {triggered}"
+                            # f"\n    joints_minmax = \n{stats_minmaxavgstd_j_pve[:2]}"
+                            # f"\n    j_safety_lims  = \n{self._safe_limits_minmax_j_pve} "
                             )
 
 
-
-        tracking_error = th.linalg.norm(body_vel_xyz[:2]-self._current_episode_config.goal_velocity_xy).cpu().item()
-        prev_tracking_error = internal_state[self.INTERNAL_FIELDS.SMOOTHED_TRACKING_ERROR]
-        alpha = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.stepLength_sec)
-        if step_count > 0:
-            smoothed_goal_dist = tracking_error*(1-alpha) + prev_tracking_error*alpha
-        else:
-            smoothed_goal_dist = 1
-
-        new_internal_state = {
-                        self.INTERNAL_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT : self._configuration.reward_torque_limit_weight,
-                        self.INTERNAL_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : self._configuration.reward_position_limit_weight,
-                        self.INTERNAL_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : self._configuration.reward_velocity_limit_weight,
-                        self.INTERNAL_FIELDS.REWARD_VELOCITY_WEIGHT : self._configuration.reward_velocity_weight,
-                        self.INTERNAL_FIELDS.REWARD_ACCELERATION_WEIGHT : self._configuration.reward_acceleration_weight,
-                        self.INTERNAL_FIELDS.REWARD_TRACKING_WEIGHT : self._configuration.reward_tracking_weight,
-                        self.INTERNAL_FIELDS.REWARD_TORQUE_WEIGHT : self._configuration.reward_torque_weight,
-                        self.INTERNAL_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._configuration.reward_torquediff_weight,
-                        self.INTERNAL_FIELDS.SAFETY_TRIGGERED : 1 if safety_triggered else 0,
-                        self.INTERNAL_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_goal_dist,
-                        self.INTERNAL_FIELDS.STEP_COUNT : step_count+1,
-                        self.INTERNAL_FIELDS.GOAL_VELOCITY_X : self._current_episode_config.goal_velocity_xy[0],
-                        self.INTERNAL_FIELDS.GOAL_VELOCITY_Y : self._current_episode_config.goal_velocity_xy[1]}
+        new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : 1 if safety_triggered else 0,
+                                self.INTERNAL_FIELDS.STEP_COUNT : step_count+1}
         new_robot_state = {jn : th.concat([ jstates[jn].position[[0]],
                                             jstates[jn].rate[[0]],
                                             jstates[jn].effort[[0]],
@@ -739,22 +557,30 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                  for i,jname in enumerate(self._environmentController.get_monitored_joints())}
         if th.any(th.concat([new_robot_state[jn][6:] for jn in self._configuration.controlled_joints])<0):
             ggLog.warn(f"negative gains in new_robot_state = {new_robot_state}")
-        new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_VEL_X : body_vel_xyz[0],
-                                self.EXTRINSIC_FIELDS.BODY_VEL_Y : body_vel_xyz[1],
-                                self.EXTRINSIC_FIELDS.BODY_VEL_Z : body_vel_xyz[2]}
+        new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_LINVEL_X : body_linvel_xyz[0],
+                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Y : body_linvel_xyz[1],
+                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Z : body_linvel_xyz[2],
+                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_X : body_angvel_xyz[0],
+                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Y : body_angvel_xyz[1],
+                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Z : body_angvel_xyz[2],
+                                self.EXTRINSIC_FIELDS.BODY_POS_Z : body_position_xyz[2]}
         new_act_state = {self.ACT_FIELDS.ACTION : self._last_out_action}
         instantaneous_state = { self.STATE_EXTRINSIC    : new_extrinsic_state,
                                 self.STATE_ACT          : new_act_state,
                                 self.STATE_INTERNAL     : new_internal_state,
                                 self.STATE_ROBOT        : new_robot_state,
                                 self.STATE_ROBOT_STATS  : new_robot_stats_state}              
+        return instantaneous_state
         
-        
+
+
+    def _update_state(self):
+        instantaneous_state = self._get_new_instantaneous_state()
+        step_count = self._current_state[self.STATE_INTERNAL][0][self.INTERNAL_FIELDS.STEP_COUNT]
         if step_count <= 0:
             self._current_state = self._state_helper.reset_state(instantaneous_state)
         else:
             self._state_helper.update(instantaneous_state, state=self._current_state)
-        
         map_tensor_tree(self._current_state, lambda t: t.detach().clone())
 
 
@@ -766,24 +592,15 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                             th.tensor([]), 
                             env_conf=self.get_configuration(),
                             dbg_info=rew_dbg_info)
-        body_vel_xyz = self._current_state[self.STATE_EXTRINSIC][0][0:3]
-        tracking_error = th.linalg.norm(body_vel_xyz-self._current_episode_config.goal_velocity_xy)
-        if self._stepCounter>0:
-            self._stats.avg_tracking_error = (self._stats.avg_tracking_error*(self._stepCounter-1) + tracking_error.squeeze())/self._stepCounter
-        self._stats.tracking_errors[self._stepCounter%len(self._stats.tracking_errors)] = tracking_error.cpu().item()
-        self._stats.rewards = rew_dbg_info
-        return rew_dbg_info
+        if self._current_state[self.STATE_INTERNAL][0][self.INTERNAL_FIELDS.STEP_COUNT]<=0:
+            self._stats = {}
+        self._stats["rewards"] = rew_dbg_info
         
     @override
     def getInfo(self,state) -> dict[Any,Any]:
         i = super().getInfo(state=state)
-        robot_state = state[self.STATE_ROBOT][0]
         internal_state = state[self.STATE_INTERNAL][0]
-        i["goal_x"] = internal_state[self.INTERNAL_FIELDS.GOAL_VELOCITY_X]
-        i["goal_y"] = internal_state[self.INTERNAL_FIELDS.GOAL_VELOCITY_Y]
-        i.update(dataclasses.asdict(self._stats))
-        i["avg_tracking_error"] = self._stats.avg_tracking_error
-        i["avg10_tracking_errors"] = th.mean(self._stats.tracking_errors)
+        i.update(self._stats)
         i["step_count"] = self._stepCounter
 
         statenorm = self._state_helper.normalize(state)
@@ -793,13 +610,12 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
             i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
             
-        i.update(self._stats.rewards)
+        i.update(self._stats["rewards"])
         i["ep_config"] = dataclasses.asdict(self._current_episode_config)
         i["safety_triggered"] = internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED]
-        i["success"] = i["avg10_tracking_errors"] < 0.05
         i["vec_obs"] = self._last_obs["vec"]
         obslabels = [n.encode("utf-8").ljust(64)[:64] for n in self._state_helper.observation_names()["vec"]]
-        i["vec_obs_labels"] = th.as_tensor(obslabels, dtype=th.uint8)
+        i["vec_obs_labels"] = th.as_tensor(obslabels, dtype=th.uint8)        
         return i
 
     @override
@@ -821,3 +637,309 @@ class LocomotionEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         self._rng = self._rng.manual_seed(seed)
         self.action_space.seed(seed)
         self.observation_space.seed(seed)
+
+
+
+
+
+
+
+class LocomotionEnv(RobotEnv):
+    STATE_LOCOMOTION = "loco"
+
+    @dataclass
+    class LocomotionConfiguration:
+        reward_acceleration_weight : float
+        reward_contacts_weight : float
+        reward_energy_weight : float
+        reward_position_limit_weight : float
+        reward_scale : float
+        reward_torque_limit_weight : float
+        reward_torque_weight : float
+        reward_torquediff_weight : float
+        reward_tracking_weight : float
+        reward_velocity_limit_weight : float
+        reward_velocity_weight : float
+
+
+    @dataclass
+    class EpisodeLocomConfiguration:
+        goal_velocity_xy : th.Tensor
+
+    LOCOMOTION_FIELDS = IntEnum("INTERNAL_FIELDS", ["GOAL_VELOCITY_X",
+                                                    "GOAL_VELOCITY_Y",
+                                                    "REWARD_TRACKING_WEIGHT",
+                                                    "REWARD_TORQUE_WEIGHT",
+                                                    "REWARD_TORQUE_LIMIT_WEIGHT",
+                                                    "REWARD_VELOCITY_WEIGHT",
+                                                    "REWARD_ACCELERATION_WEIGHT",
+                                                    "REWARD_POSITION_LIMIT_WEIGHT",
+                                                    "REWARD_VELOCITY_LIMIT_WEIGHT",
+                                                    "REWARD_TORQUEDIFF_WEIGHT",
+                                                    "SMOOTHED_TRACKING_ERROR"], start=0)
+
+    def __init__(self,  action_delay_mustd : tuple[float,float],
+                        action_noise_mustd : Sequence[float] | th.Tensor, 
+                        action_smoothing_halflife_sec : float,
+                        adapter: BaseJointImpedanceAdapter,
+                        control_mode : Literal["impedance","impedance_no_gains","position_and_torques", "position_and_gains","torque","velocity","position"],
+                        controlled_joints : Sequence[str | RobotEnv.JOINT_FILTERS],
+                        goal_err_smoothing_halflife_sec : float,
+                        maxStepsPerEpisode,
+                        minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
+                        minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
+                        obs_noise_ep_mustd : Sequence[float] | th.Tensor, 
+                        obs_noise_step_std : Sequence[float] | float | th.Tensor,
+                        reward_acceleration_weight : float,
+                        reward_contacts_weight : float,
+                        reward_energy_weight : float,
+                        reward_position_limit_weight : float,
+                        reward_scale : float,
+                        reward_torque_limit_weight : float,
+                        reward_torque_weight : float,
+                        reward_torquediff_weight : float,
+                        reward_tracking_weight : float,
+                        reward_velocity_limit_weight : float,
+                        reward_velocity_weight : float,
+                        robot_main_body_link : str,
+                        robot_name : str,
+                        robot_urdf_string : str,
+                        safe_damping : float,
+                        safe_stiffness : float,
+                        safety_limits_factor : float,
+                        seed,
+                        stepLength_sec,
+                        step_precision_tolerance : float,
+                        stop_on_safety : bool,
+                        th_device : th.device,
+                        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float] = (0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0),
+                        homing_joint_pose : dict[tuple[str,str], float] = {},
+                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] = {},
+                        observe_body_velocity : bool = True):
+        super().__init__(action_delay_mustd = action_delay_mustd,
+                        action_noise_mustd = action_noise_mustd, 
+                        action_smoothing_halflife_sec = action_smoothing_halflife_sec,
+                        adapter = adapter,
+                        control_mode = control_mode,
+                        controlled_joints = controlled_joints,
+                        goal_err_smoothing_halflife_sec = goal_err_smoothing_halflife_sec,
+                        maxStepsPerEpisode = maxStepsPerEpisode,
+                        minmax_damping = minmax_damping,
+                        minmax_stiffness = minmax_stiffness,
+                        obs_noise_ep_mustd = obs_noise_ep_mustd, 
+                        obs_noise_step_std = obs_noise_step_std,
+                        robot_main_body_link = robot_main_body_link,
+                        robot_name = robot_name,
+                        robot_urdf_string = robot_urdf_string,
+                        safe_damping = safe_damping,
+                        safe_stiffness = safe_stiffness,
+                        safety_limits_factor = safety_limits_factor,
+                        seed = seed,
+                        stepLength_sec = stepLength_sec,
+                        step_precision_tolerance = step_precision_tolerance,
+                        stop_on_safety = stop_on_safety,
+                        th_device = th_device,
+                        homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
+                        homing_joint_pose = homing_joint_pose,
+                        control_limits_minmax_pve = control_limits_minmax_pve,
+                        observe_body_velocity = observe_body_velocity
+                        )
+        self._locomotion_conf = LocomotionEnv.LocomotionConfiguration(
+                        reward_acceleration_weight = reward_acceleration_weight,
+                        reward_contacts_weight  = reward_contacts_weight ,
+                        reward_energy_weight  = reward_energy_weight ,
+                        reward_position_limit_weight  = reward_position_limit_weight ,
+                        reward_scale  = reward_scale ,
+                        reward_torque_limit_weight  = reward_torque_limit_weight ,
+                        reward_torque_weight = reward_torque_weight,
+                        reward_torquediff_weight = reward_torquediff_weight,
+                        reward_tracking_weight = reward_tracking_weight,
+                        reward_velocity_limit_weight = reward_velocity_limit_weight,
+                        reward_velocity_weight = reward_velocity_weight)
+        locomotion_state_helper = ThBoxStateHelper( field_names=[e.value for e in self.LOCOMOTION_FIELDS],
+                                                    obs_dtype=th.float32,
+                                                    th_device=th_device,
+                                                    field_size=(1,),
+                                                    fields_minmax={ self.LOCOMOTION_FIELDS.GOAL_VELOCITY_X : [-10,10],
+                                                                    self.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y : [-10,10],                                                           
+                                                                    self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_VELOCITY_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : [0,10]},
+                                                    observable_fields=[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_X,
+                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y])
+        self._state_helper = self._state_helper.add_substate(LocomotionEnv.STATE_LOCOMOTION,
+                                                             locomotion_state_helper,
+                                                             observable = True,
+                                                             flatten = True)
+        self.state_space = self._state_helper.get_space()
+        self.observation_space = self._state_helper.get_obs_space()
+        self.action_space = self._action_helper.action_space(seed=seed)
+
+    @override
+    def _get_new_instantaneous_state(self):
+        locom_state = self._current_state[self.STATE_LOCOMOTION][0]
+        internal_state = self._current_state[self.STATE_INTERNAL][0]
+        step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
+        
+        body_state : LinkState = self._environmentController.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
+        body_linvel_xyz = body_state.pos_velocity_xyz
+        tracking_error = th.linalg.norm(body_linvel_xyz[:2]-self._locomotion_episode_config.goal_velocity_xy).cpu().item()
+        prev_tracking_error = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
+        alpha = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.stepLength_sec)
+        if step_count > 0:
+            smoothed_goal_dist = tracking_error*(1-alpha) + prev_tracking_error*alpha
+        else:
+            smoothed_goal_dist = 1
+        new_locom_state = {
+                        self.LOCOMOTION_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT : self._locomotion_conf.reward_torque_limit_weight,
+                        self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : self._locomotion_conf.reward_position_limit_weight,
+                        self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : self._locomotion_conf.reward_velocity_limit_weight,
+                        self.LOCOMOTION_FIELDS.REWARD_VELOCITY_WEIGHT : self._locomotion_conf.reward_velocity_weight,
+                        self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT : self._locomotion_conf.reward_acceleration_weight,
+                        self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT : self._locomotion_conf.reward_tracking_weight,
+                        self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT : self._locomotion_conf.reward_torque_weight,
+                        self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._locomotion_conf.reward_torquediff_weight,
+                        self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_goal_dist,
+                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_X : self._locomotion_episode_config.goal_velocity_xy[0],
+                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y : self._locomotion_episode_config.goal_velocity_xy[1]}
+        new_inst_state = super()._get_new_instantaneous_state()
+        new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
+        return new_inst_state
+    
+    @override
+    def computeReward(self, previousState : dict[str,th.Tensor],
+                      state : dict[str,th.Tensor],
+                      action : th.Tensor,
+                      env_conf,
+                      sub_rewards : dict[str,th.Tensor] = {}, dbg_info = None) -> th.Tensor:
+
+        # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
+
+        max_rew = 100
+
+        robot_state_norm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT])
+        # normpositions = robot_state_norm[:,0]
+        normvelocities = robot_state_norm[0][:,1]
+        normtorques = robot_state_norm[0][:,2]
+        normaccelerations = robot_state_norm[0][:,1] - robot_state_norm[1][:,1]
+        normtorquediff = robot_state_norm[0][:,2] - robot_state_norm[1][:,2]
+
+        robot_state_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)[0]
+        position_safenorm = robot_state_safenorm[:,0]
+        velocities_safenorm = robot_state_safenorm[:,1]
+        torque_safenorm = robot_state_safenorm[:,2]
+
+        torque_reward       = - th.clamp(th.mean(th.pow(normtorques,4)),-max_rew,max_rew)
+        velocity_reward     = - th.clamp(th.mean(th.pow(normvelocities,4)),-max_rew,max_rew)
+        acceleration_reward = - th.clamp(th.mean(th.pow(normaccelerations,2)),-max_rew,max_rew)
+        torquediff_reward   = - th.clamp(th.mean(th.pow(normtorquediff,2)),-max_rew,max_rew)
+
+        torque_limit_reward   = -th.clamp(th.mean(th.pow(torque_safenorm,50)),-max_rew,max_rew)
+        position_limit_reward = -th.clamp(th.mean(th.pow(position_safenorm,50)),-max_rew,max_rew)
+        velocity_limit_reward = -th.clamp(th.mean(th.pow(velocities_safenorm,50)),-max_rew,max_rew)
+
+
+        locom_state = state[self.STATE_LOCOMOTION][0]
+        goal_dist = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
+        # tracking_reward = 1 - goal_dist
+        # tracking_reward = 1/(1+goal_dist/0.05)       # 0.50 at 0.05m, 0.35 at 0.10m, 0.2 at 0.2
+        tracking_reward = 1/(1+(goal_dist/0.1)**2) # 0.75 at 0.05m, 0.50 at 0.10m, 0.2 at 0.2
+
+        sub_rewards["reward_tracking"] = tracking_reward
+        sub_rewards["reward_torque"] = torque_reward
+        sub_rewards["reward_torque_limit"] = torque_limit_reward
+        sub_rewards["reward_torquediff"] = torquediff_reward
+        sub_rewards["reward_velocity"] = velocity_reward
+        sub_rewards["reward_velocity_limit"] = velocity_limit_reward
+        sub_rewards["reward_acceleration"] = acceleration_reward
+        sub_rewards["reward_position_limit"] = position_limit_reward
+        sub_rewards["reward_health"] = th.tensor(1, device=locom_state.device)
+        sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards.items()}
+
+        weights = { "reward_tracking" : locom_state[self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT],
+                    "reward_torque" : locom_state[self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT],
+                    "reward_torque_limit" : locom_state[self.LOCOMOTION_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT],
+                    "reward_torquediff" : locom_state[self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT],
+                    "reward_velocity" : locom_state[self.LOCOMOTION_FIELDS.REWARD_VELOCITY_WEIGHT],
+                    "reward_velocity_limit" : locom_state[self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT],
+                    "reward_acceleration" : locom_state[self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT],
+                    "reward_position_limit" : locom_state[self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT],
+                    "reward_health" : 1}
+        for k in sub_rewards:
+            sub_rewards[k] = sub_rewards[k]*self._locomotion_conf.reward_scale*weights[k]
+        sub_rewards = {k:v.squeeze() for k,v in sub_rewards.items()}
+        sub_rewards_unscaled = {k:v.squeeze() for k,v in sub_rewards_unscaled.items()}
+        reward = th.as_tensor(sum(list(sub_rewards.values())))
+
+        if dbg_info is not None:
+            sub_rewards_scaled = {f"{k}_scaled":v for k,v in sub_rewards.items()}
+            sub_rewards_scaled_agg_names = [k for k in sub_rewards_scaled.keys()]
+            sub_rewards_scaled_agg = th.stack([sub_rewards_scaled[k] for k in sub_rewards_scaled_agg_names])
+            sub_rewards_scaled_agg_names = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in sub_rewards_scaled_agg_names], dtype=th.uint8)
+            sub_rewards_unscaled_agg_names = [k for k in sub_rewards_unscaled.keys()]
+            sub_rewards_unscaled_agg = th.stack([sub_rewards_unscaled[k] for k in sub_rewards_unscaled_agg_names])
+            sub_rewards_unscaled_agg_names = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in sub_rewards_unscaled_agg_names], dtype=th.uint8)
+            dbg_info["sub_rewards_unscaled"] = sub_rewards_unscaled_agg
+            dbg_info["sub_rewards_unscaled_labels"] = sub_rewards_unscaled_agg_names
+            dbg_info["sub_rewards_scaled"] = sub_rewards_scaled_agg
+            dbg_info["sub_rewards_scaled_labels"] = sub_rewards_scaled_agg_names
+            dbg_info.update({k:r.cpu().item() if isinstance(r,th.Tensor) else r for k,r in sub_rewards.items()})
+            dbg_info["reward"] = reward
+        return reward
+    
+
+    def _update_stats(self):
+        super()._update_stats()
+
+        step_count = self._current_state[self.STATE_INTERNAL][0][self.INTERNAL_FIELDS.STEP_COUNT]
+        body_linvel_xyz = self._current_state[self.STATE_EXTRINSIC][0][0:3]
+        goal_velocity_xy = self._current_state[self.STATE_LOCOMOTION][0,[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_X,self.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y]]
+        tracking_error = th.linalg.norm(body_linvel_xyz[:2] - goal_velocity_xy)
+        if step_count>0:
+            self._stats["avg_tracking_error"] = ((self._stats["avg_tracking_error"]*(step_count-1) + tracking_error.squeeze())/step_count).item()
+            self._stats["tracking_errors"][self._stepCounter%len(self._stats["tracking_errors"])] = tracking_error.cpu().item()
+        else:
+            self._stats["avg_tracking_error"] = tracking_error
+            self._stats["tracking_errors"] =  th.full(  size=(int(self._maxStepsPerEpisode/10),),
+                                                        fill_value=tracking_error,
+                                                        dtype=th.float32, device=self._configuration.th_device)
+            
+    @override
+    def getInfo(self,state) -> dict[Any,Any]:
+        i = super().getInfo(state=state)
+        internal_state = state[self.STATE_LOCOMOTION][0]
+        i["goal_x"] = internal_state[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_X]
+        i["goal_y"] = internal_state[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y]
+        i["avg_tracking_error"] = self._stats["avg_tracking_error"]
+        i["avg10_tracking_errors"] = th.mean(self._stats["tracking_errors"])
+        i["success"] = i["avg10_tracking_errors"] < 0.05
+        return i
+    
+    def _set_current_ep_config(self, reset_options : dict = {}):
+        super()._set_current_ep_config(reset_options=reset_options)
+        
+        # goal_velocity_xy = reset_options.get("goal_velocity_xy", th.tanh(th.randn(size=(2,),generator=self._rng)/5)*5 * 2)
+        goal_velocity_xy = th.as_tensor((10.,0.), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
+
+        self._locomotion_episode_config = LocomotionEnv.EpisodeLocomConfiguration(goal_velocity_xy=goal_velocity_xy)
+        self.set_max_episode_steps(self._current_episode_config.max_ep_steps)
+
+
+    def _simulation_initialization(self):
+        if not isinstance(self._environmentController, BaseSimulationAdapter):
+            raise RuntimeError(f"called simulation initialization with non-simulated adapter")
+        super()._simulation_initialization()
+        if self._configuration.show_goal:
+            self._environmentController.setLinksStateDirect({self._red_ball_base :
+                                                            LinkState( position_xyz = th.tensor((self._locomotion_episode_config.goal_velocity_xy[0],
+                                                                                                 self._locomotion_episode_config.goal_velocity_xy[1],
+                                                                                                 0.5), device=self._configuration.th_device),
+                                                                        orientation_xyzw = th.tensor((0.,0.,0.,1.0), device=self._configuration.th_device),
+                                                                        pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
+                                                                        ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})

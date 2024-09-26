@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"  ?>
+<robot name="red_intangible_ball" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+	<xacro:arg name="add_world_link" default="False" />
+
+	<xacro:property name="color_rgba" default="0.9 0.1 0.1 0.8" />
+	<xacro:property name="add_world_link" default="$(arg add_world_link)" />
+
+
+	<material name="red">
+		<color rgba="1 0 0 0.8"/>
+	</material>
+	<material name="green">
+		<color rgba="0 1 0 0.8"/>
+	</material>
+	<material name="blue">
+		<color rgba="0 0 1 0.8"/>
+	</material>
+
+
+	<xacro:macro name="box_inertial" params="mass x y z pose_xyz pose_rpy">
+		<inertial>
+			<origin xyz="${pose_xyz}" rpy="${pose_rpy}"/>
+			<mass value="${mass}" />
+			<inertia ixx="${0.083 * mass * (y*y + z*z)}" ixy="0.0" ixz="0.0" iyy="${0.083 * mass * (x*x + z*z)}" iyz="0.0" izz="${0.083 * mass * (x*x + y*y)}"/>
+		</inertial>
+	</xacro:macro>
+
+	<link name="x_arrow">
+        <visual>
+			<origin xyz="0.1 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/>
+            </geometry>
+			<material name="red"/>
+        </visual>
+		<xacro:box_inertial mass="0.001" x="1" y="1" z="1" pose_xyz="0 0 0" pose_rpy="0 0 0"/>
+	</link>
+	<gazebo reference="arrow_link">
+		<visual name="visual">
+			<material>
+				<ambient>${color_rgba}</ambient>
+				<diffuse>${color_rgba}</diffuse>				
+				<specular>0 0 0 1</specular>
+				<emissive>0 0 0 1</emissive>
+			</material>
+      	</visual>
+    </gazebo>
+	<link name="y_arrow">
+        <visual>
+			<origin xyz="0 0.1 0" rpy="0 0 1.5707"/>
+            <geometry>
+                <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/>
+            </geometry>
+			<material name="green"/>
+        </visual>
+		<xacro:box_inertial mass="0.001" x="1" y="1" z="1" pose_xyz="0 0 0" pose_rpy="0 0 0"/>
+	</link>
+	<gazebo reference="arrow_link">
+		<visual name="visual">
+			<material>
+				<ambient>${color_rgba}</ambient>
+				<diffuse>${color_rgba}</diffuse>				
+				<specular>0 0 0 1</specular>
+				<emissive>0 0 0 1</emissive>
+			</material>
+      	</visual>
+    </gazebo>
+	<link name="z_arrow">
+        <visual>
+			<origin xyz="0 0 0.1" rpy="0 -1.5707 0"/>
+            <geometry>
+                <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/>
+            </geometry>
+			<material name="blue"/>
+        </visual>
+		<xacro:box_inertial mass="0.001" x="1" y="1" z="1" pose_xyz="0 0 0" pose_rpy="0 0 0"/>
+	</link>
+	<gazebo reference="arrow_link">
+		<visual name="visual">
+			<material>
+				<ambient>${color_rgba}</ambient>
+				<diffuse>${color_rgba}</diffuse>				
+				<specular>0 0 0 1</specular>
+				<emissive>0 0 0 1</emissive>
+			</material>
+      	</visual>
+    </gazebo>
+
+	<link name="root"/>
+	<joint name="root_jointy" type="fixed">
+		<parent link="root"/>
+		<child link="y_arrow"/>
+	</joint>
+	<joint name="root_jointx" type="fixed">
+		<parent link="root"/>
+		<child link="x_arrow"/>
+	</joint>
+	<joint name="root_jointz" type="fixed">
+		<parent link="root"/>
+		<child link="z_arrow"/>
+	</joint>
+
+	<xacro:if value="${add_world_link}"> 
+		<link name="world"/>
+		<joint name="world_joint" type="fixed">
+			<parent link="world"/>
+			<child link="root"/>
+		</joint>
+	</xacro:if>
+
+
+	<gazebo>
+		<static>true</static>
+	</gazebo>
+</robot>

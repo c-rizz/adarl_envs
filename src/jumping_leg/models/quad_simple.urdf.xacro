@@ -5,7 +5,10 @@
     <xacro:include filename="$(find jumping_leg)/models/leg_simple.xacro"/>
 
 	<!-- <xacro:arg name="hip_out_offset" default="0.2146" />  -->
-	<xacro:arg name="hip_out_offset" default="0.05" />
+    <!-- Hip offset shoulbe be wide enough to prevent self collisions 
+         To prevent collision when 45 degrees open outward it should be more than thigh_width/2*1.414,
+         When opening inward it's a bit more complicated, depends on the maximum inward angle -->
+	<xacro:arg name="hip_out_offset" default="0.07" /> 
 	<xacro:arg name="front_legs_pos" default="0.35" />
 	<xacro:arg name="back_legs_pos" default="-0.35" />
 
@@ -14,7 +17,7 @@
 	<xacro:arg name="thigh_mass" default="2" />
 	<xacro:arg name="thigh_color" default="1 0.5088 0.0468 1" />
 
-	<xacro:arg name="knee_y_offset" default="-0.05" />
+	<xacro:arg name="knee_y_offset" default="-0.09" /> <!-- Wide enough to prevent self collisions (should be more than shin_width/2 + thigh_width/2) -->
 
 	<xacro:arg name="shin_width" default="0.06" />
 	<xacro:arg name="shin_height" default="0.35" />

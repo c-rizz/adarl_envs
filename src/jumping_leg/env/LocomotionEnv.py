@@ -1,657 +1,54 @@
-
 from __future__ import annotations
 from adarl.adapters.BaseJointImpedanceAdapter import BaseJointImpedanceAdapter
 from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
-from adarl.envs.ControlledEnv import ControlledEnv
-from adarl.utils.robot_helpers import Robot
-from adarl.utils.utils import to_string_tensor
-from adarl.utils.state_helper import    JointImpedanceActionHelper, ThBoxStateHelper,\
-                                        RobotStateHelper, RobotStatsStateHelper,\
-                                        StateNoiseGenerator, DictStateHelper, unnormalize
-from adarl.utils.tensor_trees import map_tensor_tree
-from adarl.utils.utils import build_pose, JointState, Pose, LinkState
+from adarl.utils.utils import LinkState, to_string_tensor, quat_rotate, quat_conjugate
+from adarl.utils.state_helper import ThBoxStateHelper, unnormalize
+import adarl.utils.utils
 from dataclasses import dataclass
-from gymnasium import Space
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any
 from typing_extensions import override
 import adarl.utils.dbg.ggLog as ggLog
-import adarl.utils.tensor_trees
-import adarl.utils.utils
-import copy
-import dataclasses
 import numpy as np
 import torch as th
-
-class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
-
-    @dataclass
-    class Configuration:
-        action_delay_mustd : th.Tensor
-        action_exp_smoothing_1s : float
-        action_noise_mustd : th.Tensor
-        control_mode : JointImpedanceActionHelper.CONTROL_MODES
-        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor]
-        controlled_joints : Sequence[tuple[str,str]]
-        frame_stack_length : int
-        goal_err_exp_smoothing_1s : float
-        history_length : int
-        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float]
-        homing_joint_pose : dict[tuple[str,str],th.Tensor]
-        joint_physical_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
-        joint_safe_limits_minmax_damping : dict[tuple[str,str],th.Tensor]
-        joint_safe_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
-        joint_safe_limits_minmax_stiffness : dict[tuple[str,str],th.Tensor]
-        main_body_link : tuple[str,str]
-        model_urdf_string : str
-        obs_dtype : th.dtype
-        obs_noise_ep_mustd : th.Tensor
-        obs_noise_step_std : th.Tensor
-        observe_body_state : bool
-        original_max_epsteps : int
-        randomize_initial_pose : bool
-        real : bool
-        robot_name : str
-        safe_damping : float
-        safe_stiffness : float
-        seed : int
-        show_goal : bool
-        stepLength_sec : float
-        stop_on_safety : bool
-        th_device : th.device
-        ui_camera_name : str
-        ui_camera_link : tuple[str,str]
-
-    metadata = {'render.modes': ['rgb_array']}
-    # STATE_BASE = "b" # component of the state that is a vector and is always the same regardless of the configuration
-    STATE_ACT = "action"
-    STATE_ROBOT = "robot"
-    STATE_ROBOT_STATS = "robot_stats"
-    STATE_EXTRINSIC = "extrinsic"
-    STATE_INTERNAL = "internal"
-    
-    
-    INTERNAL_FIELDS = IntEnum("INTERNAL_FIELDS", [  "SAFETY_TRIGGERED",
-                                                    "STEP_COUNT"], start=0)
-
-    EXTRINSIC_FIELDS = IntEnum("EXTRINSIC_FIELS", ["BODY_LINVEL_X",
-                                                   "BODY_LINVEL_Y",
-                                                   "BODY_LINVEL_Z",
-                                                   "BODY_ANGVEL_X",
-                                                   "BODY_ANGVEL_Y",
-                                                   "BODY_ANGVEL_Z",
-                                                   "BODY_POS_Z"], start=0)
-    ACT_FIELDS = IntEnum("ACT_FIELDS", ["ACTION"], start=0)
-    
-    JOINT_FILTERS = Enum("JointFilters",["ALL_REVOLUTE",
-                                         "ALL"])
-    
-    joint_filters = {JOINT_FILTERS.ALL : lambda joint_name, robot_model: True,
-                     JOINT_FILTERS.ALL_REVOLUTE : lambda joint_name, robot_model: robot_model.get_joint_properties([joint_name])[joint_name]["type"] == Robot.JOINT_TYPES.REVOLUTE}
-
-    @dataclass
-    class EpisodeConfiguration:
-        initial_joint_pose : th.Tensor
-        max_ep_steps : th.Tensor
-
-    @dataclass
-    class Statistics:
-        tracking_errors : th.Tensor
-        avg_tracking_error : th.Tensor = dataclasses.field(default_factory=lambda: th.tensor(-1.0))
-        rewards : dict = dataclasses.field(default_factory=lambda: {})
-
-    def  __init__(self, action_delay_mustd : tuple[float,float],
-                        action_noise_mustd : Sequence[float] | th.Tensor, 
-                        action_smoothing_halflife_sec : float,
-                        adapter: BaseJointImpedanceAdapter,
-                        control_mode : Literal["impedance","impedance_no_gains","position_and_torques", "position_and_gains","torque","velocity","position"],
-                        controlled_joints : Sequence[str | JOINT_FILTERS],
-                        goal_err_smoothing_halflife_sec : float,
-                        maxStepsPerEpisode,
-                        minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
-                        minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
-                        obs_noise_ep_mustd : Sequence[float] | th.Tensor, 
-                        obs_noise_step_std : Sequence[float] | float | th.Tensor,
-                        robot_main_body_link : str,
-                        robot_name : str,
-                        robot_urdf_string : str,
-                        safe_damping : float,
-                        safe_stiffness : float,
-                        safety_limits_factor : float,
-                        seed,
-                        stepLength_sec,
-                        step_precision_tolerance : float,
-                        stop_on_safety : bool,
-                        th_device : th.device,
-                        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float] = (0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0),
-                        homing_joint_pose : dict[tuple[str,str], float] = {},
-                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] = {},
-                        observe_body_velocity : bool = True
-                        ):
-        
-        self._rng = th.Generator(device=th_device)
-        self._spawned = False
-        self._robot_model = Robot(adarl.utils.utils.compile_xacro_string(  model_definition_string=robot_urdf_string))
-        self._current_state = {}
-
-        controlled_joints_str = []
-        for j in controlled_joints:
-            if isinstance(j, str):
-                controlled_joints_str.append(j)
-            elif isinstance(j, LocomotionEnv.JOINT_FILTERS):
-                for jn in self._robot_model.get_joint_names():
-                    if LocomotionEnv.joint_filters[j](jn,self._robot_model):
-                        controlled_joints_str.append(jn)
-
-        controlled_joints_rn : list[tuple[str,str]] = [(robot_name,jn) for jn in controlled_joints_str]
-        phys_limits_minmax_pve = {(robot_name,k):th.as_tensor(l,device=th_device) 
-                                    for k,l in self._robot_model.get_joint_limits(controlled_joints_str).items()}
-        safe_limits_minmax_pve = {k:(lims_minmax-0.5*(lims_minmax[1]+lims_minmax[0]))*safety_limits_factor+0.5*(lims_minmax[1]+lims_minmax[0])
-                                    for k,lims_minmax in phys_limits_minmax_pve.items()}
-
-        for jn in safe_limits_minmax_pve.keys():
-            if jn not in control_limits_minmax_pve:
-                control_limits_minmax_pve[jn] = safe_limits_minmax_pve[jn]
-
-        if isinstance(minmax_stiffness, tuple):
-            minmax_stiffness_thdict = {k:th.as_tensor(minmax_stiffness, device=th_device) for k in phys_limits_minmax_pve.keys()}
-        else:
-            minmax_stiffness_thdict = {(robot_name,k):th.as_tensor(minmax, device=th_device) for k,minmax in minmax_stiffness.items()}
-        if isinstance(minmax_damping, tuple):
-            minmax_damping_thdict = {k:th.as_tensor(minmax_damping, device=th_device) for k in phys_limits_minmax_pve.keys()}
-        else:
-            minmax_damping_thdict = {(robot_name,k):th.as_tensor(minmax, device=th_device) for k,minmax in minmax_damping.items()}
-        action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec) if action_smoothing_halflife_sec>0 else 0.0
-        goal_err_exp_smoothing_1s = 0.5**(1/goal_err_smoothing_halflife_sec) if goal_err_smoothing_halflife_sec>0 else 0.0
-        default_homing_joint_pose = {jn: unnormalize(0.5, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item())
-                                     for jn in controlled_joints_rn}
-        for jn in homing_joint_pose:
-            if jn not in controlled_joints_rn:
-                raise RuntimeError(f"homing_joint_pose contains non-controlled joint {jn}")
-        for jn in controlled_joints_rn:
-            if jn not in homing_joint_pose:
-                homing_joint_pose[jn] = default_homing_joint_pose[jn]
-
-        ggLog.info(f"phys_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in phys_limits_minmax_pve.items()]))
-        ggLog.info(f"safe_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
-        ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
-        ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
-
-        self._configuration = LocomotionEnv.Configuration(  action_delay_mustd = th.as_tensor(action_delay_mustd, device=th_device),
-                                                            action_exp_smoothing_1s = action_exp_smoothing_1s,
-                                                            action_noise_mustd = th.as_tensor(action_noise_mustd, device=th_device),
-                                                            control_limits_minmax_pve = control_limits_minmax_pve,
-                                                            control_mode = JointImpedanceActionHelper.CONTROL_MODES[control_mode.upper()],
-                                                            controlled_joints = controlled_joints_rn,
-                                                            frame_stack_length = 3,
-                                                            goal_err_exp_smoothing_1s = goal_err_exp_smoothing_1s,
-                                                            history_length = 3,
-                                                            homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
-                                                            homing_joint_pose = map_tensor_tree(homing_joint_pose, lambda v: th.as_tensor(v, device=th_device)),
-                                                            joint_physical_limits_minmax_pve = phys_limits_minmax_pve,
-                                                            joint_safe_limits_minmax_damping = minmax_damping_thdict,
-                                                            joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
-                                                            joint_safe_limits_minmax_stiffness = minmax_stiffness_thdict,
-                                                            main_body_link=(robot_name,robot_main_body_link),
-                                                            model_urdf_string=robot_urdf_string,
-                                                            obs_dtype = th.float32,
-                                                            obs_noise_ep_mustd = th.as_tensor(obs_noise_ep_mustd, device=th_device),
-                                                            obs_noise_step_std = th.as_tensor(obs_noise_step_std, device=th_device),
-                                                            observe_body_state = observe_body_velocity,
-                                                            original_max_epsteps = maxStepsPerEpisode,
-                                                            randomize_initial_pose = False,
-                                                            real = False,
-                                                            robot_name = robot_name,
-                                                            safe_damping = safe_damping,
-                                                            safe_stiffness = safe_stiffness,
-                                                            seed = seed,
-                                                            show_goal = True,
-                                                            stepLength_sec = stepLength_sec,
-                                                            stop_on_safety = stop_on_safety,
-                                                            th_device = th_device,
-                                                            ui_camera_link = ("simple_camera", "simple_camera_link"),
-                                                            ui_camera_name="simple_camera"
-                                                            )
-
-        self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
-        self._action_helper= JointImpedanceActionHelper(control_mode=self._configuration.control_mode,
-                                joints=controlled_joints_rn,
-                                joints_minmax_pvesd={jn:th.cat([control_limits_minmax_pve[jn],
-                                                                minmax_stiffness_thdict[jn].unsqueeze(1),
-                                                                minmax_damping_thdict[jn].unsqueeze(1)], dim=1) 
-                                                        for jn in controlled_joints_rn},
-                                safe_stiffness=th.as_tensor([self._configuration.safe_stiffness]).repeat(len(controlled_joints_rn)),
-                                safe_damping=th.as_tensor([self._configuration.safe_damping]).repeat(len(controlled_joints_rn)),
-                                th_device=self._configuration.th_device)
-
-        robot_state_helper = RobotStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
-                                              stiffness_minmax=self._configuration.joint_safe_limits_minmax_stiffness,
-                                              damping_minmax=self._configuration.joint_safe_limits_minmax_damping,
-                                              obs_dtype=self._configuration.obs_dtype,
-                                              th_device=self._configuration.th_device,
-                                              history_length=self._configuration.frame_stack_length)
-        robot_stats_state_helper = RobotStatsStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
-                                                        obs_dtype=self._configuration.obs_dtype,
-                                                        th_device=self._configuration.th_device)
-        internal_state_helper =   ThBoxStateHelper(field_names=[e.value for e in self.INTERNAL_FIELDS],
-                                              obs_dtype=th.float32,
-                                              th_device=th_device,
-                                              field_size=(1,),
-                                              fields_minmax={   self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1],
-                                                                self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000_000]},
-                                                observable_fields=[])
-        extrinsic_state_helper =  ThBoxStateHelper(field_names=[e.value for e in self.EXTRINSIC_FIELDS],
-                                              obs_dtype=th.float32,
-                                              th_device=th_device,
-                                              field_size=(1,),
-                                              fields_minmax={   self.EXTRINSIC_FIELDS.BODY_LINVEL_X : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Y : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Z : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_X : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Y : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Z : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_POS_Z : [-10,10]},
-                                               history_length=self._configuration.frame_stack_length)
-        act_history_state_helper = ThBoxStateHelper(field_names=[self.ACT_FIELDS.ACTION],
-                                               obs_dtype=th.float32,
-                                               th_device=th_device,
-                                               field_size=(self._action_helper.action_len(),),
-                                               fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]})
-        robot_state_noise =  StateNoiseGenerator(robot_state_helper,
-                                            self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
-                                            episode_mu_std = self._configuration.obs_noise_ep_mustd,
-                                            step_std = self._configuration.obs_noise_step_std)
-        extrinsic_state_noise =  StateNoiseGenerator(extrinsic_state_helper,
-                                            self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
-                                            episode_mu_std = self._configuration.obs_noise_ep_mustd,
-                                            step_std = self._configuration.obs_noise_step_std)        
-        if self._configuration.observe_body_state:
-            observable_fields = [   self.STATE_ROBOT,
-                                    self.STATE_EXTRINSIC,
-                                    self.STATE_INTERNAL]
-        else:
-            observable_fields = [   self.STATE_ROBOT,
-                                    self.STATE_INTERNAL]
-        statehelpers : dict[str,ThBoxStateHelper] = {self.STATE_ROBOT : robot_state_helper,
-                        self.STATE_ROBOT_STATS : robot_stats_state_helper,
-                        self.STATE_EXTRINSIC : extrinsic_state_helper,
-                        self.STATE_INTERNAL : internal_state_helper,
-                        self.STATE_ACT: act_history_state_helper}
-        # ggLog.info("\n".join([f"{k} : state={s._state_space.shape}  obs ={s._obs_space.shape}" for k,s in statehelpers.items()]))
-
-        self._state_helper = DictStateHelper(statehelpers,
-                                              observable_fields=observable_fields,
-                                              noise = {
-                                                    self.STATE_ROBOT : robot_state_noise,
-                                                    self.STATE_EXTRINSIC : extrinsic_state_noise},
-                                              flatten_in_obs=[   self.STATE_ROBOT,
-                                                                self.STATE_EXTRINSIC,
-                                                                self.STATE_INTERNAL],
-                                              flattened_part_name="vec")
-
-        self._safety_limits = robot_state_helper.build_robot_limits(joint_limit_minmax_pve=self._configuration.joint_safe_limits_minmax_pve,
-                                                                    stiffness_minmax=self._configuration.joint_safe_limits_minmax_stiffness,
-                                                                    damping_minmax=self._configuration.joint_safe_limits_minmax_damping)
-        
-        state_space = self._state_helper.get_space()
-        observation_space = self._state_helper.get_obs_space()
-        action_space = self._action_helper.action_space(seed=seed)
-
-        super().__init__(maxStepsPerEpisode,
-                         stepLength_sec,
-                         adapter,
-                         action_space,
-                         observation_space,
-                         state_space,
-                         startSimulation = True,
-                         step_precision_tolerance = step_precision_tolerance)
-        
-        self._adapter.set_monitored_links([self._configuration.main_body_link])
-        self._adapter.startup()
-
-
-    # --------------------------------------------------------------------------------------------------------------------
-    # Action
-    # --------------------------------------------------------------------------------------------------------------------
-
-    @override
-    def submitAction(self, action : th.Tensor) -> None:
-        with th.no_grad():
-            action = th.as_tensor(action).detach().cpu().squeeze()
-            super().submitAction(action)
-            dt = self._configuration.stepLength_sec
-            alpha = self._configuration.action_exp_smoothing_1s**(dt/1)
-            prev_action = self._current_state[self.STATE_ACT][0,self.ACT_FIELDS.ACTION].detach().cpu()
-            if self._actionsCounter != 0:
-                action = action*(1-alpha) + prev_action*alpha
-            action = th.clamp(action, min=-1, max=1)
-            jimp_pvesd = self._action_helper._action_to_pvesd(action)
-            self._last_out_action = action
-            self._last_sent_pvesd = jimp_pvesd
-            n = th.randn(size=(1,),
-                        generator=self._rng,
-                        dtype=self._configuration.obs_dtype,
-                        device=self._configuration.th_device)
-            action_delay = self._configuration.action_delay_mustd[0] + self._configuration.action_delay_mustd[1]*n
-            action_delay = th.clamp(action_delay, min = 0.0)
-            self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = jimp_pvesd,
-                                                                delay_sec=action_delay.item())
-            
-
-
-
-
-
-    
-
-
-
-
-
-    # --------------------------------------------------------------------------------------------------------------------
-    # Initialization
-    # --------------------------------------------------------------------------------------------------------------------
-    @override
-    def initializeEpisode(self, options = {}) -> None:
-
-        self._current_state = self._state_helper.reset_state()
-        self._current_state[self.STATE_INTERNAL][0,self.INTERNAL_FIELDS.STEP_COUNT] = th.tensor(-1.)
-        self._last_obs = None
-
-        if not self._spawned and isinstance(self._adapter, BaseSimulationAdapter):
-            robot_pose = build_pose(0,0,1,0,0,0,1)
-            camera_pose = build_pose(0,2.5,0.7, 0.0,0.0,-0.707,0.707)
-            red_ball_pose = robot_pose
-            self._spawned = True
-            camera_file = adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro")
-            if isinstance(self._adapter, PyBulletAdapter):
-                self._adapter.spawn_model(model_definition_string=self._configuration.model_urdf_string,
-                                                        model_name=self._configuration.robot_name,
-                                                        pose=robot_pose,
-                                                        model_format="urdf")
-            self._adapter.spawn_model(model_file=camera_file,
-                                                    model_name="simple_camera",
-                                                    pose=camera_pose,
-                                                    model_format="sdf.xacro",
-                                                    model_kwargs={"camera_width":"256","camera_height":"144","frame_rate":1/self._intendedStepLength_sec})
-            if self._configuration.show_goal:
-                self._adapter.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/red_intangible_ball.urdf.xacro"),
-                                                        model_name="red_ball",
-                                                        pose=red_ball_pose,
-                                                        model_format="urdf.xacro",
-                                                        model_kwargs={"add_world_link":str(isinstance(self._adapter, PyBulletAdapter))})
-            # self._robot_model.disable_tree_self_collisions("rail_joint")
-            # self._robot_model.remove_collision_pairs([("rail_link_0","slider_link_0")])            
-            # self._ground_co_id = self._robot_model.add_collision_box( pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
-            #                                                         collision_box_size_xyz=(10,10,1),
-            #                                                         collision_obj_id="ground_collision")
-            self._adapter.set_monitored_joints(self._configuration.controlled_joints)
-
-        
-        self._set_current_ep_config(reset_options = options)
-        
-        if isinstance(self._adapter, BaseSimulationAdapter):
-            self._simulation_initialization()
-        else:
-            self._realworld_initialization()
-        self._last_out_action = th.clamp(self._action_helper._pvesd_to_action(self._last_sent_pvesd), min=-1, max=1)
-        # ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
-
-        self._update_state()
-        self._update_stats()
-
-
-    def _set_current_ep_config(self, reset_options : dict = {}):
-        maxStepsPerEpisode = reset_options.get("max_ep_steps", self._configuration.original_max_epsteps)           
-        found_good_configuration = False
-        if self._configuration.randomize_initial_pose:
-            raise NotImplementedError()
-        if not found_good_configuration:
-            initial_joint_pose = th.as_tensor([self._configuration.homing_joint_pose[jn] for jn in self._configuration.controlled_joints],
-                                              device=self._configuration.th_device,
-                                              dtype=self._configuration.obs_dtype)
-        self._current_episode_config = RobotEnv.EpisodeConfiguration(   initial_joint_pose = initial_joint_pose,
-                                                                        max_ep_steps = maxStepsPerEpisode)
-        self.set_max_episode_steps(self._current_episode_config.max_ep_steps)
-
-    def _realworld_initialization(self):
-        raise NotImplementedError()
-    
-    def _simulation_initialization(self):
-        if not isinstance(self._adapter, BaseSimulationAdapter):
-            raise RuntimeError(f"called simulation initialization with non-simulated adapter")
-        
-        self._adapter.setLinksStateDirect({self._configuration.main_body_link :
-                                                        LinkState( position_xyz = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[:3], device=self._configuration.th_device),
-                                                                    orientation_xyzw = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[3:7], device=self._configuration.th_device),
-                                                                    pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
-                                                                    ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
-        self._adapter.setJointsStateDirect({jn:JointState(position=self._configuration.homing_joint_pose[jn],
-                                                                        rate = 0,
-                                                                        effort = 0) for jn in self._configuration.controlled_joints})
-        start_jimp : dict[tuple[str,str], tuple] = {jn:(self._configuration.homing_joint_pose[jn],
-                                                        0,
-                                                        0,
-                                                        self._configuration.safe_stiffness,
-                                                        self._configuration.safe_damping) 
-                                                    for jn in self._configuration.controlled_joints}         
-        self._adapter.setJointsImpedanceCommand(start_jimp)
-        self._adapter.apply_joint_impedances(start_jimp)
-        self._last_sent_pvesd = start_jimp
-
-    @override
-    def buildSimulation(self):
-        envCtrlName = type(self._adapter).__name__
-        if envCtrlName == "PyBulletJointImpedanceAdapter":
-            self._adapter.build_scenario()
-            self._red_ball_base = ("red_ball","world")
-        elif envCtrlName in ["RosXbotAdapter", "RosXbotGazeboAdapter"]:
-            if self._configuration.real:
-                raise NotImplementedError()
-            else:
-                self._adapter.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path("jumping_leg",
-                                                                                                                          "gazebo/all_gazebo_xbot.launch"),
-                                                           launch_file_args={"gui":"false"})
-                self._red_ball_base = ("red_ball","sphere_link")
-        else:
-            raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
-
-    @override
-    def _destroySimulation(self):
-        self._adapter.destroy_scenario()
-
-
-
-
-    # --------------------------------------------------------------------------------------------------------------------
-    # State & Observation
-    # --------------------------------------------------------------------------------------------------------------------
-    @override
-    def getUiRendering(self) -> tuple[np.ndarray | th.Tensor | None, float]:
-        try:
-            if isinstance(self._adapter, BaseSimulationAdapter):
-                body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
-                self._adapter.setLinksStateDirect({self._configuration.ui_camera_link :
-                                                                LinkState( position_xyz = th.tensor((body_state.pose.position[0],
-                                                                                                    body_state.pose.position[1]+2.5,
-                                                                                                    0.7), device=self._configuration.th_device),
-                                                                            orientation_xyzw = th.tensor((0.,0.,-0.707,0.707), device=self._configuration.th_device),
-                                                                            pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
-                                                                            ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
-            img, time = self._adapter.getRenderings([self._configuration.ui_camera_name])[self._configuration.ui_camera_name]
-            if img is None:
-                time = -1
-            return img, time
-        except Exception as e:
-            ggLog.warn(f"Exception getting ui image: {adarl.utils.utils.exc_to_str(e)}")
-            return None, -1
-    
-    @override
-    def getObservation(self, state) -> dict[Any, th.Tensor]:
-        if not adarl.utils.tensor_trees.is_all_finite(state):
-            ggLog.warn(f"Non-finite values in state {state}")
-        self._last_obs = self._state_helper.observe(state)
-        if th.any(th.abs(self._last_obs["vec"]) > 100):
-            raise RuntimeError(f"Values over 100 in obs {self._last_obs}")
-        if not adarl.utils.tensor_trees.is_all_finite(self._last_obs):
-            raise RuntimeError(f"Non-finite values in obs {self._last_obs}")
-        return self._last_obs
-
-    @override
-    def getState(self) -> dict[Any, th.Tensor]:
-        return self._current_state
-    
-
-    @override
-    def performStep(self):
-        super().performStep()
-        self._update_state()
-        self._update_stats()
-        self._last_step_simtime = self._adapter.getEnvTimeFromReset()
-
-
-    def _get_new_instantaneous_state(self):
-        # ggLog.info(f"_stepCounter = {self._stepCounter}")
-        
-        jstates = self._adapter.getJointsState(requestedJoints=self._configuration.controlled_joints)
-        body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
-        body_linvel_xyz = body_state.pos_velocity_xyz
-        body_angvel_xyz = body_state.ang_velocity_xyz
-        body_position_xyz = body_state.pose.position
-
-
-        stats_minmaxavgstd_j_pve = self._adapter.get_joints_state_step_stats()
-        if not th.all(th.isfinite(stats_minmaxavgstd_j_pve)):
-            raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_j_pve}")
-
-        internal_state = self._current_state[self.STATE_INTERNAL][0]
-        step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
-        if step_count!=-1 and internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0:
-            safety_triggered = True
-        else:
-            triggered_limits = th.logical_or(stats_minmaxavgstd_j_pve[0] < self._safe_limits_minmax_j_pve[0],
-                                             stats_minmaxavgstd_j_pve[1] > self._safe_limits_minmax_j_pve[1])
-            safety_triggered = th.any(triggered_limits)
-            if safety_triggered:       
-                elements = np.array([[f"{jn[1]}_pos",f"{jn[1]}_vel",f"{jn[1]}_eff"] for jn in self._configuration.controlled_joints], dtype=object) #type: ignore
-                triggered = []
-                for i in np.ndindex(elements.shape):
-                    if triggered_limits[i]:
-                        triggered.append(elements[i])
-                ggLog.info( f"SAFETY TRIGGERED:"
-                            f"\n    triggered ({len(triggered)}) = {triggered}"
-                            # f"\n    joints_minmax = \n{stats_minmaxavgstd_j_pve[:2]}"
-                            # f"\n    j_safety_lims  = \n{self._safe_limits_minmax_j_pve} "
-                            )
-
-
-        new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : 1 if safety_triggered else 0,
-                                self.INTERNAL_FIELDS.STEP_COUNT : step_count+1}
-        new_robot_state = {jn : th.concat([ jstates[jn].position[[0]],
-                                            jstates[jn].rate[[0]],
-                                            jstates[jn].effort[[0]],
-                                            th.as_tensor(self._last_sent_pvesd[jn])])
-                                for jn in self._configuration.controlled_joints}
-        new_robot_stats_state = {jname : stats_minmaxavgstd_j_pve[:,i,:].flatten()
-                                 for i,jname in enumerate(self._adapter.get_monitored_joints())}
-        if th.any(th.concat([new_robot_state[jn][6:] for jn in self._configuration.controlled_joints])<0):
-            ggLog.warn(f"negative gains in new_robot_state = {new_robot_state}")
-        new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_LINVEL_X : body_linvel_xyz[0],
-                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Y : body_linvel_xyz[1],
-                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Z : body_linvel_xyz[2],
-                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_X : body_angvel_xyz[0],
-                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Y : body_angvel_xyz[1],
-                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Z : body_angvel_xyz[2],
-                                self.EXTRINSIC_FIELDS.BODY_POS_Z : body_position_xyz[2]}
-        new_act_state = {self.ACT_FIELDS.ACTION : self._last_out_action}
-        instantaneous_state = { self.STATE_EXTRINSIC    : new_extrinsic_state,
-                                self.STATE_ACT          : new_act_state,
-                                self.STATE_INTERNAL     : new_internal_state,
-                                self.STATE_ROBOT        : new_robot_state,
-                                self.STATE_ROBOT_STATS  : new_robot_stats_state}              
-        return instantaneous_state
-        
-
-
-    def _update_state(self):
-        instantaneous_state = self._get_new_instantaneous_state()
-        step_count = self._current_state[self.STATE_INTERNAL][0][self.INTERNAL_FIELDS.STEP_COUNT]
-        if step_count <= 0:
-            self._current_state = self._state_helper.reset_state(instantaneous_state)
-        else:
-            self._state_helper.update(instantaneous_state, state=self._current_state)
-        map_tensor_tree(self._current_state, lambda t: t.detach().clone())
-
-
-
-    def _update_stats(self):
-        rew_dbg_info = {}
-        self.computeReward( {},
-                            self._current_state, 
-                            th.tensor([]), 
-                            env_conf=self.get_configuration(),
-                            dbg_info=rew_dbg_info)
-        if self._current_state[self.STATE_INTERNAL][0][self.INTERNAL_FIELDS.STEP_COUNT]<=0:
-            self._stats = {}
-        self._stats["rewards"] = rew_dbg_info
-        
-    @override
-    def getInfo(self,state) -> dict[Any,Any]:
-        i = super().getInfo(state=state)
-        internal_state = state[self.STATE_INTERNAL][0]
-        i.update(self._stats)
-        i["step_count"] = self._stepCounter
-
-        statenorm = self._state_helper.normalize(state)
-        for substate in [self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT, self.STATE_ROBOT_STATS]:
-            i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
-            i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
-            i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
-            i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
-            
-        i.update(self._stats["rewards"])
-        i["ep_config"] = dataclasses.asdict(self._current_episode_config)
-        i["safety_triggered"] = internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED]
-        i["vec_obs"] = self._last_obs["vec"]
-        obslabels = [n.encode("utf-8").ljust(64)[:64] for n in self._state_helper.observation_names()["vec"]]
-        i["vec_obs_labels"] = th.as_tensor(obslabels, dtype=th.uint8)        
-        return i
-
-    @override
-    def get_configuration(self):
-        return dataclasses.asdict(self._configuration)
-    
-    @override
-    def reachedTerminalState(self, previousState, state) -> th.Tensor:
-        if not self._configuration.stop_on_safety:
-            return th.as_tensor(False, device=self._configuration.th_device)
-        r = state[self.STATE_INTERNAL][0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
-        if r:
-            ggLog.info(f"Terminated at step {self._stepCounter}")
-        return r
-    
-    @override
-    def seed(self, seed : int) -> None:
-        super().seed(seed)
-        self._rng = self._rng.manual_seed(seed)
-        self.action_space.seed(seed)
-        self.observation_space.seed(seed)
-
-
-
-
-
-
+import math
+import quaternion
+from jumping_leg.env.RobotEnv import RobotEnv
+from adarl.utils.tensor_trees import map_tensor_tree
+
+
+@th.jit.script
+def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
+    """A bell-shaped reward function. It's 1 at error = 0, it reaches about zero (~0.0183) at error = zero_rew_dist
+
+    Parameters
+    ----------
+    error : th.Tensor
+        Error value
+    zero_rew_dist : th.Tensor | float
+        Error value at which the reward should start to settle around zero
+
+    Returns
+    -------
+    th.Tensor
+        Reward value
+    """
+    return th.exp(-(2*error/zero_rew_dist)**2)
 
 class LocomotionEnv(RobotEnv):
     STATE_LOCOMOTION = "loco"
 
     @dataclass
     class LocomotionConfiguration:
+        disallowed_contact_links : list[tuple[str,str]]
+        goal_speed_minmax : th.Tensor
         reward_acceleration_weight : float
         reward_contacts_weight : float
         reward_energy_weight : float
+        reward_health_weight : float
+        reward_height_weight : float
+        reward_pitchnroll_weight : float
         reward_position_limit_weight : float
         reward_scale : float
         reward_torque_limit_weight : float
@@ -660,39 +57,68 @@ class LocomotionEnv(RobotEnv):
         reward_tracking_weight : float
         reward_velocity_limit_weight : float
         reward_velocity_weight : float
+        terminating_contact_pairs : list[tuple[tuple[str,str],tuple[str,str]]]
+        use_contacts : bool
+        height_reward_settle_point : th.Tensor
+        pitchnroll_reward_settle_point : th.Tensor
+        vel_tracking_reward_settle_point : th.Tensor
 
 
     @dataclass
     class EpisodeLocomConfiguration:
         goal_velocity_xy : th.Tensor
 
-    LOCOMOTION_FIELDS = IntEnum("INTERNAL_FIELDS", ["GOAL_VELOCITY_X",
-                                                    "GOAL_VELOCITY_Y",
-                                                    "REWARD_TRACKING_WEIGHT",
-                                                    "REWARD_TORQUE_WEIGHT",
-                                                    "REWARD_TORQUE_LIMIT_WEIGHT",
-                                                    "REWARD_VELOCITY_WEIGHT",
+    LOCOMOTION_FIELDS = IntEnum("INTERNAL_FIELDS", ["COLLISON_COUNT",
+                                                    "GOAL_VELOCITY_REL_X",
+                                                    "GOAL_VELOCITY_REL_Y",
+                                                    "GOAL_VELOCITY_REL_Z",
+                                                    "GOAL_BODY_HEIGHT",
+                                                    "GOAL_BODY_GRAVITY_X",
+                                                    "GOAL_BODY_GRAVITY_Y",
+                                                    "GOAL_BODY_GRAVITY_Z",
                                                     "REWARD_ACCELERATION_WEIGHT",
+                                                    "REWARD_CONTACTS_WEIGHT",
+                                                    "REWARD_HEALTH_WEIGHT",
                                                     "REWARD_POSITION_LIMIT_WEIGHT",
-                                                    "REWARD_VELOCITY_LIMIT_WEIGHT",
                                                     "REWARD_TORQUEDIFF_WEIGHT",
-                                                    "SMOOTHED_TRACKING_ERROR"], start=0)
+                                                    "REWARD_TORQUE_LIMIT_WEIGHT",
+                                                    "REWARD_TORQUE_WEIGHT",
+                                                    "REWARD_TRACKING_WEIGHT",
+                                                    "REWARD_VELOCITY_LIMIT_WEIGHT",
+                                                    "REWARD_VELOCITY_WEIGHT",
+                                                    "REWARD_HEIGHT_WEIGHT",
+                                                    "REWARD_PITCHNROLL_WEIGHT",
+                                                    "SMOOTHED_TRACKING_ERROR",
+                                                    "HEIGHT_ERR",
+                                                    "ORIENT_ERR",
+                                                    "SUM_IMPULSES",
+                                                    "CRASHED"], start=0)
 
     def __init__(self,  action_delay_mustd : tuple[float,float],
                         action_noise_mustd : Sequence[float] | th.Tensor, 
                         action_smoothing_halflife_sec : float,
                         adapter: BaseJointImpedanceAdapter,
+                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor],
                         control_mode : Literal["impedance","impedance_no_gains","position_and_torques", "position_and_gains","torque","velocity","position"],
                         controlled_joints : Sequence[str | RobotEnv.JOINT_FILTERS],
+                        disallowed_contact_links : list[tuple[str,str]],
+                        frame_stack_length : int,
                         goal_err_smoothing_halflife_sec : float,
-                        maxStepsPerEpisode,
+                        goal_speed_minmax : tuple[float, float],
+                        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
+                        homing_joint_pose : dict[tuple[str,str], float],
+                        maxStepsPerEpisode : int,
                         minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
                         minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
                         obs_noise_ep_mustd : Sequence[float] | th.Tensor, 
                         obs_noise_step_std : Sequence[float] | float | th.Tensor,
+                        observe_body_velocity : bool,
                         reward_acceleration_weight : float,
                         reward_contacts_weight : float,
                         reward_energy_weight : float,
+                        reward_health_weight : float,
+                        reward_height_weight : float,
+                        reward_pitchnroll_weight : float,
                         reward_position_limit_weight : float,
                         reward_scale : float,
                         reward_torque_limit_weight : float,
@@ -707,46 +133,47 @@ class LocomotionEnv(RobotEnv):
                         safe_damping : float,
                         safe_stiffness : float,
                         safety_limits_factor : float,
-                        seed,
-                        stepLength_sec,
+                        seed : int,
+                        stepLength_sec : float,
                         step_precision_tolerance : float,
                         stop_on_safety : bool,
+                        terminating_contact_pairs : list[tuple[tuple[str,str],tuple[str,str]]],
                         th_device : th.device,
-                        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float] = (0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0),
-                        homing_joint_pose : dict[tuple[str,str], float] = {},
-                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] = {},
-                        observe_body_velocity : bool = True):
-        super().__init__(action_delay_mustd = action_delay_mustd,
-                        action_noise_mustd = action_noise_mustd, 
-                        action_smoothing_halflife_sec = action_smoothing_halflife_sec,
-                        adapter = adapter,
-                        control_mode = control_mode,
-                        controlled_joints = controlled_joints,
-                        goal_err_smoothing_halflife_sec = goal_err_smoothing_halflife_sec,
-                        maxStepsPerEpisode = maxStepsPerEpisode,
-                        minmax_damping = minmax_damping,
-                        minmax_stiffness = minmax_stiffness,
-                        obs_noise_ep_mustd = obs_noise_ep_mustd, 
-                        obs_noise_step_std = obs_noise_step_std,
-                        robot_main_body_link = robot_main_body_link,
-                        robot_name = robot_name,
-                        robot_urdf_string = robot_urdf_string,
-                        safe_damping = safe_damping,
-                        safe_stiffness = safe_stiffness,
-                        safety_limits_factor = safety_limits_factor,
-                        seed = seed,
-                        stepLength_sec = stepLength_sec,
-                        step_precision_tolerance = step_precision_tolerance,
-                        stop_on_safety = stop_on_safety,
-                        th_device = th_device,
-                        homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
-                        homing_joint_pose = homing_joint_pose,
-                        control_limits_minmax_pve = control_limits_minmax_pve,
-                        observe_body_velocity = observe_body_velocity
+                        use_contacts : bool
+                        ):
+        super().__init__(   action_delay_mustd = action_delay_mustd,
+                            action_noise_mustd = action_noise_mustd, 
+                            action_smoothing_halflife_sec = action_smoothing_halflife_sec,
+                            adapter = adapter,
+                            control_mode = control_mode,
+                            controlled_joints = controlled_joints,
+                            goal_err_smoothing_halflife_sec = goal_err_smoothing_halflife_sec,
+                            maxStepsPerEpisode = maxStepsPerEpisode,
+                            minmax_damping = minmax_damping,
+                            minmax_stiffness = minmax_stiffness,
+                            obs_noise_ep_mustd = obs_noise_ep_mustd, 
+                            obs_noise_step_std = obs_noise_step_std,
+                            robot_main_body_link = robot_main_body_link,
+                            robot_name = robot_name,
+                            robot_urdf_string = robot_urdf_string,
+                            safe_damping = safe_damping,
+                            safe_stiffness = safe_stiffness,
+                            safety_limits_factor = safety_limits_factor,
+                            seed = seed,
+                            stepLength_sec = stepLength_sec,
+                            step_precision_tolerance = step_precision_tolerance,
+                            stop_on_safety = stop_on_safety,
+                            th_device = th_device,
+                            homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
+                            homing_joint_pose = homing_joint_pose,
+                            control_limits_minmax_pve = control_limits_minmax_pve,
+                            observe_body_velocity = observe_body_velocity,
+                            frame_stack_length=frame_stack_length
                         )
         self._locomotion_conf = LocomotionEnv.LocomotionConfiguration(
                         reward_acceleration_weight = reward_acceleration_weight,
                         reward_contacts_weight  = reward_contacts_weight ,
+                        reward_health_weight = reward_health_weight,
                         reward_energy_weight  = reward_energy_weight ,
                         reward_position_limit_weight  = reward_position_limit_weight ,
                         reward_scale  = reward_scale ,
@@ -755,24 +182,48 @@ class LocomotionEnv(RobotEnv):
                         reward_torquediff_weight = reward_torquediff_weight,
                         reward_tracking_weight = reward_tracking_weight,
                         reward_velocity_limit_weight = reward_velocity_limit_weight,
-                        reward_velocity_weight = reward_velocity_weight)
-        locomotion_state_helper = ThBoxStateHelper( field_names=[e.value for e in self.LOCOMOTION_FIELDS],
+                        reward_velocity_weight = reward_velocity_weight,
+                        use_contacts = use_contacts,
+                        disallowed_contact_links=disallowed_contact_links,
+                        terminating_contact_pairs=terminating_contact_pairs,
+                        goal_speed_minmax = th.as_tensor(goal_speed_minmax, device=th_device, dtype=th.float32),
+                        reward_height_weight=reward_height_weight,
+                        reward_pitchnroll_weight=reward_pitchnroll_weight,
+                        height_reward_settle_point=th.tensor(0.2, device=th_device),
+                        pitchnroll_reward_settle_point=th.tensor(0.5, device=th_device),
+                        vel_tracking_reward_settle_point=th.tensor(1.0, device=th_device))
+        locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     obs_dtype=th.float32,
                                                     th_device=th_device,
                                                     field_size=(1,),
-                                                    fields_minmax={ self.LOCOMOTION_FIELDS.GOAL_VELOCITY_X : [-10,10],
-                                                                    self.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y : [-10,10],                                                           
+                                                    fields_minmax={ self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X : [-10,10],
+                                                                    self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y : [-10,10], 
+                                                                    self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z : [-10,10], 
+                                                                    self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT : [-1,1], 
+                                                                    self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_X : [-1,1],
+                                                                    self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_Y : [-1,1], 
+                                                                    self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_Z : [-1,1], 
                                                                     self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_VELOCITY_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_CONTACTS_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_HEALTH_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_HEIGHT_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_PITCHNROLL_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : [0,10]},
-                                                    observable_fields=[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_X,
-                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y])
+                                                                    self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.HEIGHT_ERR : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.ORIENT_ERR : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.SUM_IMPULSES : [0,10000],
+                                                                    self.LOCOMOTION_FIELDS.COLLISON_COUNT : [0,1000],
+                                                                    self.LOCOMOTION_FIELDS.CRASHED : [0,1]},
+                                                    observable_fields=[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
+                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
+                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z])
         self._state_helper = self._state_helper.add_substate(LocomotionEnv.STATE_LOCOMOTION,
                                                              locomotion_state_helper,
                                                              observable = True,
@@ -784,6 +235,7 @@ class LocomotionEnv(RobotEnv):
     @override
     def _get_new_instantaneous_state(self):
         locom_state = self._current_state[self.STATE_LOCOMOTION][0]
+        prev_locom_state = self._current_state[self.STATE_LOCOMOTION][0]
         internal_state = self._current_state[self.STATE_INTERNAL][0]
         step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
         
@@ -795,21 +247,71 @@ class LocomotionEnv(RobotEnv):
         if step_count > 0:
             smoothed_goal_dist = tracking_error*(1-alpha) + prev_tracking_error*alpha
         else:
-            smoothed_goal_dist = 1
-        new_locom_state = {
-                        self.LOCOMOTION_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT : self._locomotion_conf.reward_torque_limit_weight,
-                        self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : self._locomotion_conf.reward_position_limit_weight,
-                        self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : self._locomotion_conf.reward_velocity_limit_weight,
-                        self.LOCOMOTION_FIELDS.REWARD_VELOCITY_WEIGHT : self._locomotion_conf.reward_velocity_weight,
-                        self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT : self._locomotion_conf.reward_acceleration_weight,
-                        self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT : self._locomotion_conf.reward_tracking_weight,
-                        self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT : self._locomotion_conf.reward_torque_weight,
-                        self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._locomotion_conf.reward_torquediff_weight,
-                        self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_goal_dist,
-                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_X : self._locomotion_episode_config.goal_velocity_xy[0],
-                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y : self._locomotion_episode_config.goal_velocity_xy[1]}
+            smoothed_goal_dist = tracking_error
+
+        if self._locomotion_conf.use_contacts:
+            if not isinstance(self._adapter, PyBulletAdapter):
+                raise RuntimeError(f"Contacts are supported only in pybullet for now")
+            contacts = self._adapter.get_contacts()
+            substep_count = len(contacts)
+            contacts = sum(contacts,[]) # merge the contacts from all the substeps
+            bad_contacts = [c for c in contacts if c[0] in self._locomotion_conf.disallowed_contact_links or c[1] in self._locomotion_conf.disallowed_contact_links]
+            collision_count = len(contacts)/substep_count if substep_count != 0 else 0
+            bad_forces = np.array([c[3] for c in bad_contacts])
+            bad_durations = np.array([c[4] for c in bad_contacts])
+            sum_bad_impulses = np.sum(np.abs(bad_forces*bad_durations))
+
+            crashed = prev_locom_state[self.LOCOMOTION_FIELDS.CRASHED]
+            if not crashed:
+                for c in contacts:
+                    if (c[0],c[1]) in self._locomotion_conf.terminating_contact_pairs or (c[1],c[0]) in self._locomotion_conf.terminating_contact_pairs:
+                        crashed = 1
+                        break
+        else:
+            collision_count = 0
+            sum_bad_impulses = 0
+
+        goal_vel_xyz = np.array([self._locomotion_episode_config.goal_velocity_xy[0], self._locomotion_episode_config.goal_velocity_xy[1], 0.0])
+        goal_vel_rel_xyz = quat_rotate(goal_vel_xyz, quat_conjugate(body_state.pose.orientation_xyzw))
+
         new_inst_state = super()._get_new_instantaneous_state()
+
+        goal_body_height = 0.45
+        goal_gravity_vec = th.tensor([0.0,0.0,-1.0], device = self._configuration.th_device)
+        height_err = th.abs(new_inst_state[self.STATE_EXTRINSIC][self.EXTRINSIC_FIELDS.BODY_POS_Z] - goal_body_height)
+        gravity_vec = th.as_tensor([new_inst_state[self.STATE_EXTRINSIC][k] for k in [self.EXTRINSIC_FIELDS.BODY_GRAVITY_X,self.EXTRINSIC_FIELDS.BODY_GRAVITY_Y,self.EXTRINSIC_FIELDS.BODY_GRAVITY_Z]], device = self._configuration.th_device)
+        orient_err = th.norm(gravity_vec-goal_gravity_vec) # Would be nice to use geodesic distance or somethinglike that
+
+        new_locom_state = { self.LOCOMOTION_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT : self._locomotion_conf.reward_torque_limit_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : self._locomotion_conf.reward_position_limit_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : self._locomotion_conf.reward_velocity_limit_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_VELOCITY_WEIGHT : self._locomotion_conf.reward_velocity_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT : self._locomotion_conf.reward_acceleration_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_CONTACTS_WEIGHT : self._locomotion_conf.reward_contacts_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_HEALTH_WEIGHT : self._locomotion_conf.reward_health_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_HEIGHT_WEIGHT : self._locomotion_conf.reward_pitchnroll_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_PITCHNROLL_WEIGHT : self._locomotion_conf.reward_height_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT : self._locomotion_conf.reward_tracking_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT : self._locomotion_conf.reward_torque_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._locomotion_conf.reward_torquediff_weight,
+                            self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_goal_dist,
+                            self.LOCOMOTION_FIELDS.HEIGHT_ERR : height_err,
+                            self.LOCOMOTION_FIELDS.ORIENT_ERR : orient_err,
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X : goal_vel_rel_xyz[0],
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y : goal_vel_rel_xyz[1],
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z : goal_vel_rel_xyz[2],
+                            self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT : goal_body_height,
+                            self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_X : goal_gravity_vec[0],
+                            self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_Y : goal_gravity_vec[1],
+                            self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_Z : goal_gravity_vec[2],
+                            self.LOCOMOTION_FIELDS.SUM_IMPULSES : sum_bad_impulses,
+                            self.LOCOMOTION_FIELDS.COLLISON_COUNT :collision_count,
+                            self.LOCOMOTION_FIELDS.CRASHED : crashed,
+                            self.LOCOMOTION_FIELDS.ORIENT_ERR : orient_err,
+                            self.LOCOMOTION_FIELDS.HEIGHT_ERR : height_err}
         new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
+
+
         return new_inst_state
     
     @override
@@ -822,6 +324,7 @@ class LocomotionEnv(RobotEnv):
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
         max_rew = 100
+        locom_state = state[self.STATE_LOCOMOTION][0]
 
         robot_state_norm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT])
         # normpositions = robot_state_norm[:,0]
@@ -845,17 +348,28 @@ class LocomotionEnv(RobotEnv):
         velocity_limit_reward = -th.clamp(th.mean(th.pow(velocities_safenorm,50)),-max_rew,max_rew)
 
 
-        locom_state = state[self.STATE_LOCOMOTION][0]
-        goal_dist = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
-        # tracking_reward = 1 - goal_dist
-        # tracking_reward = 1/(1+goal_dist/0.05)       # 0.50 at 0.05m, 0.35 at 0.10m, 0.2 at 0.2
-        tracking_reward = 1/(1+(goal_dist/0.1)**2) # 0.75 at 0.05m, 0.50 at 0.10m, 0.2 at 0.2
+        height_err = locom_state[self.LOCOMOTION_FIELDS.HEIGHT_ERR]
+        reward_height = bell_reward(height_err, zero_rew_dist=self._locomotion_conf.height_reward_settle_point)
 
-        sub_rewards["reward_tracking"] = tracking_reward
+        orient_err = locom_state[self.LOCOMOTION_FIELDS.ORIENT_ERR]
+        reward_pitchnroll = bell_reward(orient_err, zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
+
+        velocity_tracking_err = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
+        velocity_tracking_reward = bell_reward(velocity_tracking_err, zero_rew_dist=self._locomotion_conf.vel_tracking_reward_settle_point)
+        # tracking_reward = 1 - th.tanh(tracking_err/50)
+        # tracking_reward = 1/(1+goal_dist/0.05)       # 0.50 at 0.05m, 0.35 at 0.10m, 0.2 at 0.2
+        # tracking_reward = 1/(1+(goal_dist/0.1)**2) # 0.75 at 0.05m, 0.50 at 0.10m, 0.2 at 0.2
+
+        contacts_reward = - th.clamp(locom_state[self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
+
+        sub_rewards["reward_tracking"] = velocity_tracking_reward
         sub_rewards["reward_torque"] = torque_reward
         sub_rewards["reward_torque_limit"] = torque_limit_reward
         sub_rewards["reward_torquediff"] = torquediff_reward
         sub_rewards["reward_velocity"] = velocity_reward
+        sub_rewards["reward_contacts"] = contacts_reward
+        sub_rewards["reward_height"] = reward_height
+        sub_rewards["reward_pitchnroll"] = reward_pitchnroll
         sub_rewards["reward_velocity_limit"] = velocity_limit_reward
         sub_rewards["reward_acceleration"] = acceleration_reward
         sub_rewards["reward_position_limit"] = position_limit_reward
@@ -870,7 +384,10 @@ class LocomotionEnv(RobotEnv):
                     "reward_velocity_limit" : locom_state[self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT],
                     "reward_acceleration" : locom_state[self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT],
                     "reward_position_limit" : locom_state[self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT],
-                    "reward_health" : 1}
+                    "reward_health" : 1*locom_state[self.LOCOMOTION_FIELDS.REWARD_HEALTH_WEIGHT],
+                    "reward_contacts" : locom_state[self.LOCOMOTION_FIELDS.REWARD_CONTACTS_WEIGHT],
+                    "reward_height" : locom_state[self.LOCOMOTION_FIELDS.REWARD_HEIGHT_WEIGHT],
+                    "reward_pitchnroll" : locom_state[self.LOCOMOTION_FIELDS.REWARD_PITCHNROLL_WEIGHT]}
         for k in sub_rewards:
             sub_rewards[k] = sub_rewards[k]*self._locomotion_conf.reward_scale*weights[k]
         sub_rewards = {k:v.squeeze() for k,v in sub_rewards.items()}
@@ -898,48 +415,118 @@ class LocomotionEnv(RobotEnv):
         super()._update_stats()
 
         step_count = self._current_state[self.STATE_INTERNAL][0][self.INTERNAL_FIELDS.STEP_COUNT]
-        body_linvel_xyz = self._current_state[self.STATE_EXTRINSIC][0][0:3]
-        goal_velocity_xy = self._current_state[self.STATE_LOCOMOTION][0,[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_X,self.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y]]
+        body_linvel_xyz = self._current_state[self.STATE_EXTRINSIC][0,[self.EXTRINSIC_FIELDS.BODY_LINVEL_X,self.EXTRINSIC_FIELDS.BODY_LINVEL_Y,self.EXTRINSIC_FIELDS.BODY_LINVEL_Z]]
+        goal_velocity_xy = self._current_state[self.STATE_LOCOMOTION][0,[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y]]
         tracking_error = th.linalg.norm(body_linvel_xyz[:2] - goal_velocity_xy)
+        body_height = self._current_state[self.STATE_EXTRINSIC][0,self.EXTRINSIC_FIELDS.BODY_POS_Z]
+        goal_height = self._current_state[self.STATE_LOCOMOTION][0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT]
+        height_error = th.abs(body_height-goal_height)
+        gravity_vec = self._current_state[self.STATE_EXTRINSIC][0,[self.EXTRINSIC_FIELDS.BODY_GRAVITY_X,self.EXTRINSIC_FIELDS.BODY_GRAVITY_Y,self.EXTRINSIC_FIELDS.BODY_GRAVITY_Z]]
+        goal_gravity_vec = self._current_state[self.STATE_LOCOMOTION][0,[self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_X,
+                                        self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_Y,
+                                        self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_Z]]
+        pitchnroll_err = th.norm(gravity_vec-goal_gravity_vec)
+        step_count = self._current_state[self.STATE_INTERNAL][0,self.INTERNAL_FIELDS.STEP_COUNT].to(th.long).item()
         if step_count>0:
-            self._stats["avg_tracking_error"] = ((self._stats["avg_tracking_error"]*(step_count-1) + tracking_error.squeeze())/step_count).item()
-            self._stats["tracking_errors"][self._stepCounter%len(self._stats["tracking_errors"])] = tracking_error.cpu().item()
+            self._stats["avg_vel_track_err"] = ((self._stats["avg_vel_track_err"]*(step_count-1) + tracking_error.squeeze())/step_count).item()
+            self._stats["vel_track_errs"][step_count%len(self._stats["vel_track_errs"])] = tracking_error.cpu().item()
+            self._stats["avg_height_track_err"] = ((self._stats["avg_height_track_err"]*(step_count-1) + height_error.squeeze())/step_count).item()
+            self._stats["height_track_errs"][step_count%len(self._stats["height_track_errs"])] = height_error.cpu().item()
+            self._stats["avg_pitchnroll_err"] = ((self._stats["avg_pitchnroll_err"]*(step_count-1) + pitchnroll_err.squeeze())/step_count).item()
+            self._stats["pitchnroll_errs"][step_count%len(self._stats["pitchnroll_errs"])] = pitchnroll_err.cpu().item()
         else:
-            self._stats["avg_tracking_error"] = tracking_error
-            self._stats["tracking_errors"] =  th.full(  size=(int(self._maxStepsPerEpisode/10),),
+            self._stats["avg_vel_track_err"] = tracking_error.item()
+            self._stats["vel_track_errs"] =  th.full(  size=(int(self._maxStepsPerEpisode/10),),
                                                         fill_value=tracking_error,
+                                                        dtype=th.float32, device=self._configuration.th_device)
+            self._stats["avg_height_track_err"] = height_error.item()
+            self._stats["height_track_errs"] =  th.full(  size=(int(self._maxStepsPerEpisode/10),),
+                                                        fill_value=height_error.item(),
+                                                        dtype=th.float32, device=self._configuration.th_device)
+            
+            self._stats["avg_pitchnroll_err"] = height_error.item()
+            self._stats["pitchnroll_errs"] =  th.full(  size=(int(self._maxStepsPerEpisode/10),),
+                                                        fill_value=pitchnroll_err.item(),
                                                         dtype=th.float32, device=self._configuration.th_device)
             
     @override
     def getInfo(self,state) -> dict[Any,Any]:
         i = super().getInfo(state=state)
         internal_state = state[self.STATE_LOCOMOTION][0]
-        i["goal_x"] = internal_state[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_X]
-        i["goal_y"] = internal_state[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y]
-        i["avg_tracking_error"] = self._stats["avg_tracking_error"]
-        i["avg10_tracking_errors"] = th.mean(self._stats["tracking_errors"])
-        i["success"] = i["avg10_tracking_errors"] < 0.05
+        i["goal_rel_x"] = internal_state[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X]
+        i["goal_rel_y"] = internal_state[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y]
+        i["goal_rel_z"] = internal_state[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]
+        i["goal_x"] = self._locomotion_episode_config.goal_velocity_xy[0]
+        i["goal_y"] = self._locomotion_episode_config.goal_velocity_xy[1]
+        i["avg_vel_track_err"] = self._stats["avg_vel_track_err"]
+        i["avg10_vel_track_errs"] = th.mean(self._stats["vel_track_errs"])
+        i["avg_height_track_err"] = self._stats["avg_height_track_err"]
+        i["avg10_height_track_errs"] = th.mean(self._stats["height_track_errs"])
+        i["avg_pitchnroll_err"] = self._stats["avg_pitchnroll_err"]
+        i["avg10_pitchnroll_errs"] = th.mean(self._stats["pitchnroll_errs"])
+        i["success"] = i["avg10_vel_track_errs"] < 0.05
+
+        statenorm = self._state_helper.normalize(state)
+        for substate in [self.STATE_LOCOMOTION]:
+            i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
+            i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+            i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
+            i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+
         return i
     
     def _set_current_ep_config(self, reset_options : dict = {}):
         super()._set_current_ep_config(reset_options=reset_options)
         
-        # goal_velocity_xy = reset_options.get("goal_velocity_xy", th.tanh(th.randn(size=(2,),generator=self._rng)/5)*5 * 2)
-        goal_velocity_xy = th.as_tensor((10.,0.), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
+        goal_speed = unnormalize(th.rand(size=(1,),generator=self._rng, device=self._configuration.th_device)*2-1,
+                                    min=self._locomotion_conf.goal_speed_minmax[0],
+                                    max=self._locomotion_conf.goal_speed_minmax[1])
+        goal_direction = th.rand((1,),generator=self._rng, device=self._configuration.th_device)*math.pi*2
+        goal_velocity_xy = reset_options.get("goal_velocity_xy", goal_speed*th.cat([th.cos(goal_direction), th.sin(goal_direction)]))
+                                             
+        # goal_velocity_xy = th.as_tensor((10.,0.), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
 
         self._locomotion_episode_config = LocomotionEnv.EpisodeLocomConfiguration(goal_velocity_xy=goal_velocity_xy)
         self.set_max_episode_steps(self._current_episode_config.max_ep_steps)
 
+    def reachedTerminalState(self, previousState, state) -> th.Tensor:
+        if super().reachedTerminalState(previousState, state):
+            return th.as_tensor(True, device=self._configuration.th_device)
+        else:
+            return state[self.STATE_LOCOMOTION][0][self.LOCOMOTION_FIELDS.CRASHED].squeeze()
+
+    def initializeEpisode(self, options=...) -> None:
+        super().initializeEpisode(options)
+        if self._locomotion_conf.use_contacts:
+            if not isinstance(self._adapter,PyBulletAdapter):
+                raise RuntimeError(f"Contacts are supported only in pybullet for now")
+            self._adapter.monitor_contacts([(self._configuration.robot_name, None)])
 
     def _simulation_initialization(self):
         if not isinstance(self._adapter, BaseSimulationAdapter):
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
         super()._simulation_initialization()
         if self._configuration.show_goal:
-            self._adapter.setLinksStateDirect({self._red_ball_base :
-                                                            LinkState( position_xyz = th.tensor((self._locomotion_episode_config.goal_velocity_xy[0],
-                                                                                                 self._locomotion_episode_config.goal_velocity_xy[1],
-                                                                                                 0.5), device=self._configuration.th_device),
-                                                                        orientation_xyzw = th.tensor((0.,0.,0.,1.0), device=self._configuration.th_device),
+            body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
+            q = quaternion.from_euler_angles([0.0,0.0,np.arctan2(*self._locomotion_episode_config.goal_velocity_xy[[1,0]].cpu().numpy())])
+            self._adapter.setLinksStateDirect({self._arrow_base :
+                                                            LinkState( position_xyz = th.tensor((body_state.pose.position[0],
+                                                                                                 body_state.pose.position[1],
+                                                                                                 body_state.pose.position[2]+0.1), device=self._configuration.th_device),
+                                                                        orientation_xyzw = th.tensor((q.x, q.y, q.z, q.w), device=self._configuration.th_device),
                                                                         pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
+            
+    @override
+    def getUiRendering(self) -> tuple[np.ndarray | th.Tensor | None, float]:
+        if isinstance(self._adapter, BaseSimulationAdapter):
+            body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
+            q = quaternion.from_euler_angles([0.0,0.0,np.arctan2(*self._locomotion_episode_config.goal_velocity_xy[[1,0]].cpu().numpy())])
+            self._adapter.setLinksStateDirect({self._arrow_base :
+                                                            LinkState( position_xyz = th.tensor((body_state.pose.position[0],
+                                                                                                    body_state.pose.position[1],
+                                                                                                    0.0), device=self._configuration.th_device),
+                                                                        orientation_xyzw = th.tensor((q.x, q.y, q.z, q.w), device=self._configuration.th_device),
+                                                                        pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
+                                                                        ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
+        return super().getUiRendering()

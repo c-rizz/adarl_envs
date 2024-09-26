@@ -94,7 +94,6 @@ def env_builder(seed,
                             control_mode = env_builder_args.pop("control_mode"),
                             controlled_joints=[LocomotionEnv.JOINT_FILTERS.ALL_REVOLUTE],
                             goal_err_smoothing_halflife_sec = env_builder_args.pop("goal_err_smoothing_halflife_sec"),
-                            robot_main_body_link="body_link",
                             maxStepsPerEpisode=max_steps,
                             minmax_damping=(1.0,30.0),
                             minmax_stiffness=(50.0,1000.0),
@@ -103,24 +102,28 @@ def env_builder(seed,
                             reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
                             reward_contacts_weight = env_builder_args.pop("reward_contacts_weight"),
                             reward_energy_weight = env_builder_args.pop("reward_energy_weight"),
+                            reward_health_weight = env_builder_args.pop("reward_health_weight"),
                             reward_position_limit_weight = env_builder_args.pop("reward_position_limit_weight"),
-                            reward_scale=500/max_steps,
+                            reward_scale=1000/max_steps,
                             reward_torque_limit_weight = env_builder_args.pop("reward_torque_limit_weight"),
                             reward_torque_weight = env_builder_args.pop("reward_torque_weight"),
                             reward_torquediff_weight = env_builder_args.pop("reward_torquediff_weight"),
                             reward_tracking_weight = env_builder_args.pop("reward_tracking_weight"),
                             reward_velocity_limit_weight = env_builder_args.pop("reward_velocity_limit_weight"),
                             reward_velocity_weight = env_builder_args.pop("reward_velocity_weight"),
+                            reward_height_weight=env_builder_args.pop("reward_height_weight"),
+                            reward_pitchnroll_weight=env_builder_args.pop("reward_pitchnroll_weight"),
+                            robot_main_body_link="body_link",
                             robot_name="quad",
                             robot_urdf_string=urdf_string,
+                            safe_damping=env_builder_args.pop("safe_damping"),
+                            safe_stiffness=env_builder_args.pop("safe_stiffness"),
                             safety_limits_factor=0.9,
                             seed=seed,
                             stepLength_sec=stepLength_sec,
                             step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001,
                             stop_on_safety=env_builder_args.pop("stop_on_safety"),
                             th_device=th_device,
-                            safe_damping=env_builder_args.pop("safe_damping"),
-                            safe_stiffness=env_builder_args.pop("safe_stiffness"),
                             homing_joint_pose={("quad","hip_joint_x_back_left") : -3.14159*0.4,
                                                ("quad","hip_joint_x_back_right") : -3.14159*0.4,
                                                ("quad","hip_joint_x_front_left") : -3.14159*0.4,
@@ -132,7 +135,23 @@ def env_builder(seed,
                                                ("quad","knee_joint_back_left") : 1.8,
                                                ("quad","knee_joint_back_right") : 1.8,
                                                ("quad","knee_joint_front_left") : 1.8,
-                                               ("quad","knee_joint_front_right") : 1.8}
+                                               ("quad","knee_joint_front_right") : 1.8,},
+                            disallowed_contact_links = [("quad","thigh_link_back_left"),
+                                                        ("quad","thigh_link_back_left"),
+                                                        ("quad","thigh_link_back_right"),
+                                                        ("quad","thigh_link_back_right"),
+                                                        ("quad","thigh_link_front_left"),
+                                                        ("quad","thigh_link_front_left"),
+                                                        ("quad","thigh_link_front_right"),
+                                                        ("quad","thigh_link_front_right"),
+                                                        ("quad","body_link")],
+                            goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
+                            use_contacts=env_builder_args.pop("use_contacts"),
+                            frame_stack_length=env_builder_args.pop("frame_stack_length"),
+                            observe_body_velocity=True,
+                            homing_body_pose_xyz_xyzw=(0.,0.,0.5,0.,0.,0.,1.),
+                            control_limits_minmax_pve={},
+                            terminating_contact_pairs=[] #[(("quad","body_link"),("ground_plane","planeLink"))]
                             )
     ggLog.info(f"state_space = {lrenv.state_space}")
     ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -182,8 +201,16 @@ video_recorder_kwargs : dict[str,typing.Any]  = dict(vec_obs_key="vec",
                                     # f"rTorque {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]:.2f}\n"+
                                     # f"rTrack  {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]:.2f}\n"+
                                     # f"rVeloci {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]:.2f}\n"
-                                    f"goal_xy  {info['state_internal'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_X,LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_Y]].cpu().tolist()}\n"
-                                    f"safety   {info['state_internal'][LocomotionEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]:.2f}\n"
+                                    f"goal_vel       {info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X]].cpu().item(): .3f}, " 
+                                                     f"{info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y]].cpu().item(): .3f}, "
+                                                     f"{info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]].cpu().item(): .3f}\n"
+                                    f"goal_vel       {info['goal_x']: .3f}, {info['goal_y']: .3f} \n"
+                                    f"contacts_count {info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.COLLISON_COUNT]].cpu().item(): .3f}\n"
+                                    f"body_vel       {info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_LINVEL_X]].cpu().item(): .3f}, "
+                                                     f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_LINVEL_Y]].cpu().item(): .3f}, "
+                                                     f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_LINVEL_Z]].cpu().item(): .3f}\n"
+                                    f"track_err      {info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]].cpu().item(): .3f}\n"
+                                    f"safety         {info['state_internal'][LocomotionEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]: .2f}\n"
                                     # f"position {info['state_robot'][0]:.2f}, {info['state_robot'][8]:.2f}\n"
                                     # f"velocity {info['state_robot'][1]:.2f}, {info['state_robot'][8+1]:.2f}\n"
                                     # f"torque   {info['state_robot'][2]:.2f}, {info['state_robot'][8+2]:.2f}\n"

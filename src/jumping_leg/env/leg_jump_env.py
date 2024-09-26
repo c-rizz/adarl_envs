@@ -912,8 +912,8 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                 # ggLog.error(f"saving image at {imgfile}")
                 # cv2.imwrite(imgfile, self._robot_model.get_dbg_image())
 
-            link_poses = self._robot_model.get_frame_poses()
-            if link_poses["foot_link"][0][2] <0:
+            link_poses = self._robot_model.get_frame_poses_xyzxyzw()
+            if link_poses["foot_link"][2] <0:
                 ggLog.error("foot is under the ground! link_poses = "+"\n".join([f"{n}:{p}" for n,p in link_poses.items()]))
                 ggLog.error(f"checked collisions = {self._robot_model._collision_pairs}")
                 ggLog.error(f"collisions = {collisions}")
@@ -1178,13 +1178,12 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             contacts = self._adapter.get_contacts()
             impulses = []
             forces = []
-            clean_contacts = []
+            nonzero_contacts = []
             for simstep_contacts in contacts:
-                nonzero_contacts = [contact for contact in simstep_contacts if contact[3]!=0]
-                if len(nonzero_contacts)>0:
-                    clean_contacts.append(nonzero_contacts)
-            contacts = clean_contacts
-            for simsteps_contacts in contacts:
+                step_nonzero_contacts = [contact for contact in simstep_contacts if contact[3]!=0]
+                if len(step_nonzero_contacts)>0:
+                    nonzero_contacts.append(step_nonzero_contacts)
+            for simsteps_contacts in nonzero_contacts:
                 forces   += [contact[3] for contact in simsteps_contacts]
                 impulses += [contact[3]*contact[4] for contact in simsteps_contacts]
             abs_impulses = [abs(i) for i in impulses]

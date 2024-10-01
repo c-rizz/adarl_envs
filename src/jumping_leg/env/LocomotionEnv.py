@@ -139,7 +139,8 @@ class LocomotionEnv(RobotEnv):
                         stop_on_safety : bool,
                         terminating_contact_pairs : list[tuple[tuple[str,str],tuple[str,str]]],
                         th_device : th.device,
-                        use_contacts : bool
+                        use_contacts : bool,
+                        verbose_infos : bool
                         ):
         super().__init__(   action_delay_mustd = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
@@ -168,7 +169,8 @@ class LocomotionEnv(RobotEnv):
                             homing_joint_pose = homing_joint_pose,
                             control_limits_minmax_pve = control_limits_minmax_pve,
                             observe_body_velocity = observe_body_velocity,
-                            frame_stack_length=frame_stack_length
+                            frame_stack_length=frame_stack_length,
+                            verbose_infos = verbose_infos
                         )
         self._locomotion_conf = LocomotionEnv.LocomotionConfiguration(
                         reward_acceleration_weight = reward_acceleration_weight,
@@ -189,8 +191,8 @@ class LocomotionEnv(RobotEnv):
                         goal_speed_minmax = th.as_tensor(goal_speed_minmax, device=th_device, dtype=th.float32),
                         reward_height_weight=reward_height_weight,
                         reward_pitchnroll_weight=reward_pitchnroll_weight,
-                        height_reward_settle_point=th.tensor(0.2, device=th_device),
-                        pitchnroll_reward_settle_point=th.tensor(0.5, device=th_device),
+                        height_reward_settle_point=th.tensor(0.1, device=th_device),
+                        pitchnroll_reward_settle_point=th.tensor(0.1, device=th_device),
                         vel_tracking_reward_settle_point=th.tensor(1.0, device=th_device))
         locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     obs_dtype=th.float32,
@@ -289,8 +291,8 @@ class LocomotionEnv(RobotEnv):
                             self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT : self._locomotion_conf.reward_acceleration_weight,
                             self.LOCOMOTION_FIELDS.REWARD_CONTACTS_WEIGHT : self._locomotion_conf.reward_contacts_weight,
                             self.LOCOMOTION_FIELDS.REWARD_HEALTH_WEIGHT : self._locomotion_conf.reward_health_weight,
-                            self.LOCOMOTION_FIELDS.REWARD_HEIGHT_WEIGHT : self._locomotion_conf.reward_pitchnroll_weight,
-                            self.LOCOMOTION_FIELDS.REWARD_PITCHNROLL_WEIGHT : self._locomotion_conf.reward_height_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_HEIGHT_WEIGHT : self._locomotion_conf.reward_height_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_PITCHNROLL_WEIGHT : self._locomotion_conf.reward_pitchnroll_weight,
                             self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT : self._locomotion_conf.reward_tracking_weight,
                             self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT : self._locomotion_conf.reward_torque_weight,
                             self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._locomotion_conf.reward_torquediff_weight,
@@ -306,9 +308,7 @@ class LocomotionEnv(RobotEnv):
                             self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_Z : goal_gravity_vec[2],
                             self.LOCOMOTION_FIELDS.SUM_IMPULSES : sum_bad_impulses,
                             self.LOCOMOTION_FIELDS.COLLISON_COUNT :collision_count,
-                            self.LOCOMOTION_FIELDS.CRASHED : crashed,
-                            self.LOCOMOTION_FIELDS.ORIENT_ERR : orient_err,
-                            self.LOCOMOTION_FIELDS.HEIGHT_ERR : height_err}
+                            self.LOCOMOTION_FIELDS.CRASHED : crashed}
         new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
 
 
@@ -338,8 +338,8 @@ class LocomotionEnv(RobotEnv):
         velocities_safenorm = robot_state_safenorm[:,1]
         torque_safenorm = robot_state_safenorm[:,2]
 
-        torque_reward       = - th.clamp(th.mean(th.pow(normtorques,4)),-max_rew,max_rew)
-        velocity_reward     = - th.clamp(th.mean(th.pow(normvelocities,4)),-max_rew,max_rew)
+        torque_reward       = - th.clamp(th.mean(th.pow(normtorques,2)),-max_rew,max_rew)
+        velocity_reward     = - th.clamp(th.mean(th.pow(normvelocities,2)),-max_rew,max_rew)
         acceleration_reward = - th.clamp(th.mean(th.pow(normaccelerations,2)),-max_rew,max_rew)
         torquediff_reward   = - th.clamp(th.mean(th.pow(normtorquediff,2)),-max_rew,max_rew)
 
@@ -347,12 +347,11 @@ class LocomotionEnv(RobotEnv):
         position_limit_reward = -th.clamp(th.mean(th.pow(position_safenorm,50)),-max_rew,max_rew)
         velocity_limit_reward = -th.clamp(th.mean(th.pow(velocities_safenorm,50)),-max_rew,max_rew)
 
+        reward_height = bell_reward(locom_state[self.LOCOMOTION_FIELDS.HEIGHT_ERR],
+                                    zero_rew_dist=self._locomotion_conf.height_reward_settle_point)
 
-        height_err = locom_state[self.LOCOMOTION_FIELDS.HEIGHT_ERR]
-        reward_height = bell_reward(height_err, zero_rew_dist=self._locomotion_conf.height_reward_settle_point)
-
-        orient_err = locom_state[self.LOCOMOTION_FIELDS.ORIENT_ERR]
-        reward_pitchnroll = bell_reward(orient_err, zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
+        reward_pitchnroll = bell_reward(locom_state[self.LOCOMOTION_FIELDS.ORIENT_ERR],
+                                        zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
 
         velocity_tracking_err = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
         velocity_tracking_reward = bell_reward(velocity_tracking_err, zero_rew_dist=self._locomotion_conf.vel_tracking_reward_settle_point)
@@ -384,7 +383,7 @@ class LocomotionEnv(RobotEnv):
                     "reward_velocity_limit" : locom_state[self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT],
                     "reward_acceleration" : locom_state[self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT],
                     "reward_position_limit" : locom_state[self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT],
-                    "reward_health" : 1*locom_state[self.LOCOMOTION_FIELDS.REWARD_HEALTH_WEIGHT],
+                    "reward_health" : locom_state[self.LOCOMOTION_FIELDS.REWARD_HEALTH_WEIGHT],
                     "reward_contacts" : locom_state[self.LOCOMOTION_FIELDS.REWARD_CONTACTS_WEIGHT],
                     "reward_height" : locom_state[self.LOCOMOTION_FIELDS.REWARD_HEIGHT_WEIGHT],
                     "reward_pitchnroll" : locom_state[self.LOCOMOTION_FIELDS.REWARD_PITCHNROLL_WEIGHT]}
@@ -396,12 +395,10 @@ class LocomotionEnv(RobotEnv):
 
         if dbg_info is not None:
             sub_rewards_scaled = {f"{k}_scaled":v for k,v in sub_rewards.items()}
-            sub_rewards_scaled_agg_names = [k for k in sub_rewards_scaled.keys()]
-            sub_rewards_scaled_agg = th.stack([sub_rewards_scaled[k] for k in sub_rewards_scaled_agg_names])
-            sub_rewards_scaled_agg_names = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in sub_rewards_scaled_agg_names], dtype=th.uint8)
-            sub_rewards_unscaled_agg_names = [k for k in sub_rewards_unscaled.keys()]
-            sub_rewards_unscaled_agg = th.stack([sub_rewards_unscaled[k] for k in sub_rewards_unscaled_agg_names])
-            sub_rewards_unscaled_agg_names = th.as_tensor([list(n.encode("utf-8").ljust(16)[:16]) for n in sub_rewards_unscaled_agg_names], dtype=th.uint8)
+            sub_rewards_scaled_agg = th.stack([sub_rewards_scaled[k] for k in sub_rewards_scaled.keys()])
+            sub_rewards_scaled_agg_names = to_string_tensor([k for k in sub_rewards_scaled.keys()])
+            sub_rewards_unscaled_agg = th.stack([sub_rewards_unscaled[k] for k in sub_rewards_unscaled.keys()])
+            sub_rewards_unscaled_agg_names = sub_rewards_scaled_agg_names
             dbg_info["sub_rewards_unscaled"] = sub_rewards_unscaled_agg
             dbg_info["sub_rewards_unscaled_labels"] = sub_rewards_unscaled_agg_names
             dbg_info["sub_rewards_scaled"] = sub_rewards_scaled_agg
@@ -466,12 +463,13 @@ class LocomotionEnv(RobotEnv):
         i["avg10_pitchnroll_errs"] = th.mean(self._stats["pitchnroll_errs"])
         i["success"] = i["avg10_vel_track_errs"] < 0.05
 
-        statenorm = self._state_helper.normalize(state)
-        for substate in [self.STATE_LOCOMOTION]:
-            i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
-            i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
-            i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
-            i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+        if self._configuration.verbose_infos:
+            statenorm = self._state_helper.normalize(state)
+            for substate in [self.STATE_LOCOMOTION]:
+                i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
+                i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+                i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
+                i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
 
         return i
     

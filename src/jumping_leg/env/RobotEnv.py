@@ -60,6 +60,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         th_device : th.device
         ui_camera_name : str
         ui_camera_link : tuple[str,str]
+        verbose_infos : bool
 
     metadata = {'render.modes': ['rgb_array']}
     # STATE_BASE = "b" # component of the state that is a vector and is always the same regardless of the configuration
@@ -129,7 +130,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         homing_joint_pose : dict[tuple[str,str], float],
                         control_limits_minmax_pve : dict[tuple[str,str], th.Tensor],
                         observe_body_velocity : bool,
-                        frame_stack_length
+                        frame_stack_length : int,
+                        verbose_infos : bool
                         ):
         
         self._rng = th.Generator(device=th_device)
@@ -213,7 +215,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             stop_on_safety = stop_on_safety,
                                                             th_device = th_device,
                                                             ui_camera_link = ("simple_camera", "simple_camera_link"),
-                                                            ui_camera_name="simple_camera"
+                                                            ui_camera_name="simple_camera",
+                                                            verbose_infos = verbose_infos
                                                             )
 
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
@@ -399,6 +402,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             #                                                         collision_box_size_xyz=(10,10,1),
             #                                                         collision_obj_id="ground_collision")
             self._adapter.set_monitored_joints(self._configuration.controlled_joints)
+            self._adapter.set_impedance_controlled_joints(self._configuration.controlled_joints)
 
         
         self._set_current_ep_config(reset_options = options)
@@ -621,19 +625,20 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         i.update(self._stats)
         i["step_count"] = self._stepCounter
 
-        statenorm = self._state_helper.normalize(state)
-        for substate in [self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT, self.STATE_ROBOT_STATS]:
-            i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
-            i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
-            i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
-            i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+        if self._configuration.verbose_infos:
+            statenorm = self._state_helper.normalize(state)
+            for substate in [self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT, self.STATE_ROBOT_STATS]:
+                i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
+                i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+                i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
+                i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+                i["vec_obs"] = self._last_obs["vec"]
+                i["vec_obs_labels"] = to_string_tensor([n for n in self._state_helper.observation_names()["vec"]])
             
         i.update(self._stats["rewards"])
         i["ep_config"] = dataclasses.asdict(self._current_episode_config)
         i["safety_triggered"] = internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED]
-        i["vec_obs"] = self._last_obs["vec"]
-        obslabels = [n.encode("utf-8").ljust(64)[:64] for n in self._state_helper.observation_names()["vec"]]
-        i["vec_obs_labels"] = th.as_tensor(obslabels, dtype=th.uint8)        
+        
         return i
 
     @override

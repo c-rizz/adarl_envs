@@ -15,14 +15,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args = {
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
-        "reward_position_limit_weight" : 0.1,
-        "reward_velocity_limit_weight" : 1.0,
+        "reward_position_limit_weight" : 0.0,
+        "reward_velocity_limit_weight" : 0.0,
         "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 0.5,
-        "reward_torquediff_weight" : 0.5,
+        "reward_torque_weight" : 0.0,
+        "reward_torquediff_weight" : 0.0,
         "reward_tracking_weight" : 1.0,
-        "reward_velocity_weight" : 0.1,
-        "reward_acceleration_weight" : 0.5,
+        "reward_velocity_weight" : 0.0,
+        "reward_acceleration_weight" : 0.0,
         "th_device" : th.device("cpu"),
         "control_mode" : "impedance",
         "video_save_freq" : 0,
@@ -44,29 +44,28 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "leg_min_jump" : -0.1,
         "goal_dist_smoothing_halflife_sec" : 0.0,
         "enable_rendering" : False,
-        "num_envs" : train_envs,
         "randomize_initial_pose" : False}
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["video_save_freq"] = 1
-    video_eval_env_builder_args["num_envs"] = 1
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,
         "eval_freq_ep" : 10*train_envs,
         "eval_eps" : 1,
-        "env_builder_args" : video_eval_env_builder_args
+        "env_builder_args" : video_eval_env_builder_args,
+        "num_envs" : 1
     }
     eval_conf_video_stoch = {
         "name" : "video_stoch",
         "deterministic" : False,
         "eval_freq_ep" : 10*train_envs,
         "eval_eps" : 1,
-        "env_builder_args" : video_eval_env_builder_args
+        "env_builder_args" : video_eval_env_builder_args,
+        "num_envs" : 1
     }
     feasible_env_builder_args = copy.deepcopy(env_builder_args)
     feasible_env_builder_args["leg_max_jump"] = 0.2
-    feasible_env_builder_args["num_envs"] = 16
     feasible_env_builder_args["ep_obs_noise_mustd"] = (0.0, 0.0)
     feasible_env_builder_args["step_obs_noise_std"] = 0.0
     feasible_env_builder_args["randomize_initial_pose"] = False
@@ -78,19 +77,20 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "deterministic" : True,
         "eval_freq_ep" : 10*train_envs,
         "eval_eps" : 32,
-        "env_builder_args" : feasible_env_builder_args
+        "env_builder_args" : feasible_env_builder_args,
+        "num_envs" : 16
     }
     video_feasible_env_builder_args = copy.deepcopy(feasible_env_builder_args)
     video_feasible_env_builder_args["enable_rendering"] = True
     video_feasible_env_builder_args["video_save_freq"] = 1
-    video_feasible_env_builder_args["num_envs"] = 1
     video_feasible_env_builder_args["randomize_initial_pose"] = False
     eval_conf_video_feasible = {
         "name" : "video_feasible",
         "deterministic" : True,
         "eval_freq_ep" : 10*train_envs,
         "eval_eps" : 1,
-        "env_builder_args" : video_feasible_env_builder_args
+        "env_builder_args" : video_feasible_env_builder_args,
+        "num_envs" : 1
     }
     video_feasible_jump_env_builder_args = copy.deepcopy(video_feasible_env_builder_args)
     video_feasible_jump_env_builder_args["leg_min_jump"] = 0.2
@@ -99,7 +99,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "deterministic" : True,
         "eval_freq_ep" : 10*train_envs,
         "eval_eps" : 1,
-        "env_builder_args" : video_feasible_jump_env_builder_args
+        "env_builder_args" : video_feasible_jump_env_builder_args,
+        "num_envs" : 1
     }
     
 
@@ -124,14 +125,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 batch_size=16384,
                                                 buffer_size=1_000_000,
                                                 total_steps=100_000_000,
-                                                train_freq=25,
+                                                train_freq_vstep=25,
                                                 grad_steps=50,
                                                 learning_starts=max_steps_per_episode*train_envs*5,
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode),
                 video_recorder_kwargs=build_jumping_leg_env.video_recorder_kwargs,
                 checkpoint_freq=100,
-                collector_device=th.device("cuda"))
+                collector_device=th.device("cpu"),
+                debug_level=-1)
 
 
 

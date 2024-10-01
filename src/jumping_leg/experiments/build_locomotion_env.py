@@ -151,11 +151,12 @@ def env_builder(seed,
                             observe_body_velocity=True,
                             homing_body_pose_xyz_xyzw=(0.,0.,0.5,0.,0.,0.,1.),
                             control_limits_minmax_pve={},
-                            terminating_contact_pairs=[] #[(("quad","body_link"),("ground_plane","planeLink"))]
+                            terminating_contact_pairs=[], #[(("quad","body_link"),("ground_plane","planeLink"))]
+                            verbose_infos=env_builder_args.pop("verbose_infos")
                             )
-    ggLog.info(f"state_space = {lrenv.state_space}")
-    ggLog.info(f"observation_space = {lrenv.observation_space}")
-    ggLog.info(f"action_space = {lrenv.action_space.shape}")
+    # ggLog.info(f"state_space = {lrenv.state_space}")
+    # ggLog.info(f"observation_space = {lrenv.observation_space}")
+    # ggLog.info(f"action_space = {lrenv.action_space.shape}")
 
 
     if no_dict:

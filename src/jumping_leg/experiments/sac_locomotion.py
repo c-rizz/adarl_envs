@@ -8,14 +8,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import jumping_leg.experiments.build_locomotion_env as build_locomotion_env
     from rreal.examples.solve_sac import sac_train, SAC_hyperparams
     
-    step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    ep_duration_sec = 5
+    step_length_sec = 25/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 64
+    train_envs = 32
+    env_device = th.device("cpu")
     env_builder_args = {
-        "action_delay_mustd" : (0.01,0.01),
-        "action_noise_mustd" : (0.0,0.001),
-        "action_smoothing_halflife_sec" : 0.2,
+        "action_delay_mustd" : (0.0,0.0),
+        "action_noise_mustd" : (0.0,0.0),
+        "action_smoothing_halflife_sec" : 0.5,
         "control_mode" : "position",
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.2,
@@ -30,24 +30,26 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_torque_limit_weight" : 0.1,
         "reward_torque_weight" : 0.0,
         "reward_torquediff_weight" : 0.0,
-        "reward_tracking_weight" : 0.0,
+        "reward_tracking_weight" : 1.0,
         "reward_velocity_limit_weight" : 0.1,
-        "reward_velocity_weight" : 0.1,
+        "reward_velocity_weight" : 1.0,
         "reward_height_weight" : 0.1,
-        "reward_pitchnroll_weight" : 0.1,
-        "safe_stiffness" : 200,
+        "reward_pitchnroll_weight" : 1.0,
+        "safe_stiffness" : 300,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
         "obs_noise_step_std" : 0.0,
         "obs_noise_ep_mustd" : (0.0, 0.0),
         "stop_on_safety" : False,
-        "th_device" : th.device("cpu"),
+        "th_device" : env_device,
         "video_save_freq" : 0,
         "goal_speed_minmax" : (0,2),
         "use_contacts" : True,
-        "frame_stack_length" : 1}
+        "frame_stack_length" : 1,
+        "verbose_infos" : False}
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
+    video_eval_env_builder_args["verbose_infos"] = True
     video_eval_env_builder_args["video_save_freq"] = 1
     eval_conf_video_det = {
         "name" : "video_det",
@@ -68,6 +70,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
     run_1ms_env_builder_args["goal_speed_minmax"] = (1,1)
     run_1ms_env_builder_args["enable_rendering"] = True
+    run_1ms_env_builder_args["verbose_infos"] = True
     run_1ms_env_builder_args["video_save_freq"] = 1
     eval_conf_run_1ms = {
         "name" : "run_1ms",
@@ -125,14 +128,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 batch_size=16384,
                                                 buffer_size=1_000_000,
                                                 total_steps=100_000_000,
-                                                train_freq=25,
+                                                train_freq_vstep=25,
                                                 grad_steps=100,
                                                 learning_starts=max_steps_per_episode*train_envs*5,
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode),
                 video_recorder_kwargs=build_locomotion_env.video_recorder_kwargs,
                 checkpoint_freq=100,
-                collector_device=th.device("cpu"))
+                collector_device=env_device,
+                debug_level=0)
 
 
 

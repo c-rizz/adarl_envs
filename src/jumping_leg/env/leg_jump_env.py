@@ -519,7 +519,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         if self._configuration.use_contacts:
             if not isinstance(self._adapter, PyBulletAdapter):
                 raise RuntimeError(f"Required to use contacts, but environment adapter does not support contacts")
-            self._adapter.monitor_contacts([("leg",None,None,None)]) # Monitor the contacts between the leg and all the environment
+            self._adapter.monitor_contacts([("leg",None)]) # Monitor the contacts between the leg and all the environment
 
         self._adapter.startup()
 
@@ -771,14 +771,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     @override
     def initializeEpisode(self, options = {}) -> None:
 
-        self._current_state : LegJumpEnv.State = self._state_helper.init_state(initial_values={
-            self.STATE_EXTRINSIC : th.tensor(0.0),
-            self.STATE_ROBOT : th.tensor(0.0),
-            self.STATE_ROBOT_STATS : th.tensor(0.0),
-            self.STATE_ACT : th.tensor(0.0),
-            self.STATE_INTERNAL : th.tensor(0.0),
-            self.STATE_IMG : th.zeros(size=self._configuration.img_shape_chw, device=self._configuration.th_device, dtype=th.uint8)
-        })
+        self._current_state : LegJumpEnv.State = self._state_helper.reset_state()
         self._current_state[self.STATE_INTERNAL][0,self.INTERNAL_FIELDS.STEP_COUNT] = th.tensor(-1.)
         self._last_obs = None
 
@@ -842,6 +835,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             self._robot_model.remove_collision_pairs([("support2_collision","ground_collision")])
             self._robot_model.remove_collision_pairs([("rail_link_0","ground_collision")])
             self._adapter.set_monitored_joints([self._hip_joint,self._knee_joint])
+            self._adapter.set_impedance_controlled_joints([self._hip_joint,self._knee_joint])
 
         
 
@@ -1297,7 +1291,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         
         
         if step_count <= 0:
-            self._current_state = self._state_helper.init_state(instantaneous_state)
+            self._current_state = self._state_helper.reset_state(instantaneous_state)
         else:
             self._state_helper.update(instantaneous_state, state=self._current_state)
         

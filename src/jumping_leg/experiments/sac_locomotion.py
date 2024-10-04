@@ -10,32 +10,33 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 25/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 32
+    train_envs = 192
     env_device = th.device("cpu")
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
-        "action_smoothing_halflife_sec" : 0.5,
+        "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
         "enable_rendering" : False,
-        "goal_err_smoothing_halflife_sec" : 0.2,
+        "goal_err_smoothing_halflife_sec" : 0.0,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "pybullet",
         "quiet" : False,
-        "reward_acceleration_weight" : 0.5,
+        "reward_acceleration_weight" : 0.01,
+        "reward_actdiff_weight" : 0.01,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
-        "reward_health_weight" : 0.0,
-        "reward_position_limit_weight" : 0.1,
-        "reward_torque_limit_weight" : 0.1,
-        "reward_torque_weight" : 0.0,
+        "reward_health_weight" : 0.01,
+        "reward_position_limit_weight" : 0.01,
+        "reward_torque_limit_weight" : 0.0,
+        "reward_torque_weight" : 0.01,
         "reward_torquediff_weight" : 0.0,
         "reward_tracking_weight" : 1.0,
-        "reward_velocity_limit_weight" : 0.1,
-        "reward_velocity_weight" : 1.0,
-        "reward_height_weight" : 0.1,
-        "reward_pitchnroll_weight" : 1.0,
-        "safe_stiffness" : 300,
+        "reward_velocity_limit_weight" : 0.01,
+        "reward_velocity_weight" : 0.01,
+        "reward_height_weight" : 0.0,
+        "reward_pitchnroll_weight" : 0.0,
+        "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
         "obs_noise_step_std" : 0.0,
@@ -46,7 +47,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_speed_minmax" : (0,2),
         "use_contacts" : True,
         "frame_stack_length" : 1,
-        "verbose_infos" : False}
+        "verbose_infos" : False,
+        "terminate_on_body_contact" : True}
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["verbose_infos"] = True
@@ -121,22 +123,23 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 hyperparams = SAC_hyperparams(  device = "cuda",
                                                 q_network_arch=[256,128],
                                                 q_lr=0.001,
-                                                policy_lr=0.0005,
+                                                policy_lr=0.0001,
                                                 policy_network_arch=[256,256],
                                                 gamma=0.99,
                                                 target_tau = 0.005,
-                                                batch_size=16384,
+                                                batch_size=4096,
                                                 buffer_size=1_000_000,
                                                 total_steps=100_000_000,
-                                                train_freq_vstep=25,
-                                                grad_steps=100,
-                                                learning_starts=max_steps_per_episode*train_envs*5,
+                                                train_freq_vstep=5,
+                                                grad_steps=10,
+                                                learning_starts=max_steps_per_episode*max(train_envs*5, 100),
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode),
                 video_recorder_kwargs=build_locomotion_env.video_recorder_kwargs,
                 checkpoint_freq=100,
                 collector_device=env_device,
-                debug_level=0)
+                debug_level=0,
+                max_episode_duration=max_steps_per_episode)
 
 
 

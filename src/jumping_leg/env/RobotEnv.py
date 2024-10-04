@@ -177,10 +177,10 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             if jn not in homing_joint_pose:
                 homing_joint_pose[jn] = default_homing_joint_pose[jn]
 
-        ggLog.info(f"phys_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in phys_limits_minmax_pve.items()]))
-        ggLog.info(f"safe_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
-        ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
-        ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
+        # ggLog.info(f"phys_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in phys_limits_minmax_pve.items()]))
+        # ggLog.info(f"safe_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
+        # ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
+        # ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
 
         self._configuration = self.Configuration(  action_delay_mustd = th.as_tensor(action_delay_mustd, device=th_device),
                                                             action_exp_smoothing_1s = action_exp_smoothing_1s,
@@ -267,7 +267,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                obs_dtype=th.float32,
                                                th_device=th_device,
                                                field_size=(self._action_helper.action_len(),),
-                                               fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]})
+                                               fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]},
+                                               history_length=2)
         robot_state_noise =  StateNoiseGenerator(robot_state_helper,
                                             self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
                                             episode_mu_std = self._configuration.obs_noise_ep_mustd,
@@ -540,15 +541,16 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         body_rel_linvel_xyz = quat_rotate(body_linvel_xyz, quat_conjugate(body_state.pose.orientation_xyzw))
         body_rel_angvel_xyz = quat_rotate(body_angvel_xyz, quat_conjugate(body_state.pose.orientation_xyzw))
 
+
+        internal_state = self._current_state[self.STATE_INTERNAL][0]
+        step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
         stats_minmaxavgstd_j_pve = self._adapter.get_joints_state_step_stats()
         if not th.all(th.isfinite(stats_minmaxavgstd_j_pve)):
             raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_j_pve}")
 
-        internal_state = self._current_state[self.STATE_INTERNAL][0]
-        step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
         if step_count!=-1 and internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0:
             safety_triggered = True
-        else:
+        elif step_count>=1: # stats are not valid at step 0
             triggered_limits = th.logical_or(stats_minmaxavgstd_j_pve[0] < self._safe_limits_minmax_j_pve[0],
                                              stats_minmaxavgstd_j_pve[1] > self._safe_limits_minmax_j_pve[1])
             safety_triggered = th.any(triggered_limits)
@@ -558,11 +560,13 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                 for i in np.ndindex(elements.shape):
                     if triggered_limits[i]:
                         triggered.append(elements[i])
-                ggLog.info( f"SAFETY TRIGGERED:"
+                ggLog.info( f"SAFETY TRIGGERED (step {step_count.item()}):"
                             f"\n    triggered ({len(triggered)}) = {triggered}"
                             # f"\n    joints_minmax = \n{stats_minmaxavgstd_j_pve[:2]}"
                             # f"\n    j_safety_lims  = \n{self._safe_limits_minmax_j_pve} "
                             )
+        else:
+            safety_triggered = False
 
 
         new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : 1 if safety_triggered else 0,

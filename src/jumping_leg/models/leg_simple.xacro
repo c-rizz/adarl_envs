@@ -38,7 +38,13 @@
 											knee_friction
 											parent_link
 											leg_name
-											is_left_leg:=true">
+											is_left_leg:=true
+											hip_x_min_pos:=-2.4
+											hip_x_max_pos:=2.4
+											hip_y_min_pos:=-2.4
+											hip_y_max_pos:=2.4
+											knee_min_pos:=-2.4
+											knee_max_pos:=2.4">
 
 			<xacro:if value="${is_left_leg}">
 				<xacro:property name="exterior_y_direction" value="1"/>

@@ -60,6 +60,14 @@
 	<xacro:property name="knee_friction" default="$(arg knee_friction)" />
 	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
 
+
+    <xacro:property name="hip_x_min_pos" default="0.0" />
+    <xacro:property name="hip_x_max_pos" default="2.4" />
+    <xacro:property name="hip_y_min_pos" default="-2.4" />
+    <xacro:property name="hip_y_max_pos" default="2.4" />
+    <xacro:property name="knee_min_pos" default="-2.4" />
+    <xacro:property name="knee_max_pos" default="2.4" />
+
     <xacro:macro name="default_contact_params" params="">
         <contact>
         <!-- 
@@ -119,7 +127,14 @@
                         knee_friction = "${knee_friction}"
                         parent_link = "body_link"
                         leg_name = "front_left"
-                        is_left_leg = "true"/>
+                        is_left_leg = "true"
+                        hip_x_min_pos = "${hip_x_min_pos}"
+                        hip_x_max_pos = "${hip_x_max_pos}"
+                        hip_y_min_pos = "${hip_y_min_pos}"
+                        hip_y_max_pos = "${hip_y_max_pos}"
+                        knee_min_pos = "${knee_min_pos}"
+                        knee_max_pos = "${knee_max_pos}"
+                        />
 
     <xacro:leg_simple   hip_x_offset = "${front_legs_pos}"
                         hip_y_offset = "${body_width/2 + legs_out_offset}"
@@ -137,7 +152,14 @@
                         knee_friction = "${knee_friction}"
                         parent_link = "body_link"
                         leg_name = "front_right"
-                        is_left_leg = "false"/>
+                        is_left_leg = "false"
+                        hip_x_min_pos = "${hip_x_min_pos}"
+                        hip_x_max_pos = "${hip_x_max_pos}"
+                        hip_y_min_pos = "${hip_y_min_pos}"
+                        hip_y_max_pos = "${hip_y_max_pos}"
+                        knee_min_pos = "${knee_min_pos}"
+                        knee_max_pos = "${knee_max_pos}"
+                        />
 
     <xacro:leg_simple   hip_x_offset = "${back_legs_pos}"
                         hip_y_offset = "${body_width/2 + legs_out_offset}"
@@ -155,7 +177,14 @@
                         knee_friction = "${knee_friction}"
                         parent_link = "body_link"
                         leg_name = "back_left"
-                        is_left_leg = "true"/>
+                        is_left_leg = "true"
+                        hip_x_min_pos = "${hip_x_min_pos}"
+                        hip_x_max_pos = "${hip_x_max_pos}"
+                        hip_y_min_pos = "${hip_y_min_pos}"
+                        hip_y_max_pos = "${hip_y_max_pos}"
+                        knee_min_pos = "${knee_min_pos}"
+                        knee_max_pos = "${knee_max_pos}"
+                        />
 
     <xacro:leg_simple   hip_x_offset = "${back_legs_pos}"
                         hip_y_offset = "${body_width/2 + legs_out_offset}"
@@ -173,7 +202,14 @@
                         knee_friction = "${knee_friction}"
                         parent_link = "body_link"
                         leg_name = "back_right"
-                        is_left_leg = "false"/>
+                        is_left_leg = "false"
+                        hip_x_min_pos = "${hip_x_min_pos}"
+                        hip_x_max_pos = "${hip_x_max_pos}"
+                        hip_y_min_pos = "${hip_y_min_pos}"
+                        hip_y_max_pos = "${hip_y_max_pos}"
+                        knee_min_pos = "${knee_min_pos}"
+                        knee_max_pos = "${knee_max_pos}"
+                        />
 
     <!-- <link name="world"/>
 	<joint name="world_to_body" type="floating">

@@ -4,7 +4,7 @@ from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 from adarl.envs.ControlledEnv import ControlledEnv
 from adarl.utils.robot_helpers import Robot
-from adarl.utils.utils import to_string_tensor, quat_rotate, quat_conjugate
+from adarl.utils.utils import to_string_tensor, th_quat_rotate, th_quat_conj
 from adarl.utils.state_helper import    JointImpedanceActionHelper, ThBoxStateHelper,\
                                         RobotStateHelper, RobotStatsStateHelper,\
                                         StateNoiseGenerator, DictStateHelper, unnormalize
@@ -21,6 +21,7 @@ import adarl.utils.utils
 import dataclasses
 import numpy as np
 import torch as th
+import time
 
 class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
@@ -61,6 +62,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         ui_camera_name : str
         ui_camera_link : tuple[str,str]
         verbose_infos : bool
+        quiet : bool
 
     metadata = {'render.modes': ['rgb_array']}
     # STATE_BASE = "b" # component of the state that is a vector and is always the same regardless of the configuration
@@ -94,7 +96,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
     @dataclass
     class EpisodeConfiguration:
-        initial_joint_pose : th.Tensor
+        initial_ctrl_joint_pose : th.Tensor
         max_ep_steps : th.Tensor
 
     @dataclass
@@ -131,7 +133,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         control_limits_minmax_pve : dict[tuple[str,str], th.Tensor],
                         observe_body_velocity : bool,
                         frame_stack_length : int,
-                        verbose_infos : bool
+                        verbose_infos : bool,
+                        quiet : bool
                         ):
         
         self._rng = th.Generator(device=th_device)
@@ -172,7 +175,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                      for jn in controlled_joints_rn}
         for jn in homing_joint_pose:
             if jn not in controlled_joints_rn:
-                raise RuntimeError(f"homing_joint_pose contains non-controlled joint {jn}")
+                ggLog.warn(f"homing_joint_pose contains non-controlled joint {jn}")
         for jn in controlled_joints_rn:
             if jn not in homing_joint_pose:
                 homing_joint_pose[jn] = default_homing_joint_pose[jn]
@@ -216,7 +219,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             th_device = th_device,
                                                             ui_camera_link = ("simple_camera", "simple_camera_link"),
                                                             ui_camera_name="simple_camera",
-                                                            verbose_infos = verbose_infos
+                                                            verbose_infos = verbose_infos,
+                                                            quiet=quiet
                                                             )
 
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
@@ -428,7 +432,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             initial_joint_pose = th.as_tensor([self._configuration.homing_joint_pose[jn] for jn in self._configuration.controlled_joints],
                                               device=self._configuration.th_device,
                                               dtype=self._configuration.obs_dtype)
-        self._current_episode_config = RobotEnv.EpisodeConfiguration(   initial_joint_pose = initial_joint_pose,
+        self._current_episode_config = RobotEnv.EpisodeConfiguration(   initial_ctrl_joint_pose = initial_joint_pose,
                                                                         max_ep_steps = maxStepsPerEpisode)
         self.set_max_episode_steps(self._current_episode_config.max_ep_steps)
 
@@ -439,14 +443,15 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         if not isinstance(self._adapter, BaseSimulationAdapter):
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
         
-        self._adapter.setLinksStateDirect({self._configuration.main_body_link :
-                                                        LinkState( position_xyz = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[:3], device=self._configuration.th_device),
-                                                                    orientation_xyzw = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[3:7], device=self._configuration.th_device),
-                                                                    pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
-                                                                    ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
+        if self._configuration.homing_body_pose_xyz_xyzw is not None:
+            self._adapter.setLinksStateDirect({self._configuration.main_body_link :
+                                                            LinkState( position_xyz = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[:3], device=self._configuration.th_device),
+                                                                        orientation_xyzw = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[3:7], device=self._configuration.th_device),
+                                                                        pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
+                                                                        ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
         self._adapter.setJointsStateDirect({jn:JointState(position=self._configuration.homing_joint_pose[jn],
                                                                         rate = 0,
-                                                                        effort = 0) for jn in self._configuration.controlled_joints})
+                                                                        effort = 0) for jn in self._configuration.homing_joint_pose})
         start_jimp : dict[tuple[str,str], tuple] = {jn:(self._configuration.homing_joint_pose[jn],
                                                         0,
                                                         0,
@@ -492,7 +497,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                 self._adapter.setLinksStateDirect({self._configuration.ui_camera_link :
                                                                 LinkState(  position_xyz = th.tensor((body_state.pose.position[0],
                                                                                                     body_state.pose.position[1]+2.5,
-                                                                                                    1.5), device=self._configuration.th_device),
+                                                                                                    body_state.pose.position[2]+1.0), device=self._configuration.th_device),
                                                                             orientation_xyzw = th.tensor((0.183,0.183,-0.683,0.683), device=self._configuration.th_device),
                                                                             pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                             ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
@@ -536,10 +541,9 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         body_linvel_xyz = body_state.pos_velocity_xyz
         body_angvel_xyz = body_state.ang_velocity_xyz
         body_position_xyz = body_state.pose.position
-        gravity_vec = quat_rotate(np.array([0,0,-1]), body_state.pose.orientation_xyzw.cpu().numpy())
-
-        body_rel_linvel_xyz = quat_rotate(body_linvel_xyz, quat_conjugate(body_state.pose.orientation_xyzw))
-        body_rel_angvel_xyz = quat_rotate(body_angvel_xyz, quat_conjugate(body_state.pose.orientation_xyzw))
+        gravity_vec = th_quat_rotate(th.tensor([0,0,-1]), body_state.pose.orientation_xyzw)
+        body_rel_linvel_xyz = th_quat_rotate(body_linvel_xyz, th_quat_conj(body_state.pose.orientation_xyzw))
+        body_rel_angvel_xyz = th_quat_rotate(body_angvel_xyz, th_quat_conj(body_state.pose.orientation_xyzw))
 
 
         internal_state = self._current_state[self.STATE_INTERNAL][0]
@@ -560,11 +564,12 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                 for i in np.ndindex(elements.shape):
                     if triggered_limits[i]:
                         triggered.append(elements[i])
-                ggLog.info( f"SAFETY TRIGGERED (step {step_count.item()}):"
-                            f"\n    triggered ({len(triggered)}) = {triggered}"
-                            # f"\n    joints_minmax = \n{stats_minmaxavgstd_j_pve[:2]}"
-                            # f"\n    j_safety_lims  = \n{self._safe_limits_minmax_j_pve} "
-                            )
+                if not self._configuration.quiet:
+                    ggLog.info( f"SAFETY TRIGGERED (step {step_count.item()}):"
+                                f"\n    triggered ({len(triggered)}) = {triggered}"
+                                # f"\n    joints_minmax = \n{stats_minmaxavgstd_j_pve[:2]}"
+                                # f"\n    j_safety_lims  = \n{self._safe_limits_minmax_j_pve} "
+                                )
         else:
             safety_triggered = False
 
@@ -578,8 +583,6 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                 for jn in self._configuration.controlled_joints}
         new_robot_stats_state = {jname : stats_minmaxavgstd_j_pve[:,i,:].flatten()
                                  for i,jname in enumerate(self._adapter.get_monitored_joints())}
-        if th.any(th.concat([new_robot_state[jn][6:] for jn in self._configuration.controlled_joints])<0):
-            ggLog.warn(f"negative gains in new_robot_state = {new_robot_state}")
         new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_LINVEL_X : body_rel_linvel_xyz[0],
                                 self.EXTRINSIC_FIELDS.BODY_LINVEL_Y : body_rel_linvel_xyz[1],
                                 self.EXTRINSIC_FIELDS.BODY_LINVEL_Z : body_rel_linvel_xyz[2],
@@ -596,18 +599,24 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                 self.STATE_INTERNAL     : new_internal_state,
                                 self.STATE_ROBOT        : new_robot_state,
                                 self.STATE_ROBOT_STATS  : new_robot_stats_state}              
+        if th.any(th.concat([new_robot_state[jn][6:] for jn in self._configuration.controlled_joints])<0):
+            ggLog.warn(f"negative gains in new_robot_state = {new_robot_state}")
         return instantaneous_state
         
 
 
     def _update_state(self):
+        # t0 = time.monotonic()
         instantaneous_state = self._get_new_instantaneous_state()
+        # t1 = time.monotonic()
         step_count = self._current_state[self.STATE_INTERNAL][0][self.INTERNAL_FIELDS.STEP_COUNT]
         if step_count <= 0:
             self._current_state = self._state_helper.reset_state(instantaneous_state)
         else:
             self._state_helper.update(instantaneous_state, state=self._current_state)
-        map_tensor_tree(self._current_state, lambda t: t.detach().clone())
+        # map_tensor_tree(self._current_state, lambda t: t.detach().clone())
+        # tf = time.monotonic()
+        # print(f"newinst = {t1-t0}, map = {tf-t1}, tot = {tf-t0}")
 
 
 

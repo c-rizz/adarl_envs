@@ -12,18 +12,11 @@ import typing
 from pathlib import Path
 import adarl.utils.utils
 
-def locomotion_env_builder( seed,
-                            log_folder,
-                            is_eval,
-                            env_builder_args : dict,
-                            model_file : str,
-                            homing_joint_pose : dict[tuple[str,str],float],
-                            disallowed_contact_links : list[tuple[str,str]],
-                            terminating_contact_pairs : list[tuple[tuple[str,str],tuple[str,str]]],
-                            robot_name : str,
-                            robot_main_body_link : str,
-                            homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
-                            no_dict = False):
+def env_builder(seed,
+                log_folder,
+                is_eval,
+                env_builder_args : dict,
+                no_dict = False):
     ggLog.info(f"Building env: thread={threading.current_thread()}, pid={os.getpid()}")
     ggLog.info(f"env_builder_args = {env_builder_args}")
     stepLength_sec = env_builder_args.pop("stepLength_sec")
@@ -81,7 +74,7 @@ def locomotion_env_builder( seed,
                                                        debug_gui=False,
                                                        simulation_step=1/1024,
                                                        enable_rendering=env_builder_args.pop("enable_rendering"),
-                                                       global_max_torque_position_control = 100,
+                                                       global_max_torque_position_control = 1000,
                                                        real_time_factor=None
                                                        )
     else:
@@ -90,7 +83,7 @@ def locomotion_env_builder( seed,
 
     time.sleep(1)
 
-    
+    model_file = adarl.utils.utils.pkgutil_get_path("adarl","models/hopper_v1.urdf.xacro")
     urdf_string = adarl.utils.utils.compile_xacro_string(  model_definition_string=Path(model_file).read_text())
 
     lrenv = LocomotionEnv(  action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
@@ -98,7 +91,7 @@ def locomotion_env_builder( seed,
                             action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                             adapter=env_controller,
                             control_mode = env_builder_args.pop("control_mode"),
-                            controlled_joints=[LocomotionEnv.JOINT_FILTERS.ALL_REVOLUTE],
+                            controlled_joints=["torso_to_thigh","thigh_to_leg","leg_to_foot"],
                             goal_err_smoothing_halflife_sec = env_builder_args.pop("goal_err_smoothing_halflife_sec"),
                             maxStepsPerEpisode=max_steps,
                             minmax_damping=(1.0,30.0),
@@ -120,8 +113,8 @@ def locomotion_env_builder( seed,
                             reward_velocity_weight = env_builder_args.pop("reward_velocity_weight"),
                             reward_height_weight=env_builder_args.pop("reward_height_weight"),
                             reward_pitchnroll_weight=env_builder_args.pop("reward_pitchnroll_weight"),
-                            robot_main_body_link=robot_main_body_link,
-                            robot_name=robot_name,
+                            robot_main_body_link="torso",
+                            robot_name="hopper",
                             robot_urdf_string=urdf_string,
                             safe_damping=env_builder_args.pop("safe_damping"),
                             safe_stiffness=env_builder_args.pop("safe_stiffness"),
@@ -131,17 +124,23 @@ def locomotion_env_builder( seed,
                             step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001,
                             stop_on_safety=env_builder_args.pop("stop_on_safety"),
                             th_device=th_device,
-                            homing_joint_pose=homing_joint_pose,
-                            disallowed_contact_links = disallowed_contact_links,
+                            homing_joint_pose={("hopper","torso_z_slider"):-0.8,
+                                               ("hopper","torso_x_slider"):0.0,
+                                               ("hopper","torso_pitch_joint"):0.0,
+                                               ("hopper","torso_to_thigh"):0.0,
+                                               ("hopper","thigh_to_leg"):0.0,
+                                               ("hopper","leg_to_foot"):0.0,
+                                               },
+                            disallowed_contact_links = [],
                             goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
                             use_contacts=env_builder_args.pop("use_contacts"),
                             frame_stack_length=env_builder_args.pop("frame_stack_length"),
                             observe_body_velocity=True,
-                            homing_body_pose_xyz_xyzw=homing_body_pose_xyz_xyzw,
+                            homing_body_pose_xyz_xyzw=None,
                             control_limits_minmax_pve={},
-                            terminating_contact_pairs=terminating_contact_pairs if env_builder_args.pop("terminate_on_body_contact") else [],
+                            terminating_contact_pairs=[],
                             verbose_infos=env_builder_args.pop("verbose_infos"),
-                            quiet=quiet
+                            quiet=quiet,
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

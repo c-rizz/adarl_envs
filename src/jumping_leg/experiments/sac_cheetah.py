@@ -5,12 +5,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
-    from jumping_leg.experiments.build_quad_env import quad_env_builder
+    from jumping_leg.experiments.build_cheetah_env import env_builder
     from rreal.examples.solve_sac import sac_train, SAC_hyperparams
     
     step_length_sec = 25/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 192
+    train_envs = 1
     env_device = th.device("cpu")
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
@@ -110,7 +110,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 folderName,
                 run_id,
                 args,
-                env_builder = quad_env_builder,
+                env_builder = env_builder,
                 env_builder_args = env_builder_args,
                 eval_env_builder_args = [
                                         eval_conf_video_det,

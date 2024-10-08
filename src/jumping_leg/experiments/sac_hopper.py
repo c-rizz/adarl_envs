@@ -5,23 +5,23 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
-    from jumping_leg.experiments.build_quad_env import quad_env_builder
+    from jumping_leg.experiments.build_hopper_env import env_builder
     from rreal.examples.solve_sac import sac_train, SAC_hyperparams
     
     step_length_sec = 25/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 192
+    train_envs = 32
     env_device = th.device("cpu")
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
-        "action_smoothing_halflife_sec" : 0.1,
+        "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "torque",
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.0,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "pybullet",
-        "quiet" : False,
+        "quiet" : True,
         "reward_acceleration_weight" : 0.0,
         "reward_actdiff_weight" : 0.0,
         "reward_contacts_weight" : 0.0,
@@ -29,7 +29,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_health_weight" : 0.0,
         "reward_position_limit_weight" : 0.0,
         "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 0.0,
+        "reward_torque_weight" : 0.1,
         "reward_torquediff_weight" : 0.0,
         "reward_tracking_weight" : 1.0,
         "reward_velocity_limit_weight" : 0.0,
@@ -44,11 +44,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "stop_on_safety" : False,
         "th_device" : env_device,
         "video_save_freq" : 0,
-        "goal_speed_minmax" : (0,2),
+        "goal_speed_minmax" : (5,5),
         "use_contacts" : False,
         "frame_stack_length" : 1,
         "verbose_infos" : False,
-        "terminate_on_body_contact" : False,
+        "terminate_on_body_contact" : True,
         "use_wandb" : False}
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -106,11 +106,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "num_envs" : 1
     # }
     
+
     sac_train(  seed,
                 folderName,
                 run_id,
                 args,
-                env_builder = quad_env_builder,
+                env_builder = env_builder,
                 env_builder_args = env_builder_args,
                 eval_env_builder_args = [
                                         eval_conf_video_det,
@@ -127,7 +128,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 policy_network_arch=[256,256],
                                                 gamma=0.99,
                                                 target_tau = 0.005,
-                                                batch_size=8192,
+                                                batch_size=16384,
                                                 buffer_size=10_000_000,
                                                 total_steps=100_000_000,
                                                 train_freq_vstep=5,

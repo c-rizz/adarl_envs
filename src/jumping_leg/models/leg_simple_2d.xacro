@@ -22,7 +22,7 @@
         </contact>
     </xacro:macro>
 
-	<xacro:macro name="leg_simple" params="hip_x_offset
+	<xacro:macro name="leg_simple_2d" params="hip_x_offset
 											hip_y_offset
 											hip_z_offset
 											thigh_width 
@@ -38,24 +38,11 @@
 											knee_friction
 											parent_link
 											leg_name
-											is_left_leg:=true
-											hip_x_min_pos:=-2.4
-											hip_x_max_pos:=2.4
 											hip_y_min_pos:=-2.4
 											hip_y_max_pos:=2.4
 											knee_min_pos:=-2.4
 											knee_max_pos:=2.4">
 
-			<xacro:if value="${is_left_leg}">
-				<xacro:property name="exterior_y_direction" value="1"/>
-			</xacro:if>
-			<xacro:unless value="${is_left_leg}">
-				<xacro:property name="exterior_y_direction" value="-1"/>
-			</xacro:unless>
-
-			<link name="prethigh_link_${leg_name}">
-				<xacro:small_inertial/>
-			</link>
 			<link name="thigh_link_${leg_name}">
 				<visual name = "thigh_link_v_${leg_name}">
 					<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
@@ -175,40 +162,32 @@
 			
 			<joint name="hip_joint_y_${leg_name}" type="revolute">
 				<parent link="${parent_link}"/>
-				<child link="prethigh_link_${leg_name}"/>
-				<origin xyz="${hip_x_offset} ${exterior_y_direction*hip_y_offset} ${hip_z_offset}" rpy="0 0 0"/>
+				<child link="thigh_link_${leg_name}"/>
+				<origin xyz="${hip_x_offset} ${hip_y_offset} ${hip_z_offset}" rpy="0 0 0"/>
 				<dynamics damping="0.0" friction="${hip_friction}"/>
 				<limit lower="${hip_y_min_pos}" upper="${hip_y_max_pos}" effort="112" velocity="20"/>
 				<axis xyz="0 1 0"/>
-			</joint>
-			<joint name="hip_joint_x_${leg_name}" type="revolute">
-				<parent link="prethigh_link_${leg_name}"/>
-				<child link="thigh_link_${leg_name}"/>
-				<origin xyz="0 0 0" rpy="${exterior_y_direction*3.14159/2} 0 0"/>
-				<dynamics damping="0.0" friction="${hip_friction}"/>
-				<limit lower="${hip_x_min_pos}" upper="${hip_x_max_pos}" effort="112" velocity="20"/>
-				<axis xyz="${exterior_y_direction} 0 0"/>
-			</joint>
-			<joint name="thigh_link_com_${leg_name}" type="fixed">
-				<parent link="thigh_link_${leg_name}"/>
-				<child link="thigh_link_com_${leg_name}"/>
-				<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
 			</joint>
 
 			<joint name="knee_joint_${leg_name}" type="revolute">
 				<parent link="thigh_link_${leg_name}"/>
 				<child link="shin_link_${leg_name}"/>
-				<origin xyz="0 ${exterior_y_direction*knee_y_offset} -${thigh_height}" rpy="0 0 0"/>
+				<origin xyz="0 ${knee_y_offset} -${thigh_height}" rpy="0 0 0"/>
 				<dynamics damping="0.0" friction="${knee_friction}"/>
 				<limit lower="${knee_min_pos}" upper="${knee_max_pos}" effort="112" velocity="20"/>
 				<axis xyz="0 -1 0"/>
+			</joint>
+		
+			<joint name="thigh_link_com_${leg_name}" type="fixed">
+				<parent link="thigh_link_${leg_name}"/>
+				<child link="thigh_link_com_${leg_name}"/>
+				<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
 			</joint>
 			<joint name="shin_link_com_${leg_name}" type="fixed">
 				<parent link="shin_link_${leg_name}"/>
 				<child link="shin_link_com_${leg_name}"/>
 				<origin xyz="0 0 -${shin_height/2}" rpy="0 0 0"/>
 			</joint>
-
 			<joint name="foot_center_joint_${leg_name}" type="fixed">
 				<parent link="shin_link_${leg_name}"/>
 				<child link="foot_center_link_${leg_name}"/>

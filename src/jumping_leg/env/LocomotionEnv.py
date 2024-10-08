@@ -2,7 +2,7 @@ from __future__ import annotations
 from adarl.adapters.BaseJointImpedanceAdapter import BaseJointImpedanceAdapter
 from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
-from adarl.utils.utils import LinkState, to_string_tensor, quat_rotate, quat_conjugate
+from adarl.utils.utils import LinkState, to_string_tensor, quat_rotate_np, quat_conjugate
 from adarl.utils.state_helper import ThBoxStateHelper, unnormalize
 import adarl.utils.utils
 from dataclasses import dataclass
@@ -143,7 +143,8 @@ class LocomotionEnv(RobotEnv):
                         terminating_contact_pairs : list[tuple[tuple[str,str],tuple[str,str]]],
                         th_device : th.device,
                         use_contacts : bool,
-                        verbose_infos : bool
+                        verbose_infos : bool,
+                        quiet : bool
                         ):
         super().__init__(   action_delay_mustd = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
@@ -173,7 +174,8 @@ class LocomotionEnv(RobotEnv):
                             control_limits_minmax_pve = control_limits_minmax_pve,
                             observe_body_velocity = observe_body_velocity,
                             frame_stack_length=frame_stack_length,
-                            verbose_infos = verbose_infos
+                            verbose_infos = verbose_infos,
+                            quiet = quiet
                         )
         self._locomotion_conf = LocomotionEnv.LocomotionConfiguration(
                         reward_acceleration_weight = reward_acceleration_weight,
@@ -247,13 +249,11 @@ class LocomotionEnv(RobotEnv):
         internal_state = self._current_state[self.STATE_INTERNAL][0]
         extrinsic_state = self._current_state[self.STATE_EXTRINSIC][0]
 
-        step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]        
         body_linvel_xyz = extrinsic_state[[self.EXTRINSIC_FIELDS.BODY_LINVEL_X,self.EXTRINSIC_FIELDS.BODY_LINVEL_Y,self.EXTRINSIC_FIELDS.BODY_LINVEL_Z]]
         tracking_error = th.linalg.norm(body_linvel_xyz[:2]-self._locomotion_episode_config.goal_velocity_xy).cpu().item()
-        prev_tracking_error = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
-        alpha = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.stepLength_sec)
-        if step_count > 0:
-            smoothed_goal_dist = tracking_error*(1-alpha) + prev_tracking_error*alpha
+        if internal_state[self.INTERNAL_FIELDS.STEP_COUNT] > 0:
+            alpha = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.stepLength_sec)
+            smoothed_goal_dist = tracking_error*(1-alpha) + locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]*alpha
         else:
             smoothed_goal_dist = tracking_error
 
@@ -284,7 +284,7 @@ class LocomotionEnv(RobotEnv):
 
         body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
         goal_vel_xyz = np.array([self._locomotion_episode_config.goal_velocity_xy[0], self._locomotion_episode_config.goal_velocity_xy[1], 0.0])
-        goal_vel_rel_xyz = quat_rotate(goal_vel_xyz, quat_conjugate(body_state.pose.orientation_xyzw))
+        goal_vel_rel_xyz = quat_rotate_np(goal_vel_xyz, quat_conjugate(body_state.pose.orientation_xyzw))
 
         goal_body_height = 0.45
         goal_gravity_vec = th.tensor([0.0,0.0,-1.0], device = self._configuration.th_device)
@@ -368,9 +368,11 @@ class LocomotionEnv(RobotEnv):
 
         velocity_tracking_err = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
         velocity_tracking_reward = bell_reward(velocity_tracking_err, zero_rew_dist=self._locomotion_conf.vel_tracking_reward_settle_point)
-        # tracking_reward = 1 - th.tanh(tracking_err/50)
+        # velocity_tracking_reward = 1 - th.tanh(velocity_tracking_err/5)
         # tracking_reward = 1/(1+goal_dist/0.05)       # 0.50 at 0.05m, 0.35 at 0.10m, 0.2 at 0.2
         # tracking_reward = 1/(1+(goal_dist/0.1)**2) # 0.75 at 0.05m, 0.50 at 0.10m, 0.2 at 0.2
+        # velocity_tracking_reward = 1-velocity_tracking_err
+        # velocity_tracking_reward = 2*self._current_state[self.STATE_EXTRINSIC][0,self.EXTRINSIC_FIELDS.BODY_LINVEL_X]
 
         contacts_reward = - th.clamp(locom_state[self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 

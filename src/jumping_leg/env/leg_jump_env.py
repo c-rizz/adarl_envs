@@ -1037,14 +1037,14 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                                              0.3,
                                                                                              support1_xz[1]), device=self._configuration.th_device),
                                                                     orientation_xyzw = th.tensor((0.,0.,0.,1.0), device=self._configuration.th_device),
-                                                                    pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
+                                                                    pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                     ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
         self._adapter.setLinksStateDirect({self._support2_base :
                                                         LinkState(position_xyz = th.tensor((support2_xz[0],
                                                                                             0.3,
                                                                                             support2_xz[1]), device=self._configuration.th_device),
                                                                     orientation_xyzw = th.tensor((0.,0.,0.,1.0), device=self._configuration.th_device),
-                                                                    pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
+                                                                    pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                     ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
         if self._configuration.show_goal:
             self._adapter.setLinksStateDirect({self._red_ball_base :
@@ -1052,7 +1052,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                                                 0.2,
                                                                                                 goal_z), device=self._configuration.th_device),
                                                                         orientation_xyzw = th.tensor((0.,0.,0.,1.0), device=self._configuration.th_device),
-                                                                        pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
+                                                                        pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
 
     @override

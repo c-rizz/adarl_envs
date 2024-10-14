@@ -37,6 +37,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         goal_err_exp_smoothing_1s : float
         history_length : int
         homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float]
+        spawn_root_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float]
         homing_joint_pose : dict[tuple[str,str],th.Tensor]
         joint_physical_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_damping : dict[tuple[str,str],th.Tensor]
@@ -76,16 +77,16 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     INTERNAL_FIELDS = IntEnum("INTERNAL_FIELDS", [  "SAFETY_TRIGGERED",
                                                     "STEP_COUNT"], start=0)
 
-    EXTRINSIC_FIELDS = IntEnum("EXTRINSIC_FIELS", ["BODY_LINVEL_X",
-                                                   "BODY_LINVEL_Y",
-                                                   "BODY_LINVEL_Z",
-                                                   "BODY_ANGVEL_X",
-                                                   "BODY_ANGVEL_Y",
-                                                   "BODY_ANGVEL_Z",
+    EXTRINSIC_FIELDS = IntEnum("EXTRINSIC_FIELS", ["BODY_REL_LINVEL_X",
+                                                   "BODY_REL_LINVEL_Y",
+                                                   "BODY_REL_LINVEL_Z",
+                                                   "BODY_REL_ANGVEL_X",
+                                                   "BODY_REL_ANGVEL_Y",
+                                                   "BODY_REL_ANGVEL_Z",
                                                    "BODY_POS_Z",
-                                                   "BODY_GRAVITY_X",
-                                                   "BODY_GRAVITY_Y",
-                                                   "BODY_GRAVITY_Z"], start=0)
+                                                   "BODY_REL_GRAVITY_X",
+                                                   "BODY_REL_GRAVITY_Y",
+                                                   "BODY_REL_GRAVITY_Z"], start=0)
     ACT_FIELDS = IntEnum("ACT_FIELDS", ["ACTION"], start=0)
     
     JOINT_FILTERS = Enum("JointFilters",["ALL_REVOLUTE",
@@ -134,13 +135,15 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         observe_body_velocity : bool,
                         frame_stack_length : int,
                         verbose_infos : bool,
-                        quiet : bool
+                        quiet : bool,
+                        enable_dbg_checks : bool
                         ):
         
         self._rng = th.Generator(device=th_device)
         self._spawned = False
         self._robot_model = Robot(adarl.utils.utils.compile_xacro_string(  model_definition_string=robot_urdf_string))
         self._current_state = {}
+        self._enable_dbg_checks = enable_dbg_checks
 
         controlled_joints_str = []
         for j in controlled_joints:
@@ -171,7 +174,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             minmax_damping_thdict = {(robot_name,k):th.as_tensor(minmax, device=th_device) for k,minmax in minmax_damping.items()}
         action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec) if action_smoothing_halflife_sec>0 else 0.0
         goal_err_exp_smoothing_1s = 0.5**(1/goal_err_smoothing_halflife_sec) if goal_err_smoothing_halflife_sec>0 else 0.0
-        default_homing_joint_pose = {jn: unnormalize(0.5, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item())
+        default_homing_joint_pose = {jn: unnormalize(0.0, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item())
                                      for jn in controlled_joints_rn}
         for jn in homing_joint_pose:
             if jn not in controlled_joints_rn:
@@ -220,7 +223,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             ui_camera_link = ("simple_camera", "simple_camera_link"),
                                                             ui_camera_name="simple_camera",
                                                             verbose_infos = verbose_infos,
-                                                            quiet=quiet
+                                                            quiet=quiet,
+                                                            spawn_root_pose_xyz_xyzw = (0,0,0,0,0,0,1)
                                                             )
 
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
@@ -255,16 +259,16 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                               obs_dtype=th.float32,
                                               th_device=th_device,
                                               field_size=(1,),
-                                              fields_minmax={   self.EXTRINSIC_FIELDS.BODY_LINVEL_X : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Y : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Z : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_X : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Y : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Z : [-100,100],
+                                              fields_minmax={   self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : [-100,100],
                                                                 self.EXTRINSIC_FIELDS.BODY_POS_Z : [-10,10],
-                                                                self.EXTRINSIC_FIELDS.BODY_GRAVITY_X : [-1,1],
-                                                                self.EXTRINSIC_FIELDS.BODY_GRAVITY_Y : [-1,1],
-                                                                self.EXTRINSIC_FIELDS.BODY_GRAVITY_Z : [-1,1]},
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : [-1,1],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
                                                history_length=self._configuration.history_length,
                                                obs_history_length = self._configuration.frame_stack_length)
         act_history_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
@@ -374,8 +378,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         self._current_state[self.STATE_INTERNAL][0,self.INTERNAL_FIELDS.STEP_COUNT] = th.tensor(-1.)
         self._last_obs = None
 
-        if not self._spawned and isinstance(self._adapter, BaseSimulationAdapter):
-            robot_pose = build_pose(0,0,1,0,0,0,1)
+        if not self._spawned and isinstance(self._adapter, BaseSimulationAdapter):            
+            robot_pose = build_pose(*self._configuration.spawn_root_pose_xyz_xyzw)
             camera_pose = build_pose(0,2.5,0.7, 0.0,0.0,-0.707,0.707)
             arrow_pose = robot_pose
             self._spawned = True
@@ -447,7 +451,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             self._adapter.setLinksStateDirect({self._configuration.main_body_link :
                                                             LinkState( position_xyz = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[:3], device=self._configuration.th_device),
                                                                         orientation_xyzw = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[3:7], device=self._configuration.th_device),
-                                                                        pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
+                                                                        pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
         self._adapter.setJointsStateDirect({jn:JointState(position=self._configuration.homing_joint_pose[jn],
                                                                         rate = 0,
@@ -499,7 +503,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                                                     body_state.pose.position[1]+2.5,
                                                                                                     body_state.pose.position[2]+1.0), device=self._configuration.th_device),
                                                                             orientation_xyzw = th.tensor((0.183,0.183,-0.683,0.683), device=self._configuration.th_device),
-                                                                            pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
+                                                                            pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                             ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
             img, time = self._adapter.getRenderings([self._configuration.ui_camera_name])[self._configuration.ui_camera_name]
             if img is None:
@@ -541,9 +545,9 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         body_linvel_xyz = body_state.pos_velocity_xyz
         body_angvel_xyz = body_state.ang_velocity_xyz
         body_position_xyz = body_state.pose.position
-        gravity_vec = th_quat_rotate(th.tensor([0,0,-1]), body_state.pose.orientation_xyzw)
-        body_rel_linvel_xyz = th_quat_rotate(body_linvel_xyz, th_quat_conj(body_state.pose.orientation_xyzw))
-        body_rel_angvel_xyz = th_quat_rotate(body_angvel_xyz, th_quat_conj(body_state.pose.orientation_xyzw))
+        gravity_vec         = th_quat_rotate(th.tensor([0,0,-1]), th_quat_conj(body_state.pose.orientation_xyzw))
+        body_rel_linvel_xyz = th_quat_rotate(body_linvel_xyz,     th_quat_conj(body_state.pose.orientation_xyzw))
+        body_rel_angvel_xyz = th_quat_rotate(body_angvel_xyz,     th_quat_conj(body_state.pose.orientation_xyzw))
 
 
         internal_state = self._current_state[self.STATE_INTERNAL][0]
@@ -583,16 +587,16 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                 for jn in self._configuration.controlled_joints}
         new_robot_stats_state = {jname : stats_minmaxavgstd_j_pve[:,i,:].flatten()
                                  for i,jname in enumerate(self._adapter.get_monitored_joints())}
-        new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_LINVEL_X : body_rel_linvel_xyz[0],
-                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Y : body_rel_linvel_xyz[1],
-                                self.EXTRINSIC_FIELDS.BODY_LINVEL_Z : body_rel_linvel_xyz[2],
-                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_X : body_rel_angvel_xyz[0],
-                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Y : body_rel_angvel_xyz[1],
-                                self.EXTRINSIC_FIELDS.BODY_ANGVEL_Z : body_rel_angvel_xyz[2],
+        new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : body_rel_linvel_xyz[0],
+                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : body_rel_linvel_xyz[1],
+                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : body_rel_linvel_xyz[2],
+                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : body_rel_angvel_xyz[0],
+                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : body_rel_angvel_xyz[1],
+                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : body_rel_angvel_xyz[2],
                                 self.EXTRINSIC_FIELDS.BODY_POS_Z : body_position_xyz[2],
-                                self.EXTRINSIC_FIELDS.BODY_GRAVITY_X : gravity_vec[0],
-                                self.EXTRINSIC_FIELDS.BODY_GRAVITY_Y : gravity_vec[1],
-                                self.EXTRINSIC_FIELDS.BODY_GRAVITY_Z : gravity_vec[2]}
+                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : gravity_vec[0],
+                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : gravity_vec[1],
+                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : gravity_vec[2]}
         new_act_state = {self.ACT_FIELDS.ACTION : self._last_out_action}
         instantaneous_state = { self.STATE_EXTRINSIC    : new_extrinsic_state,
                                 self.STATE_ACT          : new_act_state,

@@ -2,9 +2,8 @@ from __future__ import annotations
 from adarl.adapters.BaseJointImpedanceAdapter import BaseJointImpedanceAdapter
 from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
-from adarl.utils.utils import LinkState, to_string_tensor, quat_rotate_np, quat_conjugate
+from adarl.utils.utils import LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection
 from adarl.utils.state_helper import ThBoxStateHelper, unnormalize
-import adarl.utils.utils
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any
@@ -16,7 +15,7 @@ import math
 import quaternion
 from jumping_leg.env.RobotEnv import RobotEnv
 from adarl.utils.tensor_trees import map_tensor_tree
-
+import time
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -67,7 +66,7 @@ class LocomotionEnv(RobotEnv):
 
     @dataclass
     class EpisodeLocomConfiguration:
-        goal_velocity_xy : th.Tensor
+        goal_abs_linvel_xyz : th.Tensor
 
     LOCOMOTION_FIELDS = IntEnum("INTERNAL_FIELDS", ["COLLISON_COUNT",
                                                     "GOAL_VELOCITY_REL_X",
@@ -107,7 +106,7 @@ class LocomotionEnv(RobotEnv):
                         frame_stack_length : int,
                         goal_err_smoothing_halflife_sec : float,
                         goal_speed_minmax : tuple[float, float],
-                        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
+                        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float] | None,
                         homing_joint_pose : dict[tuple[str,str], float],
                         maxStepsPerEpisode : int,
                         minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
@@ -144,7 +143,8 @@ class LocomotionEnv(RobotEnv):
                         th_device : th.device,
                         use_contacts : bool,
                         verbose_infos : bool,
-                        quiet : bool
+                        quiet : bool,
+                        enable_dbg_checks : bool
                         ):
         super().__init__(   action_delay_mustd = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
@@ -175,7 +175,8 @@ class LocomotionEnv(RobotEnv):
                             observe_body_velocity = observe_body_velocity,
                             frame_stack_length=frame_stack_length,
                             verbose_infos = verbose_infos,
-                            quiet = quiet
+                            quiet = quiet,
+                            enable_dbg_checks = enable_dbg_checks
                         )
         self._locomotion_conf = LocomotionEnv.LocomotionConfiguration(
                         reward_acceleration_weight = reward_acceleration_weight,
@@ -232,7 +233,8 @@ class LocomotionEnv(RobotEnv):
                                                                     self.LOCOMOTION_FIELDS.CRASHED : [0,1]},
                                                     observable_fields=[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
                                                                         self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
-                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z])
+                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z,
+                                                                        self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR])
         self._state_helper = self._state_helper.add_substate(LocomotionEnv.STATE_LOCOMOTION,
                                                              locomotion_state_helper,
                                                              observable = True,
@@ -241,21 +243,44 @@ class LocomotionEnv(RobotEnv):
         self.observation_space = self._state_helper.get_obs_space()
         self.action_space = self._action_helper.action_space(seed=seed)
 
+    def _tracking_error(self, body_rel_linvel_xyz : th.Tensor, gravity_rel_xyz : th.Tensor, goal_rel_linvel_xyz : th.Tensor):
+        body_planar_rel_linvel_xyz = body_rel_linvel_xyz - vector_projection(body_rel_linvel_xyz,gravity_rel_xyz)
+        # ggLog.info(f" {body_rel_linvel_xyz.cpu().tolist()} + vector_projection({body_rel_linvel_xyz.cpu().tolist()},{gravity_rel_xyz.cpu().tolist()}) =\n"
+        #            f" {body_rel_linvel_xyz.cpu().tolist()} + {vector_projection(body_rel_linvel_xyz,gravity_rel_xyz).cpu().tolist()} = \n"
+        #            f"{body_planar_rel_linvel_xyz.cpu().tolist()}\n"
+        #            f"norm({body_planar_rel_linvel_xyz.cpu().tolist()} - {goal_rel_linvel_xyz.cpu().tolist()})={th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_xyz).cpu().tolist()}")
+        # time.sleep(0.1)
+        # goal_rel_linvel_xyz should already be "planar", it's projection along gravity_rel should be zero
+        if self._enable_dbg_checks:
+            if th.norm(vector_projection(goal_rel_linvel_xyz,gravity_rel_xyz)) > 0.1: raise RuntimeError(f"goal_rel_linvel_xyz is not horizontal, projection is {vector_projection(goal_rel_linvel_xyz,gravity_rel_xyz)}")
+        return th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_xyz)
     @override
     def _get_new_instantaneous_state(self):
+
         new_inst_state = super()._get_new_instantaneous_state()
+        body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
+        goal_rel_linvel_xyz = th_quat_rotate(self._locomotion_episode_config.goal_abs_linvel_xyz, th_quat_conj(body_state.pose.orientation_xyzw))
 
-        locom_state = self._current_state[self.STATE_LOCOMOTION][0]
-        internal_state = self._current_state[self.STATE_INTERNAL][0]
-        extrinsic_state = self._current_state[self.STATE_EXTRINSIC][0]
+        prev_locom_state = self._current_state[self.STATE_LOCOMOTION][0]
+        new_internal_state = new_inst_state[self.STATE_INTERNAL]
+        new_extrinsic_state = new_inst_state[self.STATE_EXTRINSIC]
 
-        body_linvel_xyz = extrinsic_state[[self.EXTRINSIC_FIELDS.BODY_LINVEL_X,self.EXTRINSIC_FIELDS.BODY_LINVEL_Y,self.EXTRINSIC_FIELDS.BODY_LINVEL_Z]]
-        tracking_error = th.linalg.norm(body_linvel_xyz[:2]-self._locomotion_episode_config.goal_velocity_xy).cpu().item()
-        if internal_state[self.INTERNAL_FIELDS.STEP_COUNT] > 0:
+        # sadly right in this point everything is a dict, so things must be addressed like this, maybe something could be done about this
+        body_rel_linvel_xyz = th.as_tensor([new_extrinsic_state[k] for k in [self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z]]).squeeze()
+        gravity_rel_xyz     = th.as_tensor([new_extrinsic_state[k] for k in [self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z]]).squeeze()
+        tracking_err = self._tracking_error(body_rel_linvel_xyz, gravity_rel_xyz, goal_rel_linvel_xyz)
+        # ggLog.info( f"abs_goal = {self._locomotion_episode_config.goal_abs_linvel_xyz}, body_rel_linvel_xyz = {body_rel_linvel_xyz}, goal_rel_linvel_xyz = {goal_rel_linvel_xyz}, gravity_rel_xyz={gravity_rel_xyz}\n"
+        #             f"tracking_err = {tracking_error} = norm({body_planar_rel_linvel_xyz}-{goal_rel_linvel_xyz}) = norm({body_planar_rel_linvel_xyz-goal_rel_linvel_xyz})")
+        goal_body_height = 0.45
+        height_err = th.abs(new_extrinsic_state[self.EXTRINSIC_FIELDS.BODY_POS_Z] - goal_body_height)
+        goal_gravity_vec = th.tensor([0.0,0.0,-1.0], device = self._configuration.th_device)
+        orient_err = th.norm(gravity_rel_xyz-goal_gravity_vec) # Would be nice to use geodesic distance or somethinglike that
+
+        if new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT] > 0:
             alpha = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.stepLength_sec)
-            smoothed_goal_dist = tracking_error*(1-alpha) + locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]*alpha
+            smoothed_tracking_err = tracking_err*(1-alpha) + prev_locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]*alpha
         else:
-            smoothed_goal_dist = tracking_error
+            smoothed_tracking_err = tracking_err
 
         if self._locomotion_conf.use_contacts:
             if not isinstance(self._adapter, PyBulletAdapter):
@@ -269,7 +294,7 @@ class LocomotionEnv(RobotEnv):
             bad_durations = np.array([c[4] for c in bad_contacts])
             sum_bad_impulses = np.sum(np.abs(bad_forces*bad_durations))
 
-            crashed = locom_state[self.LOCOMOTION_FIELDS.CRASHED]
+            crashed = prev_locom_state[self.LOCOMOTION_FIELDS.CRASHED]
             if not crashed:
                 # pairs = {(c[0],c[1]) for c in contacts}
                 # print(f"contact pairs = {pairs}")
@@ -282,15 +307,7 @@ class LocomotionEnv(RobotEnv):
             sum_bad_impulses = 0
             crashed = 0
 
-        body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
-        goal_vel_xyz = np.array([self._locomotion_episode_config.goal_velocity_xy[0], self._locomotion_episode_config.goal_velocity_xy[1], 0.0])
-        goal_vel_rel_xyz = quat_rotate_np(goal_vel_xyz, quat_conjugate(body_state.pose.orientation_xyzw))
 
-        goal_body_height = 0.45
-        goal_gravity_vec = th.tensor([0.0,0.0,-1.0], device = self._configuration.th_device)
-        height_err = th.abs(new_inst_state[self.STATE_EXTRINSIC][self.EXTRINSIC_FIELDS.BODY_POS_Z] - goal_body_height)
-        gravity_vec = th.as_tensor([new_inst_state[self.STATE_EXTRINSIC][k] for k in [self.EXTRINSIC_FIELDS.BODY_GRAVITY_X,self.EXTRINSIC_FIELDS.BODY_GRAVITY_Y,self.EXTRINSIC_FIELDS.BODY_GRAVITY_Z]], device = self._configuration.th_device)
-        orient_err = th.norm(gravity_vec-goal_gravity_vec) # Would be nice to use geodesic distance or somethinglike that
 
         new_locom_state = { self.LOCOMOTION_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT : self._locomotion_conf.reward_torque_limit_weight,
                             self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : self._locomotion_conf.reward_position_limit_weight,
@@ -305,12 +322,12 @@ class LocomotionEnv(RobotEnv):
                             self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT : self._locomotion_conf.reward_tracking_weight,
                             self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT : self._locomotion_conf.reward_torque_weight,
                             self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._locomotion_conf.reward_torquediff_weight,
-                            self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_goal_dist,
+                            self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_tracking_err,
                             self.LOCOMOTION_FIELDS.HEIGHT_ERR : height_err,
                             self.LOCOMOTION_FIELDS.ORIENT_ERR : orient_err,
-                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X : goal_vel_rel_xyz[0],
-                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y : goal_vel_rel_xyz[1],
-                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z : goal_vel_rel_xyz[2],
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X : goal_rel_linvel_xyz[0],
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y : goal_rel_linvel_xyz[1],
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z : goal_rel_linvel_xyz[2],
                             self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT : goal_body_height,
                             self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_X : goal_gravity_vec[0],
                             self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_Y : goal_gravity_vec[1],
@@ -323,6 +340,7 @@ class LocomotionEnv(RobotEnv):
 
         return new_inst_state
     
+
     @override
     def computeReward(self, previousState : dict[str,th.Tensor],
                       state : dict[str,th.Tensor],
@@ -367,12 +385,15 @@ class LocomotionEnv(RobotEnv):
                                         zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
 
         velocity_tracking_err = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
-        velocity_tracking_reward = bell_reward(velocity_tracking_err, zero_rew_dist=self._locomotion_conf.vel_tracking_reward_settle_point)
+        # velocity_tracking_reward = bell_reward(velocity_tracking_err, zero_rew_dist=self._locomotion_conf.vel_tracking_reward_settle_point)
+        velocity_tracking_reward = bell_reward(velocity_tracking_err, 
+                                               zero_rew_dist=th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz)*self._locomotion_conf.vel_tracking_reward_settle_point+0.01)        
         # velocity_tracking_reward = 1 - th.tanh(velocity_tracking_err/5)
         # tracking_reward = 1/(1+goal_dist/0.05)       # 0.50 at 0.05m, 0.35 at 0.10m, 0.2 at 0.2
         # tracking_reward = 1/(1+(goal_dist/0.1)**2) # 0.75 at 0.05m, 0.50 at 0.10m, 0.2 at 0.2
         # velocity_tracking_reward = 1-velocity_tracking_err
-        # velocity_tracking_reward = 2*self._current_state[self.STATE_EXTRINSIC][0,self.EXTRINSIC_FIELDS.BODY_LINVEL_X]
+        # velocity_tracking_reward = 2*self._current_state[self.STATE_EXTRINSIC][0,self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X]
+        # velocity_tracking_reward = bell_reward(velocity_tracking_err/(self._locomotion_episode_config.goal_velocity_xy+0.001), 1)
 
         contacts_reward = - th.clamp(locom_state[self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 
@@ -429,13 +450,22 @@ class LocomotionEnv(RobotEnv):
         super()._update_stats()
 
         step_count = self._current_state[self.STATE_INTERNAL][0][self.INTERNAL_FIELDS.STEP_COUNT]
-        body_linvel_xyz = self._current_state[self.STATE_EXTRINSIC][0,[self.EXTRINSIC_FIELDS.BODY_LINVEL_X,self.EXTRINSIC_FIELDS.BODY_LINVEL_Y,self.EXTRINSIC_FIELDS.BODY_LINVEL_Z]]
-        goal_velocity_xy = self._current_state[self.STATE_LOCOMOTION][0,[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y]]
-        tracking_error = th.linalg.norm(body_linvel_xyz[:2] - goal_velocity_xy)
+
+        tracking_error = self._tracking_error(body_rel_linvel_xyz = self._current_state[self.STATE_EXTRINSIC][0, [self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
+                                                                                                                  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
+                                                                                                                  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z]].squeeze(),
+                                               gravity_rel_xyz = self._current_state[self.STATE_EXTRINSIC][0, [self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
+                                                                                                               self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
+                                                                                                               self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z]].squeeze(),
+                                               goal_rel_linvel_xyz = self._current_state[self.STATE_LOCOMOTION][0, [self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X, 
+                                                                                                                    self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y, 
+                                                                                                                    self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]].squeeze())
+        body_linvel_xyz = self._current_state[self.STATE_EXTRINSIC][0,[self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z]]
+        body_speed = th.linalg.norm(body_linvel_xyz[:2])
         body_height = self._current_state[self.STATE_EXTRINSIC][0,self.EXTRINSIC_FIELDS.BODY_POS_Z]
         goal_height = self._current_state[self.STATE_LOCOMOTION][0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT]
         height_error = th.abs(body_height-goal_height)
-        gravity_vec = self._current_state[self.STATE_EXTRINSIC][0,[self.EXTRINSIC_FIELDS.BODY_GRAVITY_X,self.EXTRINSIC_FIELDS.BODY_GRAVITY_Y,self.EXTRINSIC_FIELDS.BODY_GRAVITY_Z]]
+        gravity_vec = self._current_state[self.STATE_EXTRINSIC][0,[self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z]]
         goal_gravity_vec = self._current_state[self.STATE_LOCOMOTION][0,[self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_X,
                                         self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_Y,
                                         self.LOCOMOTION_FIELDS.GOAL_BODY_GRAVITY_Z]]
@@ -448,6 +478,8 @@ class LocomotionEnv(RobotEnv):
             self._stats["height_track_errs"][step_count%len(self._stats["height_track_errs"])] = height_error.cpu().item()
             self._stats["avg_pitchnroll_err"] = ((self._stats["avg_pitchnroll_err"]*(step_count-1) + pitchnroll_err.squeeze())/step_count).item()
             self._stats["pitchnroll_errs"][step_count%len(self._stats["pitchnroll_errs"])] = pitchnroll_err.cpu().item()
+            self._stats["avg_body_speed"] = ((self._stats["avg_vel_track_err"]*(step_count-1) + body_speed.squeeze())/step_count).item()
+            self._stats["body_speeds"][step_count%len(self._stats["vel_track_errs"])] = body_speed.cpu().item()
         else:
             self._stats["avg_vel_track_err"] = tracking_error.item()
             self._stats["vel_track_errs"] =  th.full(  size=(int(self._maxStepsPerEpisode/10),),
@@ -462,6 +494,10 @@ class LocomotionEnv(RobotEnv):
             self._stats["pitchnroll_errs"] =  th.full(  size=(int(self._maxStepsPerEpisode/10),),
                                                         fill_value=pitchnroll_err.item(),
                                                         dtype=th.float32, device=self._configuration.th_device)
+            self._stats["avg_body_speed"] = body_speed.item()
+            self._stats["body_speeds"] =  th.full(  size=(int(self._maxStepsPerEpisode/10),),
+                                                        fill_value=body_speed,
+                                                        dtype=th.float32, device=self._configuration.th_device)
             
     @override
     def getInfo(self,state) -> dict[Any,Any]:
@@ -470,14 +506,16 @@ class LocomotionEnv(RobotEnv):
         i["goal_rel_x"] = internal_state[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X]
         i["goal_rel_y"] = internal_state[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y]
         i["goal_rel_z"] = internal_state[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]
-        i["goal_x"] = self._locomotion_episode_config.goal_velocity_xy[0]
-        i["goal_y"] = self._locomotion_episode_config.goal_velocity_xy[1]
+        i["goal_x"] = self._locomotion_episode_config.goal_abs_linvel_xyz[0]
+        i["goal_y"] = self._locomotion_episode_config.goal_abs_linvel_xyz[1]
         i["avg_vel_track_err"] = self._stats["avg_vel_track_err"]
         i["avg10_vel_track_errs"] = th.mean(self._stats["vel_track_errs"])
         i["avg_height_track_err"] = self._stats["avg_height_track_err"]
         i["avg10_height_track_errs"] = th.mean(self._stats["height_track_errs"])
         i["avg_pitchnroll_err"] = self._stats["avg_pitchnroll_err"]
         i["avg10_pitchnroll_errs"] = th.mean(self._stats["pitchnroll_errs"])
+        i["avg_body_speed"] = self._stats["avg_body_speed"]
+        i["avg10_body_speeds"] = th.mean(self._stats["body_speeds"])
         i["success"] = i["avg10_vel_track_errs"] < 0.05
 
         if self._configuration.verbose_infos:
@@ -498,11 +536,11 @@ class LocomotionEnv(RobotEnv):
                                     max=self._locomotion_conf.goal_speed_minmax[1])
         # goal_direction = th.rand((1,),generator=self._rng, device=self._configuration.th_device)*math.pi*2
         goal_direction = th.tensor([0.0], device=self._configuration.th_device)
-        goal_velocity_xy = reset_options.get("goal_velocity_xy", goal_speed*th.cat([th.cos(goal_direction), th.sin(goal_direction)]))
+        goal_velocity_xyz = reset_options.get("goal_velocity_xy", goal_speed*th.cat([th.cos(goal_direction), th.sin(goal_direction), th.tensor([0.0],device=self._configuration.th_device)]))
                                              
         # goal_velocity_xy = th.as_tensor((10.,0.), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
 
-        self._locomotion_episode_config = LocomotionEnv.EpisodeLocomConfiguration(goal_velocity_xy=goal_velocity_xy)
+        self._locomotion_episode_config = LocomotionEnv.EpisodeLocomConfiguration(goal_abs_linvel_xyz=goal_velocity_xyz)
         self.set_max_episode_steps(self._current_episode_config.max_ep_steps)
 
     def reachedTerminalState(self, previousState, state) -> th.Tensor:
@@ -524,25 +562,25 @@ class LocomotionEnv(RobotEnv):
         super()._simulation_initialization()
         if self._configuration.show_goal:
             body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
-            q = quaternion.from_euler_angles([0.0,0.0,np.arctan2(*self._locomotion_episode_config.goal_velocity_xy[[1,0]].cpu().numpy())])
+            q = quaternion.from_euler_angles([0.0,0.0,np.arctan2(*self._locomotion_episode_config.goal_abs_linvel_xyz[[1,0]].cpu().numpy())])
             self._adapter.setLinksStateDirect({self._arrow_base :
                                                             LinkState( position_xyz = th.tensor((body_state.pose.position[0],
                                                                                                  body_state.pose.position[1],
                                                                                                  body_state.pose.position[2]+0.1), device=self._configuration.th_device),
                                                                         orientation_xyzw = th.tensor((q.x, q.y, q.z, q.w), device=self._configuration.th_device),
-                                                                        pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
+                                                                        pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
             
     @override
     def getUiRendering(self) -> tuple[np.ndarray | th.Tensor | None, float]:
         if isinstance(self._adapter, BaseSimulationAdapter):
             body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
-            q = quaternion.from_euler_angles([0.0,0.0,np.arctan2(*self._locomotion_episode_config.goal_velocity_xy[[1,0]].cpu().numpy())])
+            q = quaternion.from_euler_angles([0.0,0.0,np.arctan2(*self._locomotion_episode_config.goal_abs_linvel_xyz[[1,0]].cpu().numpy())])
             self._adapter.setLinksStateDirect({self._arrow_base :
                                                             LinkState( position_xyz = th.tensor((body_state.pose.position[0],
                                                                                                     body_state.pose.position[1],
                                                                                                     0.0), device=self._configuration.th_device),
                                                                         orientation_xyzw = th.tensor((q.x, q.y, q.z, q.w), device=self._configuration.th_device),
-                                                                        pos_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
+                                                                        pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
         return super().getUiRendering()

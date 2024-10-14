@@ -1,14 +1,58 @@
 #!/usr/bin/env python3  
+from __future__ import annotations
 
+def env_builder(seed,
+                    log_folder,
+                    is_eval,
+                    env_builder_args : dict,
+                    no_dict = False):
+    import adarl.utils.utils
+    from jumping_leg.experiments.build_locomotion_env import locomotion_env_builder
+    from jumping_leg.env.LocomotionEnv import LocomotionEnv
+
+    model_file = adarl.utils.utils.pkgutil_get_path("jumping_leg","models/cheetah.urdf.xacro")
+    homing_joint_pose={ ("cheetah","torso_z_slider"):0.8,
+                        ("cheetah","torso_x_slider"):0.0,
+                        ("cheetah","torso_pitch_joint"):0.0,
+                        ("cheetah","hip_joint_y_front"):0.785,
+                        ("cheetah","knee_joint_front"):1.57,
+                        ("cheetah","hip_joint_y_back"):0.785,
+                        ("cheetah","knee_joint_back"):1.57}
+    disallowed_contact_links = [("quad","thigh_link_back_left"),
+                                                        ("quad","shin_link_back_left"),
+                                                        ("quad","thigh_link_back_right"),
+                                                        ("quad","shin_link_back_right"),
+                                                        ("quad","thigh_link_front_left"),
+                                                        ("quad","shin_link_front_left"),
+                                                        ("quad","thigh_link_front_right"),
+                                                        ("quad","shin_link_front_right"),
+                                                        ("quad","body_link")]
+    terminating_contact_pairs=[(("cheetah","body_link"),("ground_plane","planeLink"))]
+    robot_name="cheetah"
+    robot_main_body_link="body_link"
+    homing_body_pose_xyz_xyzw=None
+    controlled_joints=[LocomotionEnv.JOINT_FILTERS.ALL_REVOLUTE]
+    return locomotion_env_builder(seed = seed,
+                                    log_folder = log_folder,
+                                    is_eval = is_eval,
+                                    env_builder_args = env_builder_args,
+                                    model_file = model_file,
+                                    no_dict = no_dict,
+                                    homing_body_pose_xyz_xyzw=homing_body_pose_xyz_xyzw,
+                                    homing_joint_pose=homing_joint_pose,
+                                    disallowed_contact_links=disallowed_contact_links,
+                                    terminating_contact_pairs=terminating_contact_pairs,
+                                    robot_name=robot_name,
+                                    robot_main_body_link=robot_main_body_link,
+                                    controlled_joints=controlled_joints)
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
-    from jumping_leg.experiments.build_cheetah_env import env_builder
     from rreal.examples.solve_sac import sac_train, SAC_hyperparams
     
-    step_length_sec = 25/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
+    step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     train_envs = 1
     env_device = th.device("cpu")
@@ -16,12 +60,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.1,
-        "control_mode" : "torque",
+        "control_mode" : "position",
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.0,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "pybullet",
-        "quiet" : False,
+        "quiet" : True,
         "reward_acceleration_weight" : 0.0,
         "reward_actdiff_weight" : 0.0,
         "reward_contacts_weight" : 0.0,
@@ -35,11 +79,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_limit_weight" : 0.0,
         "reward_velocity_weight" : 0.0,
         "reward_height_weight" : 0.0,
-        "reward_pitchnroll_weight" : 0.0,
+        "reward_pitchnroll_weight" : 0.01,
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
-        "obs_noise_step_std" : 0.0,
+        "obs_noise_step_std" : 0.01,
         "obs_noise_ep_mustd" : (0.0, 0.0),
         "stop_on_safety" : False,
         "th_device" : env_device,

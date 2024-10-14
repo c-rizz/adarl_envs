@@ -512,7 +512,7 @@ class LegReachEnv(ControlledEnv):
                                                                                                 0.2,
                                                                                                 goal_z)),
                                                                         orientation_xyzw = th.tensor((0.,0.,0.,1.0)),
-                                                                        pos_velocity_xyz = th.tensor((0.,0.,0)),
+                                                                        pos_com_velocity_xyz = th.tensor((0.,0.,0)),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.)))})
 
     def _simulation_initialization(self):

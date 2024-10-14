@@ -54,9 +54,6 @@
 	<xacro:property name="knee_friction" default="$(arg knee_friction)" />
 	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
 
-
-    <xacro:property name="hip_x_min_pos" default="0.0" />
-    <xacro:property name="hip_x_max_pos" default="2.4" />
     <xacro:property name="hip_y_min_pos" default="-2.4" />
     <xacro:property name="hip_y_max_pos" default="2.4" />
     <xacro:property name="knee_min_pos" default="-2.4" />
@@ -83,8 +80,10 @@
     </xacro:macro>
 
 
-    <link name="world"/>
 
+    <link name="world"/>
+    <link name="mid"/>
+    <link name="mid2"/>
 
     <link name="body_link">
 		<visual name = "body_link_v">
@@ -115,7 +114,7 @@
         <limit effort="10000" lower="-1" upper="1000" velocity="10000"/>
     </joint>
     <joint name="torso_z_slider" type="prismatic">
-        <origin xyz="0 0 1.0" rpy="0 0 0" />
+        <origin xyz="0 0 0" rpy="0 0 0" />
         <axis xyz="0 0 1" rpy="0 0 0" />
         <parent link="mid"/>
         <child link="mid2"/>

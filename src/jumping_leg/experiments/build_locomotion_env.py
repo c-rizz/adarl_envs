@@ -11,6 +11,8 @@ from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 import typing 
 from pathlib import Path
 import adarl.utils.utils
+from typing import Sequence
+from jumping_leg.env.RobotEnv import RobotEnv
 
 def locomotion_env_builder( seed,
                             log_folder,
@@ -23,6 +25,7 @@ def locomotion_env_builder( seed,
                             robot_name : str,
                             robot_main_body_link : str,
                             homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
+                            controlled_joints : Sequence[str | RobotEnv.JOINT_FILTERS],
                             no_dict = False):
     ggLog.info(f"Building env: thread={threading.current_thread()}, pid={os.getpid()}")
     ggLog.info(f"env_builder_args = {env_builder_args}")
@@ -98,7 +101,7 @@ def locomotion_env_builder( seed,
                             action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                             adapter=env_controller,
                             control_mode = env_builder_args.pop("control_mode"),
-                            controlled_joints=[LocomotionEnv.JOINT_FILTERS.ALL_REVOLUTE],
+                            controlled_joints=controlled_joints,
                             goal_err_smoothing_halflife_sec = env_builder_args.pop("goal_err_smoothing_halflife_sec"),
                             maxStepsPerEpisode=max_steps,
                             minmax_damping=(1.0,30.0),
@@ -141,7 +144,8 @@ def locomotion_env_builder( seed,
                             control_limits_minmax_pve={},
                             terminating_contact_pairs=terminating_contact_pairs if env_builder_args.pop("terminate_on_body_contact") else [],
                             verbose_infos=env_builder_args.pop("verbose_infos"),
-                            quiet=quiet
+                            quiet=quiet,
+                            enable_dbg_checks=True
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -191,14 +195,14 @@ video_recorder_kwargs : dict[str,typing.Any]  = dict(vec_obs_key="vec",
                                     # f"rTorque {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]:.2f}\n"+
                                     # f"rTrack  {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]:.2f}\n"+
                                     # f"rVeloci {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]:.2f}\n"
-                                    f"goal_vel       {info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X]].cpu().item(): .3f}, " 
+                                    f"goal_vel_rel       {info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X]].cpu().item(): .3f}, " 
                                                      f"{info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y]].cpu().item(): .3f}, "
                                                      f"{info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]].cpu().item(): .3f}\n"
                                     f"goal_vel       {info['goal_x']: .3f}, {info['goal_y']: .3f} \n"
                                     f"contacts_count {info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.COLLISON_COUNT]].cpu().item(): .3f}\n"
-                                    f"body_vel       {info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_LINVEL_X]].cpu().item(): .3f}, "
-                                                     f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_LINVEL_Y]].cpu().item(): .3f}, "
-                                                     f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_LINVEL_Z]].cpu().item(): .3f}\n"
+                                    f"body_vel_rel       {info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X]].cpu().item(): .3f}, "
+                                                     f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y]].cpu().item(): .3f}, "
+                                                     f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z]].cpu().item(): .3f}\n"
                                     f"track_err      {info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]].cpu().item(): .3f}\n"
                                     f"safety         {info['state_internal'][LocomotionEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]: .2f}\n"
                                     # f"position {info['state_robot'][0]:.2f}, {info['state_robot'][8]:.2f}\n"

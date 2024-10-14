@@ -2,6 +2,7 @@
 from __future__ import annotations
 import adarl.utils.utils
 from jumping_leg.experiments.build_locomotion_env import locomotion_env_builder
+from jumping_leg.env.LocomotionEnv import LocomotionEnv
 
 def quad_env_builder(seed,
                     log_folder,
@@ -46,4 +47,5 @@ def quad_env_builder(seed,
                                     disallowed_contact_links=disallowed_contact_links,
                                     terminating_contact_pairs=terminating_contact_pairs,
                                     robot_name=robot_name,
-                                    robot_main_body_link=robot_main_body_link)
+                                    robot_main_body_link=robot_main_body_link,
+                                    controlled_joints=[LocomotionEnv.JOINT_FILTERS.ALL_REVOLUTE])

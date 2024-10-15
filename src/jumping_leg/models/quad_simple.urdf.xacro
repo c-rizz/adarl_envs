@@ -61,8 +61,8 @@
 	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
 
 
-    <xacro:property name="hip_x_min_pos" default="0.0" />
-    <xacro:property name="hip_x_max_pos" default="2.4" />
+    <xacro:property name="hip_x_min_pos" default="-2.4" />
+    <xacro:property name="hip_x_max_pos" default="0.0" />
     <xacro:property name="hip_y_min_pos" default="-2.4" />
     <xacro:property name="hip_y_max_pos" default="2.4" />
     <xacro:property name="knee_min_pos" default="-2.4" />

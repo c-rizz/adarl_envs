@@ -54,7 +54,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 1
+    train_envs = 100
     env_device = th.device("cpu")
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
@@ -62,11 +62,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
         "enable_rendering" : False,
-        "goal_err_smoothing_halflife_sec" : 0.0,
+        "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "pybullet",
         "quiet" : True,
-        "reward_acceleration_weight" : 0.0,
+        "reward_acceleration_weight" : 0.1,
         "reward_actdiff_weight" : 0.0,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
@@ -79,7 +79,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_limit_weight" : 0.0,
         "reward_velocity_weight" : 0.0,
         "reward_height_weight" : 0.0,
-        "reward_pitchnroll_weight" : 0.01,
+        "reward_pitchnroll_weight" : 0.05,
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,

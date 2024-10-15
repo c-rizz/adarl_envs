@@ -1,4 +1,6 @@
 #!/usr/bin/env python3  
+from __future__ import annotations
+
 
 def quad_env_builder(seed,
                     log_folder,
@@ -9,27 +11,27 @@ def quad_env_builder(seed,
     from jumping_leg.experiments.build_locomotion_env import locomotion_env_builder
     from jumping_leg.env.LocomotionEnv import LocomotionEnv    
     model_file = adarl.utils.utils.pkgutil_get_path("jumping_leg","models/quad_simple.urdf.xacro")
-    homing_joint_pose={("quad","hip_joint_x_back_left") : -3.14159*0.4,
-                                               ("quad","hip_joint_x_back_right") : -3.14159*0.4,
-                                               ("quad","hip_joint_x_front_left") : -3.14159*0.4,
-                                               ("quad","hip_joint_x_front_right") : -3.14159*0.4,
-                                               ("quad","hip_joint_y_back_left") : 0.75,
-                                               ("quad","hip_joint_y_back_right") : 0.75,
-                                               ("quad","hip_joint_y_front_left") : 0.75,
-                                               ("quad","hip_joint_y_front_right") : 0.75,
-                                               ("quad","knee_joint_back_left") : 1.8,
-                                               ("quad","knee_joint_back_right") : 1.8,
-                                               ("quad","knee_joint_front_left") : 1.8,
-                                               ("quad","knee_joint_front_right") : 1.8}
+    homing_joint_pose={ ("quad","hip_joint_x_back_left") : -3.14159*0.4,
+                        ("quad","hip_joint_x_back_right") : -3.14159*0.4,
+                        ("quad","hip_joint_x_front_left") : -3.14159*0.4,
+                        ("quad","hip_joint_x_front_right") : -3.14159*0.4,
+                        ("quad","hip_joint_y_back_left") : 0.75,
+                        ("quad","hip_joint_y_back_right") : 0.75,
+                        ("quad","hip_joint_y_front_left") : 0.75,
+                        ("quad","hip_joint_y_front_right") : 0.75,
+                        ("quad","knee_joint_back_left") : 1.8,
+                        ("quad","knee_joint_back_right") : 1.8,
+                        ("quad","knee_joint_front_left") : 1.8,
+                        ("quad","knee_joint_front_right") : 1.8}
     disallowed_contact_links = [("quad","thigh_link_back_left"),
-                                                        ("quad","shin_link_back_left"),
-                                                        ("quad","thigh_link_back_right"),
-                                                        ("quad","shin_link_back_right"),
-                                                        ("quad","thigh_link_front_left"),
-                                                        ("quad","shin_link_front_left"),
-                                                        ("quad","thigh_link_front_right"),
-                                                        ("quad","shin_link_front_right"),
-                                                        ("quad","body_link")]
+                                ("quad","shin_link_back_left"),
+                                ("quad","thigh_link_back_right"),
+                                ("quad","shin_link_back_right"),
+                                ("quad","thigh_link_front_left"),
+                                ("quad","shin_link_front_left"),
+                                ("quad","thigh_link_front_right"),
+                                ("quad","shin_link_front_right"),
+                                ("quad","body_link")]
     terminating_contact_pairs=[(("quad","body_link"),("ground_plane","planeLink"))]
     robot_name="quad"
     robot_main_body_link="body_link"
@@ -55,21 +57,21 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import torch as th
     from rreal.examples.solve_sac import sac_train, SAC_hyperparams
     
-    step_length_sec = 25/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
+    step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 192
+    train_envs = 100
     env_device = th.device("cpu")
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.1,
-        "control_mode" : "torque",
+        "control_mode" : "position",
         "enable_rendering" : False,
-        "goal_err_smoothing_halflife_sec" : 0.0,
+        "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "pybullet",
-        "quiet" : False,
-        "reward_acceleration_weight" : 0.0,
+        "quiet" : True,
+        "reward_acceleration_weight" : 0.2,
         "reward_actdiff_weight" : 0.0,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
@@ -82,11 +84,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_limit_weight" : 0.0,
         "reward_velocity_weight" : 0.0,
         "reward_height_weight" : 0.0,
-        "reward_pitchnroll_weight" : 0.0,
+        "reward_pitchnroll_weight" : 0.05,
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
-        "obs_noise_step_std" : 0.0,
+        "obs_noise_step_std" : 0.01,
         "obs_noise_ep_mustd" : (0.0, 0.0),
         "stop_on_safety" : False,
         "th_device" : env_device,

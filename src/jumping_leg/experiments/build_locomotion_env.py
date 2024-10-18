@@ -24,6 +24,7 @@ def locomotion_env_builder( seed,
                             terminating_contact_pairs : list[tuple[tuple[str,str],tuple[str,str]]],
                             robot_name : str,
                             robot_main_body_link : str,
+                            robot_root_link : str,
                             homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
                             controlled_joints : Sequence[str | RobotEnv.JOINT_FILTERS],
                             no_dict = False):
@@ -125,6 +126,7 @@ def locomotion_env_builder( seed,
                             reward_pitchnroll_weight=env_builder_args.pop("reward_pitchnroll_weight"),
                             robot_main_body_link=robot_main_body_link,
                             robot_name=robot_name,
+                            robot_root_link=robot_root_link,
                             robot_urdf_string=urdf_string,
                             safe_damping=env_builder_args.pop("safe_damping"),
                             safe_stiffness=env_builder_args.pop("safe_stiffness"),
@@ -145,7 +147,8 @@ def locomotion_env_builder( seed,
                             terminating_contact_pairs=terminating_contact_pairs if env_builder_args.pop("terminate_on_body_contact") else [],
                             verbose_infos=env_builder_args.pop("verbose_infos"),
                             quiet=quiet,
-                            enable_dbg_checks=True
+                            enable_dbg_checks=True,
+                            randomize_initial_pose = env_builder_args.pop("randomize_initial_pose")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

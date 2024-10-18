@@ -211,10 +211,10 @@
                         knee_max_pos = "${knee_max_pos}"
                         />
 
-    <!-- <link name="world"/>
+    <link name="world"/>
 	<joint name="world_to_body" type="floating">
         <parent link="world"/>
         <child link="body_link"/>
-    </joint> -->
+    </joint>
 
 </robot>

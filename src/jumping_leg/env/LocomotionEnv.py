@@ -15,7 +15,7 @@ import math
 import quaternion
 from jumping_leg.env.RobotEnv import RobotEnv
 from adarl.utils.tensor_trees import map_tensor_tree
-import time
+import adarl.utils.tensor_trees
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -131,6 +131,7 @@ class LocomotionEnv(RobotEnv):
                         reward_velocity_weight : float,
                         robot_main_body_link : str,
                         robot_name : str,
+                        robot_root_link : str,
                         robot_urdf_string : str,
                         safe_damping : float,
                         safe_stiffness : float,
@@ -144,7 +145,8 @@ class LocomotionEnv(RobotEnv):
                         use_contacts : bool,
                         verbose_infos : bool,
                         quiet : bool,
-                        enable_dbg_checks : bool
+                        enable_dbg_checks : bool,
+                        randomize_initial_pose : bool
                         ):
         super().__init__(   action_delay_mustd = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
@@ -160,6 +162,7 @@ class LocomotionEnv(RobotEnv):
                             obs_noise_step_std = obs_noise_step_std,
                             robot_main_body_link = robot_main_body_link,
                             robot_name = robot_name,
+                            robot_root_link = robot_root_link,
                             robot_urdf_string = robot_urdf_string,
                             safe_damping = safe_damping,
                             safe_stiffness = safe_stiffness,
@@ -176,7 +179,8 @@ class LocomotionEnv(RobotEnv):
                             frame_stack_length=frame_stack_length,
                             verbose_infos = verbose_infos,
                             quiet = quiet,
-                            enable_dbg_checks = enable_dbg_checks
+                            enable_dbg_checks = enable_dbg_checks,
+                            randomize_initial_pose = randomize_initial_pose
                         )
         self._locomotion_conf = LocomotionEnv.LocomotionConfiguration(
                         reward_acceleration_weight = reward_acceleration_weight,
@@ -337,7 +341,6 @@ class LocomotionEnv(RobotEnv):
                             self.LOCOMOTION_FIELDS.CRASHED : crashed}
         new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
 
-
         return new_inst_state
     
 
@@ -374,9 +377,9 @@ class LocomotionEnv(RobotEnv):
         torquediff_reward   = - th.clamp(th.mean(th.pow(normtorquediff,2)),-max_rew,max_rew)
         actdiff_reward      = - th.clamp(th.mean(th.pow(actdiff,2)),-max_rew,max_rew)
 
-        torque_limit_reward   = -th.clamp(th.mean(th.pow(torque_safenorm,50)),-max_rew,max_rew)
-        position_limit_reward = -th.clamp(th.mean(th.pow(position_safenorm,50)),-max_rew,max_rew)
-        velocity_limit_reward = -th.clamp(th.mean(th.pow(velocities_safenorm,50)),-max_rew,max_rew)
+        torque_limit_reward   = -th.clamp(th.mean(th.pow(torque_safenorm,50)),-1,1)
+        position_limit_reward = -th.clamp(th.mean(th.pow(position_safenorm,50)),-1,1)
+        velocity_limit_reward = -th.clamp(th.mean(th.pow(velocities_safenorm,50)),-1,1)
 
         reward_height = bell_reward(locom_state[self.LOCOMOTION_FIELDS.HEIGHT_ERR],
                                     zero_rew_dist=self._locomotion_conf.height_reward_settle_point)
@@ -385,9 +388,9 @@ class LocomotionEnv(RobotEnv):
                                         zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
 
         velocity_tracking_err = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
-        # velocity_tracking_reward = bell_reward(velocity_tracking_err, zero_rew_dist=self._locomotion_conf.vel_tracking_reward_settle_point)
-        velocity_tracking_reward = bell_reward(velocity_tracking_err, 
-                                               zero_rew_dist=th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz)*self._locomotion_conf.vel_tracking_reward_settle_point+0.01)        
+        velocity_tracking_reward = bell_reward(velocity_tracking_err, zero_rew_dist=self._locomotion_conf.vel_tracking_reward_settle_point)
+        # velocity_tracking_reward = bell_reward(velocity_tracking_err, 
+        #                                        zero_rew_dist=th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz)*self._locomotion_conf.vel_tracking_reward_settle_point+0.01)        
         # velocity_tracking_reward = 1 - th.tanh(velocity_tracking_err/5)
         # tracking_reward = 1/(1+goal_dist/0.05)       # 0.50 at 0.05m, 0.35 at 0.10m, 0.2 at 0.2
         # tracking_reward = 1/(1+(goal_dist/0.1)**2) # 0.75 at 0.05m, 0.50 at 0.10m, 0.2 at 0.2
@@ -443,6 +446,9 @@ class LocomotionEnv(RobotEnv):
             dbg_info["sub_rewards_scaled_labels"] = sub_rewards_scaled_agg_names
             dbg_info.update({k:r.cpu().item() if isinstance(r,th.Tensor) else r for k,r in sub_rewards.items()})
             dbg_info["reward"] = reward
+
+        if self._enable_dbg_checks and not adarl.utils.tensor_trees.is_all_finite(state):
+            ggLog.warn(f"Non-finite reward {reward}")
         return reward
     
 

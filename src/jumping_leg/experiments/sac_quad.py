@@ -35,6 +35,7 @@ def quad_env_builder(seed,
     terminating_contact_pairs=[(("quad","body_link"),("ground_plane","planeLink"))]
     robot_name="quad"
     robot_main_body_link="body_link"
+    robot_root_link="body_link"
     homing_body_pose_xyz_xyzw=(0.,0.,0.5,0.,0.,0.,1.)
 
     return locomotion_env_builder(seed = seed,
@@ -49,6 +50,7 @@ def quad_env_builder(seed,
                                     terminating_contact_pairs=terminating_contact_pairs,
                                     robot_name=robot_name,
                                     robot_main_body_link=robot_main_body_link,
+                                    robot_root_link=robot_root_link,
                                     controlled_joints=[LocomotionEnv.JOINT_FILTERS.ALL_REVOLUTE])
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
@@ -71,24 +73,25 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "pybullet",
         "quiet" : True,
-        "reward_acceleration_weight" : 0.2,
-        "reward_actdiff_weight" : 0.0,
+        "randomize_initial_pose" : True,
+        "reward_acceleration_weight" : 0.1,
+        "reward_actdiff_weight" : 0.1,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
         "reward_health_weight" : 0.0,
-        "reward_position_limit_weight" : 0.0,
+        "reward_position_limit_weight" : 0.5,
         "reward_torque_limit_weight" : 0.0,
         "reward_torque_weight" : 0.0,
         "reward_torquediff_weight" : 0.0,
         "reward_tracking_weight" : 1.0,
         "reward_velocity_limit_weight" : 0.0,
         "reward_velocity_weight" : 0.0,
-        "reward_height_weight" : 0.0,
+        "reward_height_weight" : 0.1,
         "reward_pitchnroll_weight" : 0.05,
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
-        "obs_noise_step_std" : 0.01,
+        "obs_noise_step_std" : 0.0,
         "obs_noise_ep_mustd" : (0.0, 0.0),
         "stop_on_safety" : False,
         "th_device" : env_device,
@@ -119,11 +122,25 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "env_builder_args" : video_eval_env_builder_args,
         "num_envs" : 1
     }
+    video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
+    video_norand_eval_env_builder_args["enable_rendering"] = True
+    video_norand_eval_env_builder_args["verbose_infos"] = True
+    video_norand_eval_env_builder_args["video_save_freq"] = 1
+    video_norand_eval_env_builder_args["randomize_initial_pose"] = False
+    eval_conf_video_norand_det = {
+        "name" : "video_norand_stoch",
+        "deterministic" : False,
+        "eval_freq_ep" : 10*train_envs,
+        "eval_eps" : 1,
+        "env_builder_args" : video_norand_eval_env_builder_args,
+        "num_envs" : 1
+    }
     run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
     run_1ms_env_builder_args["goal_speed_minmax"] = (1,1)
     run_1ms_env_builder_args["enable_rendering"] = True
     run_1ms_env_builder_args["verbose_infos"] = True
     run_1ms_env_builder_args["video_save_freq"] = 1
+    run_1ms_env_builder_args["randomize_initial_pose"] = False
     eval_conf_run_1ms = {
         "name" : "run_1ms",
         "deterministic" : False,
@@ -165,6 +182,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                         eval_conf_video_det,
                                         eval_conf_video_stoch,
                                         eval_conf_run_1ms,
+                                        eval_conf_video_norand_det,
                                         #  eval_conf_feasible,
                                         #  eval_conf_video_feasible,
                                         #  eval_conf_video_jump_feasible
@@ -173,7 +191,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 q_network_arch=[256,128],
                                                 q_lr=0.001,
                                                 policy_lr=0.0001,
-                                                policy_network_arch=[256,256],
+                                                policy_network_arch=[1024,512],
                                                 gamma=0.99,
                                                 target_tau = 0.005,
                                                 batch_size=8192,

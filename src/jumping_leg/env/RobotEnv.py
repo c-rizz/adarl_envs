@@ -53,6 +53,9 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         randomize_initial_pose : bool
         real : bool
         robot_name : str
+        robot_root_link : tuple[str,str]
+        robot_root_joint : str
+        robot_is_floating : bool
         safe_damping : float
         safe_stiffness : float
         seed : int
@@ -119,6 +122,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         obs_noise_ep_mustd : Sequence[float] | th.Tensor, 
                         obs_noise_step_std : Sequence[float] | float | th.Tensor,
                         robot_main_body_link : str,
+                        robot_root_link : str,
                         robot_name : str,
                         robot_urdf_string : str,
                         safe_damping : float,
@@ -136,7 +140,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         frame_stack_length : int,
                         verbose_infos : bool,
                         quiet : bool,
-                        enable_dbg_checks : bool
+                        enable_dbg_checks : bool,
+                        randomize_initial_pose : bool
                         ):
         
         self._rng = th.Generator(device=th_device)
@@ -144,7 +149,12 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         self._robot_model = Robot(adarl.utils.utils.compile_xacro_string(  model_definition_string=robot_urdf_string))
         self._current_state = {}
         self._enable_dbg_checks = enable_dbg_checks
+        root_joint_name = self._robot_model.get_parent_joint(robot_root_link)
+        is_floating = self._robot_model.get_joint_properties([root_joint_name])[root_joint_name]["type"] == Robot.JOINT_TYPES.FLOATING
 
+
+        # ggLog.info("Properties:"+("\n".join([str(jp) for jp in self._robot_model.get_joint_properties(self._robot_model.get_joint_names()).items()])))
+        # exit()
         controlled_joints_str = []
         for j in controlled_joints:
             if isinstance(j, str):
@@ -205,15 +215,18 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
                                                             joint_safe_limits_minmax_stiffness = minmax_stiffness_thdict,
                                                             main_body_link=(robot_name,robot_main_body_link),
+                                                            robot_root_link=(robot_name,robot_root_link),
                                                             model_urdf_string=robot_urdf_string,
                                                             obs_dtype = th.float32,
                                                             obs_noise_ep_mustd = th.as_tensor(obs_noise_ep_mustd, device=th_device),
                                                             obs_noise_step_std = th.as_tensor(obs_noise_step_std, device=th_device),
                                                             observe_body_state = observe_body_velocity,
                                                             original_max_epsteps = maxStepsPerEpisode,
-                                                            randomize_initial_pose = False,
+                                                            randomize_initial_pose = randomize_initial_pose,
                                                             real = False,
                                                             robot_name = robot_name,
+                                                            robot_is_floating = is_floating,
+                                                            robot_root_joint = root_joint_name,
                                                             safe_damping = safe_damping,
                                                             safe_stiffness = safe_stiffness,
                                                             seed = seed,
@@ -406,11 +419,11 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                             pose=build_pose(0,0,0,0,0,0,1),
                                             model_format="urdf.xacro",
                                             model_kwargs={"add_world_link":str(isinstance(self._adapter, PyBulletAdapter))})
-            # self._robot_model.disable_tree_self_collisions("rail_joint")
+            self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
             # self._robot_model.remove_collision_pairs([("rail_link_0","slider_link_0")])            
-            # self._ground_co_id = self._robot_model.add_collision_box( pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
-            #                                                         collision_box_size_xyz=(10,10,1),
-            #                                                         collision_obj_id="ground_collision")
+            self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
+                                                                        collision_box_size_xyz=(100,100,1),
+                                                                        collision_obj_id="ground_collision")
             self._adapter.set_monitored_joints(self._configuration.controlled_joints)
             self._adapter.set_impedance_controlled_joints(self._configuration.controlled_joints)
 
@@ -432,7 +445,18 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         maxStepsPerEpisode = reset_options.get("max_ep_steps", self._configuration.original_max_epsteps)           
         found_good_configuration = False
         if self._configuration.randomize_initial_pose:
-            raise NotImplementedError()
+            for _ in range(1000):
+                rand_pos = th.rand(size=(len(self._configuration.controlled_joints),), dtype=th.float32, device=self._configuration.th_device)*2-1
+                limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.controlled_joints], dim = 1)
+                initial_joint_pose = unnormalize(rand_pos,limits_minmax[0],limits_minmax[1])
+                
+                self._robot_model.set_joint_pose_by_names({jn[1]:initial_joint_pose[i].cpu().numpy() for i,jn in enumerate(self._configuration.controlled_joints)})
+                if self._configuration.robot_is_floating:
+                    self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:np.array([self._configuration.homing_body_pose_xyz_xyzw])})
+                collisions = self._robot_model.get_all_collisions()
+                if len(collisions) == 0:
+                    found_good_configuration = True
+                    break
         if not found_good_configuration:
             initial_joint_pose = th.as_tensor([self._configuration.homing_joint_pose[jn] for jn in self._configuration.controlled_joints],
                                               device=self._configuration.th_device,
@@ -454,9 +478,9 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                         orientation_xyzw = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[3:7], device=self._configuration.th_device),
                                                                         pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
-        self._adapter.setJointsStateDirect({jn:JointState(position=self._configuration.homing_joint_pose[jn],
-                                                                        rate = 0,
-                                                                        effort = 0) for jn in self._configuration.homing_joint_pose})
+        self._adapter.setJointsStateDirect({jn:JointState(  position=self._current_episode_config.initial_ctrl_joint_pose[i],
+                                                            rate = 0,
+                                                            effort = 0) for i,jn in enumerate(self._configuration.controlled_joints)})
         start_jimp : dict[tuple[str,str], tuple] = {jn:(self._configuration.homing_joint_pose[jn],
                                                         0,
                                                         0,
@@ -516,13 +540,14 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     
     @override
     def getObservation(self, state) -> dict[Any, th.Tensor]:
-        if not adarl.utils.tensor_trees.is_all_finite(state):
-            ggLog.warn(f"Non-finite values in state {state}")
         self._last_obs = self._state_helper.observe(state)
-        if th.any(th.abs(self._last_obs["vec"]) > 100):
-            raise RuntimeError(f"Values over 100 in obs {self._last_obs}")
-        if not adarl.utils.tensor_trees.is_all_finite(self._last_obs):
-            raise RuntimeError(f"Non-finite values in obs {self._last_obs}")
+        if self._enable_dbg_checks:
+            if not adarl.utils.tensor_trees.is_all_finite(state):
+                ggLog.warn(f"Non-finite values in state {state}")
+            if th.any(th.abs(self._last_obs["vec"]) > 100):
+                raise RuntimeError(f"Values over 100 in obs {self._last_obs}")
+            if not adarl.utils.tensor_trees.is_all_finite(self._last_obs):
+                raise RuntimeError(f"Non-finite values in obs {self._last_obs}")
         return self._last_obs
 
     @override

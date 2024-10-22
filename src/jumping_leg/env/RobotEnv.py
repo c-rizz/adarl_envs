@@ -50,7 +50,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         obs_noise_step_std : th.Tensor
         observe_body_state : bool
         original_max_epsteps : int
-        randomize_initial_pose : bool
+        initial_pose_randomization : float
         real : bool
         robot_name : str
         robot_root_link : tuple[str,str]
@@ -141,7 +141,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         verbose_infos : bool,
                         quiet : bool,
                         enable_dbg_checks : bool,
-                        randomize_initial_pose : bool
+                        initial_pose_randomization : float
                         ):
         
         self._rng = th.Generator(device=th_device)
@@ -222,7 +222,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             obs_noise_step_std = th.as_tensor(obs_noise_step_std, device=th_device),
                                                             observe_body_state = observe_body_velocity,
                                                             original_max_epsteps = maxStepsPerEpisode,
-                                                            randomize_initial_pose = randomize_initial_pose,
+                                                            initial_pose_randomization = initial_pose_randomization,
                                                             real = False,
                                                             robot_name = robot_name,
                                                             robot_is_floating = is_floating,
@@ -240,6 +240,11 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             quiet=quiet,
                                                             spawn_root_pose_xyz_xyzw = (0,0,0,0,0,0,1)
                                                             )
+
+        self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
+            moving_joints=[jn[1] for jn in self._configuration.controlled_joints],
+            fixed_joints_pose={self._configuration.robot_root_joint : np.array(self._configuration.homing_body_pose_xyz_xyzw)}
+                                            if self._configuration.robot_is_floating else {})
 
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
         self._action_helper= JointImpedanceActionHelper(control_mode=self._configuration.control_mode,
@@ -444,12 +449,18 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     def _set_current_ep_config(self, reset_options : dict = {}):
         maxStepsPerEpisode = reset_options.get("max_ep_steps", self._configuration.original_max_epsteps)           
         found_good_configuration = False
-        if self._configuration.randomize_initial_pose:
-            for _ in range(1000):
-                rand_pos = th.rand(size=(len(self._configuration.controlled_joints),), dtype=th.float32, device=self._configuration.th_device)*2-1
+        original_collision_pairs = self._robot_model.get_enabled_collision_pairs()
+        self._robot_model.set_collision_pairs("all")
+        self._robot_model.remove_collision_pairs(self._always_present_collisions)
+        homing = th.as_tensor([self._configuration.homing_joint_pose[jn] for jn in self._configuration.controlled_joints],
+                                              device=self._configuration.th_device,
+                                              dtype=self._configuration.obs_dtype)
+        if self._configuration.initial_pose_randomization > 0:
+            for i in range(1000):
+                npos = (th.rand(size=(len(self._configuration.controlled_joints),), dtype=th.float32, device=self._configuration.th_device)*2-1)*self._configuration.initial_pose_randomization
                 limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.controlled_joints], dim = 1)
-                initial_joint_pose = unnormalize(rand_pos,limits_minmax[0],limits_minmax[1])
-                
+                # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
+                initial_joint_pose = ((npos>=0)*((limits_minmax[1]-homing)*npos + homing) + (npos<0)*((homing-limits_minmax[0])*npos + homing))
                 self._robot_model.set_joint_pose_by_names({jn[1]:initial_joint_pose[i].cpu().numpy() for i,jn in enumerate(self._configuration.controlled_joints)})
                 if self._configuration.robot_is_floating:
                     self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:np.array([self._configuration.homing_body_pose_xyz_xyzw])})
@@ -457,10 +468,12 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                 if len(collisions) == 0:
                     found_good_configuration = True
                     break
+            if not found_good_configuration:
+                ggLog.warn(f"Failed to find initial joint configuration. Last collisions = {collisions}, always present collisions = {self._always_present_collisions}")
         if not found_good_configuration:
-            initial_joint_pose = th.as_tensor([self._configuration.homing_joint_pose[jn] for jn in self._configuration.controlled_joints],
-                                              device=self._configuration.th_device,
-                                              dtype=self._configuration.obs_dtype)
+            initial_joint_pose = homing
+        # ggLog.info(f"initial_jpose = {initial_joint_pose}, homing = {homing}")
+        self._robot_model.set_collision_pairs(original_collision_pairs)
         self._current_episode_config = RobotEnv.EpisodeConfiguration(   initial_ctrl_joint_pose = initial_joint_pose,
                                                                         max_ep_steps = maxStepsPerEpisode)
         self.set_max_episode_steps(self._current_episode_config.max_ep_steps)

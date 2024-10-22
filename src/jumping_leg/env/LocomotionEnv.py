@@ -35,6 +35,10 @@ def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     """
     return th.exp(-(2*error/zero_rew_dist)**2)
 
+@th.jit.script
+def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
+    return 1-error/zero_rew_dist
+
 class LocomotionEnv(RobotEnv):
     STATE_LOCOMOTION = "loco"
 
@@ -146,7 +150,7 @@ class LocomotionEnv(RobotEnv):
                         verbose_infos : bool,
                         quiet : bool,
                         enable_dbg_checks : bool,
-                        randomize_initial_pose : bool
+                        initial_pose_randomization : float
                         ):
         super().__init__(   action_delay_mustd = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
@@ -180,7 +184,7 @@ class LocomotionEnv(RobotEnv):
                             verbose_infos = verbose_infos,
                             quiet = quiet,
                             enable_dbg_checks = enable_dbg_checks,
-                            randomize_initial_pose = randomize_initial_pose
+                            initial_pose_randomization = initial_pose_randomization
                         )
         self._locomotion_conf = LocomotionEnv.LocomotionConfiguration(
                         reward_acceleration_weight = reward_acceleration_weight,
@@ -204,7 +208,7 @@ class LocomotionEnv(RobotEnv):
                         reward_actdiff_weight = reward_actdiff_weight,
                         height_reward_settle_point=th.tensor(0.2, device=th_device),
                         pitchnroll_reward_settle_point=th.tensor(0.2, device=th_device),
-                        vel_tracking_reward_settle_point=th.tensor(0.5, device=th_device))
+                        vel_tracking_reward_settle_point=th.tensor(1.1, device=th_device))
         locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     obs_dtype=th.float32,
                                                     th_device=th_device,
@@ -389,6 +393,8 @@ class LocomotionEnv(RobotEnv):
 
         velocity_tracking_err = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
         velocity_tracking_reward = bell_reward(velocity_tracking_err, zero_rew_dist=self._locomotion_conf.vel_tracking_reward_settle_point)
+        # velocity_tracking_reward = ramp_reward(velocity_tracking_err, zero_rew_dist=th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz))
+        
         # velocity_tracking_reward = bell_reward(velocity_tracking_err, 
         #                                        zero_rew_dist=th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz)*self._locomotion_conf.vel_tracking_reward_settle_point+0.01)        
         # velocity_tracking_reward = 1 - th.tanh(velocity_tracking_err/5)
@@ -540,8 +546,8 @@ class LocomotionEnv(RobotEnv):
         goal_speed = unnormalize(th.rand(size=(1,),generator=self._rng, device=self._configuration.th_device)*2-1,
                                     min=self._locomotion_conf.goal_speed_minmax[0],
                                     max=self._locomotion_conf.goal_speed_minmax[1])
-        # goal_direction = th.rand((1,),generator=self._rng, device=self._configuration.th_device)*math.pi*2
-        goal_direction = th.tensor([0.0], device=self._configuration.th_device)
+        goal_direction = th.rand((1,),generator=self._rng, device=self._configuration.th_device)*math.pi*2
+        # goal_direction = th.tensor([0.0], device=self._configuration.th_device)
         goal_velocity_xyz = reset_options.get("goal_velocity_xy", goal_speed*th.cat([th.cos(goal_direction), th.sin(goal_direction), th.tensor([0.0],device=self._configuration.th_device)]))
                                              
         # goal_velocity_xy = th.as_tensor((10.,0.), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)

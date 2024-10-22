@@ -148,7 +148,7 @@ def locomotion_env_builder( seed,
                             verbose_infos=env_builder_args.pop("verbose_infos"),
                             quiet=quiet,
                             enable_dbg_checks=True,
-                            randomize_initial_pose = env_builder_args.pop("randomize_initial_pose")
+                            initial_pose_randomization = env_builder_args.pop("initial_pose_randomization")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

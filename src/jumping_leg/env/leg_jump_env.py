@@ -1193,17 +1193,17 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             abs_impulses_sum_avg = -1
         # ggLog.info(f"jstates = {jstates}")
 
-        stats_minmaxavgstd_hipknee_pve = self._adapter.get_joints_state_step_stats()
-        if not th.all(th.isfinite(stats_minmaxavgstd_hipknee_pve)):
-            raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_hipknee_pve}")
+        stats_minmaxavgstd_hipknee_pvae = self._adapter.get_joints_state_step_stats()
+        if not th.all(th.isfinite(stats_minmaxavgstd_hipknee_pvae)):
+            raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_hipknee_pvae}")
 
         internal_state = self._current_state[self.STATE_INTERNAL][0]
         step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
         if step_count!=-1 and internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0:
             safety_triggered = True
         else:
-            hip_knee_pve_min = stats_minmaxavgstd_hipknee_pve[0].flatten()
-            hip_knee_pve_max = stats_minmaxavgstd_hipknee_pve[1].flatten()
+            hip_knee_pve_min = stats_minmaxavgstd_hipknee_pvae[0].flatten()
+            hip_knee_pve_max = stats_minmaxavgstd_hipknee_pvae[1].flatten()
             j_safety_lims = th.as_tensor([  self._configuration.joint_safety_limits_minmax_pve[self._hip_joint][:,0],
                                             self._configuration.joint_safety_limits_minmax_pve[self._hip_joint][:,1],
                                             self._configuration.joint_safety_limits_minmax_pve[self._hip_joint][:,2],
@@ -1220,7 +1220,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         triggered.append(elements[i])
                 ggLog.info( f"SAFETY TRIGGERED:\n"
                             f"    triggered      = {triggered}\n"
-                            f"    hip_knee_stats = \n{stats_minmaxavgstd_hipknee_pve}\n"
+                            f"    hip_knee_stats = \n{stats_minmaxavgstd_hipknee_pvae}\n"
                             f"    j_safety_lims  = \n{j_safety_lims} ")
 
 

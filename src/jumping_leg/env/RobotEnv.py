@@ -591,15 +591,15 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
         internal_state = self._current_state[self.STATE_INTERNAL][0]
         step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
-        stats_minmaxavgstd_j_pve = self._adapter.get_joints_state_step_stats()
-        if not th.all(th.isfinite(stats_minmaxavgstd_j_pve)):
-            raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_j_pve}")
+        stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
+        if not th.all(th.isfinite(stats_minmaxavgstd_j_pvae)):
+            raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_j_pvae}")
 
         if step_count!=-1 and internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0:
             safety_triggered = True
         elif step_count>=1: # stats are not valid at step 0
-            triggered_limits = th.logical_or(stats_minmaxavgstd_j_pve[0] < self._safe_limits_minmax_j_pve[0],
-                                             stats_minmaxavgstd_j_pve[1] > self._safe_limits_minmax_j_pve[1])
+            triggered_limits = th.logical_or(stats_minmaxavgstd_j_pvae[0, :, [0,1,3]] < self._safe_limits_minmax_j_pve[0],
+                                             stats_minmaxavgstd_j_pvae[1, :, [0,1,3]] > self._safe_limits_minmax_j_pve[1])
             safety_triggered = th.any(triggered_limits)
             if safety_triggered:       
                 elements = np.array([[f"{jn[1]}_pos",f"{jn[1]}_vel",f"{jn[1]}_eff"] for jn in self._configuration.controlled_joints], dtype=object) #type: ignore
@@ -624,7 +624,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                             jstates[jn].effort[[0]],
                                             th.as_tensor(self._last_sent_pvesd[jn])])
                                 for jn in self._configuration.controlled_joints}
-        new_robot_stats_state = {jname : stats_minmaxavgstd_j_pve[:,i,:].flatten()
+        new_robot_stats_state = {jname : stats_minmaxavgstd_j_pvae[:,i,:].flatten()
                                  for i,jname in enumerate(self._adapter.get_monitored_joints())}
         new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : body_rel_linvel_xyz[0],
                                 self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : body_rel_linvel_xyz[1],

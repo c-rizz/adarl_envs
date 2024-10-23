@@ -81,7 +81,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_health_weight" : 0.0,
         "reward_position_limit_weight" : 0.5,
         "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 0.0,
+        "reward_torque_weight" : 0.1,
         "reward_torquediff_weight" : 0.0,
         "reward_tracking_weight" : 2.0,
         "reward_velocity_limit_weight" : 0.0,

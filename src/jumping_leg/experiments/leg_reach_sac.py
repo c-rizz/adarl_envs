@@ -1,6 +1,6 @@
 #!/usr/bin/env python3  
 
-from rreal.examples.solve_sac import sac_train, SAC_hyperparams, gym_builder
+from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams, gym_builder
 
 
 

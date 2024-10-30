@@ -366,7 +366,7 @@ class LocomotionEnv(RobotEnv):
         # normpositions = robot_state_norm[:,0]
         normvelocities = robot_state_norm[0][:,1]
         normtorques = robot_state_norm[0][:,2]
-        normaccelerations = robot_state_norm[0][:,1] - robot_state_norm[1][:,1]
+        normaccelerations = (robot_state_norm[0][:,1] - robot_state_norm[1][:,1])/self._configuration.stepLength_sec
         normtorquediff = robot_state_norm[0][:,2] - robot_state_norm[1][:,2]
         actdiff = state_action[0] - state_action[1]
 

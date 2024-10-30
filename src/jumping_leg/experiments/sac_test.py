@@ -6,7 +6,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import copy
     import torch as th
     import jumping_leg.experiments.build_jumping_leg_env as build_jumping_leg_env
-    from rreal.examples.solve_sac import sac_train, SAC_hyperparams
+    from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     ep_duration_sec = 5
@@ -110,7 +110,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 args,
                 env_builder = build_jumping_leg_env.env_builder,
                 env_builder_args = env_builder_args,
-                eval_env_builder_args = [eval_conf_video_det,
+                eval_configurations = [eval_conf_video_det,
                                          eval_conf_video_stoch,
                                          eval_conf_feasible,
                                          eval_conf_video_feasible,

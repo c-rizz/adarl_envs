@@ -53,7 +53,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
-    from rreal.examples.solve_sac import sac_train, SAC_hyperparams
+    from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams
     
     step_length_sec = 25/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
@@ -159,7 +159,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 args,
                 env_builder = quad_env_builder,
                 env_builder_args = env_builder_args,
-                eval_env_builder_args = [
+                eval_configurations = [
                                         eval_conf_video_det,
                                         eval_conf_video_stoch,
                                         eval_conf_run_1ms,

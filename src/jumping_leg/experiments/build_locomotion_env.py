@@ -107,8 +107,6 @@ def locomotion_env_builder( seed,
                             maxStepsPerEpisode=max_steps,
                             minmax_damping=(1.0,30.0),
                             minmax_stiffness=(50.0,1000.0),
-                            obs_noise_ep_mustd=env_builder_args.pop("obs_noise_ep_mustd"),
-                            obs_noise_step_std=env_builder_args.pop("obs_noise_step_std"),
                             reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
                             reward_actdiff_weight = env_builder_args.pop("reward_actdiff_weight"),
                             reward_contacts_weight = env_builder_args.pop("reward_contacts_weight"),
@@ -148,7 +146,13 @@ def locomotion_env_builder( seed,
                             verbose_infos=env_builder_args.pop("verbose_infos"),
                             quiet=quiet,
                             enable_dbg_checks=True,
-                            initial_pose_randomization = env_builder_args.pop("initial_pose_randomization")
+                            initial_pose_randomization = env_builder_args.pop("initial_pose_randomization"),
+                            init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
+                            obs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_noise_joints_pve_ep_mustd_step_std"),
+                            obs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),
+                            obs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_angvel_ep_mustd_step_std"),
+                            obs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_noise_posz_ep_mustd_step_std"),
+                            obs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_noise_gravity_ep_mustd_step_std")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

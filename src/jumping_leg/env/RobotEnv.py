@@ -46,8 +46,6 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         main_body_link : tuple[str,str]
         model_urdf_string : str
         obs_dtype : th.dtype
-        obs_noise_ep_mustd : th.Tensor
-        obs_noise_step_std : th.Tensor
         observe_body_state : bool
         original_max_epsteps : int
         initial_pose_randomization : float
@@ -67,6 +65,13 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         ui_camera_link : tuple[str,str]
         verbose_infos : bool
         quiet : bool
+        init_on_reset_ratio : float
+        noise_joints_pve_mustdstd : th.Tensor
+        noise_linvel_ep_mustdstd : th.Tensor
+        noise_angvel_ep_mustdstd : th.Tensor
+        noise_posz_ep_mustdstd : th.Tensor
+        noise_gravity_ep_mustdstd : th.Tensor
+
 
     metadata = {'render.modes': ['rgb_array']}
     # STATE_BASE = "b" # component of the state that is a vector and is always the same regardless of the configuration
@@ -119,8 +124,6 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         maxStepsPerEpisode,
                         minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
                         minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
-                        obs_noise_ep_mustd : Sequence[float] | th.Tensor, 
-                        obs_noise_step_std : Sequence[float] | float | th.Tensor,
                         robot_main_body_link : str,
                         robot_root_link : str,
                         robot_name : str,
@@ -141,7 +144,13 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         verbose_infos : bool,
                         quiet : bool,
                         enable_dbg_checks : bool,
-                        initial_pose_randomization : float
+                        initial_pose_randomization : float,
+                        init_on_reset_ratio : float,
+                        obs_noise_joints_pve_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor
                         ):
         
         self._rng = th.Generator(device=th_device)
@@ -218,8 +227,6 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             robot_root_link=(robot_name,robot_root_link),
                                                             model_urdf_string=robot_urdf_string,
                                                             obs_dtype = th.float32,
-                                                            obs_noise_ep_mustd = th.as_tensor(obs_noise_ep_mustd, device=th_device),
-                                                            obs_noise_step_std = th.as_tensor(obs_noise_step_std, device=th_device),
                                                             observe_body_state = observe_body_velocity,
                                                             original_max_epsteps = maxStepsPerEpisode,
                                                             initial_pose_randomization = initial_pose_randomization,
@@ -238,7 +245,13 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             ui_camera_name="simple_camera",
                                                             verbose_infos = verbose_infos,
                                                             quiet=quiet,
-                                                            spawn_root_pose_xyz_xyzw = (0,0,0,0,0,0,1)
+                                                            spawn_root_pose_xyz_xyzw = (0,0,0,0,0,0,1),
+                                                            init_on_reset_ratio=init_on_reset_ratio,
+                                                            noise_joints_pve_mustdstd = th.as_tensor(obs_noise_joints_pve_ep_mustd_step_std, device=th_device),
+                                                            noise_linvel_ep_mustdstd =  th.as_tensor(obs_noise_linvel_ep_mustd_step_std, device=th_device),
+                                                            noise_angvel_ep_mustdstd =  th.as_tensor(obs_noise_angvel_ep_mustd_step_std, device=th_device),
+                                                            noise_posz_ep_mustdstd =    th.as_tensor(obs_noise_posz_ep_mustd_step_std, device=th_device),
+                                                            noise_gravity_ep_mustdstd = th.as_tensor(obs_noise_gravity_ep_mustd_step_std, device=th_device)
                                                             )
 
         self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
@@ -298,12 +311,18 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                history_length=2)
         robot_state_noise =  StateNoiseGenerator(robot_state_helper,
                                             self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
-                                            episode_mu_std = self._configuration.obs_noise_ep_mustd,
-                                            step_std = self._configuration.obs_noise_step_std)
+                                            episode_mu_std = self._configuration.noise_joints_pve_mustdstd[:2],
+                                            step_std = self._configuration.noise_joints_pve_mustdstd[2])
         extrinsic_state_noise =  StateNoiseGenerator(extrinsic_state_helper,
                                             self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
-                                            episode_mu_std = self._configuration.obs_noise_ep_mustd,
-                                            step_std = self._configuration.obs_noise_step_std)        
+                                            episode_mu_std = th.cat([   self._configuration.noise_linvel_ep_mustdstd[:2].expand(3,2),
+                                                                        self._configuration.noise_angvel_ep_mustdstd[:2].expand(3,2),
+                                                                        self._configuration.noise_posz_ep_mustdstd[:2].expand(1,2),
+                                                                        self._configuration.noise_gravity_ep_mustdstd[:2].expand(3,2)]).permute(1,0).unsqueeze(-1),
+                                            step_std = th.cat([ self._configuration.noise_linvel_ep_mustdstd[2].expand(3),
+                                                                self._configuration.noise_angvel_ep_mustdstd[2].expand(3),
+                                                                self._configuration.noise_posz_ep_mustdstd[2].expand(1),
+                                                                self._configuration.noise_gravity_ep_mustdstd[2].expand(3)]).unsqueeze(-1))
         if self._configuration.observe_body_state:
             observable_fields = [   self.STATE_ROBOT,
                                     self.STATE_EXTRINSIC,
@@ -484,6 +503,9 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     def _simulation_initialization(self):
         if not isinstance(self._adapter, BaseSimulationAdapter):
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
+        
+        if self._configuration.init_on_reset_ratio > 0 and th.rand((1,), generator=self._rng) >= self._configuration.init_on_reset_ratio and self._resetCounter > 1:
+            return
         
         if self._configuration.homing_body_pose_xyz_xyzw is not None:
             self._adapter.setLinksStateDirect({self._configuration.main_body_link :

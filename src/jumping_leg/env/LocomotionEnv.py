@@ -4,7 +4,7 @@ from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 from adarl.utils.utils import LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection
 from adarl.utils.state_helper import ThBoxStateHelper, unnormalize
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any
 from typing_extensions import override
@@ -65,12 +65,14 @@ class LocomotionEnv(RobotEnv):
         use_contacts : bool
         height_reward_settle_point : th.Tensor
         pitchnroll_reward_settle_point : th.Tensor
-        vel_tracking_reward_settle_point : th.Tensor
+        vel_reward_goalrelative_weight : th.Tensor
+        vel_reward_goalrelative_zerodist : th.Tensor
+        vel_reward_goalabs_zerodist : th.Tensor
 
 
     @dataclass
     class EpisodeLocomConfiguration:
-        goal_abs_linvel_xyz : th.Tensor
+        goal_abs_linvel_xyz : th.Tensor = field(default_factory=lambda: th.tensor([0.0,0.0,0.0]))
 
     LOCOMOTION_FIELDS = IntEnum("INTERNAL_FIELDS", ["COLLISON_COUNT",
                                                     "GOAL_VELOCITY_REL_X",
@@ -110,13 +112,11 @@ class LocomotionEnv(RobotEnv):
                         frame_stack_length : int,
                         goal_err_smoothing_halflife_sec : float,
                         goal_speed_minmax : tuple[float, float],
-                        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float] | None,
+                        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
                         homing_joint_pose : dict[tuple[str,str], float],
                         maxStepsPerEpisode : int,
                         minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
                         minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
-                        obs_noise_ep_mustd : Sequence[float] | th.Tensor, 
-                        obs_noise_step_std : Sequence[float] | float | th.Tensor,
                         observe_body_velocity : bool,
                         reward_acceleration_weight : float,
                         reward_actdiff_weight : float,
@@ -150,7 +150,13 @@ class LocomotionEnv(RobotEnv):
                         verbose_infos : bool,
                         quiet : bool,
                         enable_dbg_checks : bool,
-                        initial_pose_randomization : float
+                        initial_pose_randomization : float,
+                        init_on_reset_ratio : float,
+                        obs_noise_joints_pve_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor
                         ):
         super().__init__(   action_delay_mustd = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
@@ -162,8 +168,6 @@ class LocomotionEnv(RobotEnv):
                             maxStepsPerEpisode = maxStepsPerEpisode,
                             minmax_damping = minmax_damping,
                             minmax_stiffness = minmax_stiffness,
-                            obs_noise_ep_mustd = obs_noise_ep_mustd, 
-                            obs_noise_step_std = obs_noise_step_std,
                             robot_main_body_link = robot_main_body_link,
                             robot_name = robot_name,
                             robot_root_link = robot_root_link,
@@ -184,7 +188,13 @@ class LocomotionEnv(RobotEnv):
                             verbose_infos = verbose_infos,
                             quiet = quiet,
                             enable_dbg_checks = enable_dbg_checks,
-                            initial_pose_randomization = initial_pose_randomization
+                            initial_pose_randomization = initial_pose_randomization,
+                            init_on_reset_ratio = init_on_reset_ratio,
+                            obs_noise_joints_pve_ep_mustd_step_std = obs_noise_joints_pve_ep_mustd_step_std,
+                            obs_noise_linvel_ep_mustd_step_std = obs_noise_linvel_ep_mustd_step_std,
+                            obs_noise_angvel_ep_mustd_step_std = obs_noise_angvel_ep_mustd_step_std,
+                            obs_noise_posz_ep_mustd_step_std = obs_noise_posz_ep_mustd_step_std,
+                            obs_noise_gravity_ep_mustd_step_std = obs_noise_gravity_ep_mustd_step_std
                         )
         self._locomotion_conf = LocomotionEnv.LocomotionConfiguration(
                         reward_acceleration_weight = reward_acceleration_weight,
@@ -208,7 +218,9 @@ class LocomotionEnv(RobotEnv):
                         reward_actdiff_weight = reward_actdiff_weight,
                         height_reward_settle_point=th.tensor(0.2, device=th_device),
                         pitchnroll_reward_settle_point=th.tensor(0.2, device=th_device),
-                        vel_tracking_reward_settle_point=th.tensor(1.1, device=th_device))
+                        vel_reward_goalrelative_weight = th.tensor(0.2, device=th_device),
+                        vel_reward_goalrelative_zerodist = th.tensor(1.1, device=th_device),
+                        vel_reward_goalabs_zerodist = th.tensor(0.25, device=th_device))
         locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     obs_dtype=th.float32,
                                                     th_device=th_device,
@@ -392,7 +404,14 @@ class LocomotionEnv(RobotEnv):
                                         zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
 
         velocity_tracking_err = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
-        velocity_tracking_reward = bell_reward(velocity_tracking_err, zero_rew_dist=self._locomotion_conf.vel_tracking_reward_settle_point)
+        goalrelative_weight = self._locomotion_conf.vel_reward_goalrelative_weight
+        goalrelative_zerodist = self._locomotion_conf.vel_reward_goalrelative_zerodist
+        goalabs_zerodist = self._locomotion_conf.vel_reward_goalabs_zerodist
+        goal_norm = th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz)
+        velocity_tracking_reward = (   goalrelative_weight  * bell_reward(velocity_tracking_err,
+                                                                          zero_rew_dist=goalrelative_zerodist*goal_norm)+
+                                    (1-goalrelative_weight) * bell_reward(velocity_tracking_err,
+                                                                          zero_rew_dist=goalabs_zerodist))
         # velocity_tracking_reward = ramp_reward(velocity_tracking_err, zero_rew_dist=th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz))
         
         # velocity_tracking_reward = bell_reward(velocity_tracking_err, 
@@ -543,17 +562,24 @@ class LocomotionEnv(RobotEnv):
     def _set_current_ep_config(self, reset_options : dict = {}):
         super()._set_current_ep_config(reset_options=reset_options)
         
-        goal_speed = unnormalize(th.rand(size=(1,),generator=self._rng, device=self._configuration.th_device)*2-1,
-                                    min=self._locomotion_conf.goal_speed_minmax[0],
-                                    max=self._locomotion_conf.goal_speed_minmax[1])
-        goal_direction = th.rand((1,),generator=self._rng, device=self._configuration.th_device)*math.pi*2
-        # goal_direction = th.tensor([0.0], device=self._configuration.th_device)
-        goal_velocity_xyz = reset_options.get("goal_velocity_xy", goal_speed*th.cat([th.cos(goal_direction), th.sin(goal_direction), th.tensor([0.0],device=self._configuration.th_device)]))
+        if "goal_velocity_xy" in reset_options:
+            goal_velocity_xy = th.as_tensor(reset_options["goal_velocity_xy"],device=self._configuration.th_device)
+        else:
+            goal_speed = unnormalize(th.rand(size=(1,),generator=self._rng, device=self._configuration.th_device)*2-1,
+                                        min=self._locomotion_conf.goal_speed_minmax[0],
+                                        max=self._locomotion_conf.goal_speed_minmax[1])
+            goal_direction = th.rand((1,),generator=self._rng, device=self._configuration.th_device)*math.pi*2
+            # goal_direction = th.tensor([0.0], device=self._configuration.th_device)
+            goal_velocity_xy = goal_speed*th.cat([th.cos(goal_direction), th.sin(goal_direction)])
                                              
-        # goal_velocity_xy = th.as_tensor((10.,0.), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
+        self._locomotion_episode_config = LocomotionEnv.EpisodeLocomConfiguration()
+        self.set_max_episode_steps(reset_options.get("reset_options",self._current_episode_config.max_ep_steps))
+        self.set_goal(goal_velocity_xy)
 
-        self._locomotion_episode_config = LocomotionEnv.EpisodeLocomConfiguration(goal_abs_linvel_xyz=goal_velocity_xyz)
-        self.set_max_episode_steps(self._current_episode_config.max_ep_steps)
+    def set_goal(self, goal_velocity_xy : tuple[float,float] | th.Tensor):
+        if isinstance(goal_velocity_xy, (tuple,list)):
+            goal_velocity_xy = th.as_tensor(goal_velocity_xy,device=self._configuration.th_device)
+        self._locomotion_episode_config.goal_abs_linvel_xyz = th.cat([goal_velocity_xy, th.tensor([0.0],device=self._configuration.th_device)])
 
     def reachedTerminalState(self, previousState, state) -> th.Tensor:
         if super().reachedTerminalState(previousState, state):
@@ -588,10 +614,11 @@ class LocomotionEnv(RobotEnv):
         if isinstance(self._adapter, BaseSimulationAdapter):
             body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
             q = quaternion.from_euler_angles([0.0,0.0,np.arctan2(*self._locomotion_episode_config.goal_abs_linvel_xyz[[1,0]].cpu().numpy())])
+            n = th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz).cpu().item()
             self._adapter.setLinksStateDirect({self._arrow_base :
                                                             LinkState( position_xyz = th.tensor((body_state.pose.position[0],
                                                                                                     body_state.pose.position[1],
-                                                                                                    0.0), device=self._configuration.th_device),
+                                                                                                    n), device=self._configuration.th_device),
                                                                         orientation_xyzw = th.tensor((q.x, q.y, q.z, q.w), device=self._configuration.th_device),
                                                                         pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})

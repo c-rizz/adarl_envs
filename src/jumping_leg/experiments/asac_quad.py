@@ -1,57 +1,6 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
-
-
-def quad_env_builder(seed,
-                    log_folder,
-                    is_eval,
-                    env_builder_args : dict,
-                    no_dict = False):
-    import adarl.utils.utils
-    from jumping_leg.experiments.build_locomotion_env import locomotion_env_builder
-    from jumping_leg.env.LocomotionEnv import LocomotionEnv    
-    model_file = adarl.utils.utils.pkgutil_get_path("jumping_leg","models/quad_simple.urdf.xacro")
-    homing_joint_pose={ ("quad","hip_joint_x_back_left") : -3.14159*0.4,
-                        ("quad","hip_joint_x_back_right") : -3.14159*0.4,
-                        ("quad","hip_joint_x_front_left") : -3.14159*0.4,
-                        ("quad","hip_joint_x_front_right") : -3.14159*0.4,
-                        ("quad","hip_joint_y_back_left") : 0.75,
-                        ("quad","hip_joint_y_back_right") : 0.75,
-                        ("quad","hip_joint_y_front_left") : 0.75,
-                        ("quad","hip_joint_y_front_right") : 0.75,
-                        ("quad","knee_joint_back_left") : 1.8,
-                        ("quad","knee_joint_back_right") : 1.8,
-                        ("quad","knee_joint_front_left") : 1.8,
-                        ("quad","knee_joint_front_right") : 1.8}
-    disallowed_contact_links = [("quad","thigh_link_back_left"),
-                                ("quad","shin_link_back_left"),
-                                ("quad","thigh_link_back_right"),
-                                ("quad","shin_link_back_right"),
-                                ("quad","thigh_link_front_left"),
-                                ("quad","shin_link_front_left"),
-                                ("quad","thigh_link_front_right"),
-                                ("quad","shin_link_front_right"),
-                                ("quad","body_link")]
-    terminating_contact_pairs=[(("quad","body_link"),("ground_plane","planeLink"))]
-    robot_name="quad"
-    robot_main_body_link="body_link"
-    robot_root_link="body_link"
-    homing_body_pose_xyz_xyzw=(0.,0.,0.5,0.,0.,0.,1.)
-
-    return locomotion_env_builder(seed = seed,
-                                    log_folder = log_folder,
-                                    is_eval = is_eval,
-                                    env_builder_args = env_builder_args,
-                                    model_file = model_file,
-                                    no_dict = no_dict,
-                                    homing_body_pose_xyz_xyzw=homing_body_pose_xyz_xyzw,
-                                    homing_joint_pose=homing_joint_pose,
-                                    disallowed_contact_links=disallowed_contact_links,
-                                    terminating_contact_pairs=terminating_contact_pairs,
-                                    robot_name=robot_name,
-                                    robot_main_body_link=robot_main_body_link,
-                                    robot_root_link=robot_root_link,
-                                    controlled_joints=[LocomotionEnv.JOINT_FILTERS.ALL_REVOLUTE])
+from jumping_leg.experiments.build_quad import quad_env_builder
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
@@ -76,7 +25,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : "pybullet",
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
-        "reward_acceleration_weight" : 0.02,
+        "reward_acceleration_weight" : 0.1,
         "reward_actdiff_weight" : 0.1,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
@@ -93,8 +42,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
-        "obs_noise_step_std" : 0.0,
-        "obs_noise_ep_mustd" : (0.0, 0.0),
         "stop_on_safety" : False,
         "th_device" : env_device,
         "video_save_freq" : 0,
@@ -103,7 +50,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "frame_stack_length" : 1,
         "verbose_infos" : False,
         "terminate_on_body_contact" : False,
-        "use_wandb" : False}
+        "use_wandb" : False,
+        "init_on_reset_ratio" : 0.9,
+        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
+        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0)
+}
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["verbose_infos"] = True
@@ -175,7 +129,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # }
     
     asac3_train(seed=seed,
-                train_steps=10_000_000,
+                train_steps=50_000_000,
                 run_folder=folderName,
                 gpuid = None, # seed%th.cuda.device_count(),
                 modelFile=resumeModelFile,
@@ -256,7 +210,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 le_reset_on_retrain = False,
                 le_tau=1.0,
                 le_train_period_vstep=max_steps_per_episode,
-                le_train_trajectories_length = 1,
+                le_train_trajectories_length = 5,
                 le_use_log_reward = False,
                 le_validation_batch_size = 128,
                 le_validation_ratio=0.05,
@@ -272,7 +226,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 sac_batch_size = 16384,
                 sac_ent_coef = "auto",
                 sac_gamma = 0.99,
-                sac_grad_steps = 10,
+                sac_grad_steps = 20,
                 sac_learning_starts = max_steps_per_episode*train_envs*4,
                 sac_lr_actor = 0.0005,
                 sac_lr_critic = 0.005,

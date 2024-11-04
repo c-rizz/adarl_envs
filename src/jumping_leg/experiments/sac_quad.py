@@ -7,10 +7,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import copy
     import torch as th
     from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams
+    from autoencoding_rl.experiments.asac3.asac3_train import asac3_train
+    import os
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 100
+    train_envs = 80
     env_device = th.device("cpu")
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
@@ -23,7 +25,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : "pybullet",
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
-        "reward_acceleration_weight" : 0.02,
+        "reward_acceleration_weight" : 0.1,
         "reward_actdiff_weight" : 0.1,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
@@ -40,8 +42,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
-        "obs_noise_step_std" : 0.0,
-        "obs_noise_ep_mustd" : (0.0, 0.0),
         "stop_on_safety" : False,
         "th_device" : env_device,
         "video_save_freq" : 0,
@@ -50,7 +50,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "frame_stack_length" : 1,
         "verbose_infos" : False,
         "terminate_on_body_contact" : False,
-        "use_wandb" : False}
+        "use_wandb" : False,
+        "init_on_reset_ratio" : 0.9,
+        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
+        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0)
+    }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["verbose_infos"] = True
@@ -138,12 +145,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                          ],
                 hyperparams = SAC_hyperparams(  device = "cuda",
                                                 q_network_arch=[256,128],
-                                                q_lr=0.001,
-                                                policy_lr=0.001,
-                                                policy_network_arch=[1024,512],
+                                                q_lr=0.005,
+                                                policy_lr=0.0005,
+                                                policy_network_arch=[1024,256],
                                                 gamma=0.99,
                                                 target_tau = 0.005,
-                                                batch_size=8192,
+                                                batch_size=16384,
                                                 buffer_size=10_000_000,
                                                 total_steps=100_000_000,
                                                 train_freq_vstep=5,

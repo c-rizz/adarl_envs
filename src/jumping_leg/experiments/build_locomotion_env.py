@@ -36,6 +36,7 @@ def locomotion_env_builder( seed,
     # max_steps = 5/stepLength_sec
     max_steps = env_builder_args.pop("max_steps_per_episode")
     quiet = env_builder_args.pop("quiet")
+    show_gui = env_builder_args.pop("show_gui",False)
 
     mode = env_builder_args.pop("mode").strip().lower()
     if mode == "gz":
@@ -82,7 +83,7 @@ def locomotion_env_builder( seed,
         from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
         env_controller = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
                                                        restore_on_reset=False,
-                                                       debug_gui=False,
+                                                       debug_gui=show_gui,
                                                        simulation_step=1/1024,
                                                        enable_rendering=env_builder_args.pop("enable_rendering"),
                                                        global_max_torque_position_control = 100,

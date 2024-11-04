@@ -576,10 +576,28 @@ class LocomotionEnv(RobotEnv):
         self.set_max_episode_steps(reset_options.get("reset_options",self._current_episode_config.max_ep_steps))
         self.set_goal(goal_velocity_xy)
 
-    def set_goal(self, goal_velocity_xy : tuple[float,float] | th.Tensor):
-        if isinstance(goal_velocity_xy, (tuple,list)):
-            goal_velocity_xy = th.as_tensor(goal_velocity_xy,device=self._configuration.th_device)
+    def set_goal(self, goal_velocity_xy : tuple[float,float] | th.Tensor | None = None,
+                        goal_velocity_diff_speed_yaw : tuple[float,float] | th.Tensor | None = None):
+        if goal_velocity_xy is not None:
+            if isinstance(goal_velocity_xy, (tuple,list)):
+                goal_velocity_xy = th.as_tensor(goal_velocity_xy,device=self._configuration.th_device)
+            elif not isinstance(goal_velocity_xy, th.Tensor):
+                raise RuntimeError(f"Unexpected type {type(goal_velocity_xy)} for goal_velocity_xy")
+        else:
+            if isinstance(goal_velocity_diff_speed_yaw, (tuple,list)):
+                goal_velocity_diff_speed_yaw = th.as_tensor(goal_velocity_diff_speed_yaw,device=self._configuration.th_device)
+            elif not isinstance(goal_velocity_diff_speed_yaw, th.Tensor):
+                raise RuntimeError(f"Unexpected type {type(goal_velocity_diff_speed_yaw)} for goal_velocity_diff_speed_yaw")
+            speed = th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz[:2])
+            yaw = th.atan2(self._locomotion_episode_config.goal_abs_linvel_xyz[1], self._locomotion_episode_config.goal_abs_linvel_xyz[0]).reshape((1,))
+            speed += goal_velocity_diff_speed_yaw[0]
+            yaw += goal_velocity_diff_speed_yaw[1]
+            goal_velocity_xy = speed*th.cat([th.cos(yaw), th.sin(yaw)])
+            
         self._locomotion_episode_config.goal_abs_linvel_xyz = th.cat([goal_velocity_xy, th.tensor([0.0],device=self._configuration.th_device)])
+
+    def get_goal(self):
+        return self._locomotion_episode_config.goal_abs_linvel_xyz
 
     def reachedTerminalState(self, previousState, state) -> th.Tensor:
         if super().reachedTerminalState(previousState, state):

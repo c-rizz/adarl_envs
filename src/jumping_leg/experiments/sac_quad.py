@@ -158,7 +158,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 learning_starts=max_steps_per_episode*max(train_envs*5, 100),
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode),
-                checkpoint_freq=100,
+                checkpoint_freq=20,
                 collector_device=env_device,
                 debug_level=0,
                 max_episode_duration=max_steps_per_episode,

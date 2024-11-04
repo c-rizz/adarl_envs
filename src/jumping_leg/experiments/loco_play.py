@@ -32,7 +32,6 @@ def load_model(model_path):
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
-    adarl.utils.dbg.dbg_img.helper.enable_web_dbg(True)
     step_length_sec = 50/1024 
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     env_device = th.device("cpu")
@@ -41,7 +40,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
-        "enable_rendering" : False,
+        "enable_rendering" : args["headless"],
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "pybullet",
@@ -66,7 +65,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
         "th_device" : env_device,
-        "video_save_freq" : 1,
+        "video_save_freq" : 1 if args["record"] else -1,
         "goal_speed_minmax" : (0,2),
         "use_contacts" : False,
         "frame_stack_length" : 1,
@@ -79,7 +78,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
-        "show_gui" : True
+        "show_gui" : not args["headless"]
     }
 
     return play(seed,
@@ -88,11 +87,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder = quad_env_builder,
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
-                render=False)
+                render=args["headless"])
 
 def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_length_sec : float, render : bool):
     
     ggLog.info(f"Starting run")
+    if render:
+        adarl.utils.dbg.dbg_img.helper.enable_web_dbg(True)
     log_folder, session = adarl.utils.session.adarl_startup(   __file__,
                                                         inspect.currentframe(),
                                                         seed=seed,
@@ -126,7 +127,6 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
         while play:
             cmd = None
             options = {}
-            goal_velocity_xy = [0.0, 0.0]
             if args["evaluate"] is None:
                 while cmd != "c":
                     cmd = input("Enter 'c' to continue. Type 'quit' to quit:\n > ")
@@ -137,7 +137,7 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
                         print(f" Use WASD to move the platform, LP to move the goal, T to terminate.")
                         interactive = True
                         options["max_ep_steps"] = 100_000
-                        options["goal_velocity_xy"] = goal_velocity_xy
+                        options["goal_velocity_xy"] = [0.0, 0.0]
                         keyboard_listener = KeyboardListener()
                         cmd = 'c'   
                 if not play:
@@ -156,6 +156,7 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
             while not done:
                 t0 = time.monotonic()
                 session.run_info["collected_steps"].value += 1
+                goal_velocity_xy = env.getBaseEnv().get_goal()
                 ggLog.info(f"step = {step_count} realtimefactor = {step_length_sec/step_wallduration:.2f} \t goal_velocity_xy={goal_velocity_xy}")
                 # ggLog.info(f"ep_config = {info['ep_config']}")
                 obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
@@ -171,13 +172,13 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
                         f"truncated = {truncated}\n")
                 if interactive:
                     keys = keyboard_listener.get_pressed_keys()
-                    p = 0.05
-                    if 'w' in keys: goal_velocity_xy[1] +=  p
-                    if 's' in keys: goal_velocity_xy[1] += -p
-                    if 'a' in keys: goal_velocity_xy[0] +=  p
-                    if 'd' in keys: goal_velocity_xy[0] += -p
+                    speed_yaw_diff = [0.0,0.0]
+                    if 'w' in keys: speed_yaw_diff[0] =  0.05
+                    if 's' in keys: speed_yaw_diff[0] = -0.05
+                    if 'a' in keys: speed_yaw_diff[1] =  10*3.14159/180
+                    if 'd' in keys: speed_yaw_diff[1] = -10*3.14159/180
                     if 't' in keys: truncated = True
-                    env.getBaseEnv().set_goal(goal_velocity_xy = goal_velocity_xy)
+                    env.getBaseEnv().set_goal(goal_velocity_diff_speed_yaw = speed_yaw_diff)
                 step_count += 1
 
                 done = terminated or truncated
@@ -232,7 +233,9 @@ if __name__ == "__main__":
     ap.add_argument("--pretrained", required = True, type=str, help="Model to load")
     ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
-
+    ap.add_argument("--headless", default=True, action='store_true', help="Do not start the gui, instead stream renderings")
+    ap.add_argument("--record", default=False, action='store_true', help="Record episode videos")
+    
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())
 

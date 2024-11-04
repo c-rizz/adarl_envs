@@ -33,7 +33,7 @@ def load_model(model_path):
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     adarl.utils.dbg.dbg_img.helper.enable_web_dbg(True)
-    step_length_sec = 20/1024  # about 50Hz
+    step_length_sec = 50/1024 
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     env_device = th.device("cpu")
     env_builder_args = {
@@ -66,11 +66,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
         "th_device" : env_device,
-        "video_save_freq" : 0,
+        "video_save_freq" : 1,
         "goal_speed_minmax" : (0,2),
         "use_contacts" : False,
         "frame_stack_length" : 1,
-        "verbose_infos" : False,
+        "verbose_infos" : True,
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
         "init_on_reset_ratio" : 0.9,
@@ -78,12 +78,19 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0)
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
+        "show_gui" : True
     }
 
-    return play(seed, folderName, run_id, args, env_builder = quad_env_builder, env_builder_args = env_builder_args)
+    return play(seed,
+                folderName,
+                run_id, args,
+                env_builder = quad_env_builder,
+                env_builder_args = env_builder_args,
+                step_length_sec = step_length_sec,
+                render=False)
 
-def play(seed, folderName, run_id, args, env_builder, env_builder_args):
+def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_length_sec : float, render : bool):
     
     ggLog.info(f"Starting run")
     log_folder, session = adarl.utils.session.adarl_startup(   __file__,
@@ -113,84 +120,90 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args):
     durations = []
     avg10_dists = []
 
-    while play:
-        cmd = None
-        options = {}
-        goal_velocity_xy = [0.0, 0.0]
-        if args["evaluate"] is None:
-            while cmd != "c":
-                cmd = input("Enter 'c' to continue. Type 'quit' to quit:\n > ")
-                if cmd == "quit":
-                    play = False
-                    break
-                elif cmd == "interactive":
-                    print(f" Use WASD to move the platform, LP to move the goal, T to terminate.")
-                    interactive = True
-                    options["max_ep_steps"] = 100_000
-                    options["goal_velocity_xy"] = goal_velocity_xy
-                    keyboard_listener = KeyboardListener()
-                    cmd = 'c'   
-            if not play:
-                break
-        else:
-            if session.run_info["collected_episodes"].value >= args["evaluate"]:
-                break
-        obs : TensorTree[th.Tensor]
-        obs, info = env.reset(options = options)  #type: ignore
-        # ggLog.info(f"ep_config = {info['ep_config']}")
-        done = False
-        ep_reward = 0
-        step_count = 0
-        step_wallduration = float("nan")
-        ep_wall_duration = 0
-        while not done:
-            t0 = time.monotonic()
-            session.run_info["collected_steps"].value += 1
-            ggLog.info(f"step = {step_count} realtimefactor = {env_builder_args['stepLength_sec']/step_wallduration:.2f}")
-            # ggLog.info(f"ep_config = {info['ep_config']}")
-            obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
-            action, hidden_state = model.predict(obs_batch, deterministic = True)
-            obs, reward, terminated, truncated, info = env.step(action.detach().squeeze().cpu().numpy()) #type: ignore
-            img = env.render()
-            dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
-            if verbose:
-                print(f"obs = {obs}\n"+
-                    f"rew = {reward}\n"+
-                    f"terminated = {terminated}\n"+
-                    f"truncated = {truncated}\n")
-            if interactive:
-                keys = keyboard_listener.get_pressed_keys()
-                p = 0.05
-                if 'w' in keys: goal_velocity_xy[1] +=  p
-                if 's' in keys: goal_velocity_xy[1] += -p
-                if 'a' in keys: goal_velocity_xy[0] +=  p
-                if 'd' in keys: goal_velocity_xy[1] += -p
-                if 't' in keys: truncated = True
-                env.getBaseEnv().set_goal(goal_velocity_xy = goal_velocity_xy)
-                env.getBaseEnv()._place_objects()
-            step_count += 1
+    keyboard_listener : KeyboardListener = None
 
-            done = terminated or truncated
-            def f(): 
-                nonlocal done
-                done = True
-            adarl.utils.sigint_handler.run_on_sigint_received(f)
-            ep_reward += reward
-            step_wallduration = time.monotonic()-t0
-            ep_wall_duration += step_wallduration
-            time.sleep(max(0,env_builder_args["stepLength_sec"] - step_wallduration))
-        if step_count>0:
-            rewards.append(ep_reward)
-            durations.append(step_count)
-            avg10_dists.append(info["avg10_dist"])
-        with session.run_info["collected_episodes"].get_lock():
-            session.run_info["collected_episodes"].value += 1
-        ggLog.info("\n"
-                   f"Episode reward =  {ep_reward}\n"
-                   f"Wall duration =   {ep_wall_duration:.2f}s\n"
-                   f"Sim  duration =   {step_count*env_builder_args['stepLength_sec']:.2f}s\n"
-                   f"Realtime factor = {step_count*env_builder_args['stepLength_sec']/ep_wall_duration:.2f}\n")
-        if interactive:
+    try:
+        while play:
+            cmd = None
+            options = {}
+            goal_velocity_xy = [0.0, 0.0]
+            if args["evaluate"] is None:
+                while cmd != "c":
+                    cmd = input("Enter 'c' to continue. Type 'quit' to quit:\n > ")
+                    if cmd == "quit":
+                        play = False
+                        break
+                    elif cmd == "interactive":
+                        print(f" Use WASD to move the platform, LP to move the goal, T to terminate.")
+                        interactive = True
+                        options["max_ep_steps"] = 100_000
+                        options["goal_velocity_xy"] = goal_velocity_xy
+                        keyboard_listener = KeyboardListener()
+                        cmd = 'c'   
+                if not play:
+                    break
+            else:
+                if session.run_info["collected_episodes"].value >= args["evaluate"]:
+                    break
+            obs : TensorTree[th.Tensor]
+            obs, info = env.reset(options = options)  #type: ignore
+            # ggLog.info(f"ep_config = {info['ep_config']}")
+            done = False
+            ep_reward = 0
+            step_count = 0
+            step_wallduration = float("nan")
+            ep_wall_duration = 0
+            while not done:
+                t0 = time.monotonic()
+                session.run_info["collected_steps"].value += 1
+                ggLog.info(f"step = {step_count} realtimefactor = {step_length_sec/step_wallduration:.2f} \t goal_velocity_xy={goal_velocity_xy}")
+                # ggLog.info(f"ep_config = {info['ep_config']}")
+                obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
+                action, hidden_state = model.predict(obs_batch, deterministic = True)
+                obs, reward, terminated, truncated, info = env.step(action.detach().squeeze().cpu().numpy()) #type: ignore
+                if render:
+                    img = env.render()
+                    dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
+                if verbose:
+                    print(f"obs = {obs}\n"+
+                        f"rew = {reward}\n"+
+                        f"terminated = {terminated}\n"+
+                        f"truncated = {truncated}\n")
+                if interactive:
+                    keys = keyboard_listener.get_pressed_keys()
+                    p = 0.05
+                    if 'w' in keys: goal_velocity_xy[1] +=  p
+                    if 's' in keys: goal_velocity_xy[1] += -p
+                    if 'a' in keys: goal_velocity_xy[0] +=  p
+                    if 'd' in keys: goal_velocity_xy[0] += -p
+                    if 't' in keys: truncated = True
+                    env.getBaseEnv().set_goal(goal_velocity_xy = goal_velocity_xy)
+                step_count += 1
+
+                done = terminated or truncated
+                # def f(): 
+                #     nonlocal done
+                #     done = True
+                # adarl.utils.sigint_handler.run_on_sigint_received(f)
+                ep_reward += reward
+                step_wallduration = time.monotonic()-t0
+                ep_wall_duration += step_wallduration
+                time.sleep(max(0,step_length_sec - step_wallduration))
+            if step_count>0:
+                rewards.append(ep_reward)
+                durations.append(step_count)
+                avg10_dists.append(info["avg_vel_track_err"])
+            with session.run_info["collected_episodes"].get_lock():
+                session.run_info["collected_episodes"].value += 1
+            ggLog.info("\n"
+                    f"Episode reward =  {ep_reward}\n"
+                    f"Wall duration =   {ep_wall_duration:.2f}s\n"
+                    f"Sim  duration =   {step_count*step_length_sec:.2f}s\n"
+                    f"Realtime factor = {step_count*step_length_sec/ep_wall_duration:.2f}\n")
+            if interactive:
+                keyboard_listener.close()
+    finally:
+        if keyboard_listener is not None:
             keyboard_listener.close()
     rewards = np.array(rewards)
     durations = np.array(durations)

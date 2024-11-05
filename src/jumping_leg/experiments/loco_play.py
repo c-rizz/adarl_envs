@@ -134,7 +134,8 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
                         play = False
                         break
                     elif cmd == "interactive":
-                        print(f" Use WASD to move the platform, LP to move the goal, T to terminate.")
+                        print(f" Use WASD to move the goal, IJKL to move the camera, T to terminate.")
+                        time.sleep(1)
                         interactive = True
                         options["max_ep_steps"] = 100_000
                         options["goal_velocity_xy"] = [0.0, 0.0]
@@ -152,12 +153,13 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
             ep_reward = 0
             step_count = 0
             step_wallduration = float("nan")
+            full_step_wallduration = float("nan")
             ep_wall_duration = 0
             while not done:
                 t0 = time.monotonic()
                 session.run_info["collected_steps"].value += 1
                 goal_velocity_xy = env.getBaseEnv().get_goal()
-                ggLog.info(f"step = {step_count} realtimefactor = {step_length_sec/step_wallduration:.2f} \t goal_velocity_xy={goal_velocity_xy}")
+                ggLog.info(f"step = {step_count} rtfactor = {step_length_sec/full_step_wallduration:.2f} max_rtfactor = {step_length_sec/step_wallduration:.2f} \t goal_velocity_xy={goal_velocity_xy}")
                 # ggLog.info(f"ep_config = {info['ep_config']}")
                 obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
                 action, hidden_state = model.predict(obs_batch, deterministic = True)
@@ -177,7 +179,14 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
                     if 's' in keys: speed_yaw_diff[0] = -0.05
                     if 'a' in keys: speed_yaw_diff[1] =  10*3.14159/180
                     if 'd' in keys: speed_yaw_diff[1] = -10*3.14159/180
+                    cam_pitch_yaw_diff = [0.0,0.0]
+                    if 'i' in keys: cam_pitch_yaw_diff[0] =  5*3.14159/180
+                    if 'k' in keys: cam_pitch_yaw_diff[0] = -5*3.14159/180
+                    if 'j' in keys: cam_pitch_yaw_diff[1] = -5*3.14159/180
+                    if 'l' in keys: cam_pitch_yaw_diff[1] =  5*3.14159/180
+
                     if 't' in keys: truncated = True
+                    env.getBaseEnv().set_cam_pose(env.getBaseEnv().get_cam_pose() + th.as_tensor([0.0, cam_pitch_yaw_diff[0], cam_pitch_yaw_diff[1]]))
                     env.getBaseEnv().set_goal(goal_velocity_diff_speed_yaw = speed_yaw_diff)
                 step_count += 1
 
@@ -190,6 +199,7 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
                 step_wallduration = time.monotonic()-t0
                 ep_wall_duration += step_wallduration
                 time.sleep(max(0,step_length_sec - step_wallduration))
+                full_step_wallduration = time.monotonic()-t0
             if step_count>0:
                 rewards.append(ep_reward)
                 durations.append(step_count)

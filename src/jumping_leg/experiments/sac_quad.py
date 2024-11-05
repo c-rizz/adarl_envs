@@ -12,7 +12,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 80
+    train_envs = 100
     env_device = th.device("cpu")
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
@@ -127,27 +127,26 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "env_builder_args" : video_feasible_jump_env_builder_args,
     #     "num_envs" : 1
     # }
-    
+    eval_configuration = [  eval_conf_video_det,
+                            eval_conf_video_stoch,
+                            eval_conf_run_1ms,
+                            eval_conf_video_norand_det,
+                            #  eval_conf_feasible,
+                            #  eval_conf_video_feasible,
+                            #  eval_conf_video_jump_feasible
+                                ]
     sac_train(  seed,
                 folderName,
                 run_id,
                 args,
                 env_builder = quad_env_builder,
                 env_builder_args = env_builder_args,
-                eval_configurations = [
-                                        eval_conf_video_det,
-                                        eval_conf_video_stoch,
-                                        eval_conf_run_1ms,
-                                        eval_conf_video_norand_det,
-                                        #  eval_conf_feasible,
-                                        #  eval_conf_video_feasible,
-                                        #  eval_conf_video_jump_feasible
-                                         ],
+                eval_configurations = eval_configuration,
                 hyperparams = SAC_hyperparams(  device = "cuda",
                                                 q_network_arch=[256,128],
-                                                q_lr=0.005,
+                                                q_lr=0.001,
                                                 policy_lr=0.0005,
-                                                policy_network_arch=[1024,256],
+                                                policy_network_arch=[1024,512],
                                                 gamma=0.99,
                                                 target_tau = 0.005,
                                                 batch_size=16384,
@@ -157,7 +156,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 grad_steps=10,
                                                 learning_starts=max_steps_per_episode*max(train_envs*5, 100),
                                                 parallel_envs=train_envs,
-                                                log_freq_vstep=max_steps_per_episode),
+                                                log_freq_vstep=max_steps_per_episode,
+                                                reference_init_args =  #{}
+                                                                        {   "env_builder_args" : env_builder_args,
+                                                                            "eval_configuration" : eval_configuration}
+                                                ),
                 checkpoint_freq=20,
                 collector_device=env_device,
                 debug_level=0,

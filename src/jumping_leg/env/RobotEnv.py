@@ -4,7 +4,7 @@ from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 from adarl.envs.ControlledEnv import ControlledEnv
 from adarl.utils.robot_helpers import Robot
-from adarl.utils.utils import to_string_tensor, th_quat_rotate, th_quat_conj
+from adarl.utils.utils import to_string_tensor, th_quat_rotate, th_quat_conj, ros_rpy_to_quaternion_xyzw
 from adarl.utils.state_helper import    JointImpedanceActionHelper, ThBoxStateHelper,\
                                         RobotStateHelper, RobotStatsStateHelper,\
                                         StateNoiseGenerator, DictStateHelper, unnormalize
@@ -71,6 +71,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         noise_angvel_ep_mustdstd : th.Tensor
         noise_posz_ep_mustdstd : th.Tensor
         noise_gravity_ep_mustdstd : th.Tensor
+        ui_rel_camera_pose_dist_pitch_yaw : th.Tensor
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -251,7 +252,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             noise_linvel_ep_mustdstd =  th.as_tensor(obs_noise_linvel_ep_mustd_step_std, device=th_device),
                                                             noise_angvel_ep_mustdstd =  th.as_tensor(obs_noise_angvel_ep_mustd_step_std, device=th_device),
                                                             noise_posz_ep_mustdstd =    th.as_tensor(obs_noise_posz_ep_mustd_step_std, device=th_device),
-                                                            noise_gravity_ep_mustdstd = th.as_tensor(obs_noise_gravity_ep_mustd_step_std, device=th_device)
+                                                            noise_gravity_ep_mustdstd = th.as_tensor(obs_noise_gravity_ep_mustd_step_std, device=th_device),
+                                                            ui_rel_camera_pose_dist_pitch_yaw = th.as_tensor([2.5, 30/180*3.14159, -90/180*3.14159], device=th_device)
                                                             )
 
         self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
@@ -548,21 +550,36 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         self._adapter.destroy_scenario()
 
 
+    def set_cam_pose(self, pose_dist_pitch_roll : tuple[float,float,float] | th.Tensor):
+        self._configuration.ui_rel_camera_pose_dist_pitch_yaw = th.as_tensor(pose_dist_pitch_roll, device=self._configuration.th_device)
 
+
+    def get_cam_pose(self):
+        return self._configuration.ui_rel_camera_pose_dist_pitch_yaw    
+    
+    def _get_cam_pose_xyz_xyzw(self):
+        cam_rel_pos_dist_pitch_yaw = self._configuration.ui_rel_camera_pose_dist_pitch_yaw
+        cam_rel_pos  = th.as_tensor([-cam_rel_pos_dist_pitch_yaw[0], 0.0, 0.0], device=self._configuration.th_device)
+        cam_rel_quat = th.as_tensor(ros_rpy_to_quaternion_xyzw([0.0, cam_rel_pos_dist_pitch_yaw[1], cam_rel_pos_dist_pitch_yaw[2]]),
+                                   device=self._configuration.th_device)
+        # ggLog.info(f"cam pos0 = {cam_rel_pos}")
+        return th.cat([th_quat_rotate(cam_rel_pos, cam_rel_quat), cam_rel_quat])
 
     # --------------------------------------------------------------------------------------------------------------------
     # State & Observation
     # --------------------------------------------------------------------------------------------------------------------
     @override
     def getUiRendering(self) -> tuple[np.ndarray | th.Tensor | None, float]:
+        # camera by default looks down the x axis
+        rel_cam_pose_xyz_xyzw = self._get_cam_pose_xyz_xyzw()
+        # ggLog.info(f"cam pos = {cam_rel_pos}")
+        # ggLog.info(f"cam quat = {cam_rel_quat}")
         try:
             if isinstance(self._adapter, BaseSimulationAdapter):
                 body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
                 self._adapter.setLinksStateDirect({self._configuration.ui_camera_link :
-                                                                LinkState(  position_xyz = th.tensor((body_state.pose.position[0],
-                                                                                                    body_state.pose.position[1]+2.5,
-                                                                                                    body_state.pose.position[2]+1.0), device=self._configuration.th_device),
-                                                                            orientation_xyzw = th.tensor((0.183,0.183,-0.683,0.683), device=self._configuration.th_device),
+                                                                LinkState(  position_xyz = body_state.pose.position + rel_cam_pose_xyz_xyzw[0:3],
+                                                                            orientation_xyzw = rel_cam_pose_xyz_xyzw[3:7],
                                                                             pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                             ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
             img, time = self._adapter.getRenderings([self._configuration.ui_camera_name])[self._configuration.ui_camera_name]

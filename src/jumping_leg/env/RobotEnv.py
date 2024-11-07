@@ -72,6 +72,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         noise_posz_ep_mustdstd : th.Tensor
         noise_gravity_ep_mustdstd : th.Tensor
         ui_rel_camera_pose_dist_pitch_yaw : th.Tensor
+        ui_camera_resolution_hw : tuple[int,int]
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -151,7 +152,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         obs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor
+                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        ui_camera_resolution_hw : tuple[int,int] = (144,256)
                         ):
         
         self._rng = th.Generator(device=th_device)
@@ -253,7 +255,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             noise_angvel_ep_mustdstd =  th.as_tensor(obs_noise_angvel_ep_mustd_step_std, device=th_device),
                                                             noise_posz_ep_mustdstd =    th.as_tensor(obs_noise_posz_ep_mustd_step_std, device=th_device),
                                                             noise_gravity_ep_mustdstd = th.as_tensor(obs_noise_gravity_ep_mustd_step_std, device=th_device),
-                                                            ui_rel_camera_pose_dist_pitch_yaw = th.as_tensor([2.5, 30/180*3.14159, -90/180*3.14159], device=th_device)
+                                                            ui_rel_camera_pose_dist_pitch_yaw = th.as_tensor([2.5, 30/180*3.14159, -90/180*3.14159], device=th_device),
+                                                            ui_camera_resolution_hw = ui_camera_resolution_hw
                                                             )
 
         self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
@@ -433,7 +436,9 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                         model_name="simple_camera",
                                         pose=camera_pose,
                                         model_format="sdf.xacro",
-                                        model_kwargs={"camera_width":"256","camera_height":"144","frame_rate":1/self._intendedStepLength_sec})
+                                        model_kwargs={"camera_width":self._configuration.ui_camera_resolution_hw[1],
+                                                      "camera_height":self._configuration.ui_camera_resolution_hw[0],
+                                                      "frame_rate":1/self._intendedStepLength_sec})
             if self._configuration.show_goal:
                 self._adapter.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/red_arrow.urdf.xacro"),
                                             model_name="arrow",
@@ -523,7 +528,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                         0,
                                                         self._configuration.safe_stiffness,
                                                         self._configuration.safe_damping) 
-                                                    for jn in self._configuration.controlled_joints}         
+                                                    for jn in self._configuration.controlled_joints}
         self._adapter.setJointsImpedanceCommand(start_jimp)
         self._adapter.apply_joint_impedances(start_jimp)
         self._last_sent_pvesd = start_jimp

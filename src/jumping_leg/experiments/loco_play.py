@@ -72,13 +72,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "verbose_infos" : True,
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
-        "init_on_reset_ratio" : 0.9,
+        "init_on_reset_ratio" : 1.0,
         "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
         "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
-        "show_gui" : not args["headless"]
+        "show_gui" : not args["headless"],
+        "ui_camera_resolution_hw" : (720,int(720*16/9))
     }
 
     return play(seed,
@@ -173,21 +174,27 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
                         f"terminated = {terminated}\n"+
                         f"truncated = {truncated}\n")
                 if interactive:
-                    keys = keyboard_listener.get_pressed_keys()
                     speed_yaw_diff = [0.0,0.0]
-                    if 'w' in keys: speed_yaw_diff[0] =  0.05
-                    if 's' in keys: speed_yaw_diff[0] = -0.05
-                    if 'a' in keys: speed_yaw_diff[1] =  10*3.14159/180
-                    if 'd' in keys: speed_yaw_diff[1] = -10*3.14159/180
-                    cam_pitch_yaw_diff = [0.0,0.0]
-                    if 'i' in keys: cam_pitch_yaw_diff[0] =  5*3.14159/180
-                    if 'k' in keys: cam_pitch_yaw_diff[0] = -5*3.14159/180
-                    if 'j' in keys: cam_pitch_yaw_diff[1] = -5*3.14159/180
-                    if 'l' in keys: cam_pitch_yaw_diff[1] =  5*3.14159/180
+                    if keyboard_listener.get_key_press_count("w")>0: speed_yaw_diff[0] =  0.05
+                    if keyboard_listener.get_key_press_count("s")>0: speed_yaw_diff[0] = -0.05
+                    if keyboard_listener.get_key_press_count("a")>0: speed_yaw_diff[1] =  10*3.14159/180
+                    if keyboard_listener.get_key_press_count("d")>0: speed_yaw_diff[1] = -10*3.14159/180
+                    flip = keyboard_listener.get_key_press_count("v")>0
+                    cam_dist_pitch_yaw_diff = [0.0,0.0,0.0]
+                    if keyboard_listener.get_key_press_count("u")>0: cam_dist_pitch_yaw_diff[0] = -0.1
+                    if keyboard_listener.get_key_press_count("o")>0: cam_dist_pitch_yaw_diff[0] =  0.1
+                    if keyboard_listener.get_key_press_count("i")>0: cam_dist_pitch_yaw_diff[1] =  5*3.14159/180
+                    if keyboard_listener.get_key_press_count("k")>0: cam_dist_pitch_yaw_diff[1] = -5*3.14159/180
+                    if keyboard_listener.get_key_press_count("j")>0: cam_dist_pitch_yaw_diff[2] = -5*3.14159/180
+                    if keyboard_listener.get_key_press_count("l")>0: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
 
-                    if 't' in keys: truncated = True
-                    env.getBaseEnv().set_cam_pose(env.getBaseEnv().get_cam_pose() + th.as_tensor([0.0, cam_pitch_yaw_diff[0], cam_pitch_yaw_diff[1]]))
-                    env.getBaseEnv().set_goal(goal_velocity_diff_speed_yaw = speed_yaw_diff)
+                    if keyboard_listener.get_key_press_count("t")>0: truncated = True
+                    env.getBaseEnv().set_cam_pose(env.getBaseEnv().get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
+                    if flip:
+                        env.getBaseEnv().set_goal(-env.getBaseEnv().get_goal()[:2])
+                    else:
+                        env.getBaseEnv().set_goal(goal_velocity_diff_speed_yaw = speed_yaw_diff)
+                    keyboard_listener.reset_key_press_counters()
                 step_count += 1
 
                 done = terminated or truncated

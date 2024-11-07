@@ -156,7 +156,8 @@ class LocomotionEnv(RobotEnv):
                         obs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor
+                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        ui_camera_resolution_hw : tuple[int,int] = (256,144)
                         ):
         super().__init__(   action_delay_mustd = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
@@ -194,7 +195,8 @@ class LocomotionEnv(RobotEnv):
                             obs_noise_linvel_ep_mustd_step_std = obs_noise_linvel_ep_mustd_step_std,
                             obs_noise_angvel_ep_mustd_step_std = obs_noise_angvel_ep_mustd_step_std,
                             obs_noise_posz_ep_mustd_step_std = obs_noise_posz_ep_mustd_step_std,
-                            obs_noise_gravity_ep_mustd_step_std = obs_noise_gravity_ep_mustd_step_std
+                            obs_noise_gravity_ep_mustd_step_std = obs_noise_gravity_ep_mustd_step_std,
+                            ui_camera_resolution_hw = ui_camera_resolution_hw
                         )
         self._locomotion_conf = LocomotionEnv.LocomotionConfiguration(
                         reward_acceleration_weight = reward_acceleration_weight,

@@ -3,7 +3,7 @@ from adarl.adapters.BaseJointImpedanceAdapter import BaseJointImpedanceAdapter
 from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 from adarl.utils.utils import LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection
-from adarl.utils.state_helper import ThBoxStateHelper, unnormalize
+from adarl.utils.state_helper import ThBoxStateHelper, unnormalize, normalize
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any
@@ -54,6 +54,7 @@ class LocomotionEnv(RobotEnv):
         reward_pitchnroll_weight : float
         reward_actdiff_weight : float
         reward_position_limit_weight : float
+        reward_position_weight : float
         reward_scale : float
         reward_torque_limit_weight : float
         reward_torque_weight : float
@@ -66,8 +67,9 @@ class LocomotionEnv(RobotEnv):
         height_reward_settle_point : th.Tensor
         pitchnroll_reward_settle_point : th.Tensor
         vel_reward_goalrelative_weight : th.Tensor
-        vel_reward_goalrelative_zerodist : th.Tensor
-        vel_reward_goalabs_zerodist : th.Tensor
+        reward_vel_goal_relative_width : th.Tensor
+        reward_vel_goal_relative_width_offset : th.Tensor
+        reward_vel_goal_absolute_width : th.Tensor
 
 
     @dataclass
@@ -95,6 +97,7 @@ class LocomotionEnv(RobotEnv):
                                                     "REWARD_HEIGHT_WEIGHT",
                                                     "REWARD_PITCHNROLL_WEIGHT",
                                                     "REWARD_ACTDIFF_WEIGHT",
+                                                    "REWARD_POSITION_WEIGHT",
                                                     "SMOOTHED_TRACKING_ERROR",
                                                     "HEIGHT_ERR",
                                                     "ORIENT_ERR",
@@ -126,6 +129,7 @@ class LocomotionEnv(RobotEnv):
                         reward_height_weight : float,
                         reward_pitchnroll_weight : float,
                         reward_position_limit_weight : float,
+                        reward_position_weight : float,
                         reward_scale : float,
                         reward_torque_limit_weight : float,
                         reward_torque_weight : float,
@@ -211,6 +215,7 @@ class LocomotionEnv(RobotEnv):
                         reward_tracking_weight = reward_tracking_weight,
                         reward_velocity_limit_weight = reward_velocity_limit_weight,
                         reward_velocity_weight = reward_velocity_weight,
+                        reward_position_weight = reward_position_weight,
                         use_contacts = use_contacts,
                         disallowed_contact_links=disallowed_contact_links,
                         terminating_contact_pairs=terminating_contact_pairs,
@@ -221,8 +226,9 @@ class LocomotionEnv(RobotEnv):
                         height_reward_settle_point=th.tensor(0.2, device=th_device),
                         pitchnroll_reward_settle_point=th.tensor(0.2, device=th_device),
                         vel_reward_goalrelative_weight = th.tensor(0.2, device=th_device),
-                        vel_reward_goalrelative_zerodist = th.tensor(1.1, device=th_device),
-                        vel_reward_goalabs_zerodist = th.tensor(0.25, device=th_device))
+                        reward_vel_goal_relative_width = th.tensor(1.1, device=th_device),
+                        reward_vel_goal_absolute_width = th.tensor(0.25, device=th_device),
+                        reward_vel_goal_relative_width_offset = th.tensor(0.1, device=th_device))
         locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     obs_dtype=th.float32,
                                                     th_device=th_device,
@@ -248,6 +254,7 @@ class LocomotionEnv(RobotEnv):
                                                                     self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_POSITION_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.HEIGHT_ERR : [0,10],
                                                                     self.LOCOMOTION_FIELDS.ORIENT_ERR : [0,10],
                                                                     self.LOCOMOTION_FIELDS.SUM_IMPULSES : [0,10000],
@@ -344,6 +351,7 @@ class LocomotionEnv(RobotEnv):
                             self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT : self._locomotion_conf.reward_tracking_weight,
                             self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT : self._locomotion_conf.reward_torque_weight,
                             self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._locomotion_conf.reward_torquediff_weight,
+                            self.LOCOMOTION_FIELDS.REWARD_POSITION_WEIGHT : self._locomotion_conf.reward_position_weight,
                             self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_tracking_err,
                             self.LOCOMOTION_FIELDS.HEIGHT_ERR : height_err,
                             self.LOCOMOTION_FIELDS.ORIENT_ERR : orient_err,
@@ -375,9 +383,11 @@ class LocomotionEnv(RobotEnv):
         locom_state = state[self.STATE_LOCOMOTION][0]
         state_action = self._current_state[self.STATE_ACT]
 
+        lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
+        normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
 
         robot_state_norm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT])
-        # normpositions = robot_state_norm[:,0]
+        normposhomingdiff = robot_state_norm[0,:,0] - normhoming
         normvelocities = robot_state_norm[0][:,1]
         normtorques = robot_state_norm[0][:,2]
         normaccelerations = (robot_state_norm[0][:,1] - robot_state_norm[1][:,1])/self._configuration.stepLength_sec
@@ -389,11 +399,12 @@ class LocomotionEnv(RobotEnv):
         velocities_safenorm = robot_state_safenorm[:,1]
         torque_safenorm = robot_state_safenorm[:,2]
 
-        torque_reward       = - th.clamp(th.mean(th.pow(normtorques,2)),-max_rew,max_rew)
-        velocity_reward     = - th.clamp(th.mean(th.pow(normvelocities,2)),-max_rew,max_rew)
-        acceleration_reward = - th.clamp(th.mean(th.pow(normaccelerations,2)),-max_rew,max_rew)
-        torquediff_reward   = - th.clamp(th.mean(th.pow(normtorquediff,2)),-max_rew,max_rew)
-        actdiff_reward      = - th.clamp(th.mean(th.pow(actdiff,2)),-max_rew,max_rew)
+        torque_reward       = - th.clamp(th.mean(th.pow(normtorques,2)),        -max_rew,max_rew)
+        velocity_reward     = - th.clamp(th.mean(th.pow(normvelocities,2)),     -max_rew,max_rew)
+        acceleration_reward = - th.clamp(th.mean(th.pow(normaccelerations,2)),  -max_rew,max_rew)
+        reward_position     = - th.clamp(th.mean(th.pow(normposhomingdiff,2)),  -max_rew,max_rew)
+        torquediff_reward   = - th.clamp(th.mean(th.pow(normtorquediff,2)),     -max_rew,max_rew)
+        actdiff_reward      = - th.clamp(th.mean(th.pow(actdiff,2)),            -max_rew,max_rew)
 
         torque_limit_reward   = -th.clamp(th.mean(th.pow(torque_safenorm,50)),-1,1)
         position_limit_reward = -th.clamp(th.mean(th.pow(position_safenorm,50)),-1,1)
@@ -407,13 +418,14 @@ class LocomotionEnv(RobotEnv):
 
         velocity_tracking_err = locom_state[self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
         goalrelative_weight = self._locomotion_conf.vel_reward_goalrelative_weight
-        goalrelative_zerodist = self._locomotion_conf.vel_reward_goalrelative_zerodist
-        goalabs_zerodist = self._locomotion_conf.vel_reward_goalabs_zerodist
+        rel_goal_bell_width = self._locomotion_conf.reward_vel_goal_relative_width
+        rel_goal_offset = self._locomotion_conf.reward_vel_goal_relative_width_offset
+        abs_goal_bell_width = self._locomotion_conf.reward_vel_goal_absolute_width
         goal_norm = th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz)
         velocity_tracking_reward = (   goalrelative_weight  * bell_reward(velocity_tracking_err,
-                                                                          zero_rew_dist=goalrelative_zerodist*goal_norm)+
+                                                                          zero_rew_dist=rel_goal_bell_width*(goal_norm+rel_goal_offset))+
                                     (1-goalrelative_weight) * bell_reward(velocity_tracking_err,
-                                                                          zero_rew_dist=goalabs_zerodist))
+                                                                          zero_rew_dist=abs_goal_bell_width))
         # velocity_tracking_reward = ramp_reward(velocity_tracking_err, zero_rew_dist=th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz))
         
         # velocity_tracking_reward = bell_reward(velocity_tracking_err, 
@@ -438,6 +450,7 @@ class LocomotionEnv(RobotEnv):
         sub_rewards["reward_velocity_limit"] = velocity_limit_reward
         sub_rewards["reward_acceleration"] = acceleration_reward
         sub_rewards["reward_position_limit"] = position_limit_reward
+        sub_rewards["reward_position"] = reward_position
         sub_rewards["reward_actdiff"] = actdiff_reward
         sub_rewards["reward_health"] = th.tensor(1, device=locom_state.device)
         sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards.items()}
@@ -454,7 +467,9 @@ class LocomotionEnv(RobotEnv):
                     "reward_contacts" : locom_state[self.LOCOMOTION_FIELDS.REWARD_CONTACTS_WEIGHT],
                     "reward_height" : locom_state[self.LOCOMOTION_FIELDS.REWARD_HEIGHT_WEIGHT],
                     "reward_pitchnroll" : locom_state[self.LOCOMOTION_FIELDS.REWARD_PITCHNROLL_WEIGHT],
-                    "reward_actdiff" : locom_state[self.LOCOMOTION_FIELDS.REWARD_ACTDIFF_WEIGHT]}
+                    "reward_actdiff" : locom_state[self.LOCOMOTION_FIELDS.REWARD_ACTDIFF_WEIGHT],
+                    "reward_position" : locom_state[self.LOCOMOTION_FIELDS.REWARD_POSITION_WEIGHT]
+                    }
         for k in sub_rewards:
             sub_rewards[k] = sub_rewards[k]*self._locomotion_conf.reward_scale*weights[k]
         sub_rewards = {k:v.squeeze() for k,v in sub_rewards.items()}

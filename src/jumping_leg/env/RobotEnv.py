@@ -38,7 +38,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         history_length : int
         homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float]
         spawn_root_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float]
-        homing_joint_pose : dict[tuple[str,str],th.Tensor]
+        homing_ctrl_joints_pvesd : th.Tensor
         joint_physical_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_damping : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
@@ -211,6 +211,11 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
             ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
 
+        obs_dtype = th.float32
+        homing_ctrl_joints_pvesd = th.as_tensor([(homing_joint_pose[jn], 0, 0, safe_stiffness, safe_damping)
+                                    for jn in controlled_joints_rn],
+                                    device=th_device,
+                                    dtype=obs_dtype)
         self._configuration = self.Configuration(  action_delay_mustd = th.as_tensor(action_delay_mustd, device=th_device),
                                                             action_exp_smoothing_1s = action_exp_smoothing_1s,
                                                             action_noise_mustd = th.as_tensor(action_noise_mustd, device=th_device),
@@ -221,7 +226,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             goal_err_exp_smoothing_1s = goal_err_exp_smoothing_1s,
                                                             history_length = max(2,frame_stack_length),
                                                             homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
-                                                            homing_joint_pose = map_tensor_tree(homing_joint_pose, lambda v: th.as_tensor(v, device=th_device)),
+                                                            homing_ctrl_joints_pvesd = homing_ctrl_joints_pvesd,
                                                             joint_physical_limits_minmax_pve = phys_limits_minmax_pve,
                                                             joint_safe_limits_minmax_damping = minmax_damping_thdict,
                                                             joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
@@ -229,7 +234,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             main_body_link=(robot_name,robot_main_body_link),
                                                             robot_root_link=(robot_name,robot_root_link),
                                                             model_urdf_string=robot_urdf_string,
-                                                            obs_dtype = th.float32,
+                                                            obs_dtype = obs_dtype,
                                                             observe_body_state = observe_body_velocity,
                                                             original_max_epsteps = maxStepsPerEpisode,
                                                             initial_pose_randomization = initial_pose_randomization,
@@ -478,15 +483,13 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         original_collision_pairs = self._robot_model.get_enabled_collision_pairs()
         self._robot_model.set_collision_pairs("all")
         self._robot_model.remove_collision_pairs(self._always_present_collisions)
-        homing = th.as_tensor([self._configuration.homing_joint_pose[jn] for jn in self._configuration.controlled_joints],
-                                              device=self._configuration.th_device,
-                                              dtype=self._configuration.obs_dtype)
+        homing_pos = self._configuration.homing_ctrl_joints_pvesd[:,0]
         if self._configuration.initial_pose_randomization > 0:
             for i in range(1000):
                 npos = (th.rand(size=(len(self._configuration.controlled_joints),), dtype=th.float32, device=self._configuration.th_device)*2-1)*self._configuration.initial_pose_randomization
                 limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.controlled_joints], dim = 1)
                 # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
-                initial_joint_pose = ((npos>=0)*((limits_minmax[1]-homing)*npos + homing) + (npos<0)*((homing-limits_minmax[0])*npos + homing))
+                initial_joint_pose = ((npos>=0)*((limits_minmax[1]-homing_pos)*npos + homing_pos) + (npos<0)*((homing_pos-limits_minmax[0])*npos + homing_pos))
                 self._robot_model.set_joint_pose_by_names({jn[1]:initial_joint_pose[i].cpu().numpy() for i,jn in enumerate(self._configuration.controlled_joints)})
                 if self._configuration.robot_is_floating:
                     self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:np.array([self._configuration.homing_body_pose_xyz_xyzw])})
@@ -497,7 +500,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             if not found_good_configuration:
                 ggLog.warn(f"Failed to find initial joint configuration. Last collisions = {collisions}, always present collisions = {self._always_present_collisions}")
         if not found_good_configuration:
-            initial_joint_pose = homing
+            initial_joint_pose = homing_pos
         # ggLog.info(f"initial_jpose = {initial_joint_pose}, homing = {homing}")
         self._robot_model.set_collision_pairs(original_collision_pairs)
         self._current_episode_config = RobotEnv.EpisodeConfiguration(   initial_ctrl_joint_pose = initial_joint_pose,
@@ -523,15 +526,9 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         self._adapter.setJointsStateDirect({jn:JointState(  position=self._current_episode_config.initial_ctrl_joint_pose[i],
                                                             rate = 0,
                                                             effort = 0) for i,jn in enumerate(self._configuration.controlled_joints)})
-        start_jimp : dict[tuple[str,str], tuple] = {jn:(self._configuration.homing_joint_pose[jn],
-                                                        0,
-                                                        0,
-                                                        self._configuration.safe_stiffness,
-                                                        self._configuration.safe_damping) 
-                                                    for jn in self._configuration.controlled_joints}
-        self._adapter.setJointsImpedanceCommand(start_jimp)
-        self._adapter.apply_joint_impedances(start_jimp)
-        self._last_sent_pvesd = start_jimp
+        self._adapter.setJointsImpedanceCommand(self._configuration.homing_ctrl_joints_pvesd)
+        self._adapter.apply_joint_impedances(self._configuration.homing_ctrl_joints_pvesd)
+        self._last_sent_pvesd = {jn:self._configuration.homing_ctrl_joints_pvesd[i] for i,jn in enumerate(self._configuration.controlled_joints)}
 
     @override
     def buildSimulation(self):

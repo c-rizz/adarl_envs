@@ -60,6 +60,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_weight" : 1.0,
         "reward_height_weight" : 1.0,
         "reward_pitchnroll_weight" : 1.0,
+        "reward_position_weight" : 0.1,
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,

@@ -1202,8 +1202,8 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         if step_count!=-1 and internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0:
             safety_triggered = True
         else:
-            hip_knee_pve_min = stats_minmaxavgstd_hipknee_pvae[0].flatten()
-            hip_knee_pve_max = stats_minmaxavgstd_hipknee_pvae[1].flatten()
+            hip_knee_pve_min = stats_minmaxavgstd_hipknee_pvae[0,:,[0,1,3]].flatten()
+            hip_knee_pve_max = stats_minmaxavgstd_hipknee_pvae[1,:,[0,1,3]].flatten()
             j_safety_lims = th.as_tensor([  self._configuration.joint_safety_limits_minmax_pve[self._hip_joint][:,0],
                                             self._configuration.joint_safety_limits_minmax_pve[self._hip_joint][:,1],
                                             self._configuration.joint_safety_limits_minmax_pve[self._hip_joint][:,2],

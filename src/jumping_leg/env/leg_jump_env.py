@@ -1056,7 +1056,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
 
     @override
-    def buildSimulation(self):
+    def build(self):
         envCtrlName = type(self._adapter).__name__
         if envCtrlName == "PyBulletJointImpedanceAdapter":
             self._adapter.build_scenario(None)
@@ -1077,7 +1077,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
 
     @override
-    def _destroySimulation(self):
+    def _destroy(self):
         self._adapter.destroy_scenario()
 
 

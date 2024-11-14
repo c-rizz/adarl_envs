@@ -272,17 +272,16 @@ class LocomotionEnv(RobotEnv):
         self.observation_space = self._state_helper.get_obs_space()
         self.action_space = self._action_helper.action_space(seed=seed)
 
-    def _tracking_error(self, body_rel_linvel_xyz : th.Tensor, gravity_rel_xyz : th.Tensor, goal_rel_linvel_xyz : th.Tensor):
-        body_planar_rel_linvel_xyz = body_rel_linvel_xyz - vector_projection(body_rel_linvel_xyz,gravity_rel_xyz)
-        # ggLog.info(f" {body_rel_linvel_xyz.cpu().tolist()} + vector_projection({body_rel_linvel_xyz.cpu().tolist()},{gravity_rel_xyz.cpu().tolist()}) =\n"
-        #            f" {body_rel_linvel_xyz.cpu().tolist()} + {vector_projection(body_rel_linvel_xyz,gravity_rel_xyz).cpu().tolist()} = \n"
-        #            f"{body_planar_rel_linvel_xyz.cpu().tolist()}\n"
-        #            f"norm({body_planar_rel_linvel_xyz.cpu().tolist()} - {goal_rel_linvel_xyz.cpu().tolist()})={th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_xyz).cpu().tolist()}")
-        # time.sleep(0.1)
-        # goal_rel_linvel_xyz should already be "planar", it's projection along gravity_rel should be zero
-        if self._enable_dbg_checks:
-            if th.norm(vector_projection(goal_rel_linvel_xyz,gravity_rel_xyz)) > 0.1: raise RuntimeError(f"goal_rel_linvel_xyz is not horizontal, projection is {vector_projection(goal_rel_linvel_xyz,gravity_rel_xyz)}")
-        return th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_xyz)
+
+
+
+
+
+
+
+
+
+
     @override
     def _get_new_instantaneous_state(self):
 
@@ -370,6 +369,27 @@ class LocomotionEnv(RobotEnv):
         return new_inst_state
     
 
+
+
+
+
+
+
+
+
+
+    def _tracking_error(self, body_rel_linvel_xyz : th.Tensor, gravity_rel_xyz : th.Tensor, goal_rel_linvel_xyz : th.Tensor):
+        body_planar_rel_linvel_xyz = body_rel_linvel_xyz - vector_projection(body_rel_linvel_xyz,gravity_rel_xyz)
+        # ggLog.info(f" {body_rel_linvel_xyz.cpu().tolist()} + vector_projection({body_rel_linvel_xyz.cpu().tolist()},{gravity_rel_xyz.cpu().tolist()}) =\n"
+        #            f" {body_rel_linvel_xyz.cpu().tolist()} + {vector_projection(body_rel_linvel_xyz,gravity_rel_xyz).cpu().tolist()} = \n"
+        #            f"{body_planar_rel_linvel_xyz.cpu().tolist()}\n"
+        #            f"norm({body_planar_rel_linvel_xyz.cpu().tolist()} - {goal_rel_linvel_xyz.cpu().tolist()})={th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_xyz).cpu().tolist()}")
+        # time.sleep(0.1)
+        # goal_rel_linvel_xyz should already be "planar", it's projection along gravity_rel should be zero
+        if self._enable_dbg_checks:
+            if th.norm(vector_projection(goal_rel_linvel_xyz,gravity_rel_xyz)) > 0.1: raise RuntimeError(f"goal_rel_linvel_xyz is not horizontal, projection is {vector_projection(goal_rel_linvel_xyz,gravity_rel_xyz)}")
+        return th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_xyz)
+    
     @override
     def computeReward(self, previousState : dict[str,th.Tensor],
                       state : dict[str,th.Tensor],
@@ -399,16 +419,16 @@ class LocomotionEnv(RobotEnv):
         velocities_safenorm = robot_state_safenorm[:,1]
         torque_safenorm = robot_state_safenorm[:,2]
 
-        torque_reward       = - th.clamp(th.mean(th.pow(normtorques,2)),        -max_rew,max_rew)
-        velocity_reward     = - th.clamp(th.mean(th.pow(normvelocities,2)),     -max_rew,max_rew)
-        acceleration_reward = - th.clamp(th.mean(th.pow(normaccelerations,2)),  -max_rew,max_rew)
+        reward_torque       = - th.clamp(th.mean(th.pow(normtorques,2)),        -max_rew,max_rew)
+        reward_velocity     = - th.clamp(th.mean(th.pow(normvelocities,2)),     -max_rew,max_rew)
+        reward_acceleration = - th.clamp(th.mean(th.pow(normaccelerations,2)),  -max_rew,max_rew)
         reward_position     = - th.clamp(th.mean(th.pow(normposhomingdiff,2)),  -max_rew,max_rew)
-        torquediff_reward   = - th.clamp(th.mean(th.pow(normtorquediff,2)),     -max_rew,max_rew)
-        actdiff_reward      = - th.clamp(th.mean(th.pow(actdiff,2)),            -max_rew,max_rew)
+        reward_torquediff   = - th.clamp(th.mean(th.pow(normtorquediff,2)),     -max_rew,max_rew)
+        reward_actdiff      = - th.clamp(th.mean(th.pow(actdiff,2)),            -max_rew,max_rew)
 
-        torque_limit_reward   = -th.clamp(th.mean(th.pow(torque_safenorm,50)),-1,1)
-        position_limit_reward = -th.clamp(th.mean(th.pow(position_safenorm,50)),-1,1)
-        velocity_limit_reward = -th.clamp(th.mean(th.pow(velocities_safenorm,50)),-1,1)
+        reward_torque_limit   = -th.clamp(th.mean(th.pow(torque_safenorm,50)),-1,1)
+        reward_position_limit = -th.clamp(th.mean(th.pow(position_safenorm,50)),-1,1)
+        reward_velocity_limit = -th.clamp(th.mean(th.pow(velocities_safenorm,50)),-1,1)
 
         reward_height = bell_reward(locom_state[self.LOCOMOTION_FIELDS.HEIGHT_ERR],
                                     zero_rew_dist=self._locomotion_conf.height_reward_settle_point)
@@ -422,7 +442,7 @@ class LocomotionEnv(RobotEnv):
         rel_goal_offset = self._locomotion_conf.reward_vel_goal_relative_width_offset
         abs_goal_bell_width = self._locomotion_conf.reward_vel_goal_absolute_width
         goal_norm = th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz)
-        velocity_tracking_reward = (   goalrelative_weight  * bell_reward(velocity_tracking_err,
+        reward_velocity_tracking = (   goalrelative_weight  * bell_reward(velocity_tracking_err,
                                                                           zero_rew_dist=rel_goal_bell_width*(goal_norm+rel_goal_offset))+
                                     (1-goalrelative_weight) * bell_reward(velocity_tracking_err,
                                                                           zero_rew_dist=abs_goal_bell_width))
@@ -437,21 +457,21 @@ class LocomotionEnv(RobotEnv):
         # velocity_tracking_reward = 2*self._current_state[self.STATE_EXTRINSIC][0,self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X]
         # velocity_tracking_reward = bell_reward(velocity_tracking_err/(self._locomotion_episode_config.goal_velocity_xy+0.001), 1)
 
-        contacts_reward = - th.clamp(locom_state[self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
+        reward_contacts = - th.clamp(locom_state[self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 
-        sub_rewards["reward_tracking"] = velocity_tracking_reward
-        sub_rewards["reward_torque"] = torque_reward
-        sub_rewards["reward_torque_limit"] = torque_limit_reward
-        sub_rewards["reward_torquediff"] = torquediff_reward
-        sub_rewards["reward_velocity"] = velocity_reward
-        sub_rewards["reward_contacts"] = contacts_reward
+        sub_rewards["reward_tracking"] = reward_velocity_tracking
+        sub_rewards["reward_torque"] = reward_torque
+        sub_rewards["reward_torque_limit"] = reward_torque_limit
+        sub_rewards["reward_torquediff"] = reward_torquediff
+        sub_rewards["reward_velocity"] = reward_velocity
+        sub_rewards["reward_contacts"] = reward_contacts
         sub_rewards["reward_height"] = reward_height
         sub_rewards["reward_pitchnroll"] = reward_pitchnroll
-        sub_rewards["reward_velocity_limit"] = velocity_limit_reward
-        sub_rewards["reward_acceleration"] = acceleration_reward
-        sub_rewards["reward_position_limit"] = position_limit_reward
+        sub_rewards["reward_velocity_limit"] = reward_velocity_limit
+        sub_rewards["reward_acceleration"] = reward_acceleration
+        sub_rewards["reward_position_limit"] = reward_position_limit
         sub_rewards["reward_position"] = reward_position
-        sub_rewards["reward_actdiff"] = actdiff_reward
+        sub_rewards["reward_actdiff"] = reward_actdiff
         sub_rewards["reward_health"] = th.tensor(1, device=locom_state.device)
         sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards.items()}
 
@@ -493,6 +513,15 @@ class LocomotionEnv(RobotEnv):
             ggLog.warn(f"Non-finite reward {reward}")
         return reward
     
+
+
+
+
+
+
+
+
+
 
     def _update_stats(self):
         super()._update_stats()

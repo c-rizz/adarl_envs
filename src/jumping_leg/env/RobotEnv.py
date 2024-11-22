@@ -523,12 +523,18 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                         orientation_xyzw = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[3:7], device=self._configuration.th_device),
                                                                         pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
-        self._adapter.setJointsStateDirect({jn:JointState(  position=self._current_episode_config.initial_ctrl_joint_pose[i],
+        jpose = self._current_episode_config.initial_ctrl_joint_pose
+        self._adapter.setJointsStateDirect({jn:JointState(  position=jpose[i],
                                                             rate = 0,
                                                             effort = 0) for i,jn in enumerate(self._configuration.controlled_joints)})
-        self._adapter.setJointsImpedanceCommand(self._configuration.homing_ctrl_joints_pvesd)
-        self._adapter.apply_joint_impedances(self._configuration.homing_ctrl_joints_pvesd)
-        self._last_sent_pvesd = {jn:self._configuration.homing_ctrl_joints_pvesd[i] for i,jn in enumerate(self._configuration.controlled_joints)}
+        initial_jimp_cmd = th.stack([jpose,
+                                    th.zeros_like(jpose),
+                                    th.zeros_like(jpose),
+                                    th.full_like(jpose, self._configuration.safe_stiffness),
+                                    th.full_like(jpose, self._configuration.safe_damping)], dim=1)
+        self._adapter.setJointsImpedanceCommand(initial_jimp_cmd)
+        self._adapter.apply_joint_impedances(initial_jimp_cmd)
+        self._last_sent_pvesd = {jn:initial_jimp_cmd[i] for i,jn in enumerate(self._configuration.controlled_joints)}
 
     @override
     def build(self):
@@ -625,7 +631,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         body_linvel_xyz = body_state.pos_velocity_xyz
         body_angvel_xyz = body_state.ang_velocity_xyz
         body_position_xyz = body_state.pose.position
-        gravity_vec         = th_quat_rotate(th.tensor([0,0,-1]), th_quat_conj(body_state.pose.orientation_xyzw))
+        gravity_vec         = th_quat_rotate(th.tensor([0.0,0,-1]), th_quat_conj(body_state.pose.orientation_xyzw))
         body_rel_linvel_xyz = th_quat_rotate(body_linvel_xyz,     th_quat_conj(body_state.pose.orientation_xyzw))
         body_rel_angvel_xyz = th_quat_rotate(body_angvel_xyz,     th_quat_conj(body_state.pose.orientation_xyzw))
 

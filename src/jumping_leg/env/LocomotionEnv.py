@@ -225,8 +225,8 @@ class LocomotionEnv(RobotEnv):
                         reward_actdiff_weight = reward_actdiff_weight,
                         height_reward_settle_point=th.tensor(0.2, device=th_device),
                         pitchnroll_reward_settle_point=th.tensor(0.2, device=th_device),
-                        vel_reward_goalrelative_weight = th.tensor(0.2, device=th_device),
-                        reward_vel_goal_relative_width = th.tensor(1.1, device=th_device),
+                        vel_reward_goalrelative_weight = th.tensor(0.25, device=th_device),
+                        reward_vel_goal_relative_width = th.tensor(1.5, device=th_device),
                         reward_vel_goal_absolute_width = th.tensor(0.25, device=th_device),
                         reward_vel_goal_relative_width_offset = th.tensor(0.1, device=th_device))
         locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],

@@ -378,21 +378,24 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                        max_ep_steps=th.tensor(self._configuration.original_max_epsteps, device=self._configuration.th_device))
         
         if self._configuration.obs_only_vec:
-            observable_fields = [   self.STATE_ROBOT,
-                                    self.STATE_EXTRINSIC,
-                                    self.STATE_INTERNAL,
-                                    self.STATE_ROBOT_STATS]
+            observable_fields = [   self.STATE_ROBOT
+                                    ,self.STATE_EXTRINSIC
+                                    ,self.STATE_INTERNAL
+                                    # ,self.STATE_ROBOT_STATS
+                                    ]
             vec_fields = observable_fields
         elif self._configuration.obs_only_img:
             observable_fields = [self.STATE_IMG]
         else:
-            observable_fields = [   self.STATE_ROBOT,
-                                    self.STATE_INTERNAL,
-                                    self.STATE_IMG,
-                                    self.STATE_ROBOT_STATS]
-            vec_fields = [  self.STATE_ROBOT, 
-                            self.STATE_INTERNAL,
-                            self.STATE_ROBOT_STATS]
+            observable_fields = [   self.STATE_ROBOT
+                                    ,self.STATE_INTERNAL
+                                    ,self.STATE_IMG
+                                    # ,self.STATE_ROBOT_STATS
+                                    ]
+            vec_fields = [  self.STATE_ROBOT
+                            ,self.STATE_INTERNAL
+                            # ,self.STATE_ROBOT_STATS
+                            ]
         
         robot_state_helper = RobotStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
                                               stiffness_minmax=self._configuration.stiffness_minmax,
@@ -1059,7 +1062,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     def build(self):
         envCtrlName = type(self._adapter).__name__
         if envCtrlName == "PyBulletJointImpedanceAdapter":
-            self._adapter.build_scenario(None)
+            self._adapter.build_scenario()
             self._support1_base = ("support1","world")
             self._support2_base = ("support2","world")
             self._red_ball_base = ("red_ball","world")
@@ -1145,8 +1148,13 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         if not adarl.utils.tensor_trees.is_all_finite(state):
             ggLog.warn(f"Non-finite values in state {state}")
         self._last_obs = self._state_helper.observe(state)
-        if th.any(th.abs(self._last_obs["vec"]) > 100):
-            raise RuntimeError(f"Values over 100 in obs {self._last_obs}")
+        outofbounds_idx = th.abs(self._last_obs["vec"]) > 100
+        if th.any(outofbounds_idx):
+            npidx = outofbounds_idx.nonzero().squeeze().cpu().numpy()
+            obs_names = self._state_helper.observation_names()["vec"]
+            outofbounds_names = obs_names[npidx]
+            outofbounds_vals = self._last_obs["vec"][outofbounds_idx]
+            raise RuntimeError(f"Values over 100 in obs {outofbounds_names}={outofbounds_vals}.")
         if not adarl.utils.tensor_trees.is_all_finite(self._last_obs):
             raise RuntimeError(f"Non-finite values in obs {self._last_obs}")
         return self._last_obs
@@ -1263,8 +1271,9 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                             jstates[jn].rate[[0]],
                                             jstates[jn].effort[[0]],
                                             th.as_tensor(self._last_sent_pvesd[jn])]) for jn in [self._hip_joint,self._knee_joint]}
-        new_robot_stats_state = {jname : stats_minmaxavgstd_hipknee_pve[:,i,:].flatten()
+        new_robot_stats_state = {jname : stats_minmaxavgstd_hipknee_pvae[:,i,:].flatten()
                                  for i,jname in enumerate(self._adapter.get_monitored_joints())}
+        # ggLog.info(f"new_robot_stats_state = {new_robot_stats_state}")
         if th.any(th.concat([new_robot_state[self._hip_joint][6:],new_robot_state[self._knee_joint][6:]])<0):
             ggLog.warn(f"negative gains in new_robot_state = {new_robot_state}")
         new_extrinsic_state = { self.EXTRINSIC_FIELDS.HIP_POS_Z : hip_height,

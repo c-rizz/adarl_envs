@@ -103,6 +103,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "num_envs" : 1
     }
     
+    eval_confs = [  eval_conf_video_det,
+                    eval_conf_video_stoch,
+                    eval_conf_feasible,
+                    eval_conf_video_feasible,
+                    eval_conf_video_jump_feasible]
 
     sac_train(  seed,
                 folderName,
@@ -110,11 +115,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 args,
                 env_builder = build_jumping_leg_env.env_builder,
                 env_builder_args = env_builder_args,
-                eval_configurations = [eval_conf_video_det,
-                                         eval_conf_video_stoch,
-                                         eval_conf_feasible,
-                                         eval_conf_video_feasible,
-                                         eval_conf_video_jump_feasible],
+                eval_configurations = eval_confs,
                 hyperparams = SAC_hyperparams(  device = "cuda",
                                                 q_network_arch=[256,128],
                                                 q_lr=0.001,
@@ -129,11 +130,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 grad_steps=50,
                                                 learning_starts=max_steps_per_episode*train_envs*5,
                                                 parallel_envs=train_envs,
-                                                log_freq_vstep=max_steps_per_episode),
-                video_recorder_kwargs=build_jumping_leg_env.video_recorder_kwargs,
+                                                log_freq_vstep=max_steps_per_episode,
+                                                reference_init_args={"env_builder_args":env_builder_args,
+                                                                     "eval_configuration" : eval_confs}),
                 checkpoint_freq=100,
                 collector_device=th.device("cpu"),
-                debug_level=-1)
+                debug_level=-1,
+                max_episode_duration=max_steps_per_episode,
+                validation_batch_size=0,
+                validation_buffer_size=0,
+                validation_holdout_ratio=0)
 
 
 

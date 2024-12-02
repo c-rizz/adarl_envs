@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from __future__ import annotations
 from jumping_leg.env.LocomotionEnv import LocomotionEnv
-from adarl.envs.GymVecEnvWrapper import GymVecEnvWrapper
+from adarl.envs.vec.GymVecEnvWrapper import GymVecEnvWrapper
 from adarl.envs.RecorderGymWrapper import RecorderGymWrapper
 import adarl.utils.dbg.ggLog as ggLog
 import torch as th
@@ -17,6 +17,8 @@ from pathlib import Path
 import adarl.utils.utils
 from typing import Sequence
 from jumping_leg.env.RobotVecEnv import RobotVecEnv
+from adarl.envs.vec.VecRunner import VecRunner
+from adarl.envs.vec.RunnerRecorderWrapper import RunnerRecorderWrapper
 import gymnasium as gym
 
 def robot_env_builder(  seed,
@@ -111,8 +113,11 @@ def robot_env_builder(  seed,
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
     # ggLog.info(f"action_space = {lrenv.action_space.shape}")
-
-    env = GymVecEnvWrapper(env=lrenv, episodeInfoLogFile=log_folder+f"/GymEnvWrapperLog.{seed}.log",
+    vrunner = VecRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=log_folder+"/vec_runner.log",
+                        render_envs=[0], autoreset=True)
+    vrunner = RunnerRecorderWrapper(vrunner,fps = 1/stepLength_sec, outFolder=log_folder+"/RunnerRecorder",env_index=0,
+                                    saveFrequency_ep=video_save_freq)
+    env = GymVecEnvWrapper(runner=vrunner,
                             quiet=quiet)
     
     # if video_save_freq >0:
@@ -186,7 +191,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
-        "enable_rendering" : False,
+        "enable_rendering" : True,
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "pybullet",
@@ -212,11 +217,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
         "th_device" : env_device,
-        "video_save_freq" : 0,
+        "video_save_freq" : 10,
         "goal_speed_minmax" : (0,2),
         "use_contacts" : False,
         "frame_stack_length" : 1,
-        "verbose_infos" : False,
+        "verbose_infos" : True,
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
         "init_on_reset_ratio" : 0.9,
@@ -320,12 +325,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 policy_network_arch=[1024,512],
                                                 gamma=0.99,
                                                 target_tau = 0.005,
-                                                batch_size=16384,
+                                                batch_size=1024,
                                                 buffer_size=10_000_000,
                                                 total_steps=100_000_000,
                                                 train_freq_vstep=5,
                                                 grad_steps=10,
-                                                learning_starts=max_steps_per_episode*max(train_envs*5, 100),
+                                                learning_starts=max_steps_per_episode*100,
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode,
                                                 reference_init_args =  #{}
@@ -337,8 +342,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 debug_level=0,
                 max_episode_duration=max_steps_per_episode,
                 validation_buffer_size=100_000,
-                validation_batch_size=256,
-                validation_holdout_ratio=0.01,
+                validation_batch_size=250,
+                validation_holdout_ratio=0.02,
                 no_wandb=args["no_wandb"])
 
 

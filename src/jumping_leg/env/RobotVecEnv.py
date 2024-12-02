@@ -3,14 +3,14 @@ from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAda
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 from adarl.adapters.VecPyBulletJointImpedanceAdapter import VecPyBulletJointImpedanceAdapter
-from adarl.envs.ControlledVecEnv import ControlledVecEnv
-from adarl.envs.BaseVecEnv import Observation
+from adarl.envs.vec.ControlledVecEnv import ControlledVecEnv
+from adarl.envs.vec.BaseVecEnv import Observation
 from adarl.utils.robot_helpers import Robot
 from adarl.utils.utils import to_string_tensor, th_quat_rotate, th_quat_conj, ros_rpy_to_quaternion_xyzw
 from adarl.utils.vec_state_helper import    JointImpedanceActionHelper, ThBoxStateHelper,\
                                         RobotStateHelper, RobotStatsStateHelper,\
-                                        StateNoiseGenerator, DictStateHelper, unnormalize
-from adarl.utils.tensor_trees import map_tensor_tree, flatten_tensor_tree
+                                        StateNoiseGenerator, DictStateHelper, unnormalize, normalize
+from adarl.utils.tensor_trees import map_tensor_tree, flatten_tensor_tree, map2_tensor_tree, space_from_tree
 from adarl.utils.utils import build_pose, JointState, Pose, LinkState, dbg_check_size, dbg_check
 from dataclasses import dataclass
 from gymnasium import Space
@@ -165,10 +165,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
         self._rng = th.Generator(device=th_device)
         self._robot_model = Robot(adarl.utils.utils.compile_xacro_string(  model_definition_string=robot_urdf_string))
-        self._current_state = {}
         root_joint_name = self._robot_model.get_parent_joint(robot_root_link)
         is_floating = self._robot_model.get_joint_properties([root_joint_name])[root_joint_name]["type"] == Robot.JOINT_TYPES.FLOATING
         self._build_new_instantaneous_state = th.vmap(self._build_new_instantaneous_state_single)
+        obs_dtype = th.float32
 
         # ggLog.info("Properties:"+("\n".join([str(jp) for jp in self._robot_model.get_joint_properties(self._robot_model.get_joint_names()).items()])))
         # exit()
@@ -182,7 +182,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         controlled_joints_str.append(jn)
 
         controlled_joints_rn : list[tuple[str,str]] = [(robot_name,jn) for jn in controlled_joints_str]
-        phys_limits_minmax_pve = {(robot_name,k):th.as_tensor(l,device=th_device) 
+        phys_limits_minmax_pve = {(robot_name,k):th.as_tensor(l,device=th_device, dtype = obs_dtype) 
                                     for k,l in self._robot_model.get_joint_limits(controlled_joints_str).items()}
         safe_limits_minmax_pve = {k:(lims_minmax-0.5*(lims_minmax[1]+lims_minmax[0]))*safety_limits_factor+0.5*(lims_minmax[1]+lims_minmax[0])
                                     for k,lims_minmax in phys_limits_minmax_pve.items()}
@@ -216,7 +216,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
             ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
 
-        obs_dtype = th.float32
         homing_ctrl_joints_pvesd = th.as_tensor([(homing_joint_pose[jn], 0, 0, safe_stiffness, safe_damping)
                                                     for jn in controlled_joints_rn],
                                                 device=th_device,
@@ -274,7 +273,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)),
                                                     vec_init_on_reset = th.ones(size=(adapter.vec_size(),), device=th_device, dtype=th.bool),
-                                                    vec_max_ep_steps = th.full(fill_value=maxStepsPerEpisode, size=(adapter.vec_size(),), device=th_device, dtype=th.bool))
+                                                    vec_max_ep_steps = th.full(fill_value=maxStepsPerEpisode, size=(adapter.vec_size(),), device=th_device, dtype=th.int64))
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
 
 
@@ -377,6 +376,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 self.STATE_EXTRINSIC,
                                                                 self.STATE_INTERNAL],
                                               flattened_part_name="vec")
+        self._current_state = self._state_helper.reset_state()
+        self._update_stats()
 
         self._safety_limits = robot_state_helper.build_robot_limits(joint_limit_minmax_pve=self._configuration.joint_safe_limits_minmax_pve,
                                                                     stiffness_minmax=self._configuration.joint_safe_limits_minmax_stiffness,
@@ -388,8 +389,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                          single_observation_space=self._state_helper.get_single_obs_space(),
                          single_action_space=self._action_helper.get_single_action_space(seed=seed),
                          single_reward_space=ThBox(low=float("-inf"),high=float("+inf"), shape=tuple(), torch_device=th_device),
+                         info_space=None,
                          step_precision_tolerance = step_precision_tolerance,
                          th_device=th_device)
+        self.info_space = space_from_tree(self.get_infos(self._current_state)) # needs to be done afer super()__init__
         
         self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.startup()
@@ -479,12 +482,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     @override
     def _initialize_episodes(self, vec_mask : th.Tensor | None = None, options = {}) -> None:
-
-        self._current_state = self._state_helper.reset_state()
-        self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT] = th.tensor(-1.)
-        self._last_obs = self._state_helper.observe(self._current_state)
         if vec_mask is None:
             vec_mask = th.ones((self.num_envs,), device=self._configuration.th_device, dtype=th.bool)
+        # ggLog.info(f"initializing episodes {vec_mask}")
+        resetted_state = self._state_helper.reset_state()
+        map2_tensor_tree(self._current_state, resetted_state,
+                        lambda l1, l2: l1[vec_mask].copy_(l2[vec_mask])) # should not be necessary, just for safety
+        self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.STEP_COUNT] = th.tensor(-1.) # all other fields will be overwritten accordingly in state_update
+        self._last_obs = self._state_helper.observe(self._current_state)
         self._set_current_ep_config(reset_options = options, vec_mask=vec_mask)
         
         if isinstance(self._adapter, BaseVecSimulationAdapter):
@@ -623,10 +628,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"cam quat = {cam_rel_quat}")
         try:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
-                body_states13 = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[:,0]
-                cam_link_state[:3] += body_states13[:3]
+                body_states13 = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)
+                cam_link_state = cam_link_state.expand(self._adapter.vec_size(),1,13)
+                cam_link_state[:,:,:3] += body_states13[:,:,:3]
                 self._adapter.setLinksStateDirect(link_names=[self._configuration.ui_camera_link],
-                                                  link_states_pose_vel=cam_link_state.expand(self._adapter.vec_size(),1,13),
+                                                  link_states_pose_vel=cam_link_state,
                                                   vec_mask=vec_mask)
             imgs, times = self._adapter.getRenderings([self._configuration.ui_camera_name], vec_mask=vec_mask)
             return imgs, times
@@ -752,18 +758,21 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def _update_state(self):
         # t0 = time.monotonic()
         instantaneous_state : dict[str,dict[Any,th.Tensor]]= self._get_new_instantaneous_state()
-        sizes = map_tensor_tree(flatten_tensor_tree(instantaneous_state), lambda t: t.size())
+        # sizes = map_tensor_tree(flatten_tensor_tree(instantaneous_state), lambda t: t.size())
         # {k:v.size() for k,v in instantaneous_state.items()}
-        n = "\n"
-        ggLog.info(f"Got instantaneous state with sizes: {n.join([str(kv) for kv in sizes.items()])}")
+        # n = "\n"
+        # ggLog.info(f"Got instantaneous state with sizes: {n.join([str(kv) for kv in sizes.items()])}")
         # t1 = time.monotonic()
-        step_count = self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT] # all env have the same step count
-        dbg_check(lambda: th.all(self._current_state[self.STATE_INTERNAL][0,:,self.INTERNAL_FIELDS.STEP_COUNT] == step_count),
+        new_step_counts = instantaneous_state[self.STATE_INTERNAL][self.INTERNAL_FIELDS.STEP_COUNT][0] # all env have the same step count
+        dbg_check(lambda: th.all(new_step_counts == new_step_counts[0]),
                   lambda: "asynchronous terminations are not supported yet")
-        if step_count <= 0:
-            self._current_state = self._state_helper.reset_state(instantaneous_state)
+        new_step_count = new_step_counts[0]
+        if new_step_count == 0:
+            self._current_state = self._state_helper.reset_state(instantaneous_state) # fills up history with current instantaneous state
         else:
-            self._state_helper.update(instantaneous_state, state=self._current_state)
+            self._state_helper.update(instantaneous_state, state=self._current_state) # rolls down the history and adds current state
+        dbg_check(lambda: th.all(self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT] >= 0),
+                  lambda: f"Negative step_counts {self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT]}")
         # map_tensor_tree(self._current_state, lambda t: t.detach().clone())
         # tf = time.monotonic()
         # print(f"newinst = {t1-t0}, map = {tf-t1}, tot = {tf-t0}")
@@ -784,19 +793,19 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         i : dict[str, th.Tensor] = {}
         i.update(self._stats)
         i["ep_step_count"] = self._ep_step_counter
-        i["step_ep_step_count"] = self._ep_step_counter
-        i["tot_step_count"] = th.as_tensor(self._tot_step_counter)
-        i["tot_init_count"] = th.as_tensor(self._tot_init_counter)
+        i["ep_count"] = self._ep_counter
+        # i["tot_step_count"] = th.as_tensor(self._tot_step_counter)
+        # i["tot_init_count"] = th.as_tensor(self._tot_init_counter)
 
         if self._configuration.verbose_infos:
             statenorm = self._state_helper.normalize(state)
             for substate in [self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT, self.STATE_ROBOT_STATS]:
                 i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
-                i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+                # i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                 i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
-                i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+                # i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                 i["vec_obs"] = self._last_obs["vec"]
-                i["vec_obs_labels"] = to_string_tensor([n for n in self._state_helper.observation_names()["vec"]])
+                # i["vec_obs_labels"] = to_string_tensor([n for n in self._state_helper.observation_names()["vec"]])
             
         i.update({"ep_config."+k:v for k,v in dataclasses.asdict(self._current_episode_config).items()})
         i["safety_triggered"] = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED]
@@ -807,15 +816,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def are_states_terminal(self, states) -> th.Tensor:
         if not self._configuration.stop_on_safety:
             return th.zeros((self.num_envs,), dtype=th.bool, device=self._configuration.th_device)
-        r = states[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         # if th.any(r):
         #     term_idxs = th.nonzero(r)
         #     ggLog.info(f"Env {term_idxs} terminated at step {self._ep_step_counter[term_idxs]}")
-        return r
+        return (states[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0).squeeze().view((self.num_envs,))
     
     @override
     def are_states_timedout(self, states) -> th.Tensor:
-        return states[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT] > self.get_max_episode_steps()
+        return (states[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT] >= self.get_max_episode_steps()).squeeze().view((self.num_envs,))
 
 
 
@@ -834,6 +842,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
-        reward_health = th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
-        sub_rewards_return["health"] = reward_health
-        return reward_health
+        # reward_health = th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
+        # sub_rewards_return["health"] = reward_health
+
+        max_rew = 100
+        lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
+        normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
+
+        robot_state_norm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT])
+        normposhomingdiff = robot_state_norm[:,0,:,0] - normhoming
+        reward_position     = - th.clamp(th.mean(th.pow(normposhomingdiff,2), dim = 1),  -max_rew,max_rew)
+        sub_rewards_return["reward_position"] = reward_position
+        reward = reward_position
+        return reward

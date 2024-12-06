@@ -1,6 +1,7 @@
 from __future__ import annotations
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
+from adarl.adapters.BaseSimulationAdapter import ModelSpawnDef
 from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 from adarl.adapters.VecPyBulletJointImpedanceAdapter import VecPyBulletJointImpedanceAdapter
 from adarl.envs.vec.ControlledVecEnv import ControlledVecEnv
@@ -25,6 +26,8 @@ import dataclasses
 import numpy as np
 import torch as th
 import time
+from pathlib import Path
+
 
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
@@ -442,35 +445,46 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     # Initialization
     # --------------------------------------------------------------------------------------------------------------------
 
-    def _initialize_scenario(self):
-        if isinstance(self._adapter, BaseVecSimulationAdapter):            
+    def _get_spawn_defs(self):
+        if not hasattr(self, "_spawn_defs"):
             robot_pose = build_pose(*self._configuration.spawn_root_pose_xyz_xyzw)
-            camera_pose = build_pose(0,2.5,0.7, 0.0,0.0,-0.707,0.707)
             arrow_pose = robot_pose
-            camera_file = adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro")
-            if isinstance(self._adapter, (PyBulletAdapter, VecPyBulletJointImpedanceAdapter)):
-                self._adapter.spawn_model(model_definition_string=self._configuration.model_urdf_string,
-                                            model_name=self._configuration.robot_name,
+            camera_pose = build_pose(0,2.5,0.7, 0.0,0.0,-0.707,0.707)
+            robot_spawn_def = ModelSpawnDef(definition_string=self._configuration.model_urdf_string,
+                                            name=self._configuration.robot_name,
                                             pose=robot_pose,
-                                            model_format="urdf")
-            self._adapter.spawn_model(model_file=camera_file,
-                                        model_name="simple_camera",
-                                        pose=camera_pose,
-                                        model_format="sdf.xacro",
-                                        model_kwargs={"camera_width":self._configuration.ui_camera_resolution_hw[1],
-                                                      "camera_height":self._configuration.ui_camera_resolution_hw[0],
-                                                      "frame_rate":1/self._intendedStepLength_sec})
-            if self._configuration.show_goal:
-                self._adapter.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/red_arrow.urdf.xacro"),
-                                            model_name="arrow",
+                                            format="urdf",
+                                            kwargs={})
+            if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
+                cam_file = "models/simple_camera.mjcf.xacro"
+            else:            
+                cam_file = "models/simple_camera.sdf.xacro"
+            camera_spawn_def = ModelSpawnDef(   definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
+                                                name="simple_camera",
+                                                pose=camera_pose,
+                                                format="sdf.xacro",
+                                                kwargs={"camera_width":self._configuration.ui_camera_resolution_hw[1],
+                                                        "camera_height":self._configuration.ui_camera_resolution_hw[0],
+                                                        "frame_rate":1/self._intendedStepLength_sec})
+            arrow_spawn_def = ModelSpawnDef(definition_string=Path(adarl.utils.utils.pkgutil_get_path("jumping_leg","models/red_arrow.urdf.xacro")).read_text(),
+                                            name="arrow",
                                             pose=arrow_pose,
-                                            model_format="urdf.xacro",
-                                            model_kwargs={"add_world_link":str(isinstance(self._adapter, PyBulletAdapter))})
-                self._adapter.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/axes.urdf.xacro"),
-                                            model_name="axes",
+                                            format="urdf.xacro",
+                                            kwargs={"add_world_link":str(isinstance(self._adapter, PyBulletAdapter))})
+            axes_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("jumping_leg","models/axes.urdf.xacro")).read_text(),
+                                            name="axes",
                                             pose=build_pose(0,0,0,0,0,0,1),
-                                            model_format="urdf.xacro",
-                                            model_kwargs={"add_world_link":str(isinstance(self._adapter, PyBulletAdapter))})
+                                            format="urdf.xacro",
+                                            kwargs={"add_world_link":str(isinstance(self._adapter, PyBulletAdapter))})
+            self._spawn_defs = [robot_spawn_def,
+                                    camera_spawn_def]
+            if self._configuration.show_goal:
+                self._spawn_defs.append(arrow_spawn_def)
+                self._spawn_defs.append(axes_spawn_def)
+        return self._spawn_defs
+        
+
+    def _initialize_scenario(self):
         self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
         # self._robot_model.remove_collision_pairs([("rail_link_0","slider_link_0")])            
         self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
@@ -570,11 +584,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     th.zeros_like(vjpose),
                                     th.full_like(vjpose, self._configuration.safe_stiffness),
                                     th.full_like(vjpose, self._configuration.safe_damping)], dim = 2)
+        initial_state_pve = th.zeros(size=(self.num_envs, len(self._configuration.controlled_joints), 3))
         not_resetting_sims = th.logical_not(self._current_episode_config.vec_init_on_reset)
         if th.any(not_resetting_sims):
             initial_cmd_vec_j_pvesd[not_resetting_sims] = self._last_sent_v_j_pvesd[not_resetting_sims]
         self._adapter.setJointsStateDirect(joint_names=self._configuration.controlled_joints,
-                                           joint_states_pve=initial_cmd_vec_j_pvesd[:,:,:3],
+                                           joint_states_pve=initial_state_pve, #initial_cmd_vec_j_pvesd[:,:,:3],
                                            vec_mask=th.logical_and(self._current_episode_config.vec_init_on_reset, vec_mask))
         self._adapter.setJointsImpedanceCommand(initial_cmd_vec_j_pvesd, vec_mask=vec_mask)
         self._adapter.set_current_joint_impedance_command(initial_cmd_vec_j_pvesd, vec_mask=vec_mask)
@@ -584,7 +599,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def _build(self):
         envCtrlName = type(self._adapter).__name__
         if envCtrlName in ["PyBulletJointImpedanceAdapter","VecPyBulletJointImpedanceAdapter"]:
-            self._adapter.build_scenario()
+            self._adapter.build_scenario(models = self._get_spawn_defs())
+            self._arrow_base = ("arrow","world")
+        elif adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
+            self._adapter.build_scenario(models = self._get_spawn_defs())
             self._arrow_base = ("arrow","world")
         elif envCtrlName in ["RosXbotAdapter", "RosXbotGazeboAdapter"]:
             if self._configuration.real:
@@ -624,16 +642,19 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # camera by default looks down the x axis
         cam_link_state = th.zeros((13,), device=self._configuration.th_device, dtype=th.float32)
         cam_link_state[:7] = self._get_cam_pose_xyz_xyzw()
+        if th.any(vec_mask[1:]):
+            raise RuntimeError(f"Can only render env #0 (because the camera can only be at one position across all sims)")
         # ggLog.info(f"cam pos = {cam_rel_pos}")
         # ggLog.info(f"cam quat = {cam_rel_quat}")
         try:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
-                body_states13 = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)
+                body_states13 = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[:,0,:]
+                cam_link_state[:3] += body_states13[0,:3] #body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all links
                 cam_link_state = cam_link_state.expand(self._adapter.vec_size(),1,13)
-                cam_link_state[:,:,:3] += body_states13[:,:,:3]
+                # cam_link_state[:,:,:3] += body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all sims
                 self._adapter.setLinksStateDirect(link_names=[self._configuration.ui_camera_link],
                                                   link_states_pose_vel=cam_link_state,
-                                                  vec_mask=vec_mask)
+                                                  vec_mask=None)
             imgs, times = self._adapter.getRenderings([self._configuration.ui_camera_name], vec_mask=vec_mask)
             return imgs, times
         except Exception as e:
@@ -673,11 +694,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
         if not th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)):
             raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve")
+        # bstates_v_13 = th.zeros(size=(1,13), dtype=th.float32, device=self._adapter._th_device)
         new_inst_state = self._build_new_instantaneous_state(   bstates_v_13,
                                                                 internal_states,
                                                                 vec_stats_minmaxavgstd_j_pvae,
                                                                 jstates_v_j_pve,
                                                                 self._last_sent_v_j_pvesd)
+
+        # if not th.all(th.isfinite(new_inst_state[self.STATE_ROBOT_STATS])):
+        #     ggLog.info(f"nonfinite vals in new_robot_stats_state = {new_inst_state[self.STATE_ROBOT_STATS]}")
         dbg_check(lambda: th.all(new_inst_state[self.STATE_ROBOT][:,:,6:]>=0), lambda: f"negative gains in new_robot_state") #type: ignore
         return new_inst_state
 
@@ -694,6 +719,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         gdir = th.zeros_like(conj_body_quat_xyzw[...,:3])
         gdir[...,2] = -1
         gravity_vec         = th_quat_rotate(gdir, conj_body_quat_xyzw)
+        ggLog.info(f"body_linvel_xyz, conj_body_quat_xyzw = {body_linvel_xyz}, {conj_body_quat_xyzw}")
+        ggLog.info(f"body_linvel_xyz unwrapped = {th._C._functorch.get_unwrapped(body_linvel_xyz)}")
+        ggLog.info(f"body_linvel_xyz unwrapped storage = {th._C._functorch.get_unwrapped(body_linvel_xyz).storage()}")
         body_rel_linvel_xyz = th_quat_rotate(body_linvel_xyz,     conj_body_quat_xyzw)
         body_rel_angvel_xyz = th_quat_rotate(body_angvel_xyz,     conj_body_quat_xyzw)
 
@@ -801,10 +829,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             statenorm = self._state_helper.normalize(state)
             for substate in [self.STATE_ROBOT, self.STATE_EXTRINSIC, self.STATE_INTERNAL, self.STATE_ACT, self.STATE_ROBOT_STATS]:
                 i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
-                # i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                 i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
-                # i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                 i["vec_obs"] = self._last_obs["vec"]
+                # Would make sense to put the labels in the info_space definition, maybe make an info_helper?
+                # i["state_"+substate+"_labels"] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
+                # i["statenorm_"+substate+"_labels"] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                 # i["vec_obs_labels"] = to_string_tensor([n for n in self._state_helper.observation_names()["vec"]])
             
         i.update({"ep_config."+k:v for k,v in dataclasses.asdict(self._current_episode_config).items()})

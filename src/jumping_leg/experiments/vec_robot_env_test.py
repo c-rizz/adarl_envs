@@ -62,6 +62,19 @@ def robot_env_builder(  seed,
                                                        real_time_factor=None,
                                                        vec_size=num_envs,
                                                        th_device=th.device("cpu"))
+    elif mode == "mjx":
+        from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
+        import jax
+        env_controller = MjxJointImpedanceAdapter(vec_size=num_envs,
+                                                  enable_rendering=env_builder_args.pop("enable_rendering"),
+                                                  jax_device=jax.devices("gpu")[0],
+                                                  output_th_device = th.device("cpu",0),
+                                                  sim_step_dt=1/1024,
+                                                  step_length_sec=stepLength_sec,
+                                                  realtime_factor=-1,
+                                                  gui_env_index=0,
+                                                  default_max_joint_impedance_ctrl_torque=100.0,
+                                                  show_gui=False)
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)
@@ -69,7 +82,8 @@ def robot_env_builder(  seed,
     time.sleep(1)
 
     
-    urdf_string = adarl.utils.utils.compile_xacro_string(  model_definition_string=Path(model_file).read_text())
+    urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(model_file).read_text(),
+                                                            model_kwargs={"use_cylinders" : "false"})
 
     lrenv = RobotVecEnv(action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
                         action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
@@ -194,7 +208,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_rendering" : True,
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
-        "mode" : "pybullet",
+        "mode" : "mjx", #"pybullet",
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" : 0.1,
@@ -217,7 +231,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
         "th_device" : env_device,
-        "video_save_freq" : 10,
+        "video_save_freq" : 1,
         "goal_speed_minmax" : (0,2),
         "use_contacts" : False,
         "frame_stack_length" : 1,
@@ -326,7 +340,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 gamma=0.99,
                                                 target_tau = 0.005,
                                                 batch_size=1024,
-                                                buffer_size=10_000_000,
+                                                buffer_size=100_000,
                                                 total_steps=100_000_000,
                                                 train_freq_vstep=5,
                                                 grad_steps=10,
@@ -341,7 +355,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 collector_device=env_device,
                 debug_level=0,
                 max_episode_duration=max_steps_per_episode,
-                validation_buffer_size=100_000,
+                validation_buffer_size=10_000,
                 validation_batch_size=250,
                 validation_holdout_ratio=0.02,
                 no_wandb=args["no_wandb"])

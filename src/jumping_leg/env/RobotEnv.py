@@ -22,6 +22,7 @@ import dataclasses
 import numpy as np
 import torch as th
 import time
+from adarl.utils.utils import isinstance_noimport
 
 class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
@@ -630,31 +631,35 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
         internal_state = self._current_state[self.STATE_INTERNAL][0]
         step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
-        stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
-        if not th.all(th.isfinite(stats_minmaxavgstd_j_pvae)):
-            raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_j_pvae}")
-
-        if step_count!=-1 and internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0:
-            safety_triggered = True
-        elif step_count>=1: # stats are not valid at step 0
-            triggered_limits = th.logical_or(stats_minmaxavgstd_j_pvae[0, :, [0,1,3]] < self._safe_limits_minmax_j_pve[0],
-                                             stats_minmaxavgstd_j_pvae[1, :, [0,1,3]] > self._safe_limits_minmax_j_pve[1])
-            safety_triggered = th.any(triggered_limits)
-            if safety_triggered:       
-                elements = np.array([[f"{jn[1]}_pos",f"{jn[1]}_vel",f"{jn[1]}_eff"] for jn in self._configuration.controlled_joints], dtype=object) #type: ignore
-                triggered = []
-                for i in np.ndindex(elements.shape):
-                    if triggered_limits[i]:
-                        triggered.append(elements[i])
-                if not self._configuration.quiet:
-                    ggLog.info( f"SAFETY TRIGGERED (step {step_count.item()}):"
-                                f"\n    triggered ({len(triggered)}) = {triggered}"
-                                # f"\n    joints_minmax = \n{stats_minmaxavgstd_j_pve[:2]}"
-                                # f"\n    j_safety_lims  = \n{self._safe_limits_minmax_j_pve} "
-                                )
+        safety_triggered = step_count!=-1 and internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
+        
+        if not isinstance(self._adapter, PyBulletAdapter): # for now the only adapter that really supports joint stats
+            stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
+            if not th.all(th.isfinite(stats_minmaxavgstd_j_pvae)):
+                raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_j_pvae}")
+            if step_count>=1: # stats are not valid at step 0
+                triggered_limits = th.logical_or(stats_minmaxavgstd_j_pvae[0, :, [0,1,3]] < self._safe_limits_minmax_j_pve[0],
+                                                stats_minmaxavgstd_j_pvae[1, :, [0,1,3]] > self._safe_limits_minmax_j_pve[1])
+                safety_triggered = th.any(triggered_limits)
+                if safety_triggered:       
+                    elements = np.array([[f"{jn[1]}_pos",f"{jn[1]}_vel",f"{jn[1]}_eff"] for jn in self._configuration.controlled_joints], dtype=object) #type: ignore
+                    triggered = []
+                    for i in np.ndindex(elements.shape):
+                        if triggered_limits[i]:
+                            triggered.append(elements[i])
+                    if not self._configuration.quiet:
+                        ggLog.info( f"SAFETY TRIGGERED (step {step_count.item()}):"
+                                    f"\n    triggered ({len(triggered)}) = {triggered}"
+                                    # f"\n    joints_minmax = \n{stats_minmaxavgstd_j_pve[:2]}"
+                                    # f"\n    j_safety_lims  = \n{self._safe_limits_minmax_j_pve} "
+                                    )
+            else:
+                safety_triggered = False
+        elif isinstance_noimport(self._adapter, "RosXbotAdapter"):
+            safety_triggered = self._adapter.safety_triggered()
+            stats_minmaxavgstd_j_pvae = th.zeros((4,len(self._adapter.get_monitored_joints()), 4), device=self._configuration.th_device) # TODO, put here some more proper values
         else:
-            safety_triggered = False
-
+            raise NotImplementedError()
 
         new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : 1 if safety_triggered else 0,
                                 self.INTERNAL_FIELDS.STEP_COUNT : step_count+1}

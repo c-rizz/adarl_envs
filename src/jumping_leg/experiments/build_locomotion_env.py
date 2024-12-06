@@ -47,7 +47,7 @@ def locomotion_env_builder( seed,
         env_controller = GazeboAdapter(stepLength_sec=stepLength_sec)
     elif mode == "xbot":
         from adarl_ros.adapters.RosXbotAdapter import RosXbotAdapter
-        env_controller = RosXbotAdapter(model_name = "leg",
+        env_controller = RosXbotAdapter(model_name = robot_name,
                                         stepLength_sec = stepLength_sec,
                                         forced_ros_master_uri = None,
                                         maxObsDelay = float("+inf"),
@@ -64,7 +64,7 @@ def locomotion_env_builder( seed,
                                         jpos_cmd_max_acc_default = 1.0)
     elif mode == "xbot-gazebo":
         from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
-        env_controller = RosXbotGazeboAdapter(model_name = "leg",
+        env_controller = RosXbotGazeboAdapter(model_name = robot_name,
                                         stepLength_sec = stepLength_sec,
                                         forced_ros_master_uri = None,
                                         maxObsDelay = float("+inf"),

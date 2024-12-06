@@ -40,10 +40,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
-        "enable_rendering" : args["headless"],
+        "enable_rendering" : not args["gui"],
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
-        "mode" : "pybullet",
+        "mode" : args["mode"],
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" : 0.1,
@@ -78,7 +78,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
-        "show_gui" : not args["headless"]
+        "show_gui" : args["gui"]
     }
 
     return play(seed,
@@ -87,7 +87,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder = quad_env_builder,
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
-                render=args["headless"])
+                render=not args["gui"])
 
 def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_length_sec : float, render : bool):
     
@@ -241,9 +241,9 @@ if __name__ == "__main__":
     ap.add_argument("--seedsOffset", default=0, type=int, help="Offset the used seeds by this amount")
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--pretrained", required = True, type=str, help="Model to load")
-    ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use")
+    ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use [pybullet,xbot-gazebo]")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
-    ap.add_argument("--headless", default=True, action='store_true', help="Do not start the gui, instead stream renderings")
+    ap.add_argument("--gui", default=False, action='store_true', help="Do not start the gui, instead stream renderings")
     ap.add_argument("--record", default=False, action='store_true', help="Record episode videos")
     
     ap.set_defaults(feature=True)

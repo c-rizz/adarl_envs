@@ -123,6 +123,7 @@ def locomotion_env_builder( seed,
                             reward_velocity_weight = env_builder_args.pop("reward_velocity_weight"),
                             reward_height_weight=env_builder_args.pop("reward_height_weight"),
                             reward_pitchnroll_weight=env_builder_args.pop("reward_pitchnroll_weight"),
+                            reward_position_weight=env_builder_args.pop("reward_position_weight"),
                             robot_main_body_link=robot_main_body_link,
                             robot_name=robot_name,
                             robot_root_link=robot_root_link,
@@ -153,7 +154,8 @@ def locomotion_env_builder( seed,
                             obs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),
                             obs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_angvel_ep_mustd_step_std"),
                             obs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_noise_posz_ep_mustd_step_std"),
-                            obs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_noise_gravity_ep_mustd_step_std")
+                            obs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_noise_gravity_ep_mustd_step_std"),
+                            ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

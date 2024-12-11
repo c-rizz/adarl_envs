@@ -7,7 +7,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import copy
     import torch as th
     from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams
-    from autoencoding_rl.experiments.asac3.asac3_train import asac3_train
     import os
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
@@ -32,13 +31,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_health_weight" : 0.0,
         "reward_position_limit_weight" : 0.5,
         "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 0.1,
+        "reward_torque_weight" : 1.0,
         "reward_torquediff_weight" : 0.0,
         "reward_tracking_weight" : 2.0,
         "reward_velocity_limit_weight" : 0.5,
         "reward_velocity_weight" : 1.0,
         "reward_height_weight" : 1.0,
         "reward_pitchnroll_weight" : 1.0,
+        "reward_position_weight" : 1.0,
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
@@ -52,11 +52,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
         "init_on_reset_ratio" : 0.9,
-        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
-        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0)
+        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.001),
+        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.001),
+        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.001),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.001),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.001),
+        "ui_camera_resolution_hw" : (144,256)
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

@@ -32,6 +32,8 @@
 	<xacro:arg name="hip_friction" default="0.1" />
 	<xacro:arg name="knee_friction" default="0.1" />
 
+	<xacro:arg name="use_cylinders" default="True" />
+
 
 
 
@@ -59,6 +61,8 @@
 	
 	<xacro:property name="knee_friction" default="$(arg knee_friction)" />
 	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
+
+	<xacro:property name="use_cylinders" default="$(arg use_cylinders)" />
 
 
     <xacro:property name="hip_x_min_pos" default="-2.4" />
@@ -134,6 +138,7 @@
                         hip_y_max_pos = "${hip_y_max_pos}"
                         knee_min_pos = "${knee_min_pos}"
                         knee_max_pos = "${knee_max_pos}"
+                        use_cylinders = "${use_cylinders}"
                         />
 
     <xacro:leg_simple   hip_x_offset = "${front_legs_pos}"
@@ -159,6 +164,7 @@
                         hip_y_max_pos = "${hip_y_max_pos}"
                         knee_min_pos = "${knee_min_pos}"
                         knee_max_pos = "${knee_max_pos}"
+                        use_cylinders = "${use_cylinders}"
                         />
 
     <xacro:leg_simple   hip_x_offset = "${back_legs_pos}"
@@ -184,6 +190,7 @@
                         hip_y_max_pos = "${hip_y_max_pos}"
                         knee_min_pos = "${knee_min_pos}"
                         knee_max_pos = "${knee_max_pos}"
+                        use_cylinders = "${use_cylinders}"
                         />
 
     <xacro:leg_simple   hip_x_offset = "${back_legs_pos}"
@@ -209,6 +216,7 @@
                         hip_y_max_pos = "${hip_y_max_pos}"
                         knee_min_pos = "${knee_min_pos}"
                         knee_max_pos = "${knee_max_pos}"
+                        use_cylinders = "${use_cylinders}"
                         />
 
     <link name="world"/>

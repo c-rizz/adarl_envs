@@ -2,7 +2,7 @@
 <robot name="leg" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
 	<!-- <xacro:arg name="hip_y_offset" default="0.2146" />  -->
-	<xacro:arg name="hip_y_offset" default="0.3" />
+	<xacro:arg name="hip_y_offset" default="0.15" />
 
 	<xacro:arg name="thigh_width" default="0.05" />
 	<xacro:arg name="thigh_height" default="0.3" />
@@ -38,6 +38,8 @@
 	<xacro:arg name="rail_roll" default="0.0" />
 	<xacro:arg name="rail_pitch" default="0.0" />
 	<xacro:arg name="rail_yaw" default="0.0" />
+
+	<xacro:arg name="use_cylinders" default="True" />
 
 
 	<xacro:property name="hip_y_offset"  default="$(arg hip_y_offset)" /> 
@@ -76,6 +78,8 @@
 	<xacro:property name="rail_pitch" default="$(arg rail_pitch)" />
 	<xacro:property name="rail_yaw" default="$(arg rail_yaw)" />
 
+	<xacro:property name="use_cylinders" default="$(arg use_cylinders)" />
+
 
 	<material name="almost_white">
 		<color rgba="0.9 0.9 0.9 1"/>
@@ -106,6 +110,20 @@
 		</inertial>
     </xacro:macro>
 
+	<xacro:macro name="bar" params="use_cylinder
+									length
+									thickness">
+        <xacro:if value="${use_cylinder}">
+			<geometry>
+				<cylinder length="${length}" radius="${thickness/2}" />
+			</geometry>
+		</xacro:if>
+		<xacro:unless value="${use_cylinder}">
+			<geometry>
+				<box size="${thickness} ${thickness} ${length}" />
+			</geometry>
+		</xacro:unless>
+    </xacro:macro>
 
 
 
@@ -176,15 +194,11 @@
 	<link name="thigh_link1">
 		<visual name = "thigh_link_v">
 			<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
-			<geometry>
-                <cylinder length="${thigh_height}" radius="${thigh_width/2}" />
-			</geometry>
+			<xacro:bar length="${thigh_height}" thickness="${thigh_width}" use_cylinder="${use_cylinders}"/>
 	   	</visual>
 		<collision name = "thigh_link_c">
 			<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
-			<geometry>
-                <cylinder length="${thigh_height}" radius="${thigh_width/2}" />
-			</geometry>
+			<xacro:bar length="${thigh_height}" thickness="${thigh_width}" use_cylinder="${use_cylinders}"/>
 	   	</collision>
 		<xacro:small_inertial />
 	</link>
@@ -214,15 +228,11 @@
 		<!-- shin_height is the knee to foot tip distance, so the actual shin lenght is determined accordingly-->
 		<visual name = "shin_link_v">
 			<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
-			<geometry>
-                <cylinder length="${shin_height-shin_width}" radius="${shin_width/2}" />
-			</geometry>
+			<xacro:bar length="${shin_height-shin_width}" thickness="${shin_width}" use_cylinder="${use_cylinders}"/>
 	   	</visual>
 		<collision name = "shin_link_c">
 			<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
-			<geometry>
-                <cylinder length="${shin_height-shin_width}" radius="${shin_width/2}" />
-			</geometry>
+			<xacro:bar length="${shin_height-shin_width}" thickness="${shin_width}" use_cylinder="${use_cylinders}"/>
 		</collision>
 		<xacro:small_inertial />
 
@@ -312,6 +322,7 @@
     	<child link="slider_link"/>
 		<dynamics damping="0.0" friction="${rail_friction}"/>
        	<limit lower="0.0" upper="2.0" effort="2000000" velocity="100000"/>
+    	<origin xyz="0 ${hip_y_offset} 0" rpy="0 0 0"/>
         <axis xyz="0 0 1"/>
 	</joint>
     <joint name="hip_joint_1" type="revolute">

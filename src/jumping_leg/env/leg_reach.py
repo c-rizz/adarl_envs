@@ -538,7 +538,7 @@ class LegReachEnv(ControlledEnv):
 
 
 
-    def buildSimulation(self):
+    def build(self):
         # ggLog.info("Building env")
         envCtrlName = type(self._adapter).__name__
         if envCtrlName == "PyBulletJointImpedanceAdapter":
@@ -553,7 +553,7 @@ class LegReachEnv(ControlledEnv):
                                                                                                                           "gazebo/all_gazebo_xbot.launch"),
                                                            launch_file_args={"gui":"true"})
 
-    def _destroySimulation(self):
+    def _destroy(self):
         self._adapter.destroy_scenario()
 
 

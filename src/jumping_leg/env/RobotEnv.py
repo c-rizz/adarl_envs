@@ -1,7 +1,6 @@
 from __future__ import annotations
 from adarl.adapters.BaseJointImpedanceAdapter import BaseJointImpedanceAdapter
 from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
-from adarl.adapters.PyBulletAdapter import PyBulletAdapter
 from adarl.envs.ControlledEnv import ControlledEnv
 from adarl.utils.robot_helpers import Robot
 from adarl.utils.utils import to_string_tensor, th_quat_rotate, th_quat_conj, ros_rpy_to_quaternion_xyzw
@@ -39,7 +38,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         history_length : int
         homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float]
         spawn_root_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float]
-        homing_joint_pose : dict[tuple[str,str],th.Tensor]
+        homing_ctrl_joints_pvesd : th.Tensor
         joint_physical_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_damping : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
@@ -73,6 +72,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         noise_posz_ep_mustdstd : th.Tensor
         noise_gravity_ep_mustdstd : th.Tensor
         ui_rel_camera_pose_dist_pitch_yaw : th.Tensor
+        ui_camera_resolution_hw : tuple[int,int]
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -152,7 +152,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         obs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor
+                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        ui_camera_resolution_hw : tuple[int,int] = (144,256)
                         ):
         
         self._rng = th.Generator(device=th_device)
@@ -210,6 +211,11 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
             ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
 
+        obs_dtype = th.float32
+        homing_ctrl_joints_pvesd = th.as_tensor([(homing_joint_pose[jn], 0, 0, safe_stiffness, safe_damping)
+                                    for jn in controlled_joints_rn],
+                                    device=th_device,
+                                    dtype=obs_dtype)
         self._configuration = self.Configuration(  action_delay_mustd = th.as_tensor(action_delay_mustd, device=th_device),
                                                             action_exp_smoothing_1s = action_exp_smoothing_1s,
                                                             action_noise_mustd = th.as_tensor(action_noise_mustd, device=th_device),
@@ -220,7 +226,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             goal_err_exp_smoothing_1s = goal_err_exp_smoothing_1s,
                                                             history_length = max(2,frame_stack_length),
                                                             homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
-                                                            homing_joint_pose = map_tensor_tree(homing_joint_pose, lambda v: th.as_tensor(v, device=th_device)),
+                                                            homing_ctrl_joints_pvesd = homing_ctrl_joints_pvesd,
                                                             joint_physical_limits_minmax_pve = phys_limits_minmax_pve,
                                                             joint_safe_limits_minmax_damping = minmax_damping_thdict,
                                                             joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
@@ -228,7 +234,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             main_body_link=(robot_name,robot_main_body_link),
                                                             robot_root_link=(robot_name,robot_root_link),
                                                             model_urdf_string=robot_urdf_string,
-                                                            obs_dtype = th.float32,
+                                                            obs_dtype = obs_dtype,
                                                             observe_body_state = observe_body_velocity,
                                                             original_max_epsteps = maxStepsPerEpisode,
                                                             initial_pose_randomization = initial_pose_randomization,
@@ -254,7 +260,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             noise_angvel_ep_mustdstd =  th.as_tensor(obs_noise_angvel_ep_mustd_step_std, device=th_device),
                                                             noise_posz_ep_mustdstd =    th.as_tensor(obs_noise_posz_ep_mustd_step_std, device=th_device),
                                                             noise_gravity_ep_mustdstd = th.as_tensor(obs_noise_gravity_ep_mustd_step_std, device=th_device),
-                                                            ui_rel_camera_pose_dist_pitch_yaw = th.as_tensor([2.5, 30/180*3.14159, -90/180*3.14159], device=th_device)
+                                                            ui_rel_camera_pose_dist_pitch_yaw = th.as_tensor([2.5, 30/180*3.14159, -90/180*3.14159], device=th_device),
+                                                            ui_camera_resolution_hw = ui_camera_resolution_hw
                                                             )
 
         self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
@@ -425,7 +432,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             arrow_pose = robot_pose
             self._spawned = True
             camera_file = adarl.utils.utils.pkgutil_get_path("adarl","models/simple_camera.sdf.xacro")
-            if isinstance(self._adapter, PyBulletAdapter):
+            if isinstance_noimport(self._adapter, "PyBulletAdapter"):
                 self._adapter.spawn_model(model_definition_string=self._configuration.model_urdf_string,
                                             model_name=self._configuration.robot_name,
                                             pose=robot_pose,
@@ -434,18 +441,20 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                         model_name="simple_camera",
                                         pose=camera_pose,
                                         model_format="sdf.xacro",
-                                        model_kwargs={"camera_width":"256","camera_height":"144","frame_rate":1/self._intendedStepLength_sec})
+                                        model_kwargs={"camera_width":self._configuration.ui_camera_resolution_hw[1],
+                                                      "camera_height":self._configuration.ui_camera_resolution_hw[0],
+                                                      "frame_rate":1/self._intendedStepLength_sec})
             if self._configuration.show_goal:
                 self._adapter.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/red_arrow.urdf.xacro"),
                                             model_name="arrow",
                                             pose=arrow_pose,
                                             model_format="urdf.xacro",
-                                            model_kwargs={"add_world_link":str(isinstance(self._adapter, PyBulletAdapter))})
+                                            model_kwargs={"add_world_link":str(isinstance_noimport(self._adapter, "PyBulletAdapter"))})
                 self._adapter.spawn_model(model_file=adarl.utils.utils.pkgutil_get_path("jumping_leg","models/axes.urdf.xacro"),
                                             model_name="axes",
                                             pose=build_pose(0,0,0,0,0,0,1),
                                             model_format="urdf.xacro",
-                                            model_kwargs={"add_world_link":str(isinstance(self._adapter, PyBulletAdapter))})
+                                            model_kwargs={"add_world_link":str(isinstance_noimport(self._adapter, "PyBulletAdapter"))})
             self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
             # self._robot_model.remove_collision_pairs([("rail_link_0","slider_link_0")])            
             self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
@@ -474,15 +483,13 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         original_collision_pairs = self._robot_model.get_enabled_collision_pairs()
         self._robot_model.set_collision_pairs("all")
         self._robot_model.remove_collision_pairs(self._always_present_collisions)
-        homing = th.as_tensor([self._configuration.homing_joint_pose[jn] for jn in self._configuration.controlled_joints],
-                                              device=self._configuration.th_device,
-                                              dtype=self._configuration.obs_dtype)
+        homing_pos = self._configuration.homing_ctrl_joints_pvesd[:,0]
         if self._configuration.initial_pose_randomization > 0:
             for i in range(1000):
                 npos = (th.rand(size=(len(self._configuration.controlled_joints),), dtype=th.float32, device=self._configuration.th_device)*2-1)*self._configuration.initial_pose_randomization
                 limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.controlled_joints], dim = 1)
                 # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
-                initial_joint_pose = ((npos>=0)*((limits_minmax[1]-homing)*npos + homing) + (npos<0)*((homing-limits_minmax[0])*npos + homing))
+                initial_joint_pose = ((npos>=0)*((limits_minmax[1]-homing_pos)*npos + homing_pos) + (npos<0)*((homing_pos-limits_minmax[0])*npos + homing_pos))
                 self._robot_model.set_joint_pose_by_names({jn[1]:initial_joint_pose[i].cpu().numpy() for i,jn in enumerate(self._configuration.controlled_joints)})
                 if self._configuration.robot_is_floating:
                     self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:np.array([self._configuration.homing_body_pose_xyz_xyzw])})
@@ -493,7 +500,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             if not found_good_configuration:
                 ggLog.warn(f"Failed to find initial joint configuration. Last collisions = {collisions}, always present collisions = {self._always_present_collisions}")
         if not found_good_configuration:
-            initial_joint_pose = homing
+            initial_joint_pose = homing_pos
         # ggLog.info(f"initial_jpose = {initial_joint_pose}, homing = {homing}")
         self._robot_model.set_collision_pairs(original_collision_pairs)
         self._current_episode_config = RobotEnv.EpisodeConfiguration(   initial_ctrl_joint_pose = initial_joint_pose,
@@ -516,21 +523,21 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                         orientation_xyzw = th.tensor(self._configuration.homing_body_pose_xyz_xyzw[3:7], device=self._configuration.th_device),
                                                                         pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})
-        self._adapter.setJointsStateDirect({jn:JointState(  position=self._current_episode_config.initial_ctrl_joint_pose[i],
+        jpose = self._current_episode_config.initial_ctrl_joint_pose
+        self._adapter.setJointsStateDirect({jn:JointState(  position=jpose[i],
                                                             rate = 0,
                                                             effort = 0) for i,jn in enumerate(self._configuration.controlled_joints)})
-        start_jimp : dict[tuple[str,str], tuple] = {jn:(self._configuration.homing_joint_pose[jn],
-                                                        0,
-                                                        0,
-                                                        self._configuration.safe_stiffness,
-                                                        self._configuration.safe_damping) 
-                                                    for jn in self._configuration.controlled_joints}         
-        self._adapter.setJointsImpedanceCommand(start_jimp)
-        self._adapter.apply_joint_impedances(start_jimp)
-        self._last_sent_pvesd = start_jimp
+        initial_jimp_cmd = th.stack([jpose,
+                                    th.zeros_like(jpose),
+                                    th.zeros_like(jpose),
+                                    th.full_like(jpose, self._configuration.safe_stiffness),
+                                    th.full_like(jpose, self._configuration.safe_damping)], dim=1)
+        self._adapter.setJointsImpedanceCommand(initial_jimp_cmd)
+        self._adapter.apply_joint_impedances(initial_jimp_cmd)
+        self._last_sent_pvesd = {jn:initial_jimp_cmd[i] for i,jn in enumerate(self._configuration.controlled_joints)}
 
     @override
-    def buildSimulation(self):
+    def build(self):
         envCtrlName = type(self._adapter).__name__
         if envCtrlName == "PyBulletJointImpedanceAdapter":
             self._adapter.build_scenario()
@@ -547,7 +554,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
             raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
 
     @override
-    def _destroySimulation(self):
+    def _destroy(self):
         self._adapter.destroy_scenario()
 
 
@@ -624,7 +631,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         body_linvel_xyz = body_state.pos_velocity_xyz
         body_angvel_xyz = body_state.ang_velocity_xyz
         body_position_xyz = body_state.pose.position
-        gravity_vec         = th_quat_rotate(th.tensor([0,0,-1]), th_quat_conj(body_state.pose.orientation_xyzw))
+        gravity_vec         = th_quat_rotate(th.tensor([0.0,0,-1]), th_quat_conj(body_state.pose.orientation_xyzw))
         body_rel_linvel_xyz = th_quat_rotate(body_linvel_xyz,     th_quat_conj(body_state.pose.orientation_xyzw))
         body_rel_angvel_xyz = th_quat_rotate(body_angvel_xyz,     th_quat_conj(body_state.pose.orientation_xyzw))
 
@@ -633,7 +640,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
         safety_triggered = step_count!=-1 and internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         
-        if not isinstance(self._adapter, PyBulletAdapter): # for now the only adapter that really supports joint stats
+        if not isinstance_noimport(self._adapter, "PyBulletAdapter"): # for now the only adapter that really supports joint stats
             stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
             if not th.all(th.isfinite(stats_minmaxavgstd_j_pvae)):
                 raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_j_pvae}")

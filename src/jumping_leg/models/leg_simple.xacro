@@ -22,6 +22,21 @@
         </contact>
     </xacro:macro>
 
+	<xacro:macro name="bar" params="use_cylinder
+									length
+									thickness">
+        <xacro:if value="${use_cylinder}">
+			<geometry>
+				<cylinder length="${length}" radius="${thickness/2}" />
+			</geometry>
+		</xacro:if>
+		<xacro:unless value="${use_cylinder}">
+			<geometry>
+				<box size="${thickness} ${thickness} ${length}" />
+			</geometry>
+		</xacro:unless>
+    </xacro:macro>
+
 	<xacro:macro name="leg_simple" params="hip_x_offset
 											hip_y_offset
 											hip_z_offset
@@ -44,7 +59,8 @@
 											hip_y_min_pos:=-2.4
 											hip_y_max_pos:=2.4
 											knee_min_pos:=-2.4
-											knee_max_pos:=2.4">
+											knee_max_pos:=2.4
+											use_cylinders:=true">
 
 			<xacro:if value="${is_left_leg}">
 				<xacro:property name="exterior_y_direction" value="1"/>
@@ -59,15 +75,11 @@
 			<link name="thigh_link_${leg_name}">
 				<visual name = "thigh_link_v_${leg_name}">
 					<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
-					<geometry>
-						<cylinder length="${thigh_height}" radius="${thigh_width/2}" />
-					</geometry>
+					<xacro:bar length="${thigh_height}" thickness="${thigh_width}" use_cylinder="${use_cylinders}"/>
 				</visual>
 				<collision name = "thigh_link_c_${leg_name}">
 					<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
-					<geometry>
-						<cylinder length="${thigh_height}" radius="${thigh_width/2}" />
-					</geometry>
+					<xacro:bar length="${thigh_height}" thickness="${thigh_width}" use_cylinder="${use_cylinders}"/>
 				</collision>
 				<xacro:small_inertial />
 		        <xacro:leg_contact_params />
@@ -98,15 +110,11 @@
 				<!-- shin_height is the knee to foot tip distance, so the actual shin lenght is determined accordingly-->
 				<visual name = "shin_link_v_${leg_name}">
 					<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
-					<geometry>
-						<cylinder length="${shin_height-shin_width}" radius="${shin_width/2}" />
-					</geometry>
+					<xacro:bar length="${shin_height-shin_width}" thickness="${shin_width}" use_cylinder="${use_cylinders}"/>
 				</visual>
 				<collision name = "shin_link_c_${leg_name}">
 					<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
-					<geometry>
-						<cylinder length="${shin_height-shin_width}" radius="${shin_width/2}" />
-					</geometry>
+					<xacro:bar length="${shin_height-shin_width}" thickness="${shin_width}" use_cylinder="${use_cylinders}"/>
 				</collision>
 				<xacro:small_inertial />
 		        <xacro:leg_contact_params />

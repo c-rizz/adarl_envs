@@ -719,7 +719,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         t1 = time.monotonic()
         self._update_stats()
         tf = time.monotonic()
-        ggLog.info(f"update_state: {t1-t0} update_stats: {tf-t1}")
+        # ggLog.info(f"update_state: {t1-t0} update_stats: {tf-t1}")
         self._last_step_simtime = self._adapter.getEnvTimeFromReset()
         # ggLog.info(f"on_step(): {self._current_state[self.STATE_ROBOT][0,0]}")
 

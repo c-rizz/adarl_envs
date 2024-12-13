@@ -287,26 +287,26 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.001),
         "ui_camera_resolution_hw" : (144,256)
     }
-    # video_eval_env_builder_args = copy.deepcopy(env_builder_args)
-    # video_eval_env_builder_args["enable_rendering"] = True
-    # video_eval_env_builder_args["verbose_infos"] = True
-    # video_eval_env_builder_args["video_save_freq"] = 1
-    # eval_conf_video_det = {
-    #     "name" : "video_det",
-    #     "deterministic" : True,
-    #     "eval_freq_ep" : 10*train_envs,
-    #     "eval_eps" : 1,
-    #     "env_builder_args" : video_eval_env_builder_args,
-    #     "num_envs" : 1
-    # }
-    # eval_conf_video_stoch = {
-    #     "name" : "video_stoch",
-    #     "deterministic" : False,
-    #     "eval_freq_ep" : 10*train_envs,
-    #     "eval_eps" : 1,
-    #     "env_builder_args" : video_eval_env_builder_args,
-    #     "num_envs" : 1
-    # }
+    video_eval_env_builder_args = copy.deepcopy(env_builder_args)
+    video_eval_env_builder_args["enable_rendering"] = True
+    video_eval_env_builder_args["verbose_infos"] = True
+    video_eval_env_builder_args["video_save_freq"] = 1
+    eval_conf_video_det = {
+        "name" : "video_det",
+        "deterministic" : True,
+        "eval_freq_ep" : 10*train_envs,
+        "eval_eps" : 1,
+        "env_builder_args" : video_eval_env_builder_args,
+        "num_envs" : 1
+    }
+    eval_conf_video_stoch = {
+        "name" : "video_stoch",
+        "deterministic" : False,
+        "eval_freq_ep" : 10*train_envs,
+        "eval_eps" : 1,
+        "env_builder_args" : video_eval_env_builder_args,
+        "num_envs" : 1
+    }
     # video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
     # video_norand_eval_env_builder_args["enable_rendering"] = True
     # video_norand_eval_env_builder_args["verbose_infos"] = True
@@ -357,8 +357,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "num_envs" : 1
     # }
     eval_configuration = [  
-                            # eval_conf_video_det,
-                            # eval_conf_video_stoch,
+                            eval_conf_video_det,
+                            eval_conf_video_stoch,
                             # eval_conf_run_1ms,
                             # eval_conf_video_norand_det,
                             # #  eval_conf_feasible,
@@ -385,7 +385,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 total_steps=100_000_000,
                                                 train_freq_vstep=5,
                                                 grad_steps=10,
-                                                learning_starts=max_steps_per_episode*train_envs*10,
+                                                learning_starts=max_steps_per_episode*1000,
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode,
                                                 reference_init_args =  #{}

@@ -179,7 +179,8 @@ def locomotion_env_builder( seed,
         ggLog.warn(f"Unused env_builder_args: {env_builder_args}")
     return env, 1/stepLength_sec
 
-video_recorder_kwargs : dict[str,typing.Any]  = dict(vec_obs_key="vec",
+video_recorder_kwargs : dict[str,typing.Any]  = dict(
+                            vec_obs_key="vec",
                             overlay_text_xy=(0.025,0.025),
                             overlay_text_height=0.035,
                             overlay_text_func=lambda vo, a, r, te, tr, info:   

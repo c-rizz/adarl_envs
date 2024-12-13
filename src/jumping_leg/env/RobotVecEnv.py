@@ -655,6 +655,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     
     def _get_cam_pose_xyz_xyzw(self):
         cam_rel_pos_dist_pitch_yaw = self._configuration.ui_rel_camera_pose_dist_pitch_yaw
+        ggLog.info(f"cam_rel_pos_dist_pitch_yaw = {cam_rel_pos_dist_pitch_yaw}")
         cam_rel_pos  = self._thtens([-cam_rel_pos_dist_pitch_yaw[0], 0.0, 0.0])
         cam_rel_rpy  = self._thtens([0.0, cam_rel_pos_dist_pitch_yaw[1], cam_rel_pos_dist_pitch_yaw[2]])
         cam_rel_quat = ros_rpy_to_quaternion_xyzw_th(cam_rel_rpy)
@@ -669,9 +670,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # camera by default looks down the x axis
         cam_link_state = th.zeros((13,), device=self._configuration.th_device, dtype=th.float32)
         cam_link_state[:7] = self._get_cam_pose_xyz_xyzw()
-        if isinstance_noimport(self._adapter, "MjxAdapter"):
-             # MJ uses "-Z forward, +X right, +Y up, PyBullet (and others) use +X forward +Y left, +Z up"
-            cam_link_state[3:7] = quat_mul_xyzw(cam_link_state[3:7], self._thtens([-0.5,0.5,0.5,-0.5]))
+        ggLog.info(f"cam_link_state = {cam_link_state[:7]}")
+        # if isinstance_noimport(self._adapter, "MjxAdapter"):
+        #      # MJ uses "-Z forward, +X right, +Y up, PyBullet (and others) use +X forward +Y left, +Z up"
+        #     cam_link_state[3:7] = quat_mul_xyzw(cam_link_state[3:7], self._thtens([-0.5,0.5,0.5,-0.5]))
 
 
         # cam_link_state[:7] = th.as_tensor([0.0, -2.0, 0.5, 0.0, 0.0, 0.0, 1.0], device=self._configuration.th_device, dtype=th.float32)
@@ -714,12 +716,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     @override
     def on_step(self):
-        t0 = time.monotonic()
+        # t0 = time.monotonic()
         self._update_state()
-        t1 = time.monotonic()
+        # t1 = time.monotonic()
         self._update_stats()
-        tf = time.monotonic()
-        ggLog.info(f"update_state: {t1-t0} update_stats: {tf-t1}")
+        # tf = time.monotonic()
+        # ggLog.info(f"update_state: {t1-t0} update_stats: {tf-t1}")
         self._last_step_simtime = self._adapter.getEnvTimeFromReset()
         # ggLog.info(f"on_step(): {self._current_state[self.STATE_ROBOT][0,0]}")
 

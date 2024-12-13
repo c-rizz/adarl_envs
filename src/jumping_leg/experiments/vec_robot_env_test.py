@@ -129,10 +129,23 @@ def robot_env_builder(  seed,
     # ggLog.info(f"action_space = {lrenv.action_space.shape}")
     vrunner = VecRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=log_folder+"/vec_runner.log",
                         render_envs=[0], autoreset=True)
-    vrunner = RunnerRecorderWrapper(vrunner,fps = 1/stepLength_sec, outFolder=log_folder+"/RunnerRecorder",env_index=0,
+    vrunner = RunnerRecorderWrapper(vrunner,
+                                    fps = 1/stepLength_sec,
+                                    outFolder=log_folder+"/RunnerRecorder",
+                                    env_index=0,
                                     saveFrequency_ep=video_save_freq,
                                     publish=False,
-                                    stream=True)
+                                    stream=True,
+                                    vec_obs_key="vec",
+                            overlay_text_xy=(0.025,0.025),
+                            overlay_text_height=0.035,
+                            overlay_text_func=lambda vo, a, r, te, tr, info:   
+                                    f"\n"
+                                    f"Step    {info['step_count']: .3f}\n"+
+                                    f"body_vel_rel   {info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X]].cpu().item(): .3f}, "
+                                                     f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y]].cpu().item(): .3f}, "
+                                                     f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z]].cpu().item(): .3f}\n"
+                                    f"safety         {info['state_internal'][LocomotionEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]: .2f}\n")
     env = GymVecEnvWrapper(runner=vrunner,
                             quiet=quiet)
     
@@ -259,7 +272,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
         "th_device" : env_device,
-        "video_save_freq" : 50,
+        "video_save_freq" : -1,
         "goal_speed_minmax" : (0,2),
         "use_contacts" : False,
         "frame_stack_length" : 1,
@@ -368,7 +381,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 gamma=0.99,
                                                 target_tau = 0.005,
                                                 batch_size=1024,
-                                                buffer_size=1000_000,
+                                                buffer_size=5_000_000,
                                                 total_steps=100_000_000,
                                                 train_freq_vstep=5,
                                                 grad_steps=10,
@@ -383,9 +396,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 collector_device=env_device,
                 debug_level=0,
                 max_episode_duration=max_steps_per_episode,
-                validation_buffer_size=10_000,
+                validation_buffer_size=100_000,
                 validation_batch_size=250,
-                validation_holdout_ratio=0.02,
+                validation_holdout_ratio=0.01,
                 no_wandb=args["no_wandb"])
 
 

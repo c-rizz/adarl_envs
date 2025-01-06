@@ -4,7 +4,6 @@ from __future__ import annotations
 
 
 from __future__ import annotations
-from jumping_leg.env.LocomotionEnv import LocomotionEnv
 from adarl.envs.vec.GymVecEnvWrapper import GymVecEnvWrapper
 from adarl.envs.RecorderGymWrapper import RecorderGymWrapper
 import adarl.utils.dbg.ggLog as ggLog
@@ -16,13 +15,20 @@ import typing
 from pathlib import Path
 import adarl.utils.utils
 from typing import Sequence
-from jumping_leg.env.RobotVecEnv import RobotVecEnv
+from jumping_leg.env.LocomotionVecEnv import LocomotionVecEnv
 from adarl.envs.vec.EnvRunner import EnvRunner
 from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
 import gymnasium as gym
 import copy
 
-def robot_env_builder(  seed,
+def format_tensor(t, float_precision):
+    t = t.squeeze().cpu().tolist()
+    if not isinstance(t,list):
+        t = [t]
+    t = [f"{e: .{float_precision}f}" if isinstance(e,float) else str(e) for e in t]
+    return f"[{', '.join(t)}]"
+
+def loco_env_builder(   seed,
                         log_folder,
                         env_builder_args : dict,
                         model_file : str,
@@ -31,8 +37,10 @@ def robot_env_builder(  seed,
                         robot_main_body_link : str,
                         robot_root_link : str,
                         homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
-                        controlled_joints : Sequence[str | RobotVecEnv.JOINT_FILTERS],
-                        num_envs : int):
+                        controlled_joints : Sequence[str | LocomotionVecEnv.JOINT_FILTERS],
+                        num_envs : int,
+                        disallowed_contact_links : list[tuple[str,str]],
+                        terminating_contact_pairs : list[tuple[tuple[str,str],tuple[str,str]]]):
     ggLog.info(f"Building env: thread={threading.current_thread()}, pid={os.getpid()}")
     ggLog.info(f"env_builder_args = {env_builder_args}")
     env_builder_args = copy.deepcopy(env_builder_args)
@@ -71,7 +79,7 @@ def robot_env_builder(  seed,
                                                   enable_rendering=env_builder_args.pop("enable_rendering"),
                                                   jax_device=jax.devices("gpu")[0],
                                                   output_th_device = th_device,
-                                                  sim_step_dt=1/512,
+                                                  sim_step_dt=1/1024,
                                                   step_length_sec=stepLength_sec,
                                                   realtime_factor=-1.0,
                                                   gui_env_index=0,
@@ -87,45 +95,65 @@ def robot_env_builder(  seed,
     urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(model_file).read_text(),
                                                             model_kwargs={"use_cylinders" : "false"})
 
-    lrenv = RobotVecEnv(action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
-                        action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
-                        action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
-                        adapter=env_controller,
-                        control_mode = env_builder_args.pop("control_mode"),
-                        controlled_joints=controlled_joints,
-                        goal_err_smoothing_halflife_sec = env_builder_args.pop("goal_err_smoothing_halflife_sec"),
-                        maxStepsPerEpisode=max_steps,
-                        minmax_damping=(1.0,30.0),
-                        minmax_stiffness=(50.0,1000.0),
-                        robot_main_body_link=robot_main_body_link,
-                        robot_name=robot_name,
-                        robot_root_link=robot_root_link,
-                        robot_urdf_string=urdf_string,
-                        safe_damping=env_builder_args.pop("safe_damping"),
-                        safe_stiffness=env_builder_args.pop("safe_stiffness"),
-                        safety_limits_factor=0.9,
-                        seed=seed,
-                        stepLength_sec=stepLength_sec,
-                        step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001,
-                        stop_on_safety=env_builder_args.pop("stop_on_safety"),
-                        th_device=th_device,
-                        homing_joint_pose=homing_joint_pose,
-                        frame_stack_length=env_builder_args.pop("frame_stack_length"),
-                        observe_body_velocity=True,
-                        homing_body_pose_xyz_xyzw=homing_body_pose_xyz_xyzw,
-                        control_limits_minmax_pve={},
-                        verbose_infos=env_builder_args.pop("verbose_infos"),
-                        quiet=quiet,
-                        enable_dbg_checks=True,
-                        initial_pose_randomization = env_builder_args.pop("initial_pose_randomization"),
-                        init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
-                        obs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_noise_joints_pve_ep_mustd_step_std"),
-                        obs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),
-                        obs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_angvel_ep_mustd_step_std"),
-                        obs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_noise_posz_ep_mustd_step_std"),
-                        obs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_noise_gravity_ep_mustd_step_std"),
-                        ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw")
-                        )
+    lrenv = LocomotionVecEnv(action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
+                            action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
+                            action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
+                            adapter=env_controller,
+                            control_mode = env_builder_args.pop("control_mode"),
+                            controlled_joints=controlled_joints,
+                            goal_err_smoothing_halflife_sec = env_builder_args.pop("goal_err_smoothing_halflife_sec"),
+                            maxStepsPerEpisode=max_steps,
+                            minmax_damping=(1.0,30.0),
+                            minmax_stiffness=(50.0,1000.0),
+                            robot_main_body_link=robot_main_body_link,
+                            robot_name=robot_name,
+                            robot_root_link=robot_root_link,
+                            robot_urdf_string=urdf_string,
+                            safe_damping=env_builder_args.pop("safe_damping"),
+                            safe_stiffness=env_builder_args.pop("safe_stiffness"),
+                            safety_limits_factor=0.9,
+                            seed=seed,
+                            stepLength_sec=stepLength_sec,
+                            step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001,
+                            stop_on_safety=env_builder_args.pop("stop_on_safety"),
+                            th_device=th_device,
+                            homing_joint_pose=homing_joint_pose,
+                            frame_stack_length=env_builder_args.pop("frame_stack_length"),
+                            observe_body_velocity=True,
+                            homing_body_pose_xyz_xyzw=homing_body_pose_xyz_xyzw,
+                            control_limits_minmax_pve={},
+                            verbose_infos=env_builder_args.pop("verbose_infos"),
+                            quiet=quiet,
+                            enable_dbg_checks=True,
+                            initial_pose_randomization = env_builder_args.pop("initial_pose_randomization"),
+                            init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
+                            obs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_noise_joints_pve_ep_mustd_step_std"),
+                            obs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),
+                            obs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_angvel_ep_mustd_step_std"),
+                            obs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_noise_posz_ep_mustd_step_std"),
+                            obs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_noise_gravity_ep_mustd_step_std"),
+                            ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw"),
+                            reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
+                            reward_actdiff_weight = env_builder_args.pop("reward_actdiff_weight"),
+                            reward_contacts_weight = env_builder_args.pop("reward_contacts_weight"),
+                            reward_energy_weight = env_builder_args.pop("reward_energy_weight"),
+                            reward_health_weight = env_builder_args.pop("reward_health_weight"),
+                            reward_position_limit_weight = env_builder_args.pop("reward_position_limit_weight"),
+                            reward_scale=1000/max_steps,
+                            reward_torque_limit_weight = env_builder_args.pop("reward_torque_limit_weight"),
+                            reward_torque_weight = env_builder_args.pop("reward_torque_weight"),
+                            reward_torquediff_weight = env_builder_args.pop("reward_torquediff_weight"),
+                            reward_tracking_weight = env_builder_args.pop("reward_tracking_weight"),
+                            reward_velocity_limit_weight = env_builder_args.pop("reward_velocity_limit_weight"),
+                            reward_velocity_weight = env_builder_args.pop("reward_velocity_weight"),
+                            reward_height_weight=env_builder_args.pop("reward_height_weight"),
+                            reward_pitchnroll_weight=env_builder_args.pop("reward_pitchnroll_weight"),
+                            reward_position_weight=env_builder_args.pop("reward_position_weight"),
+                            disallowed_contact_links = disallowed_contact_links,
+                            goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
+                            use_contacts=env_builder_args.pop("use_contacts"),
+                            terminating_contact_pairs=terminating_contact_pairs if env_builder_args.pop("terminate_on_body_contact") else [],
+                            )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
     # ggLog.info(f"action_space = {lrenv.action_space.shape}")
@@ -146,10 +174,12 @@ def robot_env_builder(  seed,
                                     overlay_text_func=lambda vo, a, r, te, tr, info:   
                                             f"\n"
                                             f"Step    {info['ep_step_count']: .3f}\n"+
-                                            f"body_vel_rel   {info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X]].cpu().item(): .3f}, "
-                                                            f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y]].cpu().item(): .3f}, "
-                                                            f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z]].cpu().item(): .3f}\n"
-                                            f"safety         {info['state_internal'][LocomotionEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]: .2f}\n")
+                                            f"body_abs_linvel       {format_tensor(info['state_extrinsic'][[LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z]], 3)}\n"
+                                            f"goal_abs              {format_tensor(info['goal_abs_xyz_vec'], 3)}\n"
+                                            f"goal_rel              {format_tensor(info['goal_rel_xyz_vec'], 3)}\n"
+                                            f"smoothed_linvel_error {format_tensor(info['smoothed_linvel_error'], 3)}\n"
+                                            f"linvel_error          {format_tensor(info['linvel_error'], 3)}\n"
+                                            f"safety                {info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]: .2f}\n")
     env = GymVecEnvWrapper(runner=vrunner,
                             quiet=quiet)
     
@@ -172,7 +202,7 @@ def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
                                 saveFrequency_ep=video_save_freq,
                                 **video_recorder_kwargs)
 
-def quad_env_builder(seed : int,
+def quad_loco_env_builder(seed : int,
                     run_folder : str,
                     num_envs : int, 
                     env_builder_args : dict) -> gym.vector.VectorEnv:
@@ -194,8 +224,18 @@ def quad_env_builder(seed : int,
     robot_main_body_link="body_link"
     robot_root_link="body_link"
     homing_body_pose_xyz_xyzw=(0.,0.,0.5,0.,0.,0.,1.)
-
-    return robot_env_builder(seed = seed,
+    disallowed_contact_links = [("quad","thigh_link_back_left"),
+                                ("quad","shin_link_back_left"),
+                                ("quad","thigh_link_back_right"),
+                                ("quad","shin_link_back_right"),
+                                ("quad","thigh_link_front_left"),
+                                ("quad","shin_link_front_left"),
+                                ("quad","thigh_link_front_right"),
+                                ("quad","shin_link_front_right"),
+                                ("quad","body_link")]
+    terminating_contact_pairs=[(("quad","body_link"),("ground_plane","planeLink"))]
+    
+    return loco_env_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
                             model_file = model_file,
@@ -204,8 +244,10 @@ def quad_env_builder(seed : int,
                             robot_name=robot_name,
                             robot_main_body_link=robot_main_body_link,
                             robot_root_link=robot_root_link,
-                            controlled_joints=[RobotVecEnv.JOINT_FILTERS.ALL_REVOLUTE],
-                            num_envs=num_envs)[0]
+                            controlled_joints=[LocomotionVecEnv.JOINT_FILTERS.ALL_REVOLUTE],
+                            num_envs=num_envs,
+                            disallowed_contact_links=disallowed_contact_links,
+                            terminating_contact_pairs=terminating_contact_pairs)[0]
 
 def jumping_leg_builder(seed : int,
                     run_folder : str,
@@ -220,8 +262,10 @@ def jumping_leg_builder(seed : int,
     robot_main_body_link="slider_link"
     robot_root_link="slider_link"
     homing_body_pose_xyz_xyzw=(0.,0.,0.0,0.,0.,0.,1.)
+    disallowed_contact_links = []
+    terminating_contact_pairs=[]
 
-    return robot_env_builder(seed = seed,
+    return loco_env_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
                             model_file = model_file,
@@ -230,8 +274,10 @@ def jumping_leg_builder(seed : int,
                             robot_name=robot_name,
                             robot_main_body_link=robot_main_body_link,
                             robot_root_link=robot_root_link,
-                            controlled_joints=[RobotVecEnv.JOINT_FILTERS.ALL_REVOLUTE],
-                            num_envs=num_envs)[0]
+                            controlled_joints=[LocomotionVecEnv.JOINT_FILTERS.ALL_REVOLUTE],
+                            num_envs=num_envs,
+                            disallowed_contact_links=disallowed_contact_links,
+                            terminating_contact_pairs=terminating_contact_pairs)[0]
 
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
@@ -243,7 +289,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 3
+    train_envs = 1000
     env_device = th.device("cuda",0)
     eval_freq = 5
     env_builder_args = {
@@ -257,21 +303,21 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : "mjx", #"pybullet",
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
-        "reward_acceleration_weight" : 0.1,
-        "reward_actdiff_weight" : 0.1,
+        "reward_acceleration_weight" : 0.0,
+        "reward_actdiff_weight" : 0.0,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
         "reward_health_weight" : 0.0,
-        "reward_position_limit_weight" : 0.5,
+        "reward_position_limit_weight" : 0.0,
         "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 1.0,
+        "reward_torque_weight" : 0.0,
         "reward_torquediff_weight" : 0.0,
         "reward_tracking_weight" : 2.0,
-        "reward_velocity_limit_weight" : 0.5,
-        "reward_velocity_weight" : 1.0,
+        "reward_velocity_limit_weight" : 0.0,
+        "reward_velocity_weight" : 0.0,
         "reward_height_weight" : 1.0,
         "reward_pitchnroll_weight" : 1.0,
-        "reward_position_weight" : 1.0,
+        "reward_position_weight" : 0.0,
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
@@ -281,7 +327,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_speed_minmax" : (0,2),
         "use_contacts" : False,
         "frame_stack_length" : 1,
-        "verbose_infos" : True,
+        "verbose_infos" : False,
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
         "init_on_reset_ratio" : 0.9,
@@ -374,23 +420,23 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 folderName,
                 run_id,
                 args,
-                vec_env_builder = quad_env_builder,
+                vec_env_builder = quad_loco_env_builder,
                 env_builder = None,
                 env_builder_args = env_builder_args,
                 eval_configurations = eval_configuration,
                 hyperparams = SAC_hyperparams(  device = "cuda",
                                                 q_network_arch=[256,128],
-                                                q_lr=0.001,
-                                                policy_lr=0.0005,
+                                                q_lr=0.005,
+                                                policy_lr=0.001,
                                                 policy_network_arch=[1024,512],
                                                 gamma=0.99,
                                                 target_tau = 0.005,
-                                                batch_size=4096,
+                                                batch_size=16384,
                                                 buffer_size=5_000_000,
                                                 total_steps=100_000_000,
                                                 train_freq_vstep=5,
-                                                grad_steps=50,
-                                                learning_starts=max_steps_per_episode*1000,
+                                                grad_steps=100,
+                                                learning_starts=max_steps_per_episode*train_envs,
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode,
                                                 reference_init_args =  #{}
@@ -399,7 +445,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 ),
                 checkpoint_freq=20,
                 collector_device=env_device,
-                debug_level=0,
+                debug_level=10,
                 max_episode_duration=max_steps_per_episode,
                 validation_buffer_size=100_000,
                 validation_batch_size=250,

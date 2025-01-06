@@ -141,6 +141,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 run_id,
                 args,
                 env_builder = quad_env_builder,
+                vec_env_builder = None,
                 env_builder_args = env_builder_args,
                 eval_configurations = eval_configuration,
                 hyperparams = SAC_hyperparams(  device = "cuda",

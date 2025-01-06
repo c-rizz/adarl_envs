@@ -93,7 +93,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                    "BODY_REL_ANGVEL_X",
                                                    "BODY_REL_ANGVEL_Y",
                                                    "BODY_REL_ANGVEL_Z",
-                                                   "BODY_POS_Z",
+                                                   "BODY_ABS_POS_Z",
                                                    "BODY_REL_GRAVITY_X",
                                                    "BODY_REL_GRAVITY_Y",
                                                    "BODY_REL_GRAVITY_Z"], start=0)
@@ -307,7 +307,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : [-100,100],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : [-100,100],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : [-100,100],
-                                                                self.EXTRINSIC_FIELDS.BODY_POS_Z : [-1,1],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z : [-1,1],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : [-1,1],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
@@ -683,7 +683,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : body_rel_angvel_xyz[0],
                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : body_rel_angvel_xyz[1],
                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : body_rel_angvel_xyz[2],
-                                self.EXTRINSIC_FIELDS.BODY_POS_Z : body_position_xyz[2],
+                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z : body_position_xyz[2],
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : gravity_vec[0],
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : gravity_vec[1],
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : gravity_vec[2]}

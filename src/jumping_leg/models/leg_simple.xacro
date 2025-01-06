@@ -76,6 +76,9 @@
 				<visual name = "thigh_link_v_${leg_name}">
 					<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
 					<xacro:bar length="${thigh_height}" thickness="${thigh_width}" use_cylinder="${use_cylinders}"/>
+					<material name="DarkOrange">
+						<color rgba="0.95 0.50 0.1 1.0"/>
+					</material>
 				</visual>
 				<collision name = "thigh_link_c_${leg_name}">
 					<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
@@ -111,6 +114,9 @@
 				<visual name = "shin_link_v_${leg_name}">
 					<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
 					<xacro:bar length="${shin_height-shin_width}" thickness="${shin_width}" use_cylinder="${use_cylinders}"/>
+					<material name="orange">
+						<color rgba="0.95 0.60 0.1 1.0"/>
+					</material>
 				</visual>
 				<collision name = "shin_link_c_${leg_name}">
 					<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
@@ -140,6 +146,9 @@
 					<geometry>
 						<sphere radius="${shin_width}" />
 					</geometry>
+					<material name="grey">
+						<color rgba="0.3 0.2 0.1 1.0"/>
+					</material>
 				</visual>
 				<collision>
 					<origin xyz="0 0 0" rpy="0 0 0"/>

@@ -299,7 +299,7 @@ class LocomotionEnv(RobotEnv):
         # ggLog.info( f"abs_goal = {self._locomotion_episode_config.goal_abs_linvel_xyz}, body_rel_linvel_xyz = {body_rel_linvel_xyz}, goal_rel_linvel_xyz = {goal_rel_linvel_xyz}, gravity_rel_xyz={gravity_rel_xyz}\n"
         #             f"tracking_err = {tracking_error} = norm({body_planar_rel_linvel_xyz}-{goal_rel_linvel_xyz}) = norm({body_planar_rel_linvel_xyz-goal_rel_linvel_xyz})")
         goal_body_height = 0.45
-        height_err = th.abs(new_extrinsic_state[self.EXTRINSIC_FIELDS.BODY_POS_Z] - goal_body_height)
+        height_err = th.abs(new_extrinsic_state[self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - goal_body_height)
         goal_gravity_vec = th.tensor([0.0,0.0,-1.0], device = self._configuration.th_device)
         orient_err = th.norm(gravity_rel_xyz-goal_gravity_vec) # Would be nice to use geodesic distance or somethinglike that
 
@@ -538,7 +538,7 @@ class LocomotionEnv(RobotEnv):
                                                                                                                     self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]].squeeze())
         body_linvel_xyz = self._current_state[self.STATE_EXTRINSIC][0,[self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z]]
         body_speed = th.linalg.norm(body_linvel_xyz[:2])
-        body_height = self._current_state[self.STATE_EXTRINSIC][0,self.EXTRINSIC_FIELDS.BODY_POS_Z]
+        body_height = self._current_state[self.STATE_EXTRINSIC][0,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]
         goal_height = self._current_state[self.STATE_LOCOMOTION][0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT]
         height_error = th.abs(body_height-goal_height)
         gravity_vec = self._current_state[self.STATE_EXTRINSIC][0,[self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z]]

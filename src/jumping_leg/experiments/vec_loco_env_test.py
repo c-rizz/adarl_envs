@@ -288,8 +288,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import os
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 1000
+    max_steps_per_episode=100 #int(ep_duration_sec/step_length_sec)
+    train_envs = 3000
     env_device = th.device("cuda",0)
     eval_freq = 5
     env_builder_args = {
@@ -303,21 +303,21 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : "mjx", #"pybullet",
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
-        "reward_acceleration_weight" : 0.0,
+        "reward_acceleration_weight" : 0.1,
         "reward_actdiff_weight" : 0.0,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
         "reward_health_weight" : 0.0,
-        "reward_position_limit_weight" : 0.0,
+        "reward_position_limit_weight" : 0.5,
         "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 0.0,
+        "reward_torque_weight" : 1.0,
         "reward_torquediff_weight" : 0.0,
         "reward_tracking_weight" : 2.0,
-        "reward_velocity_limit_weight" : 0.0,
+        "reward_velocity_limit_weight" : 0.5,
         "reward_velocity_weight" : 0.0,
         "reward_height_weight" : 1.0,
         "reward_pitchnroll_weight" : 1.0,
-        "reward_position_weight" : 0.0,
+        "reward_position_weight" : 1.0,
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
@@ -330,7 +330,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "verbose_infos" : False,
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
-        "init_on_reset_ratio" : 0.9,
+        "init_on_reset_ratio" : 0.8,
         "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.001),
         "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.001),
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.001),

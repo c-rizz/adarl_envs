@@ -60,7 +60,9 @@
 											hip_y_max_pos:=2.4
 											knee_min_pos:=-2.4
 											knee_max_pos:=2.4
-											use_cylinders:=true">
+											use_cylinders:=true
+											enable_thigh_collisions:=true
+											enable_shin_collisions:=true">
 
 			<xacro:if value="${is_left_leg}">
 				<xacro:property name="exterior_y_direction" value="1"/>
@@ -80,10 +82,12 @@
 						<color rgba="0.95 0.50 0.1 1.0"/>
 					</material>
 				</visual>
-				<collision name = "thigh_link_c_${leg_name}">
-					<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
-					<xacro:bar length="${thigh_height}" thickness="${thigh_width}" use_cylinder="${use_cylinders}"/>
-				</collision>
+        		<xacro:if value="${enable_thigh_collisions}">
+					<collision name = "thigh_link_c_${leg_name}">
+						<origin xyz="0 0 -${thigh_height/2}" rpy="0 0 0"/>
+						<xacro:bar length="${thigh_height}" thickness="${thigh_width}" use_cylinder="${use_cylinders}"/>
+					</collision>
+				</xacro:if>
 				<xacro:small_inertial />
 		        <xacro:leg_contact_params />
 			</link>
@@ -118,10 +122,12 @@
 						<color rgba="0.95 0.60 0.1 1.0"/>
 					</material>
 				</visual>
-				<collision name = "shin_link_c_${leg_name}">
-					<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
-					<xacro:bar length="${shin_height-shin_width}" thickness="${shin_width}" use_cylinder="${use_cylinders}"/>
-				</collision>
+        		<xacro:if value="${enable_shin_collisions}">
+					<collision name = "shin_link_c_${leg_name}">
+						<origin xyz="0 0 -${(shin_height-shin_width)/2}" rpy="0 0 0"/>
+						<xacro:bar length="${shin_height-shin_width}" thickness="${shin_width}" use_cylinder="${use_cylinders}"/>
+					</collision>
+				</xacro:if>
 				<xacro:small_inertial />
 		        <xacro:leg_contact_params />
 			</link>

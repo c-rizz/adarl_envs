@@ -22,7 +22,9 @@ import numpy as np
 import torch as th
 import time
 from adarl.utils.utils import isinstance_noimport
+from typing_extensions import deprecated
 
+@deprecated("Use RobotVecEnv") 
 class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
     @dataclass
@@ -323,6 +325,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                             self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
                                             episode_mu_std = self._configuration.noise_joints_pve_mustdstd[:2],
                                             step_std = self._configuration.noise_joints_pve_mustdstd[2])
+        ggLog.info(f"Built robot noise")
         extrinsic_state_noise =  StateNoiseGenerator(extrinsic_state_helper,
                                             self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
                                             episode_mu_std = th.cat([   self._configuration.noise_linvel_ep_mustdstd[:2].expand(3,2),
@@ -333,6 +336,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                 self._configuration.noise_angvel_ep_mustdstd[2].expand(3),
                                                                 self._configuration.noise_posz_ep_mustdstd[2].expand(1),
                                                                 self._configuration.noise_gravity_ep_mustdstd[2].expand(3)]).unsqueeze(-1))
+        ggLog.info(f"Built extrinsic noise")
         if self._configuration.observe_body_state:
             observable_fields = [   self.STATE_ROBOT,
                                     self.STATE_EXTRINSIC,
@@ -347,6 +351,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         self.STATE_ACT: act_history_state_helper}
         # ggLog.info("\n".join([f"{k} : state={s._state_space.shape}  obs ={s._obs_space.shape}" for k,s in statehelpers.items()]))
 
+        ggLog.info(f"Built substate helpers")
         self._state_helper = DictStateHelper(statehelpers,
                                               observable_fields=observable_fields,
                                               noise = {
@@ -356,14 +361,16 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                 self.STATE_EXTRINSIC,
                                                                 self.STATE_INTERNAL],
                                               flattened_part_name="vec")
-
+        ggLog.info(f"Built state helper")
         self._safety_limits = robot_state_helper.build_robot_limits(joint_limit_minmax_pve=self._configuration.joint_safe_limits_minmax_pve,
                                                                     stiffness_minmax=self._configuration.joint_safe_limits_minmax_stiffness,
                                                                     damping_minmax=self._configuration.joint_safe_limits_minmax_damping)
+        ggLog.info(f"Built safety limits")
         
         state_space = self._state_helper.get_space()
         observation_space = self._state_helper.get_obs_space()
         action_space = self._action_helper.action_space(seed=seed)
+        ggLog.info(f"Built state/obs/action helpers")
 
         super().__init__(maxStepsPerEpisode,
                          stepLength_sec,
@@ -538,6 +545,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
     @override
     def build(self):
+        ggLog.info(f"RobotEnv.build()...")
         envCtrlName = type(self._adapter).__name__
         if envCtrlName == "PyBulletJointImpedanceAdapter":
             self._adapter.build_scenario()

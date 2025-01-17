@@ -12,7 +12,7 @@ import numpy as np
 import torch as th
 import math
 import quaternion
-from jumping_leg.env.RobotVecEnv import RobotVecEnv
+from jumping_leg.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS
 from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import adarl.utils.tensor_trees
 
@@ -114,7 +114,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         adapter: BaseVecJointImpedanceAdapter,
                         control_limits_minmax_pve : dict[tuple[str,str], th.Tensor],
                         control_mode : Literal["impedance","impedance_no_gains","position_and_torques", "position_and_gains","torque","velocity","position"],
-                        controlled_joints : Sequence[str | RobotVecEnv.JOINT_FILTERS],
+                        controlled_joints : Sequence[str | JOINT_FILTERS],
                         disallowed_contact_links : list[tuple[str,str]],
                         frame_stack_length : int,
                         goal_err_smoothing_halflife_sec : float,
@@ -243,6 +243,7 @@ class LocomotionVecEnv(RobotVecEnv):
         example_labels : dict[str,th.Tensor] = {}
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
+        ggLog.info(f"Env constructed")
 
     @override
     def _build_stats(self):
@@ -302,6 +303,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                             locomotion_state_helper,
                                                             observable = True,
                                                             flatten = True)
+        ggLog.info(f"Built state/obs/action helpers")
+        
 
 
 
@@ -313,7 +316,7 @@ class LocomotionVecEnv(RobotVecEnv):
         new_internal_state = new_inst_state[self.STATE_INTERNAL]
         new_extrinsic_state = new_inst_state[self.STATE_EXTRINSIC]
 
-        bstates_vec_13 = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[:,0,:]
+        bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
         vsize = bstates_vec_13.size()[0]
         prev_goal_abs_vec_xyz = self._locomotion_episode_config.goal_abs_vel_vec_xyz
         # prev_goal_abs_vec_xyz = prev_locom_state[:,[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X,
@@ -556,7 +559,7 @@ class LocomotionVecEnv(RobotVecEnv):
         dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(sub_rewards_return, -100, 100),
                   lambda: f"{adarl.utils.tensor_trees.flatten_tensor_tree(map_tensor_tree(sub_rewards_return, lambda t: adarl.utils.tensor_trees.is_leaf_bounded(t,min=-100,max=100)))}")
         dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(reward, -100, 100),
-                  lambda: f"Reward over 100. reward = {reward.cpu().tolist()},\nsub_rewards = {map_tensor_tree(sub_rewards_return,lambda t: 'minmax='+str((th.min(t).cpu().item(), th.max(t).cpu().item())))}",
+                  lambda: f"Reward over 100. sub_rewards = {map_tensor_tree(sub_rewards_return,lambda t: 'minmax='+str((th.min(t).cpu().item(), th.max(t).cpu().item())))}",
                   just_warn=True)
         return reward
     
@@ -738,7 +741,7 @@ class LocomotionVecEnv(RobotVecEnv):
     def _set_arrow_pose(self, vec_mask : th.Tensor):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             q = quat_xyzw_between_vecs_py(self._thtens([1.0,0,0]).expand((self._adapter.vec_size(),3)), self._locomotion_episode_config.goal_abs_vel_vec_xyz)
-            bstates_vec_13 = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[:,0,:]
+            bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
             pose = bstates_vec_13[:,:7]
             pose[:,2] += 0.1
             pose[:,3:7] = q

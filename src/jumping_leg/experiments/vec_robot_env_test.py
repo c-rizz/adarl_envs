@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from __future__ import annotations
 from jumping_leg.env.LocomotionEnv import LocomotionEnv
-from adarl.envs.vec.GymVecEnvWrapper import GymVecEnvWrapper
+from adarl.envs.vec.GymVecEnvWrapper import GymVecRunnerWrapper
 from adarl.envs.RecorderGymWrapper import RecorderGymWrapper
 import adarl.utils.dbg.ggLog as ggLog
 import torch as th
@@ -16,7 +16,7 @@ import typing
 from pathlib import Path
 import adarl.utils.utils
 from typing import Sequence
-from jumping_leg.env.RobotVecEnv import RobotVecEnv
+from jumping_leg.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS
 from adarl.envs.vec.EnvRunner import EnvRunner
 from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
 import gymnasium as gym
@@ -31,7 +31,7 @@ def robot_env_builder(  seed,
                         robot_main_body_link : str,
                         robot_root_link : str,
                         homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
-                        controlled_joints : Sequence[str | RobotVecEnv.JOINT_FILTERS],
+                        controlled_joints : Sequence[str | JOINT_FILTERS],
                         num_envs : int):
     ggLog.info(f"Building env: thread={threading.current_thread()}, pid={os.getpid()}")
     ggLog.info(f"env_builder_args = {env_builder_args}")
@@ -63,7 +63,7 @@ def robot_env_builder(  seed,
                                                        global_max_torque_position_control = 100,
                                                        real_time_factor=None,
                                                        vec_size=num_envs,
-                                                       th_device=th.device("cpu"))
+                                                       th_device=th_device)
     elif mode == "mjx":
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
         import jax
@@ -150,7 +150,7 @@ def robot_env_builder(  seed,
                                                             f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y]].cpu().item(): .3f}, "
                                                             f"{info['state_extrinsic'][[LocomotionEnv.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z]].cpu().item(): .3f}\n"
                                             f"safety         {info['state_internal'][LocomotionEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]: .2f}\n")
-    env = GymVecEnvWrapper(runner=vrunner,
+    env = GymVecRunnerWrapper(runner=vrunner,
                             quiet=quiet)
     
     # if video_save_freq >0:
@@ -204,7 +204,7 @@ def quad_env_builder(seed : int,
                             robot_name=robot_name,
                             robot_main_body_link=robot_main_body_link,
                             robot_root_link=robot_root_link,
-                            controlled_joints=[RobotVecEnv.JOINT_FILTERS.ALL_REVOLUTE],
+                            controlled_joints=[JOINT_FILTERS.ALL_REVOLUTE],
                             num_envs=num_envs)[0]
 
 def jumping_leg_builder(seed : int,
@@ -230,7 +230,7 @@ def jumping_leg_builder(seed : int,
                             robot_name=robot_name,
                             robot_main_body_link=robot_main_body_link,
                             robot_root_link=robot_root_link,
-                            controlled_joints=[RobotVecEnv.JOINT_FILTERS.ALL_REVOLUTE],
+                            controlled_joints=[JOINT_FILTERS.ALL_REVOLUTE],
                             num_envs=num_envs)[0]
 
 

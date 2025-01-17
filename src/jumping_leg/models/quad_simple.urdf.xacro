@@ -63,6 +63,12 @@
 	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
 
 	<xacro:property name="use_cylinders" default="$(arg use_cylinders)" />
+	<xacro:arg name="enable_body_collisions" default="False" />
+	<xacro:arg name="enable_thigh_collisions" default="False" />
+	<xacro:arg name="enable_shin_collisions" default="False" />
+	<xacro:property name="enable_body_collisions" default="$(arg enable_body_collisions)" />
+	<xacro:property name="enable_thigh_collisions" default="$(arg enable_thigh_collisions)" />
+	<xacro:property name="enable_shin_collisions" default="$(arg enable_shin_collisions)" />
 
 
     <xacro:property name="hip_x_min_pos" default="-2.4" />
@@ -104,12 +110,14 @@
                 <color rgba="0.85 0.30 0.1 1.0"/>
             </material>
 	   	</visual>
-  		<collision name = "body_link_c">
-			<origin xyz="0 0 0" rpy="0 0 0"/>
-			<geometry>
-				<box size="${body_length} ${body_width} ${body_height}"/>
-			</geometry>
-	   	</collision>
+        <xacro:if value="${enable_body_collisions}">
+            <collision name = "body_link_c">
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <box size="${body_length} ${body_width} ${body_height}"/>
+                </geometry>
+            </collision>
+		</xacro:if>
 		<xacro:box_inertial mass="${body_mass}"
                             x="${body_width}" y="${body_length}" z="${body_height}"
                             pose_xyz = "0 0 0"
@@ -142,6 +150,8 @@
                         knee_min_pos = "${knee_min_pos}"
                         knee_max_pos = "${knee_max_pos}"
                         use_cylinders = "${use_cylinders}"
+                        enable_thigh_collisions = "${enable_thigh_collisions}"
+                        enable_shin_collisions = "${enable_shin_collisions}"
                         />
 
     <xacro:leg_simple   hip_x_offset = "${front_legs_pos}"
@@ -168,6 +178,8 @@
                         knee_min_pos = "${knee_min_pos}"
                         knee_max_pos = "${knee_max_pos}"
                         use_cylinders = "${use_cylinders}"
+                        enable_thigh_collisions = "${enable_thigh_collisions}"
+                        enable_shin_collisions = "${enable_shin_collisions}"
                         />
 
     <xacro:leg_simple   hip_x_offset = "${back_legs_pos}"
@@ -194,6 +206,8 @@
                         knee_min_pos = "${knee_min_pos}"
                         knee_max_pos = "${knee_max_pos}"
                         use_cylinders = "${use_cylinders}"
+                        enable_thigh_collisions = "${enable_thigh_collisions}"
+                        enable_shin_collisions = "${enable_shin_collisions}"
                         />
 
     <xacro:leg_simple   hip_x_offset = "${back_legs_pos}"
@@ -220,6 +234,8 @@
                         knee_min_pos = "${knee_min_pos}"
                         knee_max_pos = "${knee_max_pos}"
                         use_cylinders = "${use_cylinders}"
+                        enable_thigh_collisions = "${enable_thigh_collisions}"
+                        enable_shin_collisions = "${enable_shin_collisions}"
                         />
 
     <link name="world"/>

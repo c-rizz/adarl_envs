@@ -15,6 +15,7 @@ import quaternion
 from jumping_leg.env.RobotEnv import RobotEnv
 from adarl.utils.tensor_trees import map_tensor_tree
 import adarl.utils.tensor_trees
+from typing_extensions import deprecated
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -38,6 +39,7 @@ def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
 def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     return 1-error/zero_rew_dist
 
+@deprecated("Use LocomotionVecEnv") 
 class LocomotionEnv(RobotEnv):
     STATE_LOCOMOTION = "loco"
 

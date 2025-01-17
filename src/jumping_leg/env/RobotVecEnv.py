@@ -27,6 +27,9 @@ import time
 from pathlib import Path
 
 
+JOINT_FILTERS = Enum("JOINT_FILTERS",["ALL_REVOLUTE",
+                                         "ALL"])
+
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     @dataclass
@@ -110,8 +113,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                    "BODY_REL_GRAVITY_Z"], start=0)
     ACT_FIELDS = IntEnum("ACT_FIELDS", ["ACTION"], start=0)
     
-    JOINT_FILTERS = Enum("JointFilters",["ALL_REVOLUTE",
-                                         "ALL"])
     
     joint_filters = {JOINT_FILTERS.ALL : lambda joint_name, robot_model: True,
                      JOINT_FILTERS.ALL_REVOLUTE : lambda joint_name, robot_model: robot_model.get_joint_properties([joint_name])[joint_name]["type"] == Robot.JOINT_TYPES.REVOLUTE}
@@ -175,16 +176,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         root_joint_name = self._robot_model.get_parent_joint(robot_root_link)
         is_floating = self._robot_model.get_joint_properties([root_joint_name])[root_joint_name]["type"] == Robot.JOINT_TYPES.FLOATING
         self._build_new_instantaneous_state = th.vmap(self._build_new_instantaneous_state_single)
-        # ggLog.info("Properties:"+("\n".join([str(jp) for jp in self._robot_model.get_joint_properties(self._robot_model.get_joint_names()).items()])))
+        ggLog.info("Properties:"+("\n".join([str(jp) for jp in self._robot_model.get_joint_properties(self._robot_model.get_joint_names()).items()])))
         # exit()
         controlled_joints_str = []
         for j in controlled_joints:
             if isinstance(j, str):
                 controlled_joints_str.append(j)
-            elif isinstance(j, self.JOINT_FILTERS):
+            elif j in self.joint_filters:
                 for jn in self._robot_model.get_joint_names():
                     if self.joint_filters[j](jn,self._robot_model):
                         controlled_joints_str.append(jn)
+            else:
+                raise RuntimeError(f"Unexpected controlled joint request {j} of type {type(j)} (self.joint_filters = {self.joint_filters})")
 
         controlled_joints_rn : list[tuple[str,str]] = [(robot_name,jn) for jn in controlled_joints_str]
         phys_limits_minmax_pve = {(robot_name,k):self._thtens(l) 
@@ -219,6 +222,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             ggLog.info(f"phys_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in phys_limits_minmax_pve.items()]))
             ggLog.info(f"safe_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
             ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
+            ggLog.info(f"controlled_joints_rn = \n"+"\n".join([str(jn) for jn in controlled_joints_rn]))
             ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
 
         homing_ctrl_joints_pvesd = self._thtens([(homing_joint_pose[jn], 0, 0, safe_stiffness, safe_damping)
@@ -296,6 +300,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 safe_stiffness=self._thtens([self._configuration.safe_stiffness]).repeat(len(controlled_joints_rn)),
                                 safe_damping=self._thtens([self._configuration.safe_damping]).repeat(len(controlled_joints_rn)),
                                 th_device=self._configuration.th_device)
+        ggLog.info(f"Built action helper")
 
         self._build_state_helper(adapter)
         self._current_state = self._state_helper.reset_state()
@@ -303,7 +308,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._safety_limits = self._state_helper.sub_helpers[self.STATE_ROBOT].build_robot_limits(joint_limit_minmax_pve=self._configuration.joint_safe_limits_minmax_pve,
                                                                     stiffness_minmax=self._configuration.joint_safe_limits_minmax_stiffness,
                                                                     damping_minmax=self._configuration.joint_safe_limits_minmax_damping)
+        ggLog.info(f"Built safety limits")
+        
         self._build_stats()
+        ggLog.info(f"Built stats")
+
         super().__init__(max_episode_steps=maxStepsPerEpisode,
                          step_duration_sec=stepLength_sec,
                          adapter=adapter,
@@ -314,12 +323,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                          info_space=None,
                          step_precision_tolerance = step_precision_tolerance,
                          th_device=th_device)
+        ggLog.info(f"Built scenario")
         example_labels : dict[str,th.Tensor] = {}
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
-        
+        ggLog.info(f"Built info helper")
         self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.startup()
+
 
     def _build_stats(self):
         self._stats = {}
@@ -491,12 +502,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                             name="arrow",
                                             pose=arrow_pose,
                                             format="urdf.xacro",
-                                            kwargs={"add_world_link":str(isinstance_noimport(self._adapter, "PyBulletAdapter"))})
+                                            kwargs={"add_world_link":str(isinstance_noimport(self._adapter, ["PyBulletAdapter","VecPyBulletJointImpedanceAdapter"]))})
             axes_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("jumping_leg","models/axes.urdf.xacro")).read_text(),
                                             name="axes",
                                             pose=build_pose(0,0,0,0,0,0,1),
                                             format="urdf.xacro",
-                                            kwargs={"add_world_link":str(isinstance_noimport(self._adapter, "PyBulletAdapter"))})
+                                            kwargs={"add_world_link":str(isinstance_noimport(self._adapter, ["PyBulletAdapter","VecPyBulletJointImpedanceAdapter"]))})
             self._spawn_defs = [robot_spawn_def,
                                     camera_spawn_def]
             if self._configuration.show_goal:
@@ -660,6 +671,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 self._arrow_base = ("arrow","arrow_link")
         else:
             raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
+        
+        self._main_body_link_ids = self._adapter.get_links_ids([self._configuration.main_body_link])
+        self._controlled_joints_ids = self._adapter.get_joints_ids(self._configuration.controlled_joints)
         self._initialize_scenario()
 
     @override
@@ -700,7 +714,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"cam quat = {cam_rel_quat}")
         try:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
-                body_states13 = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[:,0,:]
+                body_states13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
                 cam_link_state[:3] += body_states13[0,:3] #body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all links
                 cam_link_state = cam_link_state.expand(self._adapter.vec_size(),1,13)
                 # cam_link_state[:,:,:3] += body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all sims
@@ -745,15 +759,22 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     def _get_new_instantaneous_state(self):
         # ggLog.info(f"_stepCounter = {self._stepCounter}")
-        jstates_v_j_pve = self._adapter.getJointsState(requestedJoints=self._configuration.controlled_joints)
-        bstates_v_13 = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[:,0,:]
+        # t0 = time.monotonic()
+        jstates_v_j_pve = self._adapter.getJointsState(requestedJoints=self._controlled_joints_ids)
+        # th.cuda.synchronize()
+        # t1 = time.monotonic()
+        bstates_v_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
+        # th.cuda.synchronize()
+        # t2 = time.monotonic()
         internal_states = self._current_state[self.STATE_INTERNAL][:,0]
         vec_stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
+        # th.cuda.synchronize()
+        # t3 = time.monotonic()
         # ggLog.info(f"vec_stats_minmaxavgstd_j_pvae = {vec_stats_minmaxavgstd_j_pvae}")
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # ggLog.info(f"internal_states = {internal_states}")
-        # ggLog.info(f"jstates_v_j_pve = {jstates_v_j_pve}")
-        # ggLog.info(f"self._last_sent_v_j_pvesd = {self._last_sent_v_j_pvesd}")
+        # ggLog.info(f"jstates_v_j_pve.device = {jstates_v_j_pve.device}")
+        # ggLog.info(f"self._last_sent_v_j_pvesd.device = {self._last_sent_v_j_pvesd.device}")
         if not th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)):
             raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve")
         # bstates_v_13 = th.zeros(size=(1,13), dtype=th.float32, device=self._adapter._th_device)
@@ -763,10 +784,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 jstates_v_j_pve,
                                                                 self._last_sent_v_j_pvesd)
         new_inst_state[self.STATE_ACT] = {self.ACT_FIELDS.ACTION : self._last_out_actions}
-
+        # th.cuda.synchronize()
+        # t4 = time.monotonic()
         # if not th.all(th.isfinite(new_inst_state[self.STATE_ROBOT_STATS])):
         #     ggLog.info(f"nonfinite vals in new_robot_stats_state = {new_inst_state[self.STATE_ROBOT_STATS]}")
         dbg_check(lambda: th.all(new_inst_state[self.STATE_ROBOT][:,:,6:]>=0), lambda: f"negative gains in new_robot_state") #type: ignore
+        # th.cuda.synchronize()
+        # t5 = time.monotonic()
+        # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} build={t4-t3:.6f} check={t5-t4:.6f} tot={t5-t0}")
         return new_inst_state
 
     def _build_new_instantaneous_state_single(self, body_state_13 : th.Tensor,
@@ -845,8 +870,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
     def _update_state(self):
+        # th.cuda.synchronize()
         # t0 = time.monotonic()
         instantaneous_state : dict[str,dict[Any,th.Tensor]]= self._get_new_instantaneous_state()
+        # th.cuda.synchronize()
+        # t01 = time.monotonic()
         self._state_helper.check_size(instantaneous_state=instantaneous_state)
         # dbg_run(lambda: self._state_helper.check_size(instantaneous_state=instantaneous_state))
         # sizes = map_tensor_tree(flatten_tensor_tree(instantaneous_state), lambda t: t.size())
@@ -867,8 +895,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         dbg_check(lambda: th.all(self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT] >= 0),
                   lambda: f"Negative step_counts {self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT]}")
         # map_tensor_tree(self._current_state, lambda t: t.detach().clone())
-        # tf = time.monotonic()
-        # print(f"newinst = {t1-t0}, map = {tf-t1}, tot = {tf-t0}")
+        tf = time.monotonic()
+        # print(f"newinst = {t01-t0}, check = {t1-t01}, map = {tf-t1}, tot = {tf-t0}")
 
 
 

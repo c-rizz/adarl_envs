@@ -761,9 +761,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"_stepCounter = {self._stepCounter}")
         # t0 = time.monotonic()
         jstates_v_j_pve = self._adapter.getJointsState(requestedJoints=self._controlled_joints_ids)
+        # ggLog.info(f"jstates_v_j_pve = {jstates_v_j_pve}")
         # th.cuda.synchronize()
         # t1 = time.monotonic()
         bstates_v_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
+        # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # th.cuda.synchronize()
         # t2 = time.monotonic()
         internal_states = self._current_state[self.STATE_INTERNAL][:,0]

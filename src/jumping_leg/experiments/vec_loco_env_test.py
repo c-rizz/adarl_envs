@@ -313,7 +313,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 52/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=100 #int(ep_duration_sec/step_length_sec)
-    train_envs = 100
+    train_envs = 3000
     env_device = th.device("cuda",0)
     eval_freq = 5
     env_builder_args = {

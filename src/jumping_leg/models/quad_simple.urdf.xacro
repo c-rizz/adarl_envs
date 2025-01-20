@@ -34,7 +34,7 @@
 
 	<xacro:arg name="use_cylinders" default="True" />
 	
-    <xacro:arg name="all_collisions" default="False" />
+    <xacro:arg name="all_collisions" default="True" />
 
 
 

@@ -38,7 +38,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_weight" : 1.0,
         "reward_height_weight" : 1.0,
         "reward_pitchnroll_weight" : 1.0,
-        "reward_position_weight" : 1.0,
+        "reward_position_weight" : 0.1,
         "safe_stiffness" : 400,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
@@ -52,11 +52,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
         "init_on_reset_ratio" : 0.9,
-        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.001),
-        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.001),
-        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.001),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.001),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.001),
+        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
+        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : (144,256)
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)

@@ -33,6 +33,8 @@
 	<xacro:arg name="knee_friction" default="0.1" />
 
 	<xacro:arg name="use_cylinders" default="True" />
+	
+    <xacro:arg name="all_collisions" default="False" />
 
 
 
@@ -63,9 +65,9 @@
 	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
 
 	<xacro:property name="use_cylinders" default="$(arg use_cylinders)" />
-	<xacro:arg name="enable_body_collisions" default="False" />
-	<xacro:arg name="enable_thigh_collisions" default="False" />
-	<xacro:arg name="enable_shin_collisions" default="False" />
+	<xacro:arg name="enable_body_collisions" default="$(arg all_collisions)" />
+	<xacro:arg name="enable_thigh_collisions" default="$(arg all_collisions)" />
+	<xacro:arg name="enable_shin_collisions" default="$(arg all_collisions)" />
 	<xacro:property name="enable_body_collisions" default="$(arg enable_body_collisions)" />
 	<xacro:property name="enable_thigh_collisions" default="$(arg enable_thigh_collisions)" />
 	<xacro:property name="enable_shin_collisions" default="$(arg enable_shin_collisions)" />

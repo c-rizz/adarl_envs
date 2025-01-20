@@ -648,7 +648,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         step_count = internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
         safety_triggered = step_count!=-1 and internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         
-        if not isinstance_noimport(self._adapter, "PyBulletAdapter"): # for now the only adapter that really supports joint stats
+        if isinstance_noimport(self._adapter, ["PyBulletAdapter"]): # for now the only adapter that really supports joint stats
             stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
             if not th.all(th.isfinite(stats_minmaxavgstd_j_pvae)):
                 raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve = {stats_minmaxavgstd_j_pvae}")

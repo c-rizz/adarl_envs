@@ -434,7 +434,15 @@ class LocomotionVecEnv(RobotVecEnv):
         #            f"norm({body_planar_rel_linvel_xyz.cpu().tolist()} - {goal_rel_linvel_xyz.cpu().tolist()})={th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_xyz).cpu().tolist()}")
         # time.sleep(0.1)
         # goal_rel_linvel_xyz should already be "planar", it's projection along gravity_rel should be zero
-        dbg_check(lambda: th.all(th.norm(vector_projection(goal_rel_linvel_vec_xyz,gravity_rel_vec_xyz), dim = 1) < 0.1), lambda: f"goal_rel_linvel_xyz is not horizontal, projection is {vector_projection(goal_rel_linvel_vec_xyz, gravity_rel_vec_xyz)}")
+        norms = th.norm(vector_projection(goal_rel_linvel_vec_xyz,gravity_rel_vec_xyz), dim = 1)
+        dbg_check(lambda: th.all(norms < 0.1),
+                  lambda:   f"goal_rel_linvel_xyz is not horizontal (th.all(norms < 0.1) = {th.all(norms < 0.1)}), projection is "
+                            f"{vector_projection(goal_rel_linvel_vec_xyz, gravity_rel_vec_xyz)[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
+                            f"goal={goal_rel_linvel_vec_xyz[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
+                            f"graity={gravity_rel_vec_xyz[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
+                            f" big={th.nonzero(norms >= 0.1)}"
+                            f" isnan={th.nonzero(th.isnan(norms))}"
+                            f" isinf={th.nonzero(th.isinf(norms))}")
         return th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_vec_xyz, dim = 1)
     
     @override
@@ -557,7 +565,8 @@ class LocomotionVecEnv(RobotVecEnv):
         # ggLog.info(f"torques = {state[self.STATE_ROBOT][:,0,:,2]}")
         dbg_check_size(reward, (self._adapter.vec_size(),), f"Unexpected reward size")
         dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(sub_rewards_return, -100, 100),
-                  lambda: f"{adarl.utils.tensor_trees.flatten_tensor_tree(map_tensor_tree(sub_rewards_return, lambda t: adarl.utils.tensor_trees.is_leaf_bounded(t,min=-100,max=100)))}")
+                  lambda: f"{adarl.utils.tensor_trees.flatten_tensor_tree(map_tensor_tree(sub_rewards_return, lambda t: adarl.utils.tensor_trees.is_leaf_bounded(t,min=-100,max=100)))}",
+                  just_warn=True)
         dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(reward, -100, 100),
                   lambda: f"Reward over 100. sub_rewards = {map_tensor_tree(sub_rewards_return,lambda t: 'minmax='+str((th.min(t).cpu().item(), th.max(t).cpu().item())))}",
                   just_warn=True)

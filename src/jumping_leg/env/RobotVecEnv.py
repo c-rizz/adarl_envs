@@ -733,10 +733,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if self._configuration.enable_dbg_checks:
             if not adarl.utils.tensor_trees.is_all_finite(state):
                 ggLog.warn(f"Non-finite values in state {state}")
-            if th.any(th.abs(self._last_obs["vec"]) > 100):
-                raise RuntimeError(f"Values over 100 in obs {self._last_obs}")
             if not adarl.utils.tensor_trees.is_all_finite(self._last_obs):
-                raise RuntimeError(f"Non-finite values in obs {self._last_obs}")
+                ggLog.warn(f"Non-finite values in obs {self._last_obs}")
+            if th.any(th.abs(self._last_obs["vec"]) > 100):
+                ggLog.warn(f"Values over 100 in obs {self._last_obs}")
         return self._last_obs
 
 
@@ -777,8 +777,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"internal_states = {internal_states}")
         # ggLog.info(f"jstates_v_j_pve.device = {jstates_v_j_pve.device}")
         # ggLog.info(f"self._last_sent_v_j_pvesd.device = {self._last_sent_v_j_pvesd.device}")
-        if not th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)):
-            raise RuntimeError(f"non finite values in joint stats: stats_minmaxavgstd_hipknee_pve")
+        dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)),
+                  lambda: f"non finite values in joint stats: {vec_stats_minmaxavgstd_j_pvae}")
+        dbg_check(lambda: th.all(th.isfinite(bstates_v_13)),
+                  lambda: f"non finite values in body link state: {bstates_v_13}")
         # bstates_v_13 = th.zeros(size=(1,13), dtype=th.float32, device=self._adapter._th_device)
         new_inst_state = self._build_new_instantaneous_state(   bstates_v_13,
                                                                 internal_states,

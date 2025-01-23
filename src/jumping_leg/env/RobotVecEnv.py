@@ -27,6 +27,9 @@ import time
 from pathlib import Path
 
 
+def hash_tensor(tensor):
+    return hash(tuple(tensor.reshape(-1).tolist()))
+
 JOINT_FILTERS = Enum("JOINT_FILTERS",["ALL_REVOLUTE",
                                          "ALL"])
 
@@ -146,7 +149,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         safe_damping : float,
                         safe_stiffness : float,
                         safety_limits_factor : float,
-                        seed,
+                        seed : int,
                         stepLength_sec,
                         step_precision_tolerance : float,
                         stop_on_safety : bool,
@@ -168,8 +171,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         ui_camera_resolution_hw : tuple[int,int] = (144,256)
                         ):
-        
+        self._main_seed = seed
         self._rng = th.Generator(device=th_device)
+        self._rng.manual_seed(seed)
+        
+
         self._th_device = th_device
         self._obs_dtype = th.float32
         self._robot_model = Robot(adarl.utils.utils.compile_xacro_string(  model_definition_string=robot_urdf_string))
@@ -328,9 +334,17 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
         ggLog.info(f"Built info helper")
+
+        self.set_seeds(th.as_tensor(seed))
         self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.startup()
 
+    # @property
+    # def _rng(self):
+    #     import traceback
+    #     ggLog.info(f"Getting rng {self._rng_get_count} {hash_tensor(self._rng_v.get_state())} at {''.join(traceback.format_list(traceback.extract_stack(limit=3)))}")
+    #     self._rng_get_count += 1
+    #     return self._rng_v
 
     def _build_stats(self):
         self._stats = {}
@@ -373,6 +387,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : [-1,1],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
+                                                    observable_fields=[self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
+                                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
+                                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
+                                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
+                                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
+                                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                                                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,
+                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
+                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
+                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z],
                                                     history_length=self._configuration.history_length,
                                                     obs_history_length = self._configuration.frame_stack_length,
                                                     vec_size=adapter.vec_size())
@@ -421,7 +445,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                               flatten_in_obs=[   self.STATE_ROBOT,
                                                                 self.STATE_EXTRINSIC,
                                                                 self.STATE_INTERNAL],
-                                              flattened_part_name="vec")
+                                              flattened_part_name="vec")        
 
     def _thtens(self, tensor):
         return th.as_tensor(tensor, device=self._th_device, dtype=self._obs_dtype)
@@ -445,7 +469,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         actions = th.clamp(actions, min=-1, max=1)
         n = th.randn(size=(self._adapter.vec_size(),),
                     generator=self._rng,
-                    dtype=th.float32,
+                    dtype=self._configuration.obs_dtype,
                     device=self._configuration.th_device)
         action_delay = th.clamp(self._configuration.action_delay_mustd[0] + self._configuration.action_delay_mustd[1]*n, min = 0.0)
         return actions, action_delay
@@ -597,7 +621,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     ggLog.warn(f"Failed to find initial joint configuration. Last collisions = {collisions}, always present collisions = {self._always_present_collisions}")
         else:
             initial_jposes = homing_pos.expand(selected_vecs_num, len(self._configuration.controlled_joints))
-        if self._tot_init_counter>1:
+        if  self._configuration.init_on_reset_ratio>0 and self._tot_init_counter>1:
             vec_init_on_reset = self._thrand((selected_vecs_num,)) < self._configuration.init_on_reset_ratio
         else:
             vec_init_on_reset = th.ones((selected_vecs_num,), dtype=th.bool, device=self._configuration.th_device)
@@ -966,14 +990,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     @override
     def set_seeds(self, seeds : th.Tensor):
         super().set_seeds(seeds)
-        self._seed = int(th.sum(seeds).item())
-        self._rng = self._rng.manual_seed(self._seed)
-        self.vec_action_space.seed(self._seed)
-        self.vec_observation_space.seed(self._seed)
-        self.vec_state_space.seed(self._seed)
-        self.single_action_space.seed(self._seed)
-        self.single_observation_space.seed(self._seed)
-        self.single_state_space.seed(self._seed)
+        self._main_seed = int(th.sum(seeds).item())
+        self._rng.manual_seed(self._main_seed)
+        self.vec_action_space.seed(self._main_seed)
+        self.vec_observation_space.seed(self._main_seed)
+        self.vec_state_space.seed(self._main_seed)
+        self.single_action_space.seed(self._main_seed)
+        self.single_observation_space.seed(self._main_seed)
+        self.single_state_space.seed(self._main_seed)
 
     def _warn_out_of_bounds(self, robot_state_norm):
         if not adarl.utils.tensor_trees.is_all_bounded(robot_state_norm, -10, 10):

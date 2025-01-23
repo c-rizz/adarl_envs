@@ -208,6 +208,7 @@ def loco_env_builder(   seed,
                                     quiet=quiet,
                                     autoreset = False)
             return GymRunnerWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
+        from jumping_leg.experiments.build_quad import quad_env_builder
         env = build_vec_env(env_builder=single_env_builder,
                             env_builder_args=env_builder_args,
                             log_folder=log_folder,
@@ -313,8 +314,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 52/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=100 #int(ep_duration_sec/step_length_sec)
-    train_envs = 3000
-    env_device = th.device("cuda",0)
+    train_envs = 1
+    env_device = th.device("cpu",0)
     eval_freq = 5
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
@@ -324,9 +325,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
-        "mode" : "mjx",
+        "mode" : "pybullet",
         "quiet" : True,
-        "initial_pose_randomization" : 0.25,
+        "initial_pose_randomization" : 0.0,
         "reward_acceleration_weight" : 0.1,
         "reward_actdiff_weight" : 0.,
         "reward_contacts_weight" : 0.0,
@@ -433,7 +434,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # }
     eval_configuration = [  
                             eval_conf_video_det,
-                            eval_conf_video_stoch,
+                            # eval_conf_video_stoch,
                             # eval_conf_run_1ms,
                             # eval_conf_video_norand_det,
                             # #  eval_conf_feasible,

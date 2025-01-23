@@ -15,6 +15,7 @@ import quaternion
 from jumping_leg.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS
 from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import adarl.utils.tensor_trees
+import traceback
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -695,17 +696,16 @@ class LocomotionVecEnv(RobotVecEnv):
         return i
     
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
-        super()._set_current_ep_config(vec_mask=vec_mask, reset_options=reset_options)
-        
         if "goal_velocity_xy" in reset_options:
             goal_velocity_vec_xy = th.as_tensor(reset_options["goal_velocity_xy"],device=self._configuration.th_device)
         else:
             goal_speeds = unnormalize(self._thrand(size=(self._adapter.vec_size(),))*2-1,
                                         min=self._locomotion_conf.goal_speed_minmax[0],
                                         max=self._locomotion_conf.goal_speed_minmax[1])
-            goal_yaws = th.rand((self._adapter.vec_size(),),generator=self._rng, device=self._configuration.th_device)*math.pi*2
+            goal_yaws = self._thrand((self._adapter.vec_size(),))*math.pi*2
             goal_velocity_vec_xy = goal_speeds.unsqueeze(1)*th.stack([th.cos(goal_yaws), th.sin(goal_yaws)], dim = 1)
-                                             
+        
+        super()._set_current_ep_config(vec_mask=vec_mask, reset_options=reset_options)
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xyz     = self._thzeros((self._adapter.vec_size(), 3)),
                                                                                      goal_abs_gravity_vec_xyz = self._thtens([0.0,0.0,-1.0]).repeat(self._adapter.vec_size(), 1),
                                                                                      goal_abs_height_vec_z    = self._thtens([0.45]).repeat(self._adapter.vec_size(), 1))
@@ -752,10 +752,10 @@ class LocomotionVecEnv(RobotVecEnv):
             q = quat_xyzw_between_vecs_py(self._thtens([1.0,0,0]).expand((self._adapter.vec_size(),3)), self._locomotion_episode_config.goal_abs_vel_vec_xyz)
             bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
             pose = bstates_vec_13[:,:7]
-            pose[:,2] += 0.1
+            pose[:,2] = th.linalg.norm(self._locomotion_episode_config.goal_abs_vel_vec_xyz, dim = 1)
             pose[:,3:7] = q
             pose[1:] = pose[0] #body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all links
-            pose[:,:3] = self._thtens([0.,0.,1.0])
+            # pose[:,:3] = self._thtens([0.,0.,1.0])
             self._adapter.setLinksStateDirect(link_names=[self._arrow_base],
                                                 link_states_pose_vel=th.cat([pose, self._thzeros((pose.size()[0],6,))], dim = 1).unsqueeze(1),
                                                 vec_mask=vec_mask)

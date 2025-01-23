@@ -24,6 +24,10 @@ import time
 from adarl.utils.utils import isinstance_noimport
 from typing_extensions import deprecated
 
+
+def hash_tensor(tensor):
+    return hash(tuple(tensor.reshape(-1).tolist()))
+
 @deprecated("Use RobotVecEnv") 
 class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
@@ -95,6 +99,9 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                    "BODY_REL_ANGVEL_X",
                                                    "BODY_REL_ANGVEL_Y",
                                                    "BODY_REL_ANGVEL_Z",
+                                                   "BODY_ABS_LINVEL_X",
+                                                   "BODY_ABS_LINVEL_Y",
+                                                   "BODY_ABS_LINVEL_Z",
                                                    "BODY_ABS_POS_Z",
                                                    "BODY_REL_GRAVITY_X",
                                                    "BODY_REL_GRAVITY_Y",
@@ -159,6 +166,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         ):
         
         self._rng = th.Generator(device=th_device)
+        self._rng.manual_seed(seed)
+
         self._spawned = False
         self._robot_model = Robot(adarl.utils.utils.compile_xacro_string(  model_definition_string=robot_urdf_string))
         self._current_state = {}
@@ -309,10 +318,23 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : [-100,100],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : [-100,100],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : [-100,100],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : [-10,10],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : [-10,10],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : [-10,10],                                                    
                                                                 self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z : [-1,1],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : [-1,1],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
+                                                observable_fields=[self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z],
                                                history_length=self._configuration.history_length,
                                                obs_history_length = self._configuration.frame_stack_length)
         act_history_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
@@ -325,18 +347,18 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                             self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
                                             episode_mu_std = self._configuration.noise_joints_pve_mustdstd[:2],
                                             step_std = self._configuration.noise_joints_pve_mustdstd[2])
-        ggLog.info(f"Built robot noise")
         extrinsic_state_noise =  StateNoiseGenerator(extrinsic_state_helper,
                                             self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
                                             episode_mu_std = th.cat([   self._configuration.noise_linvel_ep_mustdstd[:2].expand(3,2),
                                                                         self._configuration.noise_angvel_ep_mustdstd[:2].expand(3,2),
+                                                                        self._configuration.noise_linvel_ep_mustdstd[:2].expand(3,2),
                                                                         self._configuration.noise_posz_ep_mustdstd[:2].expand(1,2),
                                                                         self._configuration.noise_gravity_ep_mustdstd[:2].expand(3,2)]).permute(1,0).unsqueeze(-1),
                                             step_std = th.cat([ self._configuration.noise_linvel_ep_mustdstd[2].expand(3),
                                                                 self._configuration.noise_angvel_ep_mustdstd[2].expand(3),
+                                                                self._configuration.noise_linvel_ep_mustdstd[2].expand(3),
                                                                 self._configuration.noise_posz_ep_mustdstd[2].expand(1),
                                                                 self._configuration.noise_gravity_ep_mustdstd[2].expand(3)]).unsqueeze(-1))
-        ggLog.info(f"Built extrinsic noise")
         if self._configuration.observe_body_state:
             observable_fields = [   self.STATE_ROBOT,
                                     self.STATE_EXTRINSIC,
@@ -351,7 +373,6 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         self.STATE_ACT: act_history_state_helper}
         # ggLog.info("\n".join([f"{k} : state={s._state_space.shape}  obs ={s._obs_space.shape}" for k,s in statehelpers.items()]))
 
-        ggLog.info(f"Built substate helpers")
         self._state_helper = DictStateHelper(statehelpers,
                                               observable_fields=observable_fields,
                                               noise = {
@@ -361,16 +382,13 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                 self.STATE_EXTRINSIC,
                                                                 self.STATE_INTERNAL],
                                               flattened_part_name="vec")
-        ggLog.info(f"Built state helper")
         self._safety_limits = robot_state_helper.build_robot_limits(joint_limit_minmax_pve=self._configuration.joint_safe_limits_minmax_pve,
                                                                     stiffness_minmax=self._configuration.joint_safe_limits_minmax_stiffness,
                                                                     damping_minmax=self._configuration.joint_safe_limits_minmax_damping)
-        ggLog.info(f"Built safety limits")
         
         state_space = self._state_helper.get_space()
         observation_space = self._state_helper.get_obs_space()
         action_space = self._action_helper.action_space(seed=seed)
-        ggLog.info(f"Built state/obs/action helpers")
 
         super().__init__(maxStepsPerEpisode,
                          stepLength_sec,
@@ -381,10 +399,21 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                          startSimulation = True,
                          step_precision_tolerance = step_precision_tolerance)
         
+        self.seed(seed)
         self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.startup()
 
 
+    # @property
+    # def _rng(self):
+    #     import traceback
+    #     def hash_tensor(tensor):
+    #         return hash(tuple(tensor.reshape(-1).tolist()))
+    #     ggLog.info(f"Getting rng {self._rng_get_count} {hash_tensor(self._rng_v.get_state())} at {traceback.format_list(traceback.extract_stack(limit=2))[0]}")
+    #     self._rng_get_count += 1
+    #     return self._rng_v
+
+    
     # --------------------------------------------------------------------------------------------------------------------
     # Action
     # --------------------------------------------------------------------------------------------------------------------
@@ -636,12 +665,12 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         
         jstates = self._adapter.getJointsState(requestedJoints=self._configuration.controlled_joints)
         body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
-        body_linvel_xyz = body_state.pos_velocity_xyz
-        body_angvel_xyz = body_state.ang_velocity_xyz
+        body_abs_linvel_xyz = body_state.pos_velocity_xyz
+        body_abs_angvel_xyz = body_state.ang_velocity_xyz
         body_position_xyz = body_state.pose.position
         gravity_vec         = th_quat_rotate(th.tensor([0.0,0,-1]), th_quat_conj(body_state.pose.orientation_xyzw))
-        body_rel_linvel_xyz = th_quat_rotate(body_linvel_xyz,     th_quat_conj(body_state.pose.orientation_xyzw))
-        body_rel_angvel_xyz = th_quat_rotate(body_angvel_xyz,     th_quat_conj(body_state.pose.orientation_xyzw))
+        body_rel_linvel_xyz = th_quat_rotate(body_abs_linvel_xyz,     th_quat_conj(body_state.pose.orientation_xyzw))
+        body_rel_angvel_xyz = th_quat_rotate(body_abs_angvel_xyz,     th_quat_conj(body_state.pose.orientation_xyzw))
 
 
         internal_state = self._current_state[self.STATE_INTERNAL][0]
@@ -691,6 +720,9 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : body_rel_angvel_xyz[0],
                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : body_rel_angvel_xyz[1],
                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : body_rel_angvel_xyz[2],
+                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : body_abs_linvel_xyz[0],
+                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : body_abs_linvel_xyz[1],
+                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : body_abs_linvel_xyz[2],     
                                 self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z : body_position_xyz[2],
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : gravity_vec[0],
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : gravity_vec[1],
@@ -711,8 +743,9 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         # t0 = time.monotonic()
         instantaneous_state = self._get_new_instantaneous_state()
         # t1 = time.monotonic()
-        step_count = self._current_state[self.STATE_INTERNAL][0][self.INTERNAL_FIELDS.STEP_COUNT]
-        if step_count <= 0:
+        # new_step_count = instantaneous_state[self.STATE_INTERNAL][0][self.INTERNAL_FIELDS.STEP_COUNT]
+        new_step_count = instantaneous_state[self.STATE_INTERNAL][self.INTERNAL_FIELDS.STEP_COUNT][0]
+        if new_step_count <= 0:
             self._current_state = self._state_helper.reset_state(instantaneous_state)
         else:
             self._state_helper.update(instantaneous_state, state=self._current_state)
@@ -772,6 +805,6 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     @override
     def seed(self, seed : int) -> None:
         super().seed(seed)
-        self._rng = self._rng.manual_seed(seed)
+        self._rng.manual_seed(seed)
         self.action_space.seed(seed)
         self.observation_space.seed(seed)

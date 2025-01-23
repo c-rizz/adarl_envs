@@ -21,12 +21,9 @@ import dataclasses
 import numpy as np
 import torch as th
 import time
-from adarl.utils.utils import isinstance_noimport
+from adarl.utils.utils import isinstance_noimport, hash_tensor
 from typing_extensions import deprecated
 
-
-def hash_tensor(tensor):
-    return hash(tuple(tensor.reshape(-1).tolist()))
 
 @deprecated("Use RobotVecEnv") 
 class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
@@ -118,6 +115,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
     class EpisodeConfiguration:
         initial_ctrl_joint_pose : th.Tensor
         max_ep_steps : th.Tensor
+        init_on_reset : th.Tensor
 
     @dataclass
     class Statistics:
@@ -165,6 +163,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                         ui_camera_resolution_hw : tuple[int,int] = (144,256)
                         ):
         
+        # self._rng_get_count = 0
         self._rng = th.Generator(device=th_device)
         self._rng.manual_seed(seed)
 
@@ -289,7 +288,8 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                         for jn in controlled_joints_rn},
                                 safe_stiffness=th.as_tensor([self._configuration.safe_stiffness]).repeat(len(controlled_joints_rn)),
                                 safe_damping=th.as_tensor([self._configuration.safe_damping]).repeat(len(controlled_joints_rn)),
-                                th_device=self._configuration.th_device)
+                                th_device=self._configuration.th_device,
+                                generator = self._rng)
 
         robot_state_helper = RobotStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
                                               stiffness_minmax=self._configuration.joint_safe_limits_minmax_stiffness,
@@ -388,7 +388,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         
         state_space = self._state_helper.get_space()
         observation_space = self._state_helper.get_obs_space()
-        action_space = self._action_helper.action_space(seed=seed)
+        action_space = self._action_helper.action_space()
 
         super().__init__(maxStepsPerEpisode,
                          stepLength_sec,
@@ -522,7 +522,10 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         homing_pos = self._configuration.homing_ctrl_joints_pvesd[:,0]
         if self._configuration.initial_pose_randomization > 0:
             for i in range(1000):
-                npos = (th.rand(size=(len(self._configuration.controlled_joints),), dtype=th.float32, device=self._configuration.th_device)*2-1)*self._configuration.initial_pose_randomization
+                npos = (th.rand(size=(len(self._configuration.controlled_joints),), 
+                                dtype=th.float32, 
+                                device=self._configuration.th_device,
+                                generator=self._rng)*2-1)*self._configuration.initial_pose_randomization
                 limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.controlled_joints], dim = 1)
                 # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
                 initial_joint_pose = ((npos>=0)*((limits_minmax[1]-homing_pos)*npos + homing_pos) + (npos<0)*((homing_pos-limits_minmax[0])*npos + homing_pos))
@@ -537,10 +540,15 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                 ggLog.warn(f"Failed to find initial joint configuration. Last collisions = {collisions}, always present collisions = {self._always_present_collisions}")
         if not found_good_configuration:
             initial_joint_pose = homing_pos
+        if  self._configuration.init_on_reset_ratio<1.0 and self._resetCounter>1:
+            init_on_reset = th.rand((1,)) < self._configuration.init_on_reset_ratio
+        else:
+            init_on_reset = th.ones((1,), dtype=th.bool, device=self._configuration.th_device)
         # ggLog.info(f"initial_jpose = {initial_joint_pose}, homing = {homing}")
         self._robot_model.set_collision_pairs(original_collision_pairs)
         self._current_episode_config = RobotEnv.EpisodeConfiguration(   initial_ctrl_joint_pose = initial_joint_pose,
-                                                                        max_ep_steps = maxStepsPerEpisode)
+                                                                        max_ep_steps = maxStepsPerEpisode,
+                                                                        init_on_reset = init_on_reset)
         self.set_max_episode_steps(self._current_episode_config.max_ep_steps)
 
     def _realworld_initialization(self):
@@ -550,7 +558,7 @@ class RobotEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         if not isinstance(self._adapter, BaseSimulationAdapter):
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
         
-        if self._configuration.init_on_reset_ratio > 0 and th.rand((1,), generator=self._rng) >= self._configuration.init_on_reset_ratio and self._resetCounter > 1:
+        if not self._current_episode_config.init_on_reset:
             return
         
         if self._configuration.homing_body_pose_xyz_xyzw is not None:

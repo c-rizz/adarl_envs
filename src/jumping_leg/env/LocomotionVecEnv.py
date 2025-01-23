@@ -703,8 +703,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                         min=self._locomotion_conf.goal_speed_minmax[0],
                                         max=self._locomotion_conf.goal_speed_minmax[1])
             goal_yaws = self._thrand((self._adapter.vec_size(),))*math.pi*2
-            goal_velocity_vec_xy = goal_speeds.unsqueeze(1)*th.stack([th.cos(goal_yaws), th.sin(goal_yaws)], dim = 1)
-        
+            goal_velocity_vec_xy = goal_speeds.unsqueeze(1)*th.stack([th.cos(goal_yaws), th.sin(goal_yaws)], dim = 1)        
         super()._set_current_ep_config(vec_mask=vec_mask, reset_options=reset_options)
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xyz     = self._thzeros((self._adapter.vec_size(), 3)),
                                                                                      goal_abs_gravity_vec_xyz = self._thtens([0.0,0.0,-1.0]).repeat(self._adapter.vec_size(), 1),

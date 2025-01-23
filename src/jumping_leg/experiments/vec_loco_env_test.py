@@ -312,11 +312,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams
     import os
     
-    step_length_sec = 52/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=100 #int(ep_duration_sec/step_length_sec)
+    step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
+    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     train_envs = 1
     env_device = th.device("cpu",0)
-    eval_freq = 5
+    eval_freq = 10
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
@@ -327,9 +327,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "pybullet",
         "quiet" : True,
-        "initial_pose_randomization" : 0.0,
+        "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" : 0.1,
-        "reward_actdiff_weight" : 0.,
+        "reward_actdiff_weight" : 0.1,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
         "reward_health_weight" : 0.0,
@@ -348,14 +348,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
         "th_device" : env_device,
-        "video_save_freq" : -1,
+        "video_save_freq" : 0,
         "goal_speed_minmax" : (0,2),
         "use_contacts" : False,
         "frame_stack_length" : 1,
         "verbose_infos" : False,
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
-        "init_on_reset_ratio" : 0.8,
+        "init_on_reset_ratio" : 1.0,
         "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
         "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
@@ -373,7 +373,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_freq_ep" : eval_freq*train_envs,
         "eval_eps" : 1,
         "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 1
+        "num_envs" : 1,
+        "init_on_reset_ratio" : 1.0
     }
     eval_conf_video_stoch = {
         "name" : "video_stoch",
@@ -381,7 +382,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_freq_ep" : eval_freq*train_envs,
         "eval_eps" : 1,
         "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 1
+        "num_envs" : 1,
+        "init_on_reset_ratio" : 1.0
     }
     # video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
     # video_norand_eval_env_builder_args["enable_rendering"] = True
@@ -452,12 +454,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 hyperparams = SAC_hyperparams(  device = "cuda",
                                                 q_network_arch=[256,128],
                                                 q_lr=0.001,
-                                                policy_lr=0.001,
+                                                policy_lr=0.0005,
                                                 policy_network_arch=[1024,512],
                                                 gamma=0.99,
                                                 target_tau = 0.005,
                                                 batch_size=16384,
-                                                buffer_size=1_000_000,
+                                                buffer_size=10_000_000,
                                                 total_steps=100_000_000,
                                                 train_freq_vstep=5,
                                                 grad_steps=10,
@@ -473,7 +475,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 debug_level=10,
                 max_episode_duration=max_steps_per_episode,
                 validation_buffer_size=100_000,
-                validation_batch_size=250,
+                validation_batch_size=256,
                 validation_holdout_ratio=0.01,
                 no_wandb=args["no_wandb"])
 

@@ -172,6 +172,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         ui_camera_resolution_hw : tuple[int,int] = (144,256)
                         ):
         self._main_seed = seed
+        # self._rng_get_count = 0
         self._rng = th.Generator(device=th_device)
         self._rng.manual_seed(seed)
         
@@ -295,7 +296,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._always_present_collisions : set[tuple[str,str]] = set()
 
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
-        self._action_helper= JointImpedanceActionHelper(
+        self._action_helper = JointImpedanceActionHelper(
                                 vec_size=adapter.vec_size(),
                                 control_mode=self._configuration.control_mode,
                                 joints=controlled_joints_rn,
@@ -305,7 +306,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                         for jn in controlled_joints_rn},
                                 safe_stiffness=self._thtens([self._configuration.safe_stiffness]).repeat(len(controlled_joints_rn)),
                                 safe_damping=self._thtens([self._configuration.safe_damping]).repeat(len(controlled_joints_rn)),
-                                th_device=self._configuration.th_device)
+                                th_device=self._configuration.th_device,
+                                generator=self._rng)
         ggLog.info(f"Built action helper")
 
         self._build_state_helper(adapter)
@@ -324,7 +326,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                          adapter=adapter,
                          single_state_space=self._state_helper.get_single_space(),
                          single_observation_space=self._state_helper.get_single_obs_space(),
-                         single_action_space=self._action_helper.get_single_action_space(seed=seed),
+                         single_action_space=self._action_helper.get_single_action_space(),
                          single_reward_space=ThBox(low=float("-inf"),high=float("+inf"), shape=tuple(), torch_device=th_device),
                          info_space=None,
                          step_precision_tolerance = step_precision_tolerance,
@@ -621,7 +623,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     ggLog.warn(f"Failed to find initial joint configuration. Last collisions = {collisions}, always present collisions = {self._always_present_collisions}")
         else:
             initial_jposes = homing_pos.expand(selected_vecs_num, len(self._configuration.controlled_joints))
-        if  self._configuration.init_on_reset_ratio>0 and self._tot_init_counter>1:
+        if  self._configuration.init_on_reset_ratio<1.0 and self._tot_init_counter>1:
             vec_init_on_reset = self._thrand((selected_vecs_num,)) < self._configuration.init_on_reset_ratio
         else:
             vec_init_on_reset = th.ones((selected_vecs_num,), dtype=th.bool, device=self._configuration.th_device)

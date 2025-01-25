@@ -84,7 +84,7 @@ def loco_run_builder(   seed,
                                                   enable_rendering=env_builder_args.pop("enable_rendering"),
                                                   jax_device=jax.devices("gpu")[0],
                                                   output_th_device = th_device,
-                                                  sim_step_dt=2/1024,
+                                                  sim_step_dt=2/4096,
                                                   step_length_sec=stepLength_sec,
                                                   realtime_factor=-1.0,
                                                   gui_env_index=0,
@@ -208,7 +208,7 @@ def loco_env_builder(   seed,
                                     quiet=quiet,
                                     autoreset = False)
             return GymRunnerWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
-        from jumping_leg.experiments.build_quad import quad_env_builder
+        # from jumping_leg.experiments.build_quad import quad_env_builder
         env = build_vec_env(env_builder=single_env_builder,
                             env_builder_args=env_builder_args,
                             log_folder=log_folder,
@@ -282,6 +282,46 @@ def quad_loco_env_builder(seed : int,
                             env_builder_args = env_builder_args,
                             num_envs=num_envs)[0]
 
+
+def kyon_loco_env_builder(seed : int,
+                    run_folder : str,
+                    num_envs : int, 
+                    env_builder_args : dict) -> gym.vector.VectorEnv:
+    import adarl.utils.utils
+    env_builder_args["model_file"] = adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","models/quad_simple.urdf.xacro")
+    env_builder_args["homing_joint_pose"]={ ("quad","hip_joint_x_back_left") : -3.14159*0.4,
+                                            ("quad","hip_joint_x_back_right") : -3.14159*0.4,
+                                            ("quad","hip_joint_x_front_left") : -3.14159*0.4,
+                                            ("quad","hip_joint_x_front_right") : -3.14159*0.4,
+                                            ("quad","hip_joint_y_back_left") : 0.75,
+                                            ("quad","hip_joint_y_back_right") : 0.75,
+                                            ("quad","hip_joint_y_front_left") : 0.75,
+                                            ("quad","hip_joint_y_front_right") : 0.75,
+                                            ("quad","knee_joint_back_left") : 1.8,
+                                            ("quad","knee_joint_back_right") : 1.8,
+                                            ("quad","knee_joint_front_left") : 1.8,
+                                            ("quad","knee_joint_front_right") : 1.8}
+    env_builder_args["robot_name"]="quad"
+    env_builder_args["robot_main_body_link"]="body_link"
+    env_builder_args["robot_root_link"]="body_link"
+    env_builder_args["homing_body_pose_xyz_xyzw"]=(0.,0.,0.5,0.,0.,0.,1.)
+    env_builder_args["disallowed_contact_links"] = [("quad","thigh_link_back_left"),
+                                                    ("quad","shin_link_back_left"),
+                                                    ("quad","thigh_link_back_right"),
+                                                    ("quad","shin_link_back_right"),
+                                                    ("quad","thigh_link_front_left"),
+                                                    ("quad","shin_link_front_left"),
+                                                    ("quad","thigh_link_front_right"),
+                                                    ("quad","shin_link_front_right"),
+                                                    ("quad","body_link")]
+    env_builder_args["terminating_contact_pairs"]=[(("quad","body_link"),("ground_plane","planeLink"))]
+    env_builder_args["controlled_joints"] = [JOINT_FILTERS.ALL_REVOLUTE]
+    return loco_env_builder(seed = seed,
+                            log_folder = run_folder,
+                            env_builder_args = env_builder_args,
+                            num_envs=num_envs)[0]
+
+
 def jumping_leg_builder(seed : int,
                     run_folder : str,
                     num_envs : int, 
@@ -314,8 +354,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 1
-    env_device = th.device("cpu",0)
+    train_envs = 1000
+    env_device = th.device("cuda",0)
     eval_freq = 10
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
@@ -325,7 +365,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
-        "mode" : "pybullet",
+        "mode" : "mjx",
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" : 0.1,

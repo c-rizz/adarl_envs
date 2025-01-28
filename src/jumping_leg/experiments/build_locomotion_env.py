@@ -96,7 +96,8 @@ def locomotion_env_builder( seed,
     time.sleep(1)
 
     
-    urdf_string = adarl.utils.utils.compile_xacro_string(  model_definition_string=Path(model_file).read_text())
+    urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(model_file).read_text(),
+                                                            model_kwargs={"use_cylinders" : "false"})
 
     lrenv = LocomotionEnv(  action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
                             action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
@@ -167,14 +168,15 @@ def locomotion_env_builder( seed,
         lrenv = ObsDict2FlatBox(lrenv, "vec")
     env = GymEnvWrapper(env=lrenv, episodeInfoLogFile=log_folder+f"/GymEnvWrapperLog.{seed}.log",
                         quiet=quiet,
-                        use_wandb=env_builder_args.pop("use_wandb"))
+                        use_wandb=env_builder_args.pop("use_wandb"),
+                        verbose=True)
     
     if video_save_freq >0:
         env = wrap_with_recorder(env,
                                  stepLength_sec=stepLength_sec,
                                  log_folder=log_folder,
                                  video_save_freq=video_save_freq)
-    env.reset(seed=seed)
+    # env.reset(seed=seed)
     if len(env_builder_args)>0:
         ggLog.warn(f"Unused env_builder_args: {env_builder_args}")
     return env, 1/stepLength_sec

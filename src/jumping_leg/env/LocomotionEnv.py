@@ -271,7 +271,7 @@ class LocomotionEnv(RobotEnv):
                                                              flatten = True)
         self.state_space = self._state_helper.get_space()
         self.observation_space = self._state_helper.get_obs_space()
-        self.action_space = self._action_helper.action_space(seed=seed)
+        self.action_space = self._action_helper.action_space()
 
 
 
@@ -607,7 +607,6 @@ class LocomotionEnv(RobotEnv):
         return i
     
     def _set_current_ep_config(self, reset_options : dict = {}):
-        super()._set_current_ep_config(reset_options=reset_options)
         
         if "goal_velocity_xy" in reset_options:
             goal_velocity_xy = th.as_tensor(reset_options["goal_velocity_xy"],device=self._configuration.th_device)
@@ -618,7 +617,7 @@ class LocomotionEnv(RobotEnv):
             goal_direction = th.rand((1,),generator=self._rng, device=self._configuration.th_device)*math.pi*2
             # goal_direction = th.tensor([0.0], device=self._configuration.th_device)
             goal_velocity_xy = goal_speed*th.cat([th.cos(goal_direction), th.sin(goal_direction)])
-                                             
+        super()._set_current_ep_config(reset_options=reset_options)
         self._locomotion_episode_config = LocomotionEnv.EpisodeLocomConfiguration()
         self.set_max_episode_steps(reset_options.get("reset_options",self._current_episode_config.max_ep_steps))
         self.set_goal(goal_velocity_xy)
@@ -680,10 +679,9 @@ class LocomotionEnv(RobotEnv):
             body_state : LinkState = self._adapter.getLinksState(requestedLinks = [self._configuration.main_body_link], use_com_frame = True)[self._configuration.main_body_link]
             q = quaternion.from_euler_angles([0.0,0.0,np.arctan2(*self._locomotion_episode_config.goal_abs_linvel_xyz[[1,0]].cpu().numpy())])
             n = th.norm(self._locomotion_episode_config.goal_abs_linvel_xyz).cpu().item()
+            pos_xyz = (body_state.pose.position[0], body_state.pose.position[1], n)
             self._adapter.setLinksStateDirect({self._arrow_base :
-                                                            LinkState( position_xyz = th.tensor((body_state.pose.position[0],
-                                                                                                    body_state.pose.position[1],
-                                                                                                    n), device=self._configuration.th_device),
+                                                            LinkState( position_xyz = th.tensor(pos_xyz, device=self._configuration.th_device),
                                                                         orientation_xyzw = th.tensor((q.x, q.y, q.z, q.w), device=self._configuration.th_device),
                                                                         pos_com_velocity_xyz = th.tensor((0.,0.,0), device=self._configuration.th_device),
                                                                         ang_velocity_xyz = th.tensor((0.,0.,0.), device=self._configuration.th_device))})

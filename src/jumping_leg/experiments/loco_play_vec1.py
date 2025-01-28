@@ -5,9 +5,11 @@ import inspect
 import adarl.utils.dbg.dbg_img
 from jumping_leg.utils.modded_sac import SAC as SB3_SAC
 from rreal.algorithms.sac import SAC
+from rreal.algorithms.sac_helpers import EnvBuilderProtocol
 import adarl.utils.dbg.ggLog as ggLog
 import adarl.utils.utils
 import numpy as np
+import gymnasium as gym
 
 import os
 import torch as th
@@ -16,9 +18,11 @@ import adarl.utils.dbg.dbg_img as dbg_img
 from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
-from jumping_leg.experiments.build_quad import quad_env_builder
+from jumping_leg.experiments.vec_loco_env_test import quad_loco_env_builder
+from jumping_leg.env.LocomotionVecEnv import LocomotionVecEnv
 
 import adarl.utils.dbg
+from typing import Any
 from ctypes.util import find_library
 import readline
 
@@ -35,6 +39,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     step_length_sec = 50/1024 
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     env_device = th.device("cpu")
+    pixel_resolution = 360 if args["mode"] == "mjx" else 720
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
@@ -80,18 +85,29 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "show_gui" : args["gui"],
-        "ui_camera_resolution_hw" : (720,int(720*16/9))
+        "ui_camera_resolution_hw" : (pixel_resolution,int(pixel_resolution*16/9))
     }
 
     return play(seed,
                 folderName,
                 run_id, args,
-                env_builder = quad_env_builder,
+                env_builder = quad_loco_env_builder,
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
                 render=not args["gui"])
 
-def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_length_sec : float, render : bool):
+class Fixedpolicy():
+    def __init__(self, cmd : th.Tensor):
+        self._cmd = cmd.detach().clone()
+
+    def predict(self, obs, deterministic : bool):
+        return self._cmd.clone(), None
+
+
+def play(seed, folderName, run_id, args, 
+         env_builder : EnvBuilderProtocol, 
+         env_builder_args : dict[str,Any], 
+         step_length_sec : float, render : bool):
     
     ggLog.info(f"Starting run")
     if render:
@@ -109,12 +125,16 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
     device = adarl.utils.utils.torch_selectBestGpu()
     ggLog.info("Building env...")
 
-    env, fps = env_builder(log_folder=log_folder+"/eval",
-                                    seed=seed+100000000,
-                                    env_builder_args = env_builder_args,
-                                    is_eval=True)
+    env, fps = env_builder( log_folder=log_folder+"/eval",
+                            seed=seed+100000000,
+                            env_builder_args = env_builder_args,
+                            is_eval=False)
     ggLog.info("Built")
     model = load_model(args["pretrained"])
+    # model = Fixedpolicy(th.as_tensor([0.1, 1.0, 1.0,
+    #                                   0.1, 1.0, 1.0, 
+    #                                   0.1, 1.0, 1.0, 
+    #                                   0.1, 1.0, 1.0], device=th.device("cuda")))
 
     play = True
     verbose = False
@@ -160,12 +180,13 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
             while not done:
                 t0 = time.monotonic()
                 session.run_info["collected_steps"].value += 1
-                goal_velocity_xy = env.getBaseEnv().get_goal()
+                base_env : LocomotionVecEnv = env.get_runner().get_base_env()
+                goal_velocity_xy = base_env.get_goals()[0]
                 ggLog.info(f"step = {step_count} rtfactor = {step_length_sec/full_step_wallduration:.2f} max_rtfactor = {step_length_sec/step_wallduration:.2f} \t goal_velocity_xy={goal_velocity_xy}")
                 # ggLog.info(f"ep_config = {info['ep_config']}")
                 obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
                 action, hidden_state = model.predict(obs_batch, deterministic = True)
-                obs, reward, terminated, truncated, info = env.step(action.detach().squeeze().cpu().numpy()) #type: ignore
+                obs, reward, terminated, truncated, info = env.step(action.detach().squeeze()) #type: ignore
                 if render:
                     img = env.render()
                     dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
@@ -190,11 +211,11 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
                     if keyboard_listener.get_key_press_count("l")>0: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
 
                     if keyboard_listener.get_key_press_count("t")>0: truncated = True
-                    env.getBaseEnv().set_cam_pose(env.getBaseEnv().get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
+                    base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
                     if flip:
-                        env.getBaseEnv().set_goal(-env.getBaseEnv().get_goal()[:2])
+                        base_env.set_goal(-base_env.get_goals()[0,:2])
                     else:
-                        env.getBaseEnv().set_goal(goal_velocity_diff_speed_yaw = speed_yaw_diff)
+                        base_env.set_goal(goal_velocity_diff_speed_yaw = tuple(speed_yaw_diff))
                     keyboard_listener.reset_key_press_counters()
                 step_count += 1
 
@@ -211,7 +232,7 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
             if step_count>0:
                 rewards.append(ep_reward)
                 durations.append(step_count)
-                avg10_dists.append(info["avg_vel_track_err"])
+                # avg10_dists.append(info["avg_vel_track_err"])
             with session.run_info["collected_episodes"].get_lock():
                 session.run_info["collected_episodes"].value += 1
             ggLog.info("\n"
@@ -226,10 +247,10 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
             keyboard_listener.close()
     rewards = np.array(rewards)
     durations = np.array(durations)
-    avg10_dists = np.array(avg10_dists)
+    # avg10_dists = np.array(avg10_dists)
     ggLog.info(f"Avg reward = {rewards.mean()}, {rewards.std()} std")
     ggLog.info(f"Avg durations = {durations.mean()}, {durations.std()} std")
-    ggLog.info(f"Avg avg10_dists = {avg10_dists.mean()}, {avg10_dists.std()} std")
+    # ggLog.info(f"Avg avg10_dists = {avg10_dists.mean()}, {avg10_dists.std()} std")
     env.reset() # trigger video saving
     env.close()
 

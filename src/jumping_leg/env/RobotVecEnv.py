@@ -1,6 +1,7 @@
 from __future__ import annotations
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
+from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
 from adarl.adapters.BaseSimulationAdapter import ModelSpawnDef
 from adarl.envs.vec.ControlledVecEnv import ControlledVecEnv
 from adarl.envs.vec.BaseVecEnv import Observation
@@ -484,6 +485,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             actions, action_delay = self._preproc_acts(actions)
             self._last_out_actions = actions
             self._last_sent_v_j_pvesd = self._action_helper.action_to_pvesd(actions)
+            # ggLog.info(f"sending jimp: {self._last_sent_v_j_pvesd}")
             self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_v_j_pvesd,
                                                     delay_sec=action_delay)
             
@@ -517,6 +519,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 cam_file = "models/simple_camera.mjcf.xacro"
             else:            
                 cam_file = "models/simple_camera.sdf.xacro"
+            is_pybullet = False
+            is_ros = False
+            if isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper):
+                if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("PyBulletJointImpedanceAdapter")):
+                    is_pybullet= True
+                elif adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("RosXbotAdapter", "RosXbotGazeboAdapter")):
+                    is_ros = True
             camera_spawn_def = ModelSpawnDef(   definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
                                                 name="simple_camera",
                                                 pose=camera_pose,
@@ -528,12 +537,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                             name="arrow",
                                             pose=arrow_pose,
                                             format="urdf.xacro",
-                                            kwargs={"add_world_link":str(isinstance_noimport(self._adapter, ["PyBulletAdapter","VecPyBulletJointImpedanceAdapter"]))})
+                                            kwargs={"add_world_link":str(is_pybullet)})
             axes_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("jumping_leg","models/axes.urdf.xacro")).read_text(),
                                             name="axes",
                                             pose=build_pose(0,0,0,0,0,0,1),
                                             format="urdf.xacro",
-                                            kwargs={"add_world_link":str(isinstance_noimport(self._adapter, ["PyBulletAdapter","VecPyBulletJointImpedanceAdapter"]))})
+                                            kwargs={"add_world_link":str(is_pybullet)})
             self._spawn_defs = [robot_spawn_def,
                                     camera_spawn_def]
             if self._configuration.show_goal:
@@ -681,20 +690,23 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     @override
     def _build(self):
         envCtrlName = type(self._adapter).__name__
-        if envCtrlName in ["PyBulletJointImpedanceAdapter","VecPyBulletJointImpedanceAdapter"]:
-            self._adapter.build_scenario(models = self._get_spawn_defs())
-            self._arrow_base = ("arrow","world")
-        elif adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
+        if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
             self._adapter.build_scenario(models = self._get_spawn_defs())
             self._arrow_base = ("arrow","arrow_link")
-        elif envCtrlName in ["RosXbotAdapter", "RosXbotGazeboAdapter"]:
-            if self._configuration.real:
-                raise NotImplementedError()
+        elif isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper):
+            if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("PyBulletJointImpedanceAdapter")):
+                self._adapter.build_scenario(models = self._get_spawn_defs())
+                self._arrow_base = ("arrow","world")
+            elif adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("RosXbotAdapter", "RosXbotGazeboAdapter")):
+                if self._configuration.real:
+                    raise NotImplementedError()
+                else:
+                    self._adapter.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path( "jumping_leg",
+                                                                                                                "gazebo/all_gazebo_xbot.launch"),
+                                                launch_file_args={"gui":"false"})
+                    self._arrow_base = ("arrow","arrow_link")
             else:
-                self._adapter.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path( "jumping_leg",
-                                                                                                            "gazebo/all_gazebo_xbot.launch"),
-                                             launch_file_args={"gui":"false"})
-                self._arrow_base = ("arrow","arrow_link")
+                raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         else:
             raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         

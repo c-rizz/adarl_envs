@@ -54,8 +54,8 @@ def robot_env_builder(  seed,
     elif mode == "xbot-gazebo":
         raise NotImplementedError()
     elif mode == "pybullet":
-        from adarl.adapters.VecPyBulletJointImpedanceAdapter import VecPyBulletJointImpedanceAdapter
-        env_controller = VecPyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
+        from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
+        env_controller = VecSimJointImpedanceAdapterWrapper(stepLength_sec=stepLength_sec,
                                                        restore_on_reset=False,
                                                        debug_gui=show_gui,
                                                        simulation_step=1/1024,

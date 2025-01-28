@@ -65,18 +65,38 @@ def loco_run_builder(   seed,
     elif mode == "xbot":
         raise NotImplementedError()
     elif mode == "xbot-gazebo":
-        raise NotImplementedError()
+        from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
+        from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
+        env_controller = VecSimJointImpedanceAdapterWrapper(adapter = RosXbotGazeboAdapter(model_name = robot_name,
+                                                                                    stepLength_sec = stepLength_sec,
+                                                                                    forced_ros_master_uri = None,
+                                                                                    maxObsDelay = float("+inf"),
+                                                                                    blocking_observation = False,
+                                                                                    is_floating_base = True,
+                                                                                    reference_frame = "base_link",
+                                                                                    torch_device = th.device("cpu"),
+                                                                                    fallback_cmd_stiffness = 200.0,
+                                                                                    fallback_cmd_damping = 10.0,
+                                                                                    allow_fallback = True,
+                                                                                    jpos_cmd_max_vel = {},
+                                                                                    jpos_cmd_max_vel_default = 10.0,
+                                                                                    jpos_cmd_max_acc = {},
+                                                                                    jpos_cmd_max_acc_default = 10.0),
+                                                            vec_size = 1,
+                                                            th_device = th_device)
     elif mode == "pybullet":
-        from adarl.adapters.VecPyBulletJointImpedanceAdapter import VecPyBulletJointImpedanceAdapter
-        env_controller = VecPyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
-                                                       restore_on_reset=False,
-                                                       debug_gui=show_gui,
-                                                       simulation_step=1/1024,
-                                                       enable_rendering=env_builder_args.pop("enable_rendering"),
-                                                       global_max_torque_position_control = 100,
-                                                       real_time_factor=None,
-                                                       vec_size=num_envs,
-                                                       th_device=th_device)
+        from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
+        from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
+        env_controller = VecSimJointImpedanceAdapterWrapper(adapter = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
+                                                                            restore_on_reset=False,
+                                                                            debug_gui=show_gui,
+                                                                            simulation_step=1/1024,
+                                                                            enable_rendering=env_builder_args.pop("enable_rendering"),
+                                                                            global_max_torque_position_control = 100,
+                                                                            real_time_factor=None,
+                                                                            th_device=th_device),
+                                                            vec_size = 1,
+                                                            th_device = th_device)
     elif mode == "mjx":
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
         import jax
@@ -197,6 +217,24 @@ def loco_env_builder(   seed,
     quiet = env_builder_args["quiet"]
     stepLength_sec = env_builder_args["stepLength_sec"]
 
+    vrunner = loco_run_builder( seed = seed,
+                                log_folder = log_folder,
+                                env_builder_args = env_builder_args,
+                                num_envs = 1,
+                                mode = mode,
+                                quiet=quiet,
+                                autoreset = False)
+    return GymRunnerWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
+        
+
+def loco_venv_builder(   seed,
+                        log_folder,
+                        env_builder_args : dict,
+                        num_envs : int):
+    mode = env_builder_args["mode"].strip().lower()
+    quiet = env_builder_args["quiet"]
+    stepLength_sec = env_builder_args["stepLength_sec"]
+
     if mode == "pybullet":
         device = env_builder_args["th_device"]
         def single_env_builder(seed : int, log_folder : str, is_eval : bool, env_builder_args : dict[str, Any]):
@@ -244,46 +282,61 @@ def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
                                 saveFrequency_ep=video_save_freq,
                                 **video_recorder_kwargs)
 
-def quad_loco_env_builder(seed : int,
+quad_args = {
+    "model_file" : adarl.utils.utils.pkgutil_get_path("jumping_leg","models/quad_simple.urdf.xacro"),
+    "homing_joint_pose" : { ("quad","hip_joint_x_back_left") : -3.14159*0.4,
+                            ("quad","hip_joint_x_back_right") : -3.14159*0.4,
+                            ("quad","hip_joint_x_front_left") : -3.14159*0.4,
+                            ("quad","hip_joint_x_front_right") : -3.14159*0.4,
+                            ("quad","hip_joint_y_back_left") : 0.75,
+                            ("quad","hip_joint_y_back_right") : 0.75,
+                            ("quad","hip_joint_y_front_left") : 0.75,
+                            ("quad","hip_joint_y_front_right") : 0.75,
+                            ("quad","knee_joint_back_left") : 1.8,
+                            ("quad","knee_joint_back_right") : 1.8,
+                            ("quad","knee_joint_front_left") : 1.8,
+                            ("quad","knee_joint_front_right") : 1.8},
+    "robot_name" : "quad",
+    "robot_main_body_link" : "body_link",
+    "robot_root_link" : "body_link",
+    "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
+    "disallowed_contact_links" : [  ("quad","thigh_link_back_left"),
+                                    ("quad","shin_link_back_left"),
+                                    ("quad","thigh_link_back_right"),
+                                    ("quad","shin_link_back_right"),
+                                    ("quad","thigh_link_front_left"),
+                                    ("quad","shin_link_front_left"),
+                                    ("quad","thigh_link_front_right"),
+                                    ("quad","shin_link_front_right"),
+                                    ("quad","body_link")],
+    "terminating_contact_pairs" : [(("quad","body_link"),("ground_plane","planeLink"))],
+    "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE]
+}
+
+def quad_loco_venv_builder(seed : int,
                     run_folder : str,
                     num_envs : int, 
-                    env_builder_args : dict) -> gym.vector.VectorEnv:
-    import adarl.utils.utils
-    env_builder_args["model_file"] = adarl.utils.utils.pkgutil_get_path("jumping_leg","models/quad_simple.urdf.xacro")
-    env_builder_args["homing_joint_pose"]={ ("quad","hip_joint_x_back_left") : -3.14159*0.4,
-                                            ("quad","hip_joint_x_back_right") : -3.14159*0.4,
-                                            ("quad","hip_joint_x_front_left") : -3.14159*0.4,
-                                            ("quad","hip_joint_x_front_right") : -3.14159*0.4,
-                                            ("quad","hip_joint_y_back_left") : 0.75,
-                                            ("quad","hip_joint_y_back_right") : 0.75,
-                                            ("quad","hip_joint_y_front_left") : 0.75,
-                                            ("quad","hip_joint_y_front_right") : 0.75,
-                                            ("quad","knee_joint_back_left") : 1.8,
-                                            ("quad","knee_joint_back_right") : 1.8,
-                                            ("quad","knee_joint_front_left") : 1.8,
-                                            ("quad","knee_joint_front_right") : 1.8}
-    env_builder_args["robot_name"]="quad"
-    env_builder_args["robot_main_body_link"]="body_link"
-    env_builder_args["robot_root_link"]="body_link"
-    env_builder_args["homing_body_pose_xyz_xyzw"]=(0.,0.,0.5,0.,0.,0.,1.)
-    env_builder_args["disallowed_contact_links"] = [("quad","thigh_link_back_left"),
-                                                    ("quad","shin_link_back_left"),
-                                                    ("quad","thigh_link_back_right"),
-                                                    ("quad","shin_link_back_right"),
-                                                    ("quad","thigh_link_front_left"),
-                                                    ("quad","shin_link_front_left"),
-                                                    ("quad","thigh_link_front_right"),
-                                                    ("quad","shin_link_front_right"),
-                                                    ("quad","body_link")]
-    env_builder_args["terminating_contact_pairs"]=[(("quad","body_link"),("ground_plane","planeLink"))]
-    env_builder_args["controlled_joints"] = [JOINT_FILTERS.ALL_REVOLUTE]
-    return loco_env_builder(seed = seed,
+                    env_builder_args : dict,
+                    env_name : str = "") -> gym.vector.VectorEnv:
+    env_builder_args.update(quad_args)
+    return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
                             num_envs=num_envs)[0]
 
 
-def kyon_loco_env_builder(seed : int,
+def quad_loco_env_builder(seed : int,
+                    log_folder : str,
+                    is_eval : bool, 
+                    env_builder_args : dict) -> tuple[gym.Env,float]:
+    env_builder_args.update(quad_args)
+    return loco_env_builder(seed = seed,
+                            log_folder = log_folder,
+                            env_builder_args = env_builder_args,
+                            num_envs=1)
+
+
+def kyon_loco_venv_builder(seed : int,
                     run_folder : str,
                     num_envs : int, 
                     env_builder_args : dict) -> gym.vector.VectorEnv:
@@ -316,7 +369,7 @@ def kyon_loco_env_builder(seed : int,
                                                     ("quad","body_link")]
     env_builder_args["terminating_contact_pairs"]=[(("quad","body_link"),("ground_plane","planeLink"))]
     env_builder_args["controlled_joints"] = [JOINT_FILTERS.ALL_REVOLUTE]
-    return loco_env_builder(seed = seed,
+    return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
                             num_envs=num_envs)[0]
@@ -339,7 +392,7 @@ def jumping_leg_builder(seed : int,
     env_builder_args["terminating_contact_pairs"] = []
     env_builder_args["controlled_joints"] = [JOINT_FILTERS.ALL_REVOLUTE]
 
-    return loco_env_builder(seed = seed,
+    return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
                             num_envs=num_envs)[0]
@@ -354,18 +407,18 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 1000
-    env_device = th.device("cuda",0)
+    train_envs = 100
+    env_device = th.device("cpu",0)
     eval_freq = 10
     env_builder_args = {
-        "action_delay_mustd" : (0.0,0.0),
+        "action_delay_mustd" : (0.001,0.001),
         "action_noise_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
-        "mode" : "mjx",
+        "mode" : "pybullet",
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" : 0.1,
@@ -395,12 +448,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "verbose_infos" : False,
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
-        "init_on_reset_ratio" : 1.0,
-        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
-        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
+        "init_on_reset_ratio" : 0.9,
+        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.001),
+        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.001),
+        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.001),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.001),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.001),
         "ui_camera_resolution_hw" : (144,256)
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
@@ -476,7 +529,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # }
     eval_configuration = [  
                             eval_conf_video_det,
-                            # eval_conf_video_stoch,
+                            eval_conf_video_stoch,
                             # eval_conf_run_1ms,
                             # eval_conf_video_norand_det,
                             # #  eval_conf_feasible,
@@ -487,7 +540,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 folderName,
                 run_id,
                 args,
-                vec_env_builder = quad_loco_env_builder,
+                vec_env_builder = quad_loco_venv_builder,
                 env_builder = None,
                 env_builder_args = env_builder_args,
                 eval_configurations = eval_configuration,

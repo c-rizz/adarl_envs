@@ -315,7 +315,6 @@ class LocomotionVecEnv(RobotVecEnv):
         prev_locom_state = self._current_state[self.STATE_LOCOMOTION][:, 0]
         new_inst_state = super()._get_new_instantaneous_state()
         new_internal_state = new_inst_state[self.STATE_INTERNAL]
-        new_robot_state = new_inst_state[self.STATE_ROBOT]
         new_extrinsic_state = new_inst_state[self.STATE_EXTRINSIC]
 
         bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
@@ -326,8 +325,8 @@ class LocomotionVecEnv(RobotVecEnv):
         #                                             self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z]]
         goal_rel_linvel_vec_xyz = th_quat_rotate(prev_goal_abs_vec_xyz, th_quat_conj(bstates_vec_13[:,3:7]))
         # print(f"jstate = {new_robot_state}")
-        # print(f"bstates_vec_13[:,3:7] = {bstates_vec_13[:,3:7]}")
-        # print(f"prev_goal_abs_vec_xyz = {prev_goal_abs_vec_xyz}")
+        # print(f"bstates_vec_13[:,3:7] = {bstates_vec_13[:,3:7].size()}")
+        # print(f"prev_goal_abs_vec_xyz = {prev_goal_abs_vec_xyz.size()}")
         # print(f"goal_rel_linvel_vec_xyz = {goal_rel_linvel_vec_xyz}")
         goal_height_z = prev_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT]
 
@@ -358,7 +357,8 @@ class LocomotionVecEnv(RobotVecEnv):
 
         alpha = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.stepLength_sec)
         smoothed_tracking_err_vec = tracking_err_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]*alpha
-        smoothed_tracking_err_vec[new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]<=0] = tracking_err_vec
+        # print(f"smoothed_tracking_err_vec.size() = {smoothed_tracking_err_vec.size()}")
+        smoothed_tracking_err_vec[new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]<=0] = tracking_err_vec[new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]<=0]
 
         if self._locomotion_conf.use_contacts:
             if not isinstance_noimport(self._adapter, "PyBulletAdapter"):
@@ -432,7 +432,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
 
 
-    def _tracking_error_vec(self, body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_vec_xyz : th.Tensor, goal_rel_linvel_vec_xyz : th.Tensor):
+    def _tracking_error_vec(self, body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_vec_xyz : th.Tensor, goal_rel_linvel_vec_xyz : th.Tensor) -> th.Tensor:
         # ggLog.info(f"tracking_error_vec(body_rel_linvel_vec_xyz.size()={body_rel_linvel_vec_xyz.size()}, gravity_rel_vec_xyz.size()={gravity_rel_vec_xyz.size()}, goal_rel_linvel_vec_xyz.size()={goal_rel_linvel_vec_xyz.size()}")
         body_planar_rel_linvel_xyz = body_rel_linvel_vec_xyz - vector_projection(body_rel_linvel_vec_xyz,gravity_rel_vec_xyz)
         # ggLog.info(f" {body_rel_linvel_xyz.cpu().tolist()} + vector_projection({body_rel_linvel_xyz.cpu().tolist()},{gravity_rel_xyz.cpu().tolist()}) =\n"
@@ -754,10 +754,9 @@ class LocomotionVecEnv(RobotVecEnv):
 
     def _set_arrow_pose(self, vec_mask : th.Tensor):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
-            if th.norm(self._locomotion_episode_config.goal_abs_vel_vec_xyz) == 0:
-                q = quat_xyzw_between_vecs_py(self._thtens([1.0,0,0]), self._thtens([0,0,-1.0])).expand((self._adapter.vec_size(),4)) # if goal is zero then point down
-            else:
-                q = quat_xyzw_between_vecs_py(self._thtens([1.0,0,0]).expand((self._adapter.vec_size(),3)), self._locomotion_episode_config.goal_abs_vel_vec_xyz)
+            goals_fixed = self._locomotion_episode_config.goal_abs_vel_vec_xyz.detach().clone()
+            goals_fixed[th.linalg.norm(goals_fixed, dim = 1) < 0.0001] = self._thtens([0,0,-1.0]) # if goal is zero then point the arrow down
+            q = quat_xyzw_between_vecs_py(self._thtens([1.0,0,0]).expand((self._adapter.vec_size(),3)), goals_fixed)
             bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
             pose = bstates_vec_13[:,:7]
             pose[:,2] = th.linalg.norm(self._locomotion_episode_config.goal_abs_vel_vec_xyz, dim = 1)

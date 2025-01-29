@@ -20,6 +20,7 @@ from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
 from jumping_leg.experiments.vec_loco_env_test import quad_loco_env_builder
 from jumping_leg.env.LocomotionVecEnv import LocomotionVecEnv
+from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
 
 import adarl.utils.dbg
 from typing import Any
@@ -27,11 +28,80 @@ from ctypes.util import find_library
 import readline
 
 def load_model(model_path):
-    try:
-        return SB3_SAC.load(model_path)
-    except:
-        return SAC.load(model_path)
+    return SAC.load(model_path)
 
+
+class Fixedpolicy():
+    def __init__(self, cmd : th.Tensor):
+        self._cmd = cmd.detach().clone()
+
+    def predict(self, obs, deterministic : bool):
+        return self._cmd.clone(), None
+    
+
+class SinPolicy(RLAgent):
+    def __init__(self,  act_scale : th.Tensor,
+                        act_offset : th.Tensor,
+                        act_speed : th.Tensor,
+                        action_size : int,
+                        dt : float):
+        self._t0 = 0.0
+        self._t = 0.0
+        self._dt = dt
+        self._a_offset = act_offset
+        self._a_speed = act_speed
+        # self._t_off = th.asin(self._a_offset/act_range)
+        self._a_scale = act_scale.expand((action_size,))
+
+    def predict_action(self, observation_batch, deterministic = False):
+        theta = (self._t0-self._t)*self._a_speed
+        a = th.sin(theta)*self._a_scale+self._a_offset
+        print(f" theta = {theta} \n"
+            #   f" _t_off = {self._t_off} \n"
+              f" _t = {self._t} \n"
+              f" _a_scale = {self._a_scale} \n"
+              f" _a_offset = {self._a_offset} \n"
+              f" a = {a}")
+        self._t = self._t+self._dt
+        return a
+    
+    def get_hidden_state(self):
+        return self._t
+
+    def predict(self, observation_batch, deterministic = False):
+        # Mostly for stable-baselines3 compatibility
+        hidden_state = self.get_hidden_state()
+        return self.predict_action(observation_batch=observation_batch, deterministic=deterministic), hidden_state
+    
+    def update(self, transitions : TransitionBatch):
+        raise NotImplementedError()
+
+    def reset_hidden_state(self):
+        self._t = self._t0
+
+def build_sin_policy(env):
+    home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(
+                                            {   ("quad","hip_joint_x_back_left") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                ("quad","hip_joint_x_back_right") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                ("quad","hip_joint_x_front_left") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                ("quad","hip_joint_x_front_right") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                ("quad","hip_joint_y_back_left") : [0.75, 0, 0, 400, 10],
+                                                ("quad","hip_joint_y_back_right") : [0.75, 0, 0, 400, 10],
+                                                ("quad","hip_joint_y_front_left") : [0.75, 0, 0, 400, 10],
+                                                ("quad","hip_joint_y_front_right") : [0.75, 0, 0, 400, 10],
+                                                ("quad","knee_joint_back_left") : [1.8, 0, 0, 400, 10],
+                                                ("quad","knee_joint_back_right") : [1.8, 0, 0, 400, 10],
+                                                ("quad","knee_joint_front_left") : [1.8, 0, 0, 400, 10],
+                                                ("quad","knee_joint_front_right") : [1.8, 0, 0, 400, 10]})
+    model = SinPolicy(  act_scale=th.as_tensor([0.1, 0.1, 0.2,
+                                                0.1, 0.1, 0.2,
+                                                0.1, 0.1, 0.2,
+                                                0.1, 0.1, 0.2]),
+                        act_offset=home_action,
+                        act_speed=th.as_tensor([0.8]),
+                        action_size=12,
+                        dt=0.05)
+    return model
 
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
@@ -50,7 +120,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : args["mode"],
         "quiet" : True,
-        "initial_pose_randomization" : 0.25,
+        "initial_pose_randomization" : 0.0,
         "reward_acceleration_weight" : 0.1,
         "reward_actdiff_weight" : 0.1,
         "reward_contacts_weight" : 0.0,
@@ -96,12 +166,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 step_length_sec = step_length_sec,
                 render=not args["gui"])
 
-class Fixedpolicy():
-    def __init__(self, cmd : th.Tensor):
-        self._cmd = cmd.detach().clone()
-
-    def predict(self, obs, deterministic : bool):
-        return self._cmd.clone(), None
 
 
 def play(seed, folderName, run_id, args, 
@@ -130,11 +194,12 @@ def play(seed, folderName, run_id, args,
                             env_builder_args = env_builder_args,
                             is_eval=False)
     ggLog.info("Built")
-    model = load_model(args["pretrained"])
+    # model = load_model(args["pretrained"])
     # model = Fixedpolicy(th.as_tensor([0.1, 1.0, 1.0,
     #                                   0.1, 1.0, 1.0, 
     #                                   0.1, 1.0, 1.0, 
     #                                   0.1, 1.0, 1.0], device=th.device("cuda")))
+    model = build_sin_policy(env)
 
     play = True
     verbose = False
@@ -177,6 +242,12 @@ def play(seed, folderName, run_id, args,
             step_wallduration = float("nan")
             full_step_wallduration = float("nan")
             ep_wall_duration = 0
+            rt = 1.0
+            model.reset_hidden_state()
+            if render:
+                img = env.render()
+                dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
+                time.sleep(step_length_sec/rt)
             while not done:
                 t0 = time.monotonic()
                 session.run_info["collected_steps"].value += 1
@@ -227,7 +298,7 @@ def play(seed, folderName, run_id, args,
                 ep_reward += reward
                 step_wallduration = time.monotonic()-t0
                 ep_wall_duration += step_wallduration
-                time.sleep(max(0,step_length_sec - step_wallduration))
+                time.sleep(max(0,step_length_sec/rt - step_wallduration))
                 full_step_wallduration = time.monotonic()-t0
             if step_count>0:
                 rewards.append(ep_reward)

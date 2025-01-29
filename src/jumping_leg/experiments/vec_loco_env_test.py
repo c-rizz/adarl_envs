@@ -23,6 +23,7 @@ from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
 import gymnasium as gym
 import copy
 from rreal.algorithms.sac_helpers import build_vec_env
+from jumping_leg.experiments.solve_sb3 import solve_sb3
 
 def format_tensor(t, float_precision):
     t = t.squeeze().cpu().tolist()
@@ -110,7 +111,10 @@ def loco_run_builder(   seed,
                                                   gui_env_index=0,
                                                   default_max_joint_impedance_ctrl_torque=100.0,
                                                   show_gui=False,
-                                                  log_freq=100)
+                                                  log_freq=10_000,
+                                                  record_whole_joint_trajectories = False,
+                                                  log_freq_joints_trajectories = int(250*(50/1024)/(2/4096)),
+                                                  log_folder=log_folder)
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)
@@ -449,11 +453,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
         "init_on_reset_ratio" : 0.9,
-        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.001),
-        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.001),
-        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.001),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.001),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.001),
+        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0001, 0.001),
+        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0001, 0.001),
+        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0001, 0.001),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0001, 0.005),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0001, 0.005),
         "ui_camera_resolution_hw" : (144,256)
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
@@ -536,6 +540,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                             # #  eval_conf_video_feasible,
                             # #  eval_conf_video_jump_feasible
                                 ]
+
     sac_train(  seed,
                 folderName,
                 run_id,
@@ -559,8 +564,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 learning_starts=max_steps_per_episode*max(train_envs*5, 100),
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode,
-                                                reference_init_args =  #{}
-                                                                        {   "env_builder_args" : env_builder_args,
+                                                reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                             "eval_configuration" : eval_configuration}
                                                 ),
                 checkpoint_freq=20,

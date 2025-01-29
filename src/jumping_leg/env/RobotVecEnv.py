@@ -632,7 +632,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     ggLog.warn(f"Failed to find initial joint configuration. Last collisions = {collisions}, always present collisions = {self._always_present_collisions}")
         else:
             initial_jposes = homing_pos.expand(selected_vecs_num, len(self._configuration.controlled_joints))
-        if  self._configuration.init_on_reset_ratio<1.0 and self._tot_init_counter>1:
+        if  self._configuration.init_on_reset_ratio<1.0 and self._init_counter_since_reset>1:
             vec_init_on_reset = self._thrand((selected_vecs_num,)) < self._configuration.init_on_reset_ratio
         else:
             vec_init_on_reset = th.ones((selected_vecs_num,), dtype=th.bool, device=self._configuration.th_device)
@@ -651,9 +651,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if not isinstance(self._adapter, BaseVecSimulationAdapter):
             raise RuntimeError(f"called simulation initialization with non-simulated adapter")
                 
-        # ggLog.info(f"Set link state>")
+        # ggLog.info(f"simulation init ({vec_mask}) (count={self._tot_init_counter},{self._init_counter_since_reset})")
         # time.sleep(5)
         if self._configuration.homing_body_pose_xyz_xyzw is not None and self._configuration.robot_is_floating:
+            # ggLog.info(f"setting body pose ({self._current_episode_config.vec_init_on_reset})")
             self._adapter.setLinksStateDirect(link_names=[self._configuration.main_body_link],
                                               link_states_pose_vel=th.cat([self._configuration.homing_body_pose_xyz_xyzw,
                                                                            th.zeros((6,), device=self._configuration.th_device, dtype=th.float32)])
@@ -939,6 +940,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # map_tensor_tree(self._current_state, lambda t: t.detach().clone())
         tf = time.monotonic()
         # print(f"newinst = {t01-t0}, check = {t1-t01}, map = {tf-t1}, tot = {tf-t0}")
+        self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # TODO: remove, this shouldn't be necessary, just here out of caution
 
 
 

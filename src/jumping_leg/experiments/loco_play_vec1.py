@@ -194,12 +194,12 @@ def play(seed, folderName, run_id, args,
                             env_builder_args = env_builder_args,
                             is_eval=False)
     ggLog.info("Built")
-    # model = load_model(args["pretrained"])
+    model = load_model(args["pretrained"])
     # model = Fixedpolicy(th.as_tensor([0.1, 1.0, 1.0,
     #                                   0.1, 1.0, 1.0, 
     #                                   0.1, 1.0, 1.0, 
     #                                   0.1, 1.0, 1.0], device=th.device("cuda")))
-    model = build_sin_policy(env)
+    # model = build_sin_policy(env)
 
     play = True
     verbose = False

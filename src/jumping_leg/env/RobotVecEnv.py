@@ -484,8 +484,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             dbg_check_size(actions, (self._adapter.vec_size(), self._action_helper.single_action_len()))
             actions, action_delay = self._preproc_acts(actions)
             self._last_out_actions = actions
-            self._last_sent_v_j_pvesd = self._action_helper.action_to_pvesd(actions)
-            # ggLog.info(f"sending jimp: {self._last_sent_v_j_pvesd}")
+            v_j_pvesd = self._action_helper.action_to_pvesd(actions)
+            # do this better, avoid this if, whatever, put it in the helper
+            if self._configuration.control_mode in [JointImpedanceActionHelper.CONTROL_MODES.POSITION, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_STIFFNESS, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_TORQUES] :
+                v_j_pvesd[:,:,1] = (v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec # set velocity reference
+            self._last_sent_v_j_pvesd = v_j_pvesd# ggLog.info(f"sending jimp: {self._last_sent_v_j_pvesd}")
             self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_v_j_pvesd,
                                                     delay_sec=action_delay)
             

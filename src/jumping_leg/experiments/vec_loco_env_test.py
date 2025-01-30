@@ -412,7 +412,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     train_envs = 100
-    env_device = th.device("cpu",0)
+    env_device = th.device("cuda",0)
     eval_freq = 10
     env_builder_args = {
         "action_delay_mustd" : (0.001,0.001),
@@ -422,7 +422,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
-        "mode" : "pybullet",
+        "mode" : "mjx",
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" : 0.1,

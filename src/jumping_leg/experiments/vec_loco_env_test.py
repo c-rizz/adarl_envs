@@ -50,6 +50,8 @@ def loco_run_builder(   seed,
     show_gui = env_builder_args.pop("show_gui",False)
 
     model_file = env_builder_args["model_file"]
+    model_kwargs = env_builder_args["model_kwargs"]
+    xacro_extra_pkg_paths = env_builder_args["xacro_extra_pkg_paths"]
     homing_joint_pose = env_builder_args["homing_joint_pose"]
     robot_name = env_builder_args["robot_name"]
     robot_main_body_link = env_builder_args["robot_main_body_link"]
@@ -105,7 +107,7 @@ def loco_run_builder(   seed,
                                                   enable_rendering=env_builder_args.pop("enable_rendering"),
                                                   jax_device=jax.devices("gpu")[0],
                                                   output_th_device = th_device,
-                                                  sim_step_dt=2/4096,
+                                                  sim_step_dt=4/4096,
                                                   step_length_sec=stepLength_sec,
                                                   realtime_factor=-1.0,
                                                   gui_env_index=0,
@@ -123,7 +125,8 @@ def loco_run_builder(   seed,
 
     
     urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(model_file).read_text(),
-                                                            model_kwargs={"use_cylinders" : "false"})
+                                                            model_kwargs=model_kwargs,
+                                                            extra_pkg_paths=xacro_extra_pkg_paths)
 
     lrenv = LocomotionVecEnv(action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
                             action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
@@ -288,6 +291,9 @@ def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
 
 quad_args = {
     "model_file" : adarl.utils.utils.pkgutil_get_path("jumping_leg","models/quad_simple.urdf.xacro"),
+    "model_kwargs" : {  "use_cylinders" : "false",
+                        "all_collisions" : "false"},
+    "xacro_extra_pkg_paths" : {"jumping_leg" : adarl.utils.utils.pkgutil_get_path("jumping_leg")},
     "homing_joint_pose" : { ("quad","hip_joint_x_back_left") : -3.14159*0.4,
                             ("quad","hip_joint_x_back_right") : -3.14159*0.4,
                             ("quad","hip_joint_x_front_left") : -3.14159*0.4,
@@ -340,39 +346,46 @@ def quad_loco_env_builder(seed : int,
                             num_envs=1)
 
 
+kyon_args = {
+    "model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
+    "model_kwargs" : { },
+    "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf")},
+    "homing_joint_pose" : { ("quad","hip_joint_x_back_left") : -3.14159*0.4,
+                            ("quad","hip_joint_x_back_right") : -3.14159*0.4,
+                            ("quad","hip_joint_x_front_left") : -3.14159*0.4,
+                            ("quad","hip_joint_x_front_right") : -3.14159*0.4,
+                            ("quad","hip_joint_y_back_left") : 0.75,
+                            ("quad","hip_joint_y_back_right") : 0.75,
+                            ("quad","hip_joint_y_front_left") : 0.75,
+                            ("quad","hip_joint_y_front_right") : 0.75,
+                            ("quad","knee_joint_back_left") : 1.8,
+                            ("quad","knee_joint_back_right") : 1.8,
+                            ("quad","knee_joint_front_left") : 1.8,
+                            ("quad","knee_joint_front_right") : 1.8},
+    "robot_name" : "kyon",
+    "robot_main_body_link" : "pelvis",
+    "robot_root_link" : "pelvis",
+    "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
+    "disallowed_contact_links" : [ ],
+    "terminating_contact_pairs" : [ ],
+    "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE]
+}
+
+def kyon_loco_env_builder(seed : int,
+                    log_folder : str,
+                    is_eval : bool, 
+                    env_builder_args : dict) -> tuple[gym.Env,float]:
+    env_builder_args.update(kyon_args)
+    return loco_env_builder(seed = seed,
+                            log_folder = log_folder,
+                            env_builder_args = env_builder_args,
+                            num_envs=1)
+
 def kyon_loco_venv_builder(seed : int,
                     run_folder : str,
                     num_envs : int, 
                     env_builder_args : dict) -> gym.vector.VectorEnv:
-    import adarl.utils.utils
-    env_builder_args["model_file"] = adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","models/quad_simple.urdf.xacro")
-    env_builder_args["homing_joint_pose"]={ ("quad","hip_joint_x_back_left") : -3.14159*0.4,
-                                            ("quad","hip_joint_x_back_right") : -3.14159*0.4,
-                                            ("quad","hip_joint_x_front_left") : -3.14159*0.4,
-                                            ("quad","hip_joint_x_front_right") : -3.14159*0.4,
-                                            ("quad","hip_joint_y_back_left") : 0.75,
-                                            ("quad","hip_joint_y_back_right") : 0.75,
-                                            ("quad","hip_joint_y_front_left") : 0.75,
-                                            ("quad","hip_joint_y_front_right") : 0.75,
-                                            ("quad","knee_joint_back_left") : 1.8,
-                                            ("quad","knee_joint_back_right") : 1.8,
-                                            ("quad","knee_joint_front_left") : 1.8,
-                                            ("quad","knee_joint_front_right") : 1.8}
-    env_builder_args["robot_name"]="quad"
-    env_builder_args["robot_main_body_link"]="body_link"
-    env_builder_args["robot_root_link"]="body_link"
-    env_builder_args["homing_body_pose_xyz_xyzw"]=(0.,0.,0.5,0.,0.,0.,1.)
-    env_builder_args["disallowed_contact_links"] = [("quad","thigh_link_back_left"),
-                                                    ("quad","shin_link_back_left"),
-                                                    ("quad","thigh_link_back_right"),
-                                                    ("quad","shin_link_back_right"),
-                                                    ("quad","thigh_link_front_left"),
-                                                    ("quad","shin_link_front_left"),
-                                                    ("quad","thigh_link_front_right"),
-                                                    ("quad","shin_link_front_right"),
-                                                    ("quad","body_link")]
-    env_builder_args["terminating_contact_pairs"]=[(("quad","body_link"),("ground_plane","planeLink"))]
-    env_builder_args["controlled_joints"] = [JOINT_FILTERS.ALL_REVOLUTE]
+    env_builder_args.update(kyon_args)
     return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
@@ -411,7 +424,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 100
+    train_envs = 6000
     env_device = th.device("cuda",0)
     eval_freq = 10
     env_builder_args = {
@@ -565,15 +578,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                 parallel_envs=train_envs,
                                                 log_freq_vstep=max_steps_per_episode,
                                                 reference_init_args =   {   "env_builder_args" : env_builder_args,
-                                                                            "eval_configuration" : eval_configuration}
+                                                                            "eval_configuration" : eval_configuration},
+                                                target_entropy = None
                                                 ),
                 checkpoint_freq=20,
                 collector_device=env_device,
                 debug_level=10,
                 max_episode_duration=max_steps_per_episode,
-                validation_buffer_size=100_000,
-                validation_batch_size=256,
-                validation_holdout_ratio=0.01,
+                validation_buffer_size=0,
+                validation_batch_size=0,
+                validation_holdout_ratio=0,
                 no_wandb=args["no_wandb"])
 
 

@@ -755,7 +755,13 @@ class LocomotionVecEnv(RobotVecEnv):
     def _set_arrow_pose(self, vec_mask : th.Tensor):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             goals_fixed = self._locomotion_episode_config.goal_abs_vel_vec_xyz.detach().clone()
-            goals_fixed[th.linalg.norm(goals_fixed, dim = 1) < 0.0001] = self._thtens([0,0,-1.0]) # if goal is zero then point the arrow down
+            zero_goals = th.linalg.norm(goals_fixed, dim = 1) < 0.0001
+            if len(zero_goals)>0:
+                downs = self._thtens([0,0,-1.0]).expand((th.count_nonzero(zero_goals).item(),)+goals_fixed.size()[1:]) # Without the expand this crashes due to https://github.com/pytorch/pytorch/issues/79987
+                # ggLog.info(f"downs.size() = {downs.size()}")
+                # ggLog.info(f"goals_fixed.size() = {goals_fixed.size()}")
+                # ggLog.info(f"goals_fixed[zero_goals].size() = {goals_fixed[zero_goals].size()}")
+                goals_fixed[zero_goals] = downs
             q = quat_xyzw_between_vecs_py(self._thtens([1.0,0,0]).expand((self._adapter.vec_size(),3)), goals_fixed)
             bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
             pose = bstates_vec_13[:,:7]

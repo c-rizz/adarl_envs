@@ -18,7 +18,7 @@ import adarl.utils.dbg.dbg_img as dbg_img
 from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
-from jumping_leg.experiments.vec_loco_env_test import quad_loco_env_builder
+from jumping_leg.experiments.vec_loco_env_test import quad_loco_env_builder, kyon_loco_env_builder
 from jumping_leg.env.LocomotionVecEnv import LocomotionVecEnv
 from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
 
@@ -194,12 +194,14 @@ def play(seed, folderName, run_id, args,
                             env_builder_args = env_builder_args,
                             is_eval=False)
     ggLog.info("Built")
-    model = load_model(args["pretrained"])
-    # model = Fixedpolicy(th.as_tensor([0.1, 1.0, 1.0,
-    #                                   0.1, 1.0, 1.0, 
-    #                                   0.1, 1.0, 1.0, 
-    #                                   0.1, 1.0, 1.0], device=th.device("cuda")))
-    # model = build_sin_policy(env)
+    if args["pretrained"] is not None:
+        model = load_model(args["pretrained"])
+    else:
+        # model = Fixedpolicy(th.as_tensor([0.1, 1.0, 1.0,
+        #                                   0.1, 1.0, 1.0, 
+        #                                   0.1, 1.0, 1.0, 
+        #                                   0.1, 1.0, 1.0], device=th.device("cuda")))
+        model = build_sin_policy(env)
 
     play = True
     verbose = False
@@ -340,7 +342,7 @@ if __name__ == "__main__":
     # ap.add_argument("--robot_pc_ip", default=None, type=str, help="Ip of the pc connected to the robot (which runs the control, using its rt kernel)")
     ap.add_argument("--seedsOffset", default=0, type=int, help="Offset the used seeds by this amount")
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
-    ap.add_argument("--pretrained", required = True, type=str, help="Model to load")
+    ap.add_argument("--pretrained", required = False, default=None, type=str, help="Model to load")
     ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use [pybullet,xbot-gazebo]")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
     ap.add_argument("--gui", default=False, action='store_true', help="Do not start the gui, instead stream renderings")

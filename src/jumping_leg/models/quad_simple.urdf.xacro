@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"  ?>
 <robot name="quad_simple" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-    <xacro:include filename="package://jumping_leg/models/commons.xacro"/>
+    <xacro:include filename="$(find jumping_leg)/models/commons.xacro"/>
     <xacro:include filename="$(find jumping_leg)/models/leg_simple.xacro"/>
 
 	<!-- <xacro:arg name="hip_out_offset" default="0.2146" />  -->
@@ -246,4 +246,9 @@
         <child link="body_link"/>
     </joint>
 
+
+
+  <mujoco>
+    <compiler  discardvisual="false"/>
+  </mujoco>
 </robot>

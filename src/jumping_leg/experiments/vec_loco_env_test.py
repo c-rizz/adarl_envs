@@ -346,36 +346,37 @@ def quad_loco_env_builder(seed : int,
                             num_envs=1)
 
 
-kyon_args = {
-    "model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
-    "model_kwargs" : { },
-    "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf")},
-    "homing_joint_pose" : { ("quad","hip_joint_x_back_left") : -3.14159*0.4,
-                            ("quad","hip_joint_x_back_right") : -3.14159*0.4,
-                            ("quad","hip_joint_x_front_left") : -3.14159*0.4,
-                            ("quad","hip_joint_x_front_right") : -3.14159*0.4,
-                            ("quad","hip_joint_y_back_left") : 0.75,
-                            ("quad","hip_joint_y_back_right") : 0.75,
-                            ("quad","hip_joint_y_front_left") : 0.75,
-                            ("quad","hip_joint_y_front_right") : 0.75,
-                            ("quad","knee_joint_back_left") : 1.8,
-                            ("quad","knee_joint_back_right") : 1.8,
-                            ("quad","knee_joint_front_left") : 1.8,
-                            ("quad","knee_joint_front_right") : 1.8},
-    "robot_name" : "kyon",
-    "robot_main_body_link" : "pelvis",
-    "robot_root_link" : "pelvis",
-    "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
-    "disallowed_contact_links" : [ ],
-    "terminating_contact_pairs" : [ ],
-    "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE]
-}
+def kyon_args():
+    return {
+            "model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
+            "model_kwargs" : { },
+            "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf")},
+            "homing_joint_pose" : { ("quad","hip_joint_x_back_left") : -3.14159*0.4,
+                                    ("quad","hip_joint_x_back_right") : -3.14159*0.4,
+                                    ("quad","hip_joint_x_front_left") : -3.14159*0.4,
+                                    ("quad","hip_joint_x_front_right") : -3.14159*0.4,
+                                    ("quad","hip_joint_y_back_left") : 0.75,
+                                    ("quad","hip_joint_y_back_right") : 0.75,
+                                    ("quad","hip_joint_y_front_left") : 0.75,
+                                    ("quad","hip_joint_y_front_right") : 0.75,
+                                    ("quad","knee_joint_back_left") : 1.8,
+                                    ("quad","knee_joint_back_right") : 1.8,
+                                    ("quad","knee_joint_front_left") : 1.8,
+                                    ("quad","knee_joint_front_right") : 1.8},
+            "robot_name" : "kyon",
+            "robot_main_body_link" : "pelvis",
+            "robot_root_link" : "pelvis",
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
+            "disallowed_contact_links" : [ ],
+            "terminating_contact_pairs" : [ ],
+            "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE]
+            }
 
 def kyon_loco_env_builder(seed : int,
                     log_folder : str,
                     is_eval : bool, 
                     env_builder_args : dict) -> tuple[gym.Env,float]:
-    env_builder_args.update(kyon_args)
+    env_builder_args.update(kyon_args())
     return loco_env_builder(seed = seed,
                             log_folder = log_folder,
                             env_builder_args = env_builder_args,
@@ -385,7 +386,7 @@ def kyon_loco_venv_builder(seed : int,
                     run_folder : str,
                     num_envs : int, 
                     env_builder_args : dict) -> gym.vector.VectorEnv:
-    env_builder_args.update(kyon_args)
+    env_builder_args.update(kyon_args())
     return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
@@ -424,8 +425,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 6000
-    env_device = th.device("cuda",0)
+    train_envs = 100
+    env_device = th.device("cpu",0)
     eval_freq = 10
     env_builder_args = {
         "action_delay_mustd" : (0.001,0.001),
@@ -435,7 +436,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
-        "mode" : "mjx",
+        "mode" : "pybullet",
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" : 0.1,

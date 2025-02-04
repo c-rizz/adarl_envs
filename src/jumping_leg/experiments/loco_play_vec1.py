@@ -31,13 +31,21 @@ def load_model(model_path):
     return SAC.load(model_path)
 
 
-class Fixedpolicy():
+class Fixedpolicy(RLAgent):
     def __init__(self, cmd : th.Tensor):
         self._cmd = cmd.detach().clone()
 
     def predict(self, obs, deterministic : bool):
         return self._cmd.clone(), None
     
+    def get_hidden_state(self):
+        return None
+    
+    def update(self, transitions : TransitionBatch):
+        raise NotImplementedError()
+
+    def reset_hidden_state(self):
+        pass
 
 class SinPolicy(RLAgent):
     def __init__(self,  act_scale : th.Tensor,
@@ -67,11 +75,6 @@ class SinPolicy(RLAgent):
     
     def get_hidden_state(self):
         return self._t
-
-    def predict(self, observation_batch, deterministic = False):
-        # Mostly for stable-baselines3 compatibility
-        hidden_state = self.get_hidden_state()
-        return self.predict_action(observation_batch=observation_batch, deterministic=deterministic), hidden_state
     
     def update(self, transitions : TransitionBatch):
         raise NotImplementedError()
@@ -79,28 +82,80 @@ class SinPolicy(RLAgent):
     def reset_hidden_state(self):
         self._t = self._t0
 
-def build_sin_policy(env):
-    home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(
-                                            {   ("quad","hip_joint_x_back_left") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                ("quad","hip_joint_x_back_right") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                ("quad","hip_joint_x_front_left") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                ("quad","hip_joint_x_front_right") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                ("quad","hip_joint_y_back_left") : [0.75, 0, 0, 400, 10],
-                                                ("quad","hip_joint_y_back_right") : [0.75, 0, 0, 400, 10],
-                                                ("quad","hip_joint_y_front_left") : [0.75, 0, 0, 400, 10],
-                                                ("quad","hip_joint_y_front_right") : [0.75, 0, 0, 400, 10],
-                                                ("quad","knee_joint_back_left") : [1.8, 0, 0, 400, 10],
-                                                ("quad","knee_joint_back_right") : [1.8, 0, 0, 400, 10],
-                                                ("quad","knee_joint_front_left") : [1.8, 0, 0, 400, 10],
-                                                ("quad","knee_joint_front_right") : [1.8, 0, 0, 400, 10]})
-    model = SinPolicy(  act_scale=th.as_tensor([0.1, 0.1, 0.2,
-                                                0.1, 0.1, 0.2,
-                                                0.1, 0.1, 0.2,
-                                                0.1, 0.1, 0.2]),
+def build_sin_policy(env, robot : str, scale : float = 0.0):
+    if robot == "quad":
+        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(
+                                                {   ("quad","hip_joint_x_back_left") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_x_back_right") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_x_front_left") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_x_front_right") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_y_back_left") : [0.75, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_y_back_right") : [0.75, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_y_front_left") : [0.75, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_y_front_right") : [0.75, 0, 0, 400, 10],
+                                                    ("quad","knee_joint_back_left") : [1.8, 0, 0, 400, 10],
+                                                    ("quad","knee_joint_back_right") : [1.8, 0, 0, 400, 10],
+                                                    ("quad","knee_joint_front_left") : [1.8, 0, 0, 400, 10],
+                                                    ("quad","knee_joint_front_right") : [1.8, 0, 0, 400, 10]})
+    elif robot == "kyon":
+        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(
+                                                {   ("kyon","hip_roll_3") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("kyon","hip_roll_4") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("kyon","hip_roll_1") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("kyon","hip_roll_2") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("kyon","hip_pitch_3") : [0.75, 0, 0, 400, 10],
+                                                    ("kyon","hip_pitch_4") : [0.75, 0, 0, 400, 10],
+                                                    ("kyon","hip_pitch_1") : [0.75, 0, 0, 400, 10],
+                                                    ("kyon","hip_pitch_2") : [0.75, 0, 0, 400, 10],
+                                                    ("kyon","knee_pitch_3") : [1.8, 0, 0, 400, 10],
+                                                    ("kyon","knee_pitch_4") : [1.8, 0, 0, 400, 10],
+                                                    ("kyon","knee_pitch_1") : [1.8, 0, 0, 400, 10],
+                                                    ("kyon","knee_pitch_2") : [1.8, 0, 0, 400, 10]})
+    else:
+        RuntimeError(f"Unknown robot '{robot}")
+    model = SinPolicy(  act_scale=th.as_tensor([0.0, 0.1, 0.2,
+                                                0.0, 0.1, 0.2,
+                                                0.0, 0.1, 0.2,
+                                                0.0, 0.1, 0.2])*scale,
                         act_offset=home_action,
                         act_speed=th.as_tensor([0.8]),
                         action_size=12,
                         dt=0.05)
+    return model
+
+
+def build_fixed_policy(env, robot : str, scale : float = 0.0):
+    if robot == "quad":
+        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(
+                                                {   ("quad","hip_joint_x_back_left") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_x_back_right") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_x_front_left") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_x_front_right") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_y_back_left") : [0.75, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_y_back_right") : [0.75, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_y_front_left") : [0.75, 0, 0, 400, 10],
+                                                    ("quad","hip_joint_y_front_right") : [0.75, 0, 0, 400, 10],
+                                                    ("quad","knee_joint_back_left") : [1.8, 0, 0, 400, 10],
+                                                    ("quad","knee_joint_back_right") : [1.8, 0, 0, 400, 10],
+                                                    ("quad","knee_joint_front_left") : [1.8, 0, 0, 400, 10],
+                                                    ("quad","knee_joint_front_right") : [1.8, 0, 0, 400, 10]})
+    elif robot == "kyon":
+        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(
+                                                {   ("kyon","hip_roll_3") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("kyon","hip_roll_4") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("kyon","hip_roll_1") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("kyon","hip_roll_2") : [-3.14159*0.4, 0, 0, 400, 10],
+                                                    ("kyon","hip_pitch_3") : [0.75, 0, 0, 400, 10],
+                                                    ("kyon","hip_pitch_4") : [0.75, 0, 0, 400, 10],
+                                                    ("kyon","hip_pitch_1") : [0.75, 0, 0, 400, 10],
+                                                    ("kyon","hip_pitch_2") : [0.75, 0, 0, 400, 10],
+                                                    ("kyon","knee_pitch_3") : [1.8, 0, 0, 400, 10],
+                                                    ("kyon","knee_pitch_4") : [1.8, 0, 0, 400, 10],
+                                                    ("kyon","knee_pitch_1") : [1.8, 0, 0, 400, 10],
+                                                    ("kyon","knee_pitch_2") : [1.8, 0, 0, 400, 10]})
+    else:
+        RuntimeError(f"Unknown robot '{robot}")
+    model = Fixedpolicy(  cmd = home_action)
     return model
 
 
@@ -119,7 +174,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : args["mode"],
-        "quiet" : True,
+        "quiet" : False,
         "initial_pose_randomization" : 0.0,
         "reward_acceleration_weight" : 0.1,
         "reward_actdiff_weight" : 0.1,
@@ -158,20 +213,30 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "ui_camera_resolution_hw" : (pixel_resolution,int(pixel_resolution*16/9))
     }
 
+    robot = args["robot"]
+    if robot == "quad":
+        builder = quad_loco_env_builder
+    elif robot == "kyon":
+        builder = kyon_loco_env_builder
+    else:
+        raise RuntimeError(f"Unknown robot '{robot}'")
+
     return play(seed,
                 folderName,
                 run_id, args,
-                env_builder = quad_loco_env_builder,
+                env_builder = builder,
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
-                render=not args["gui"])
+                render=not args["gui"],
+                robot = robot)
 
 
 
 def play(seed, folderName, run_id, args, 
          env_builder : EnvBuilderProtocol, 
          env_builder_args : dict[str,Any], 
-         step_length_sec : float, render : bool):
+         step_length_sec : float, render : bool,
+         robot : str):
     
     ggLog.info(f"Starting run")
     if render:
@@ -197,11 +262,8 @@ def play(seed, folderName, run_id, args,
     if args["pretrained"] is not None:
         model = load_model(args["pretrained"])
     else:
-        # model = Fixedpolicy(th.as_tensor([0.1, 1.0, 1.0,
-        #                                   0.1, 1.0, 1.0, 
-        #                                   0.1, 1.0, 1.0, 
-        #                                   0.1, 1.0, 1.0], device=th.device("cuda")))
-        model = build_sin_policy(env)
+        model = build_fixed_policy(env = env, robot=robot)
+        # model = build_sin_policy(env, robot=robot)
 
     play = True
     verbose = False
@@ -211,6 +273,10 @@ def play(seed, folderName, run_id, args,
     avg10_dists = []
 
     keyboard_listener : KeyboardListener = None
+
+    if render:
+        img = env.render()
+        dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
 
     try:
         while play:
@@ -344,6 +410,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--pretrained", required = False, default=None, type=str, help="Model to load")
     ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use [pybullet,xbot-gazebo]")
+    ap.add_argument("--robot", default="quad", type=str, help="Robot to be used")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
     ap.add_argument("--gui", default=False, action='store_true', help="Do not start the gui, instead stream renderings")
     ap.add_argument("--record", default=False, action='store_true', help="Record episode videos")

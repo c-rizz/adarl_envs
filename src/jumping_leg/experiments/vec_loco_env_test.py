@@ -73,6 +73,7 @@ def loco_run_builder(   seed,
         env_controller = VecSimJointImpedanceAdapterWrapper(adapter = RosXbotGazeboAdapter(model_name = robot_name,
                                                                                     stepLength_sec = stepLength_sec,
                                                                                     forced_ros_master_uri = None,
+
                                                                                     maxObsDelay = float("+inf"),
                                                                                     blocking_observation = False,
                                                                                     is_floating_base = True,
@@ -348,20 +349,20 @@ def quad_loco_env_builder(seed : int,
 
 kyon_args = {
     "model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
-    "model_kwargs" : { },
+    "model_kwargs" : {"upper_body" : "false"},
     "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf")},
-    "homing_joint_pose" : { ("quad","hip_joint_x_back_left") : -3.14159*0.4,
-                            ("quad","hip_joint_x_back_right") : -3.14159*0.4,
-                            ("quad","hip_joint_x_front_left") : -3.14159*0.4,
-                            ("quad","hip_joint_x_front_right") : -3.14159*0.4,
-                            ("quad","hip_joint_y_back_left") : 0.75,
-                            ("quad","hip_joint_y_back_right") : 0.75,
-                            ("quad","hip_joint_y_front_left") : 0.75,
-                            ("quad","hip_joint_y_front_right") : 0.75,
-                            ("quad","knee_joint_back_left") : 1.8,
-                            ("quad","knee_joint_back_right") : 1.8,
-                            ("quad","knee_joint_front_left") : 1.8,
-                            ("quad","knee_joint_front_right") : 1.8},
+    "homing_joint_pose" : { ("kyon","hip_roll_3") : -3.14159*0.4,
+                            ("kyon","hip_roll_4") : -3.14159*0.4,
+                            ("kyon","hip_roll_1") : -3.14159*0.4,
+                            ("kyon","hip_roll_2") : -3.14159*0.4,
+                            ("kyon","hip_pitch_3") : 0.75,
+                            ("kyon","hip_pitch_4") : 0.75,
+                            ("kyon","hip_pitch_1") : 0.75,
+                            ("kyon","hip_pitch_2") : 0.75,
+                            ("kyon","knee_pitch_3") : 1.8,
+                            ("kyon","knee_pitch_4") : 1.8,
+                            ("kyon","knee_pitch_1") : 1.8,
+                            ("kyon","knee_pitch_2") : 1.8},
     "robot_name" : "kyon",
     "robot_main_body_link" : "pelvis",
     "robot_root_link" : "pelvis",
@@ -424,8 +425,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 6000
-    env_device = th.device("cuda",0)
+    train_envs = 100
+    env_device = th.device("cpu",0)
     eval_freq = 10
     env_builder_args = {
         "action_delay_mustd" : (0.001,0.001),
@@ -435,7 +436,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
-        "mode" : "mjx",
+        "mode" : "pybullet",
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" : 0.1,

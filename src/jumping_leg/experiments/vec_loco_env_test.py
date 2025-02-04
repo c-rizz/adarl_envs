@@ -347,36 +347,36 @@ def quad_loco_env_builder(seed : int,
                             num_envs=1)
 
 
-kyon_args = {
-    "model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
-    "model_kwargs" : {"upper_body" : "false"},
-    "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf")},
-    "homing_joint_pose" : { ("kyon","hip_roll_3") : -3.14159*0.4,
-                            ("kyon","hip_roll_4") : -3.14159*0.4,
-                            ("kyon","hip_roll_1") : -3.14159*0.4,
-                            ("kyon","hip_roll_2") : -3.14159*0.4,
-                            ("kyon","hip_pitch_3") : 0.75,
-                            ("kyon","hip_pitch_4") : 0.75,
-                            ("kyon","hip_pitch_1") : 0.75,
-                            ("kyon","hip_pitch_2") : 0.75,
-                            ("kyon","knee_pitch_3") : 1.8,
-                            ("kyon","knee_pitch_4") : 1.8,
-                            ("kyon","knee_pitch_1") : 1.8,
-                            ("kyon","knee_pitch_2") : 1.8},
-    "robot_name" : "kyon",
-    "robot_main_body_link" : "pelvis",
-    "robot_root_link" : "pelvis",
-    "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
-    "disallowed_contact_links" : [ ],
-    "terminating_contact_pairs" : [ ],
-    "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE]
-}
+def kyon_args():
+    return {"model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
+            "model_kwargs" : {"upper_body" : "false"},
+            "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf")},
+            "homing_joint_pose" : { ("kyon","hip_roll_3") : -3.14159*0.4,
+                                    ("kyon","hip_roll_4") : -3.14159*0.4,
+                                    ("kyon","hip_roll_1") : -3.14159*0.4,
+                                    ("kyon","hip_roll_2") : -3.14159*0.4,
+                                    ("kyon","hip_pitch_3") : 0.75,
+                                    ("kyon","hip_pitch_4") : 0.75,
+                                    ("kyon","hip_pitch_1") : 0.75,
+                                    ("kyon","hip_pitch_2") : 0.75,
+                                    ("kyon","knee_pitch_3") : 1.8,
+                                    ("kyon","knee_pitch_4") : 1.8,
+                                    ("kyon","knee_pitch_1") : 1.8,
+                                    ("kyon","knee_pitch_2") : 1.8},
+            "robot_name" : "kyon",
+            "robot_main_body_link" : "pelvis",
+            "robot_root_link" : "pelvis",
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
+            "disallowed_contact_links" : [ ],
+            "terminating_contact_pairs" : [ ],
+            "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE]
+        }
 
 def kyon_loco_env_builder(seed : int,
                     log_folder : str,
                     is_eval : bool, 
                     env_builder_args : dict) -> tuple[gym.Env,float]:
-    env_builder_args.update(kyon_args)
+    env_builder_args.update(kyon_args())
     return loco_env_builder(seed = seed,
                             log_folder = log_folder,
                             env_builder_args = env_builder_args,
@@ -386,7 +386,7 @@ def kyon_loco_venv_builder(seed : int,
                     run_folder : str,
                     num_envs : int, 
                     env_builder_args : dict) -> gym.vector.VectorEnv:
-    env_builder_args.update(kyon_args)
+    env_builder_args.update(kyon_args())
     return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,

@@ -1,7 +1,8 @@
 from __future__ import annotations
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
-from adarl.utils.utils import LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection, isinstance_noimport, quat_xyzw_between_vecs_py, dbg_check_size, dbg_check, dbg_run
+from adarl.utils.utils import LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection, isinstance_noimport, quat_xyzw_between_vecs_py
+from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
 from adarl.utils.vec_state_helper import ThBoxStateHelper, unnormalize, normalize
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum

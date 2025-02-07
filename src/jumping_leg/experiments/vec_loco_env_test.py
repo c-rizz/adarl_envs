@@ -44,7 +44,7 @@ def loco_run_builder(   seed,
     env_builder_args = copy.deepcopy(env_builder_args)
     stepLength_sec = env_builder_args.pop("stepLength_sec")
     video_save_freq = env_builder_args.pop("video_save_freq")
-    th_device = env_builder_args.pop("th_device")
+    th_device = env_builder_args["th_device"]
     # max_steps = 5/stepLength_sec
     max_steps = env_builder_args.pop("max_steps_per_episode")
     show_gui = env_builder_args.pop("show_gui",False)
@@ -423,10 +423,17 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams
     import os
     
+    mode = args["mode"].lower()
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 100
-    env_device = th.device("cpu",0)
+    train_envs = 8000
+    if mode == "pybullet":
+        env_device = th.device("cpu",0)
+    elif mode == "mjx":
+        env_device = th.device("cuda",0)
+    else:
+        raise RuntimeError(f"Unknown mode '{mode}'")
+
     eval_freq = 10
     env_builder_args = {
         "action_delay_mustd" : (0.001,0.001),
@@ -436,7 +443,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
-        "mode" : "pybullet",
+        "mode" : mode,
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" : 0.1,
@@ -472,7 +479,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0001, 0.001),
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0001, 0.005),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0001, 0.005),
-        "ui_camera_resolution_hw" : (144,256)
+        "ui_camera_resolution_hw" : (144,256),
+        "log_info_stats" : True
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -545,7 +553,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "env_builder_args" : video_feasible_jump_env_builder_args,
     #     "num_envs" : 1
     # }
-    eval_configuration = [  
+    eval_configurations = [  
                             eval_conf_video_det,
                             eval_conf_video_stoch,
                             # eval_conf_run_1ms,
@@ -553,43 +561,73 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                             # #  eval_conf_feasible,
                             # #  eval_conf_video_feasible,
                             # #  eval_conf_video_jump_feasible
-                                ]
-
-    sac_train(  seed,
-                folderName,
-                run_id,
-                args,
-                vec_env_builder = quad_loco_venv_builder,
-                env_builder = None,
-                env_builder_args = env_builder_args,
-                eval_configurations = eval_configuration,
-                hyperparams = SAC_hyperparams(  device = "cuda",
-                                                q_network_arch=[256,128],
-                                                q_lr=0.001,
-                                                policy_lr=0.0005,
-                                                policy_network_arch=[1024,512],
-                                                gamma=0.99,
-                                                target_tau = 0.005,
-                                                batch_size=16384,
-                                                buffer_size=10_000_000,
-                                                total_steps=100_000_000,
-                                                train_freq_vstep=5,
-                                                grad_steps=10,
-                                                learning_starts=max_steps_per_episode*max(train_envs*5, 100),
-                                                parallel_envs=train_envs,
-                                                log_freq_vstep=max_steps_per_episode,
-                                                reference_init_args =   {   "env_builder_args" : env_builder_args,
-                                                                            "eval_configuration" : eval_configuration},
-                                                target_entropy = None
-                                                ),
-                checkpoint_freq=20,
-                collector_device=env_device,
-                debug_level=10,
-                max_episode_duration=max_steps_per_episode,
-                validation_buffer_size=0,
+                        ]
+    algo = args["algorithm"]                                
+    if algo.lower() == "sac":
+        sac_train(  seed,
+                    folderName,
+                    run_id,
+                    args,
+                    vec_env_builder = quad_loco_venv_builder,
+                    env_builder = None,
+                    env_builder_args = env_builder_args,
+                    eval_configurations = eval_configurations,
+                    hyperparams = SAC_hyperparams(  device = "cuda",
+                                                    q_network_arch=[256,128],
+                                                    q_lr=0.001,
+                                                    policy_lr=0.0005,
+                                                    policy_network_arch=[1024,512],
+                                                    gamma=0.99,
+                                                    target_tau = 0.005,
+                                                    batch_size=16384,
+                                                    buffer_size=10_000_000,
+                                                    total_steps=100_000_000,
+                                                    train_freq_vstep=5,
+                                                    grad_steps=10,
+                                                    learning_starts=max_steps_per_episode*max(train_envs*5, 100),
+                                                    parallel_envs=train_envs,
+                                                    log_freq_vstep=max_steps_per_episode,
+                                                    reference_init_args =   {   "env_builder_args" : env_builder_args,
+                                                                                "eval_configuration" : eval_configurations},
+                                                    target_entropy = None
+                                                    ),
+                    checkpoint_freq=20,
+                    collector_device=env_device,
+                    debug_level=10,
+                    max_episode_duration=max_steps_per_episode,
+                    validation_buffer_size=0,
+                    validation_batch_size=0,
+                    validation_holdout_ratio=0,
+                    no_wandb=args["no_wandb"])                           
+    elif algo.lower() == "ppo":
+        from rreal.algorithms.ppo2 import ppo_train, PPO_hyperparams
+        ppo_train(  seed=seed,
+                folderName=folderName,
+                run_id=run_id,
+                args=args,
+                env_builder=None,
+                vec_env_builder=quad_loco_venv_builder,
+                env_builder_args=env_builder_args,
+                agent_hyperparams=PPO_hyperparams(  minibatch_size=512,
+                                                    th_device=th.device("cuda"),
+                                                    policy_arch=None,
+                                                    q_network_arch=None,
+                                                    q_lr=None,
+                                                    policy_lr=3e-4,
+                                                    update_epochs=10,
+                                                    total_steps=1_000_000,
+                                                    num_envs=train_envs,
+                                                    num_steps=10,
+                                                    gamma=0.99),
+                max_episode_duration=1000,
                 validation_batch_size=0,
+                validation_buffer_size=0,
                 validation_holdout_ratio=0,
-                no_wandb=args["no_wandb"])
+                checkpoint_freq=-1,
+                collector_device=th.device("cpu"),
+                eval_configurations=eval_configurations)
+    else:       
+        raise RuntimeError(f"Unknown algorithm '{algo}'")
 
 
 
@@ -604,6 +642,8 @@ if __name__ == "__main__":
     ap.add_argument("--seedsOffset", default=0, type=int, help="Offset the used seeds by this amount")
     ap.add_argument("--maxProcs", default=int(multiprocessing.cpu_count()/2), type=int, help="Maximum number of parallel runs")
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
+    ap.add_argument("--algorithm", default="sac", type=str, help="Algorithm to use ('sac'/'ppo')")
+    ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

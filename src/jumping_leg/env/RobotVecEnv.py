@@ -11,7 +11,8 @@ from adarl.utils.vec_state_helper import    JointImpedanceActionHelper, ThBoxSta
                                         RobotStateHelper, RobotStatsStateHelper,\
                                         StateNoiseGenerator, DictStateHelper, unnormalize, normalize
 from adarl.utils.tensor_trees import map_tensor_tree, flatten_tensor_tree, map2_tensor_tree, space_from_tree
-from adarl.utils.utils import build_pose, JointState, Pose, LinkState, dbg_check_size, dbg_check, isinstance_noimport, dbg_run
+from adarl.utils.utils import build_pose, JointState, Pose, LinkState, isinstance_noimport
+from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
 from dataclasses import dataclass
 from gymnasium import Space
 from enum import Enum, IntEnum

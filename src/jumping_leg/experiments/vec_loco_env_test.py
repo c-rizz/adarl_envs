@@ -70,7 +70,7 @@ def loco_run_builder(   seed,
     elif mode == "xbot-gazebo":
         from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
         from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
-        env_controller = VecSimJointImpedanceAdapterWrapper(adapter = RosXbotGazeboAdapter(model_name = robot_name,
+        adapter = VecSimJointImpedanceAdapterWrapper(adapter = RosXbotGazeboAdapter(model_name = robot_name,
                                                                                     stepLength_sec = stepLength_sec,
                                                                                     forced_ros_master_uri = None,
 
@@ -91,7 +91,7 @@ def loco_run_builder(   seed,
     elif mode == "pybullet":
         from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
         from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
-        env_controller = VecSimJointImpedanceAdapterWrapper(adapter = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
+        adapter = VecSimJointImpedanceAdapterWrapper(adapter = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
                                                                             restore_on_reset=False,
                                                                             debug_gui=show_gui,
                                                                             simulation_step=1/1024,
@@ -104,7 +104,7 @@ def loco_run_builder(   seed,
     elif mode == "mjx":
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
         import jax
-        env_controller = MjxJointImpedanceAdapter(vec_size=num_envs,
+        adapter = MjxJointImpedanceAdapter(vec_size=num_envs,
                                                   enable_rendering=env_builder_args.pop("enable_rendering"),
                                                   jax_device=jax.devices("gpu")[0],
                                                   output_th_device = th_device,
@@ -132,7 +132,7 @@ def loco_run_builder(   seed,
     lrenv = LocomotionVecEnv(action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
                             action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
                             action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
-                            adapter=env_controller,
+                            adapter=adapter,
                             control_mode = env_builder_args.pop("control_mode"),
                             controlled_joints=controlled_joints,
                             goal_err_smoothing_halflife_sec = env_builder_args.pop("goal_err_smoothing_halflife_sec"),
@@ -148,7 +148,7 @@ def loco_run_builder(   seed,
                             safety_limits_factor=0.9,
                             seed=seed,
                             stepLength_sec=stepLength_sec,
-                            step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001,
+                            step_precision_tolerance=0 if isinstance(adapter, BaseSimulationAdapter) else 0.001,
                             stop_on_safety=env_builder_args.pop("stop_on_safety"),
                             th_device=th_device,
                             homing_joint_pose=homing_joint_pose,
@@ -426,7 +426,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     mode = args["mode"].lower()
     step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 8000
+    train_envs = 4096
     if mode == "pybullet":
         env_device = th.device("cpu",0)
     elif mode == "mjx":
@@ -446,20 +446,20 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : mode,
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
-        "reward_acceleration_weight" : 0.1,
+        "reward_acceleration_weight" : 0.001,
         "reward_actdiff_weight" : 0.1,
         "reward_contacts_weight" : 0.0,
         "reward_energy_weight" : 0.0,
         "reward_health_weight" : 0.0,
         "reward_position_limit_weight" : 0.5,
         "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 1.0,
+        "reward_torque_weight" : 0.0,
         "reward_torquediff_weight" : 0.0,
-        "reward_tracking_weight" : 2.0,
+        "reward_tracking_weight" : 0.0,
         "reward_velocity_limit_weight" : 0.5,
         "reward_velocity_weight" : 1.0,
-        "reward_height_weight" : 1.0,
-        "reward_pitchnroll_weight" : 1.0,
+        "reward_height_weight" : 0.0,
+        "reward_pitchnroll_weight" : 0.0,
         "reward_position_weight" : 0.1,
         "safe_stiffness" : 400,
         "safe_damping" : 10,
@@ -593,12 +593,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     ),
                     checkpoint_freq=20,
                     collector_device=env_device,
-                    debug_level=10,
                     max_episode_duration=max_steps_per_episode,
                     validation_buffer_size=0,
                     validation_batch_size=0,
                     validation_holdout_ratio=0,
-                    no_wandb=args["no_wandb"])                           
+                    no_wandb=args["no_wandb"],
+                    debug_level=0)                           
     elif algo.lower() == "ppo":
         from rreal.algorithms.ppo2 import ppo_train, PPO_hyperparams
         ppo_train(  seed=seed,
@@ -608,24 +608,26 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder=None,
                 vec_env_builder=quad_loco_venv_builder,
                 env_builder_args=env_builder_args,
-                agent_hyperparams=PPO_hyperparams(  minibatch_size=512,
+                agent_hyperparams=PPO_hyperparams(  minibatch_size=8192,
                                                     th_device=th.device("cuda"),
                                                     policy_arch=None,
                                                     q_network_arch=None,
                                                     q_lr=None,
                                                     policy_lr=3e-4,
-                                                    update_epochs=10,
-                                                    total_steps=1_000_000,
+                                                    update_epochs=5,
+                                                    total_steps=train_envs*max_steps_per_episode*1000,
                                                     num_envs=train_envs,
-                                                    num_steps=10,
-                                                    gamma=0.99),
-                max_episode_duration=1000,
+                                                    num_steps=20,
+                                                    gamma=0.99,
+                                                    log_freq_vstep=int(max_steps_per_episode/10)),
+                max_episode_duration=max_steps_per_episode,
                 validation_batch_size=0,
                 validation_buffer_size=0,
                 validation_holdout_ratio=0,
                 checkpoint_freq=-1,
                 collector_device=th.device("cpu"),
-                eval_configurations=eval_configurations)
+                eval_configurations=eval_configurations,
+                debug_level=1)
     else:       
         raise RuntimeError(f"Unknown algorithm '{algo}'")
 
@@ -657,6 +659,5 @@ if __name__ == "__main__":
                 launchFilePath=__file__,
                 resumeFolder = None,
                 args = args,
-                debug_level = -10,
                 start_adarl=False,
                 pkgs_to_save=["adarl","jumping_leg","rreal"])

@@ -540,6 +540,11 @@ if method == "ppo":
     make_networks_factory = functools.partial(
         ppo_networks.make_ppo_networks,
             policy_hidden_layer_sizes=(128, 128, 128, 128))
+    # this means:
+    #  num_envs = num_envs = 8192
+    #  num_steps = batch_size * num_minibatch/num_envs = 1
+    #  minbatch_size = batch_size
+    #  epoches = num_updates_per_batch
     train_fn = functools.partial(
         ppo.train, num_timesteps=timesteps, num_evals=int(timesteps/eval_freq),
         reward_scaling=1, episode_length=1000, normalize_observations=True,

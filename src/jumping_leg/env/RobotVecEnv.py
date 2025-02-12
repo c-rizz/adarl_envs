@@ -177,8 +177,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # self._rng_get_count = 0
         self._rng = th.Generator(device=th_device)
         self._rng.manual_seed(seed)
-        
-
         self._th_device = th_device
         self._obs_dtype = th.float32
         self._robot_model = Robot(adarl.utils.utils.compile_xacro_string(  model_definition_string=robot_urdf_string))
@@ -332,7 +330,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                          single_reward_space=ThBox(low=float("-inf"),high=float("+inf"), shape=tuple(), torch_device=th_device),
                          info_space=None,
                          step_precision_tolerance = step_precision_tolerance,
-                         th_device=th_device)
+                         th_device = self._th_device,
+                         obs_dtype = self._obs_dtype,
+                         seed = seed)
         ggLog.info(f"Built scenario")
         example_labels : dict[str,th.Tensor] = {}
         example_infos = self.get_infos(self._current_state, example_labels)
@@ -451,14 +451,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 self.STATE_INTERNAL],
                                               flattened_part_name="vec")        
 
-    def _thtens(self, tensor):
-        return th.as_tensor(tensor, device=self._th_device, dtype=self._obs_dtype)
-
-    def _thzeros(self, size : tuple[int,...]):
-        return th.zeros(size, device=self._th_device, dtype=self._obs_dtype)
-
-    def _thrand(self, size : tuple[int,...]):
-        return th.rand(size=size, dtype=self._obs_dtype, device=self.th_device, generator=self._rng)
     
     # --------------------------------------------------------------------------------------------------------------------
     # Action
@@ -512,8 +504,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if not hasattr(self, "_spawn_defs"):
             robot_pose = build_pose(*self._configuration.spawn_root_pose_xyz_xyzw)
             arrow_pose = robot_pose
-            camera_pose = build_pose(0,2.5,0.7,    0.0, 0.0,-0.707, 0.707)
-            camera_pose = build_pose(0,0.0,0.0,    0.0, 0.0, 0.0,   1.0)
+            camera_pose = build_pose(.0,.0,.0,    .0,.0,.0,1.0)
             robot_spawn_def = ModelSpawnDef(definition_string=self._configuration.model_urdf_string,
                                             name=self._configuration.robot_name,
                                             pose=robot_pose,
@@ -555,19 +546,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         return self._spawn_defs
         
 
-    def _initialize_scenario(self):
-        self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
-        # self._robot_model.remove_collision_pairs([("rail_link_0","slider_link_0")])            
-        self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
-                                                                    collision_box_size_xyz=(100,100,1),
-                                                                    collision_obj_id="ground_collision")
-        self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
-            moving_joints=[jn[1] for jn in self._configuration.controlled_joints],
-            fixed_joints_pose={self._configuration.robot_root_joint : self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy()}
-                                            if self._configuration.robot_is_floating else {})
-        self._adapter.set_monitored_joints(self._configuration.controlled_joints)
-        self._adapter.set_impedance_controlled_joints(self._configuration.controlled_joints)
-        # ggLog.info("Initialized RobotVecEnv scenario")
 
     @override
     def _initialize_episodes(self, vec_mask : th.Tensor | None = None, options = {}) -> None:
@@ -672,8 +650,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     th.full_like(vjpose, self._configuration.safe_damping)], dim = 2)
         # initial_state_pve = th.zeros(size=(self.num_envs, len(self._configuration.controlled_joints), 3))
         not_resetting_sims = th.logical_not(self._current_episode_config.vec_init_on_reset)
-        if th.any(not_resetting_sims):
-            initial_cmd_vec_j_pvesd[not_resetting_sims] = self._last_sent_v_j_pvesd[not_resetting_sims]
+        # if th.any(not_resetting_sims):
+        ggLog.info(f"initial_cmd_vec_j_pvesd.device = {initial_cmd_vec_j_pvesd.device}, self._last_sent_v_j_pvesd.deive = {self._last_sent_v_j_pvesd.device} not_resetting_sims.device={not_resetting_sims.device}")
+        initial_cmd_vec_j_pvesd[not_resetting_sims] = self._last_sent_v_j_pvesd[not_resetting_sims]
         # ggLog.info(f"Set joint state>")
         # time.sleep(5)
         self._adapter.setJointsStateDirect(joint_names=self._configuration.controlled_joints,
@@ -717,7 +696,23 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
         self._main_body_link_ids = self._adapter.get_links_ids([self._configuration.main_body_link])
         self._controlled_joints_ids = self._adapter.get_joints_ids(self._configuration.controlled_joints)
-        self._initialize_scenario()
+
+        self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
+        # self._robot_model.remove_collision_pairs([("rail_link_0","slider_link_0")])            
+        self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
+                                                                    collision_box_size_xyz=(100,100,1),
+                                                                    collision_obj_id="ground_collision")
+        self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
+            moving_joints=[jn[1] for jn in self._configuration.controlled_joints],
+            fixed_joints_pose={self._configuration.robot_root_joint : self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy()}
+                                            if self._configuration.robot_is_floating else {})
+        self._adapter.set_monitored_joints(self._configuration.controlled_joints)
+        self._adapter.set_impedance_controlled_joints(self._configuration.controlled_joints)
+        # ggLog.info("Initialized RobotVecEnv scenario")
+
+
+
+
 
     @override
     def close(self):
@@ -955,7 +950,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._stats["rewards"] = sub_rewards
         
     @override
-    def get_infos(self,state, labels : dict[str, th.Tensor] | None = None) -> dict[str, th.Tensor]:
+    def g   et_infos(self,state, labels : dict[str, th.Tensor] | None = None) -> dict[str, th.Tensor]:
         # i = super().get_infos(states=state)
         i : dict[str, th.Tensor] = {}
         i.update(self._stats)

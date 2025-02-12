@@ -262,7 +262,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
     def _build_state_helper(self, adapter : BaseVecJointImpedanceAdapter):
         super()._build_state_helper(adapter)
-        locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
+        self._locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     obs_dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=(1,),
@@ -302,7 +302,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                         self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR],
                                                     vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
-                                                            locomotion_state_helper,
+                                                            self._locomotion_state_helper,
                                                             observable = True,
                                                             flatten = True)
         ggLog.info(f"Built state/obs/action helpers")
@@ -657,19 +657,25 @@ class LocomotionVecEnv(RobotVecEnv):
         i = super().get_infos(state=state, labels=labels)
         curr_locom_state = state[self.STATE_LOCOMOTION][:,0]
         curr_extri_state = state[self.STATE_EXTRINSIC][:,0]
-        i["goal_rel_xyz_vec"] = curr_locom_state[:,[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
+        
+        goal_vel_rel_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
                                                 self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
-                                                self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]]
-        i["goal_abs_xyz_vec"] = curr_locom_state[:,[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X,
+                                                self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z)) #type:ignore
+        goal_vel_abs_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X,
                                                 self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Y,
-                                                self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z]]
-        i["smoothed_linvel_error"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
-        i["body_abs_linvel"] = curr_extri_state[:,[self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X,
-                                                   self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y,
-                                                   self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z]]
-        i["body_rel_linvel"] = curr_extri_state[:,[self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
-                                                   self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
-                                                   self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z]]
+                                                self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z)) #type:ignore 
+        smooth_track_err_idx = self._locomotion_state_helper.field_idx(self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR) #type: ignore
+        body_linvel_abs_xyz_idx = th.as_tensor([self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X,
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y,
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z], device=self._th_device)
+        body_linvel_rel_xyz_idx = th.as_tensor([self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z], device=self._th_device)
+        i["goal_rel_xyz_vec"] = curr_locom_state[:,goal_vel_rel_xyz_idx]
+        i["goal_abs_xyz_vec"] = curr_locom_state[:,goal_vel_abs_xyz_idx]
+        i["smoothed_linvel_error"] = curr_locom_state[:,smooth_track_err_idx]
+        i["body_abs_linvel"] = curr_extri_state[:,body_linvel_abs_xyz_idx]
+        i["body_rel_linvel"] = curr_extri_state[:,body_linvel_rel_xyz_idx]
         i["linvel_error"] = i["goal_abs_xyz_vec"] - i["body_abs_linvel"]
         i["linvel_error"] = i["goal_abs_xyz_vec"] - i["body_abs_linvel"]
         i["ep_avg_vel_err_vec"] = self._stats["ep_avg_vel_err_vec"]

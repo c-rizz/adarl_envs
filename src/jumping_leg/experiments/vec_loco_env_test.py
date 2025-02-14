@@ -424,7 +424,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import os
     
     mode = args["mode"].lower()
-    step_length_sec = 50/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
+    step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     train_envs = 4096
     if mode == "pybullet":
@@ -434,11 +434,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
 
-    eval_freq = 10
+    eval_freq = 5
     env_builder_args = {
         "action_delay_mustd" : (0.001,0.001),
         "action_noise_mustd" : (0.0,0.0),
-        "action_smoothing_halflife_sec" : 0.1,
+        "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.2,
@@ -446,23 +446,23 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : mode,
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
-        "reward_acceleration_weight" : 0.001,
-        "reward_actdiff_weight" : 0.1,
-        "reward_contacts_weight" : 0.0,
-        "reward_energy_weight" : 0.0,
-        "reward_health_weight" : 0.0,
-        "reward_position_limit_weight" : 0.5,
-        "reward_torque_limit_weight" : 0.0,
-        "reward_torque_weight" : 0.0,
-        "reward_torquediff_weight" : 0.0,
-        "reward_tracking_weight" : 0.0,
-        "reward_velocity_limit_weight" : 0.5,
-        "reward_velocity_weight" : 1.0,
-        "reward_height_weight" : 0.0,
-        "reward_pitchnroll_weight" : 0.0,
-        "reward_position_weight" : 0.1,
+        "reward_acceleration_weight" :      1.0,
+        "reward_actdiff_weight" :           0.0,
+        "reward_contacts_weight" :          0.0,
+        "reward_energy_weight" :            0.0,
+        "reward_health_weight" :            0.0,
+        "reward_position_limit_weight" :    10.0,
+        "reward_torque_limit_weight" :      0.0,
+        "reward_torque_weight" :            0.0,
+        "reward_torquediff_weight" :        0.0,
+        "reward_tracking_weight" :          0.0,
+        "reward_velocity_limit_weight" :    0.0,
+        "reward_velocity_weight" :          0.0,
+        "reward_height_weight" :            0.0,
+        "reward_pitchnroll_weight" :        0.0,
+        "reward_position_weight" :          0.1,
         "safe_stiffness" : 400,
-        "safe_damping" : 10,
+        "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
         "th_device" : env_device,
@@ -474,11 +474,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
         "init_on_reset_ratio" : 0.9,
-        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0001, 0.001),
-        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0001, 0.001),
-        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0001, 0.001),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0001, 0.005),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0001, 0.005),
+        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
+        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True
     }
@@ -573,18 +573,18 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_hyperparams(  device = "cuda",
-                                                    q_network_arch=[256,128],
+                                                    q_network_arch=[512,256],
                                                     q_lr=0.001,
                                                     policy_lr=0.0005,
-                                                    policy_network_arch=[1024,512],
+                                                    policy_network_arch=[512,256],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=16384,
-                                                    buffer_size=10_000_000,
+                                                    buffer_size=1_000_000,
                                                     total_steps=100_000_000,
-                                                    train_freq_vstep=5,
+                                                    train_freq_vstep=10,
                                                     grad_steps=10,
-                                                    learning_starts=max_steps_per_episode*max(train_envs*5, 100),
+                                                    learning_starts=max_steps_per_episode*max(train_envs*1, 100),
                                                     parallel_envs=train_envs,
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
@@ -598,7 +598,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_batch_size=0,
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
-                    debug_level=0)                           
+                    debug_level=1)                           
     elif algo.lower() == "ppo":
         from rreal.algorithms.ppo2 import ppo_train, PPO_hyperparams
         ppo_train(  seed=seed,

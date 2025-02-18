@@ -195,7 +195,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_pitchnroll = self._thtens(reward_pitchnroll_weight),
                         reward_weight_actdiff = self._thtens(reward_actdiff_weight),
                         height_reward_settle_point=self._thtens(0.2),
-                        pitchnroll_reward_settle_point=self._thtens(0.6),
+                        pitchnroll_reward_settle_point=self._thtens(0.2),
                         vel_reward_goalrelative_weight = self._thtens(0.25),
                         reward_vel_goal_relative_width = self._thtens(1.5),
                         reward_vel_goal_absolute_width = self._thtens(0.25),
@@ -318,7 +318,7 @@ class LocomotionVecEnv(RobotVecEnv):
         new_internal_state = new_inst_state[self.STATE_INTERNAL]
         new_extrinsic_state = new_inst_state[self.STATE_EXTRINSIC]
 
-        bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
+        bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = False)[:,0,:]
         vsize = bstates_vec_13.size()[0]
         prev_goal_abs_vec_xyz = self._locomotion_episode_config.goal_abs_vel_vec_xyz
         # prev_goal_abs_vec_xyz = prev_locom_state[:,[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X,
@@ -775,7 +775,7 @@ class LocomotionVecEnv(RobotVecEnv):
                 masked_assign(goals_fixed,zero_goals,self._thtens([0,0,-1.0]))
                 
             q = quat_xyzw_between_vecs_py(self._thtens([1.0,0,0]).expand((self._adapter.vec_size(),3)), goals_fixed)
-            bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
+            bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = False)[:,0,:]
             pose = bstates_vec_13[:,:7]
             pose[:,2] = th.linalg.norm(self._locomotion_episode_config.goal_abs_vel_vec_xyz, dim = 1)
             pose[:,3:7] = q

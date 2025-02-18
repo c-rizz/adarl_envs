@@ -121,7 +121,7 @@
             </collision>
 		</xacro:if>
 		<xacro:box_inertial mass="${body_mass}"
-                            x="${body_width}" y="${body_length}" z="${body_height}"
+                            x="${body_length}" y="${body_width}" z="${body_height}"
                             pose_xyz = "0 0 0"
                             pose_rpy = "0 0 0"/>
         <xacro:default_contact_params />
@@ -248,7 +248,7 @@
 
 
 
-  <mujoco>
+  <!-- <mujoco>
     <compiler  discardvisual="false"/>
-  </mujoco>
+  </mujoco> -->
 </robot>

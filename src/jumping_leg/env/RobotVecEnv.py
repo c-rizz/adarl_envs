@@ -755,7 +755,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"cam quat = {cam_rel_quat}")
         try:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
-                body_states13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
+                body_states13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = False)[:,0,:]
                 cam_link_state[:3] += body_states13[0,:3] #body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all links
                 cam_link_state = cam_link_state.expand(self._adapter.vec_size(),1,13)
                 # cam_link_state[:,:,:3] += body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all sims
@@ -805,7 +805,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"jstates_v_j_pve = {jstates_v_j_pve}")
         # th.cuda.synchronize()
         # t1 = time.monotonic()
-        bstates_v_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = True)[:,0,:]
+        bstates_v_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = False)[:,0,:]
+        # ggLog.info(f"axes pose = {self._adapter.getLinksState(requestedLinks = self._adapter.get_links_ids([('axes','root')]), use_com_frame = False)[:,0,:]}")
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # th.cuda.synchronize()
         # t2 = time.monotonic()
@@ -851,6 +852,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # th.as_tensor([0.0,0.0,-1.0]).expand(conj_body_quat_xyzw[...,:3].size())
         gdir = th.zeros_like(conj_body_quat_xyzw[...,:3])
         gdir[...,2] = -1
+        # ggLog.info(f"body_state_13[3:7] = {body_state_13[3:7]}")
         gravity_vec         = th_quat_rotate_py(gdir, conj_body_quat_xyzw)
         body_rel_linvel_xyz = th_quat_rotate_py(body_abs_linvel_xyz,     conj_body_quat_xyzw)
         body_rel_angvel_xyz = th_quat_rotate_py(body_angvel_xyz,     conj_body_quat_xyzw)

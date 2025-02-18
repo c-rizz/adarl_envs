@@ -23,9 +23,10 @@
 	<link name="arrow_link">
 		<!-- The shin is made of a cylinder plus a sphere, the total length, is shin_height, so the length  of the two are detemrined accordingly -->
         <visual>
-			<origin xyz="0 0 0" rpy="0 0 0"/>
+			<origin xyz="0.5 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/>
+				<box size="1 0.1 0.1"/>
+                <!-- <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/> -->
             </geometry>
 			<material name="red"/>
         </visual>

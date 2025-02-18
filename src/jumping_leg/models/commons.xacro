@@ -5,7 +5,9 @@
 		<inertial>
 			<origin xyz="${pose_xyz}" rpy="${pose_rpy}"/>
 			<mass value="${mass}" />
-			<inertia ixx="${0.083 * mass * (y*y + z*z)}" ixy="0.0" ixz="0.0" iyy="${0.083 * mass * (x*x + z*z)}" iyz="0.0" izz="${0.083 * mass * (x*x + y*y)}"/>
+			<inertia 	ixx="${0.083 * mass * (y*y + z*z)}" ixy="0.0" ixz="0.0" 
+						iyy="${0.083 * mass * (x*x + z*z)}" iyz="0.0" 
+						izz="${0.083 * mass * (x*x + y*y)}"/>
 		</inertial>
 	</xacro:macro>
 

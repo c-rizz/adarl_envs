@@ -28,9 +28,10 @@
 
 	<link name="x_arrow">
         <visual>
-			<origin xyz="0.1 0 0" rpy="0 0 0"/>
+			<origin xyz="0.5 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/>
+				<box size="1 0.1 0.1"/>
+                <!-- <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/> -->
             </geometry>
 			<material name="red"/>
         </visual>
@@ -48,9 +49,10 @@
     </gazebo>
 	<link name="y_arrow">
         <visual>
-			<origin xyz="0 0.1 0" rpy="0 0 1.5707"/>
+			<origin xyz="0 0.5 0" rpy="0 0 1.5707"/>
             <geometry>
-                <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/>
+				<box size="1 0.1 0.1"/>
+                <!-- <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/> -->
             </geometry>
 			<material name="green"/>
         </visual>
@@ -68,9 +70,10 @@
     </gazebo>
 	<link name="z_arrow">
         <visual>
-			<origin xyz="0 0 0.1" rpy="0 -1.5707 0"/>
+			<origin xyz="0 0 0.5" rpy="0 -1.5707 0"/>
             <geometry>
-                <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/>
+				<box size="1 0.1 0.1"/>
+                <!-- <mesh filename="package://jumping_leg/models/arrow.stl"  scale="0.001 0.001 0.001"/> -->
             </geometry>
 			<material name="blue"/>
         </visual>

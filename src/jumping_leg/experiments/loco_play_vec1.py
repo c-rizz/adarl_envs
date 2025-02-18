@@ -2,6 +2,7 @@
 
 import time
 import inspect
+from adarl.utils.buffers import BaseBuffer
 import adarl.utils.dbg.dbg_img
 from jumping_leg.utils.modded_sac import SAC as SB3_SAC
 from rreal.algorithms.sac import SAC
@@ -35,8 +36,8 @@ class Fixedpolicy(RLAgent):
     def __init__(self, cmd : th.Tensor):
         self._cmd = cmd.detach().clone()
 
-    def predict(self, obs, deterministic : bool):
-        return self._cmd.clone(), None
+    def predict_action(self, observation_batch, deterministic = False):
+        return self._cmd.clone()
     
     def get_hidden_state(self):
         return None
@@ -46,6 +47,22 @@ class Fixedpolicy(RLAgent):
 
     def reset_hidden_state(self):
         pass
+
+    def train_model(self, global_step, iterations, buffer: BaseBuffer) -> tuple[float, float, float]:
+        raise NotImplementedError()
+    
+    def save(self, path: str):
+        pass
+
+    @classmethod
+    def load(cls, path: str):
+        pass
+    
+    def load_(self, path: str):
+        pass
+    
+    def input_device(self):
+        return self._a_offset.device
 
 class SinPolicy(RLAgent):
     def __init__(self,  act_scale : th.Tensor,
@@ -81,6 +98,23 @@ class SinPolicy(RLAgent):
 
     def reset_hidden_state(self):
         self._t = self._t0
+
+    def train_model(self, global_step, iterations, buffer: BaseBuffer) -> tuple[float, float, float]:
+        raise NotImplementedError()
+    
+    def save(self, path: str):
+        pass
+
+    @classmethod
+    def load(cls, path: str):
+        pass
+    
+    def load_(self, path: str):
+        pass
+    
+    def input_device(self):
+        return self._a_offset.device
+        
 
 def build_sin_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":
@@ -409,7 +443,7 @@ if __name__ == "__main__":
     ap.add_argument("--seedsOffset", default=0, type=int, help="Offset the used seeds by this amount")
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--pretrained", required = False, default=None, type=str, help="Model to load")
-    ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use [pybullet,xbot-gazebo]")
+    ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use [pybullet,xbot-gazebo,mjx]")
     ap.add_argument("--robot", default="quad", type=str, help="Robot to be used")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
     ap.add_argument("--gui", default=False, action='store_true', help="Do not start the gui, instead stream renderings")

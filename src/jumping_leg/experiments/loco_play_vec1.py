@@ -37,7 +37,7 @@ class Fixedpolicy(RLAgent):
         self._cmd = cmd.detach().clone()
 
     def predict_action(self, observation_batch, deterministic = False):
-        return self._cmd.clone(), None
+        return self._cmd.clone()
     
     def get_hidden_state(self):
         return None
@@ -443,7 +443,7 @@ if __name__ == "__main__":
     ap.add_argument("--seedsOffset", default=0, type=int, help="Offset the used seeds by this amount")
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--pretrained", required = False, default=None, type=str, help="Model to load")
-    ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use [pybullet,xbot-gazebo]")
+    ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use [pybullet,xbot-gazebo,mjx]")
     ap.add_argument("--robot", default="quad", type=str, help="Robot to be used")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
     ap.add_argument("--gui", default=False, action='store_true', help="Do not start the gui, instead stream renderings")

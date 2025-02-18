@@ -195,7 +195,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_pitchnroll = self._thtens(reward_pitchnroll_weight),
                         reward_weight_actdiff = self._thtens(reward_actdiff_weight),
                         height_reward_settle_point=self._thtens(0.2),
-                        pitchnroll_reward_settle_point=self._thtens(0.2),
+                        pitchnroll_reward_settle_point=self._thtens(0.6),
                         vel_reward_goalrelative_weight = self._thtens(0.25),
                         reward_vel_goal_relative_width = self._thtens(1.5),
                         reward_vel_goal_absolute_width = self._thtens(0.25),
@@ -460,22 +460,25 @@ class LocomotionVecEnv(RobotVecEnv):
 
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
-        max_rew = 100
+        max_rew = 1000
         current_state_locom_vec = state[self.STATE_LOCOMOTION][:, 0,:,0]
-        state_action_vec = self._current_state[self.STATE_ACT]
+        state_action_vec = state[self.STATE_ACT]
+        state_stats = state[self.STATE_ROBOT_STATS]
 
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
         normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
         state_robot_norm     = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)
         dbg_run(lambda: self._warn_out_of_bounds(state_robot_norm))
         state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
+        # state_stats_norm = self._state_helper.sub_helpers[self.STATE_ROBOT_STATS].normalize(state_stats)
         # ggLog.info(f"current_state_locom_vec.size() = {current_state_locom_vec.size()}")
         # ggLog.info(f"state_robot_norm.size() = {state_robot_norm.size()}")
         # ggLog.info(f"state_robot_safenorm.size() = {state_robot_safenorm.size()}")
         normposhomingdiff   = state_robot_norm[:,0,:,0] - normhoming
         normvelocities      = state_robot_norm[:,0,:,1]
         normtorques         = state_robot_norm[:,0,:,2]
-        normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
+        # normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
+        normaccelerations   = state_stats[:,0,:,10]/1000 # average accelearation, normalized assuming a max of 1000 m/s^2
         normtorquediff      = state_robot_norm[:,0,:,2] - state_robot_norm[:,1,:,2]
         actdiff             = th.flatten((state_action_vec[:,0] - state_action_vec[:,1])/2, start_dim=1)
 
@@ -514,20 +517,20 @@ class LocomotionVecEnv(RobotVecEnv):
         
         reward_contacts = - th.clamp(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 
-        sub_rewards_return["reward_tracking"] = reward_velocity_tracking
-        sub_rewards_return["reward_torque"] = reward_torque
-        sub_rewards_return["reward_torque_limit"] = reward_torque_limit
-        sub_rewards_return["reward_torquediff"] = reward_torquediff
-        sub_rewards_return["reward_velocity"] = reward_velocity
-        sub_rewards_return["reward_contacts"] = reward_contacts
-        sub_rewards_return["reward_height"] = reward_height
-        sub_rewards_return["reward_pitchnroll"] = reward_pitchnroll
-        sub_rewards_return["reward_velocity_limit"] = reward_velocity_limit
-        sub_rewards_return["reward_acceleration"] = reward_acceleration
-        sub_rewards_return["reward_position_limit"] = reward_position_limit
-        sub_rewards_return["reward_position"] = reward_position
-        sub_rewards_return["reward_actdiff"] = reward_actdiff
-        sub_rewards_return["reward_health"] = th.ones((current_state_locom_vec.size()[0],), device=current_state_locom_vec.device)
+        sub_rewards_return["tracking"] = reward_velocity_tracking
+        sub_rewards_return["torque"] = reward_torque
+        sub_rewards_return["torque_limit"] = reward_torque_limit
+        sub_rewards_return["torquediff"] = reward_torquediff
+        sub_rewards_return["velocity"] = reward_velocity
+        sub_rewards_return["contacts"] = reward_contacts
+        sub_rewards_return["height"] = reward_height
+        sub_rewards_return["pitchnroll"] = reward_pitchnroll
+        sub_rewards_return["velocity_limit"] = reward_velocity_limit
+        sub_rewards_return["acceleration"] = reward_acceleration
+        sub_rewards_return["position_limit"] = reward_position_limit
+        sub_rewards_return["position"] = reward_position
+        sub_rewards_return["actdiff"] = reward_actdiff
+        sub_rewards_return["health"] = th.ones((current_state_locom_vec.size()[0],), device=current_state_locom_vec.device)
         sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards_return.items()}
 
         for k,v in sub_rewards_return.items():
@@ -535,20 +538,20 @@ class LocomotionVecEnv(RobotVecEnv):
         # dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(sub_rewards_return, -100, 100),
         #           lambda: f"{adarl.utils.tensor_trees.flatten_tensor_tree(map_tensor_tree(sub_rewards_return, lambda t: adarl.utils.tensor_trees.is_leaf_bounded(t,min=-100,max=100)))}")
         
-        weights = { "reward_tracking" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT],
-                    "reward_torque" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT],
-                    "reward_torque_limit" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT],
-                    "reward_torquediff" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT],
-                    "reward_velocity" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_VELOCITY_WEIGHT],
-                    "reward_velocity_limit" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT],
-                    "reward_acceleration" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT],
-                    "reward_position_limit" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT],
-                    "reward_health" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_HEALTH_WEIGHT],
-                    "reward_contacts" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_CONTACTS_WEIGHT],
-                    "reward_height" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_HEIGHT_WEIGHT],
-                    "reward_pitchnroll" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_PITCHNROLL_WEIGHT],
-                    "reward_actdiff" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_ACTDIFF_WEIGHT],
-                    "reward_position" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_POSITION_WEIGHT]
+        weights = { "tracking" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT],
+                    "torque" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT],
+                    "torque_limit" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT],
+                    "torquediff" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT],
+                    "velocity" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_VELOCITY_WEIGHT],
+                    "velocity_limit" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT],
+                    "acceleration" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_ACCELERATION_WEIGHT],
+                    "position_limit" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT],
+                    "health" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_HEALTH_WEIGHT],
+                    "contacts" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_CONTACTS_WEIGHT],
+                    "height" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_HEIGHT_WEIGHT],
+                    "pitchnroll" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_PITCHNROLL_WEIGHT],
+                    "actdiff" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_ACTDIFF_WEIGHT],
+                    "position" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_POSITION_WEIGHT]
                     }
         for k in sub_rewards_return:
             sub_rewards_return[k] = self._locomotion_conf.reward_scale*sub_rewards_return[k]*weights[k]

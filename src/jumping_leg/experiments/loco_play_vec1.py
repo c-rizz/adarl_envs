@@ -2,6 +2,7 @@
 
 import time
 import inspect
+from adarl.utils.buffers import BaseBuffer
 import adarl.utils.dbg.dbg_img
 from jumping_leg.utils.modded_sac import SAC as SB3_SAC
 from rreal.algorithms.sac import SAC
@@ -35,7 +36,7 @@ class Fixedpolicy(RLAgent):
     def __init__(self, cmd : th.Tensor):
         self._cmd = cmd.detach().clone()
 
-    def predict(self, obs, deterministic : bool):
+    def predict_action(self, observation_batch, deterministic = False):
         return self._cmd.clone(), None
     
     def get_hidden_state(self):
@@ -46,6 +47,22 @@ class Fixedpolicy(RLAgent):
 
     def reset_hidden_state(self):
         pass
+
+    def train_model(self, global_step, iterations, buffer: BaseBuffer) -> tuple[float, float, float]:
+        raise NotImplementedError()
+    
+    def save(self, path: str):
+        pass
+
+    @classmethod
+    def load(cls, path: str):
+        pass
+    
+    def load_(self, path: str):
+        pass
+    
+    def input_device(self):
+        return self._a_offset.device
 
 class SinPolicy(RLAgent):
     def __init__(self,  act_scale : th.Tensor,
@@ -81,6 +98,23 @@ class SinPolicy(RLAgent):
 
     def reset_hidden_state(self):
         self._t = self._t0
+
+    def train_model(self, global_step, iterations, buffer: BaseBuffer) -> tuple[float, float, float]:
+        raise NotImplementedError()
+    
+    def save(self, path: str):
+        pass
+
+    @classmethod
+    def load(cls, path: str):
+        pass
+    
+    def load_(self, path: str):
+        pass
+    
+    def input_device(self):
+        return self._a_offset.device
+        
 
 def build_sin_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":

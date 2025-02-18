@@ -1048,15 +1048,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         reward_acceleration = - th.clamp(th.mean(th.pow(normaccelerations,2),   dim = 1), -max_rew,max_rew)
         
         
-        sub_rewards_return["reward_position"] = reward_position
-        sub_rewards_return["reward_torque"] = reward_torque
-        sub_rewards_return["reward_velocity"] = reward_velocity
-        sub_rewards_return["reward_acceleration"] = reward_acceleration
+        sub_rewards_return["position"] = reward_position
+        sub_rewards_return["torque"] = reward_torque
+        sub_rewards_return["velocity"] = reward_velocity
+        sub_rewards_return["acceleration"] = reward_acceleration
 
-        weights = { "reward_torque" : 0.01,
-                    "reward_velocity" : 1.0,
-                    "reward_acceleration" : 0.1,
-                    "reward_position" : 1.0
+        weights = { "torque" : 0.01,
+                    "velocity" : 1.0,
+                    "acceleration" : 0.1,
+                    "position" : 1.0
                     }
 
         reward = th.sum(th.stack([sub_rewards_return[k]*weights[k] for k in sub_rewards_return]), dim=0)

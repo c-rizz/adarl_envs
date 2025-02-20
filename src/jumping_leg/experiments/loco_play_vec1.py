@@ -204,7 +204,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
-        "enable_rendering" : not args["gui"],
+        "enable_rendering" : not args["gui"] or args["record"],
         "goal_err_smoothing_halflife_sec" : 0.2,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : args["mode"],
@@ -296,8 +296,8 @@ def play(seed, folderName, run_id, args,
     if args["pretrained"] is not None:
         model = load_model(args["pretrained"])
     else:
-        model = build_fixed_policy(env = env, robot=robot)
-        # model = build_sin_policy(env, robot=robot)
+        # model = build_fixed_policy(env = env, robot=robot)
+        model = build_sin_policy(env, robot=robot, scale = 1.0)
 
     play = True
     verbose = False

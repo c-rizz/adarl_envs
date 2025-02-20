@@ -113,7 +113,7 @@ def loco_run_builder(   seed,
                                                   realtime_factor=-1.0,
                                                   gui_env_index=0,
                                                   default_max_joint_impedance_ctrl_torque=100.0,
-                                                  show_gui=False,
+                                                  show_gui=show_gui,
                                                   log_freq=10_000,
                                                   record_whole_joint_trajectories = False,
                                                   log_freq_joints_trajectories = int(250*(50/1024)/(2/4096)),
@@ -187,7 +187,7 @@ def loco_run_builder(   seed,
                             goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
                             use_contacts=env_builder_args.pop("use_contacts"),
                             terminating_contact_pairs=terminating_contact_pairs if env_builder_args.pop("terminate_on_body_contact") else [],
-                            )
+                            enable_link_collisions=env_builder_args.pop("enable_link_collisions"))
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
     # ggLog.info(f"action_space = {lrenv.action_space.shape}")
@@ -321,7 +321,8 @@ quad_args = {
                                     ("quad","shin_link_front_right"),
                                     ("quad","body_link")],
     "terminating_contact_pairs" : [(("quad","body_link"),("ground_plane","planeLink"))],
-    "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE]
+    "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+    "enable_link_collisions" : None
 }
 
 def quad_loco_venv_builder(seed : int,
@@ -369,8 +370,13 @@ def kyon_args():
             "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
-            "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE]
+            "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "enable_link_collisions" : [    (('kyon', 'knee_pitch_1_link'),[('ground','ground_link')]),
+                                            (('kyon', 'knee_pitch_2_link'),[('ground','ground_link')]),
+                                            (('kyon', 'knee_pitch_3_link'),[('ground','ground_link')]),
+                                            (('kyon', 'knee_pitch_4_link'),[('ground','ground_link')]),]
         }
+
 
 def kyon_loco_env_builder(seed : int,
                     log_folder : str,

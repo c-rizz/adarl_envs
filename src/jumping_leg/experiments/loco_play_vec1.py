@@ -115,42 +115,41 @@ class SinPolicy(RLAgent):
     def input_device(self):
         return self._a_offset.device
         
-
+kyon_homing = { ("kyon","hip_roll_3") : [-3.14159*0.05, 0, 0, 400, 10],
+                ("kyon","hip_roll_4") : [ 3.14159*0.05, 0, 0, 400, 10],
+                ("kyon","hip_roll_1") : [ 3.14159*0.05, 0, 0, 400, 10],
+                ("kyon","hip_roll_2") : [-3.14159*0.05, 0, 0, 400, 10],
+                ("kyon","hip_pitch_3") : [0.75, 0, 0, 400, 10],
+                ("kyon","hip_pitch_4") : [-0.75, 0, 0, 400, 10],
+                ("kyon","hip_pitch_1") : [0.75, 0, 0, 400, 10],
+                ("kyon","hip_pitch_2") : [-0.75, 0, 0, 400, 10],
+                ("kyon","knee_pitch_3") : [-1.8, 0, 0, 400, 10],
+                ("kyon","knee_pitch_4") : [ 1.8, 0, 0, 400, 10],
+                ("kyon","knee_pitch_1") : [-1.8, 0, 0, 400, 10],
+                ("kyon","knee_pitch_2") : [ 1.8, 0, 0, 400, 10]}
+quad_homing = { ("quad","hip_joint_x_back_left") : [-3.14159*0.4, 0, 0, 400, 10],
+                ("quad","hip_joint_x_back_right") : [-3.14159*0.4, 0, 0, 400, 10],
+                ("quad","hip_joint_x_front_left") : [-3.14159*0.4, 0, 0, 400, 10],
+                ("quad","hip_joint_x_front_right") : [-3.14159*0.4, 0, 0, 400, 10],
+                ("quad","hip_joint_y_back_left") : [0.75, 0, 0, 400, 10],
+                ("quad","hip_joint_y_back_right") : [0.75, 0, 0, 400, 10],
+                ("quad","hip_joint_y_front_left") : [0.75, 0, 0, 400, 10],
+                ("quad","hip_joint_y_front_right") : [0.75, 0, 0, 400, 10],
+                ("quad","knee_joint_back_left") : [1.8, 0, 0, 400, 10],
+                ("quad","knee_joint_back_right") : [1.8, 0, 0, 400, 10],
+                ("quad","knee_joint_front_left") : [1.8, 0, 0, 400, 10],
+                ("quad","knee_joint_front_right") : [1.8, 0, 0, 400, 10]}
 def build_sin_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":
-        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(
-                                                {   ("quad","hip_joint_x_back_left") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_x_back_right") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_x_front_left") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_x_front_right") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_y_back_left") : [0.75, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_y_back_right") : [0.75, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_y_front_left") : [0.75, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_y_front_right") : [0.75, 0, 0, 400, 10],
-                                                    ("quad","knee_joint_back_left") : [1.8, 0, 0, 400, 10],
-                                                    ("quad","knee_joint_back_right") : [1.8, 0, 0, 400, 10],
-                                                    ("quad","knee_joint_front_left") : [1.8, 0, 0, 400, 10],
-                                                    ("quad","knee_joint_front_right") : [1.8, 0, 0, 400, 10]})
+        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(quad_homing)
     elif robot == "kyon":
-        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(
-                                                {   ("kyon","hip_roll_3") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("kyon","hip_roll_4") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("kyon","hip_roll_1") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("kyon","hip_roll_2") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("kyon","hip_pitch_3") : [0.75, 0, 0, 400, 10],
-                                                    ("kyon","hip_pitch_4") : [0.75, 0, 0, 400, 10],
-                                                    ("kyon","hip_pitch_1") : [0.75, 0, 0, 400, 10],
-                                                    ("kyon","hip_pitch_2") : [0.75, 0, 0, 400, 10],
-                                                    ("kyon","knee_pitch_3") : [1.8, 0, 0, 400, 10],
-                                                    ("kyon","knee_pitch_4") : [1.8, 0, 0, 400, 10],
-                                                    ("kyon","knee_pitch_1") : [1.8, 0, 0, 400, 10],
-                                                    ("kyon","knee_pitch_2") : [1.8, 0, 0, 400, 10]})
+        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(kyon_homing)
     else:
         RuntimeError(f"Unknown robot '{robot}")
     model = SinPolicy(  act_scale=th.as_tensor([0.0, 0.1, 0.2,
+                                                -0.0, -0.1, -0.2,
                                                 0.0, 0.1, 0.2,
-                                                0.0, 0.1, 0.2,
-                                                0.0, 0.1, 0.2])*scale,
+                                                -0.0, -0.1, -0.2])*scale,
                         act_offset=home_action,
                         act_speed=th.as_tensor([0.8]),
                         action_size=12,
@@ -160,33 +159,9 @@ def build_sin_policy(env, robot : str, scale : float = 0.0):
 
 def build_fixed_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":
-        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(
-                                                {   ("quad","hip_joint_x_back_left") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_x_back_right") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_x_front_left") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_x_front_right") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_y_back_left") : [0.75, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_y_back_right") : [0.75, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_y_front_left") : [0.75, 0, 0, 400, 10],
-                                                    ("quad","hip_joint_y_front_right") : [0.75, 0, 0, 400, 10],
-                                                    ("quad","knee_joint_back_left") : [1.8, 0, 0, 400, 10],
-                                                    ("quad","knee_joint_back_right") : [1.8, 0, 0, 400, 10],
-                                                    ("quad","knee_joint_front_left") : [1.8, 0, 0, 400, 10],
-                                                    ("quad","knee_joint_front_right") : [1.8, 0, 0, 400, 10]})
+        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(quad_homing)
     elif robot == "kyon":
-        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(
-                                                {   ("kyon","hip_roll_3") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("kyon","hip_roll_4") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("kyon","hip_roll_1") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("kyon","hip_roll_2") : [-3.14159*0.4, 0, 0, 400, 10],
-                                                    ("kyon","hip_pitch_3") : [0.75, 0, 0, 400, 10],
-                                                    ("kyon","hip_pitch_4") : [0.75, 0, 0, 400, 10],
-                                                    ("kyon","hip_pitch_1") : [0.75, 0, 0, 400, 10],
-                                                    ("kyon","hip_pitch_2") : [0.75, 0, 0, 400, 10],
-                                                    ("kyon","knee_pitch_3") : [1.8, 0, 0, 400, 10],
-                                                    ("kyon","knee_pitch_4") : [1.8, 0, 0, 400, 10],
-                                                    ("kyon","knee_pitch_1") : [1.8, 0, 0, 400, 10],
-                                                    ("kyon","knee_pitch_2") : [1.8, 0, 0, 400, 10]})
+        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(kyon_homing)
     else:
         RuntimeError(f"Unknown robot '{robot}")
     model = Fixedpolicy(  cmd = home_action)

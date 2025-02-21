@@ -142,14 +142,19 @@ quad_homing = { ("quad","hip_joint_x_back_left") : [-3.14159*0.4, 0, 0, 400, 10]
 def build_sin_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":
         home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(quad_homing)
+        act_range = th.as_tensor([0.0, 0.1, 0.2,
+                                  0.0, 0.1, 0.2,
+                                  0.0, 0.1, 0.2,
+                                  0.0, 0.1, 0.2])
     elif robot == "kyon":
         home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(kyon_homing)
+        act_range = th.as_tensor([0.0, 0.1, 0.2,
+                                -0.0, -0.1, -0.2,
+                                0.0, 0.1, 0.2,
+                                -0.0, -0.1, -0.2])
     else:
         RuntimeError(f"Unknown robot '{robot}")
-    model = SinPolicy(  act_scale=th.as_tensor([0.0, 0.1, 0.2,
-                                                -0.0, -0.1, -0.2,
-                                                0.0, 0.1, 0.2,
-                                                -0.0, -0.1, -0.2])*scale,
+    model = SinPolicy(  act_scale=act_range*scale,
                         act_offset=home_action,
                         act_speed=th.as_tensor([0.8]),
                         action_size=12,

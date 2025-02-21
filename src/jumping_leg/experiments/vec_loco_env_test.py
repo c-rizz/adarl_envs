@@ -32,7 +32,7 @@ def format_tensor(t, float_precision):
     t = [f"{e: .{float_precision}f}" if isinstance(e,float) else str(e) for e in t]
     return f"[{', '.join(t)}]"
 
-def loco_run_builder(   seed,
+def loco_runner_builder(seed,
                         log_folder,
                         env_builder_args : dict,
                         num_envs : int,
@@ -217,15 +217,14 @@ def loco_run_builder(   seed,
     return vrunner
 
 
-def loco_env_builder(   seed,
-                        log_folder,
-                        env_builder_args : dict,
-                        num_envs : int):
+def loco_env_builder(   seed : int,
+                        log_folder : str,
+                        is_eval : bool, 
+                        env_builder_args : dict):
     mode = env_builder_args["mode"].strip().lower()
     quiet = env_builder_args["quiet"]
     stepLength_sec = env_builder_args["stepLength_sec"]
-
-    vrunner = loco_run_builder( seed = seed,
+    vrunner = loco_runner_builder( seed = seed,
                                 log_folder = log_folder,
                                 env_builder_args = env_builder_args,
                                 num_envs = 1,
@@ -245,17 +244,7 @@ def loco_venv_builder(   seed,
 
     if mode == "pybullet":
         device = env_builder_args["th_device"]
-        def single_env_builder(seed : int, log_folder : str, is_eval : bool, env_builder_args : dict[str, Any]):
-            vrunner = loco_run_builder( seed = seed,
-                                    log_folder = log_folder,
-                                    env_builder_args = env_builder_args,
-                                    num_envs = 1,
-                                    mode = mode,
-                                    quiet=quiet,
-                                    autoreset = False)
-            return GymRunnerWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
-        # from jumping_leg.experiments.build_quad import quad_env_builder
-        env = build_vec_env(env_builder=single_env_builder,
+        env = build_vec_env(env_builder=loco_env_builder,
                             env_builder_args=env_builder_args,
                             log_folder=log_folder,
                             seed=seed,
@@ -263,7 +252,7 @@ def loco_venv_builder(   seed,
                             collector_device=device,
                             env_action_device = device)
     else:
-        vrunner = loco_run_builder( seed = seed,
+        vrunner = loco_runner_builder( seed = seed,
                                     log_folder = log_folder,
                                     env_builder_args = env_builder_args,
                                     num_envs = num_envs,
@@ -281,74 +270,47 @@ def loco_venv_builder(   seed,
         ggLog.warn(f"Unused env_builder_args: {env_builder_args}")
     return env, 1/stepLength_sec
 
-video_recorder_kwargs : dict[str,typing.Any]  = {}
 
-def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
-    return RecorderGymWrapper(  env=env,
-                                fps = 1/stepLength_sec,
-                                outFolder=log_folder+"/videos/RecorderGymWrapper",
-                                saveFrequency_ep=video_save_freq,
-                                **video_recorder_kwargs)
+def get_quad_args():
+    return {"model_file" : adarl.utils.utils.pkgutil_get_path("jumping_leg","models/quad_simple.urdf.xacro"),
+            "model_kwargs" : {  "use_cylinders" : "false",
+                                "all_collisions" : "false"},
+            "xacro_extra_pkg_paths" : {"jumping_leg" : adarl.utils.utils.pkgutil_get_path("jumping_leg")},
+            "homing_joint_pose" : { ("quad","hip_joint_x_back_left") : -3.14159*0.4,
+                                    ("quad","hip_joint_x_back_right") : -3.14159*0.4,
+                                    ("quad","hip_joint_x_front_left") : -3.14159*0.4,
+                                    ("quad","hip_joint_x_front_right") : -3.14159*0.4,
+                                    ("quad","hip_joint_y_back_left") : 0.75,
+                                    ("quad","hip_joint_y_back_right") : 0.75,
+                                    ("quad","hip_joint_y_front_left") : 0.75,
+                                    ("quad","hip_joint_y_front_right") : 0.75,
+                                    ("quad","knee_joint_back_left") : 1.8,
+                                    ("quad","knee_joint_back_right") : 1.8,
+                                    ("quad","knee_joint_front_left") : 1.8,
+                                    ("quad","knee_joint_front_right") : 1.8},
+            "robot_name" : "quad",
+            "robot_main_body_link" : "body_link",
+            "robot_root_link" : "body_link",
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
+            "disallowed_contact_links" : [  ("quad","thigh_link_back_left"),
+                                            ("quad","shin_link_back_left"),
+                                            ("quad","thigh_link_back_right"),
+                                            ("quad","shin_link_back_right"),
+                                            ("quad","thigh_link_front_left"),
+                                            ("quad","shin_link_front_left"),
+                                            ("quad","thigh_link_front_right"),
+                                            ("quad","shin_link_front_right"),
+                                            ("quad","body_link")],
+            "terminating_contact_pairs" : [(("quad","body_link"),("ground_plane","planeLink"))],
+            "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            # "enable_link_collisions" : None,
+            "enable_link_collisions" : [    (('quad', 'foot_center_link_back_left'),[('ground','ground_link')]),
+                                            (('quad', 'foot_center_link_back_right'),[('ground','ground_link')]),
+                                            (('quad', 'foot_center_link_front_left'),[('ground','ground_link')]),
+                                            (('quad', 'foot_center_link_front_right'),[('ground','ground_link')])]
+            }
 
-quad_args = {
-    "model_file" : adarl.utils.utils.pkgutil_get_path("jumping_leg","models/quad_simple.urdf.xacro"),
-    "model_kwargs" : {  "use_cylinders" : "false",
-                        "all_collisions" : "false"},
-    "xacro_extra_pkg_paths" : {"jumping_leg" : adarl.utils.utils.pkgutil_get_path("jumping_leg")},
-    "homing_joint_pose" : { ("quad","hip_joint_x_back_left") : -3.14159*0.4,
-                            ("quad","hip_joint_x_back_right") : -3.14159*0.4,
-                            ("quad","hip_joint_x_front_left") : -3.14159*0.4,
-                            ("quad","hip_joint_x_front_right") : -3.14159*0.4,
-                            ("quad","hip_joint_y_back_left") : 0.75,
-                            ("quad","hip_joint_y_back_right") : 0.75,
-                            ("quad","hip_joint_y_front_left") : 0.75,
-                            ("quad","hip_joint_y_front_right") : 0.75,
-                            ("quad","knee_joint_back_left") : 1.8,
-                            ("quad","knee_joint_back_right") : 1.8,
-                            ("quad","knee_joint_front_left") : 1.8,
-                            ("quad","knee_joint_front_right") : 1.8},
-    "robot_name" : "quad",
-    "robot_main_body_link" : "body_link",
-    "robot_root_link" : "body_link",
-    "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
-    "disallowed_contact_links" : [  ("quad","thigh_link_back_left"),
-                                    ("quad","shin_link_back_left"),
-                                    ("quad","thigh_link_back_right"),
-                                    ("quad","shin_link_back_right"),
-                                    ("quad","thigh_link_front_left"),
-                                    ("quad","shin_link_front_left"),
-                                    ("quad","thigh_link_front_right"),
-                                    ("quad","shin_link_front_right"),
-                                    ("quad","body_link")],
-    "terminating_contact_pairs" : [(("quad","body_link"),("ground_plane","planeLink"))],
-    "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
-    "enable_link_collisions" : None
-}
-
-def quad_loco_venv_builder(seed : int,
-                    run_folder : str,
-                    num_envs : int, 
-                    env_builder_args : dict,
-                    env_name : str = "") -> gym.vector.VectorEnv:
-    env_builder_args.update(quad_args)
-    return loco_venv_builder(seed = seed,
-                            log_folder = run_folder,
-                            env_builder_args = env_builder_args,
-                            num_envs=num_envs)[0]
-
-
-def quad_loco_env_builder(seed : int,
-                    log_folder : str,
-                    is_eval : bool, 
-                    env_builder_args : dict) -> tuple[gym.Env,float]:
-    env_builder_args.update(quad_args)
-    return loco_env_builder(seed = seed,
-                            log_folder = log_folder,
-                            env_builder_args = env_builder_args,
-                            num_envs=1)
-
-
-def kyon_args():
+def get_kyon_args():
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
             "model_kwargs" : {"upper_body" : "false"},
             "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf")},
@@ -374,29 +336,56 @@ def kyon_args():
             "enable_link_collisions" : [    (('kyon', 'knee_pitch_1_link'),[('ground','ground_link')]),
                                             (('kyon', 'knee_pitch_2_link'),[('ground','ground_link')]),
                                             (('kyon', 'knee_pitch_3_link'),[('ground','ground_link')]),
-                                            (('kyon', 'knee_pitch_4_link'),[('ground','ground_link')]),]
+                                            (('kyon', 'knee_pitch_4_link'),[('ground','ground_link')])]
         }
+
+
+def quad_loco_venv_builder(seed : int,
+                    run_folder : str,
+                    num_envs : int, 
+                    env_builder_args : dict,
+                    env_name : str = "") -> gym.vector.VectorEnv:
+    env_builder_args.update(get_quad_args())
+    return loco_venv_builder(seed = seed,
+                            log_folder = run_folder,
+                            env_builder_args = env_builder_args,
+                            num_envs=num_envs)[0]
+
+
+def quad_loco_env_builder(seed : int,
+                    log_folder : str,
+                    is_eval : bool, 
+                    env_builder_args : dict) -> tuple[gym.Env,float]:
+    env_builder_args.update(get_quad_args())
+    return loco_env_builder(seed = seed,
+                            log_folder = log_folder,
+                            is_eval=is_eval,
+                            env_builder_args = env_builder_args)
+
+
 
 
 def kyon_loco_env_builder(seed : int,
                     log_folder : str,
                     is_eval : bool, 
                     env_builder_args : dict) -> tuple[gym.Env,float]:
-    env_builder_args.update(kyon_args())
+    env_builder_args.update(get_kyon_args())
     return loco_env_builder(seed = seed,
                             log_folder = log_folder,
-                            env_builder_args = env_builder_args,
-                            num_envs=1)
+                            is_eval=is_eval,
+                            env_builder_args = env_builder_args)
 
 def kyon_loco_venv_builder(seed : int,
                     run_folder : str,
                     num_envs : int, 
                     env_builder_args : dict) -> gym.vector.VectorEnv:
-    env_builder_args.update(kyon_args())
+    env_builder_args.update(get_kyon_args())
     return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
                             num_envs=num_envs)[0]
+
+
 
 
 def jumping_leg_builder(seed : int,
@@ -420,6 +409,29 @@ def jumping_leg_builder(seed : int,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
                             num_envs=num_envs)[0]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):

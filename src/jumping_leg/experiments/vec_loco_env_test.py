@@ -438,7 +438,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args = {
         "action_delay_mustd" : (0.001,0.001),
         "action_noise_mustd" : (0.0,0.0),
-        "action_smoothing_halflife_sec" : 0.05,
+        "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.2,

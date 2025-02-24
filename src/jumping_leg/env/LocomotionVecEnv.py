@@ -105,8 +105,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     "REWARD_ACTDIFF_WEIGHT",
                                                     "REWARD_POSITION_WEIGHT",
                                                     "SMOOTHED_TRACKING_ERROR",
-                                                    "HEIGHT_ERR",
-                                                    "ORIENT_ERR",
+                                                    "SMOOTHED_HEIGHT_ERROR",
+                                                    "SMOOTHED_ORIENTATION_ERROR",
                                                     "SUM_IMPULSES",
                                                     "CRASHED"], start=0)
 
@@ -291,15 +291,17 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_POSITION_WEIGHT : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.HEIGHT_ERR : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.ORIENT_ERR : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.SMOOTHED_ORIENTATION_ERROR : [0,10],
                                                                     self.LOCOMOTION_FIELDS.SUM_IMPULSES : [0,10000],
                                                                     self.LOCOMOTION_FIELDS.COLLISON_COUNT : [0,1000],
                                                                     self.LOCOMOTION_FIELDS.CRASHED : [0,1]},
                                                     observable_fields=[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
                                                                         self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
                                                                         self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z,
-                                                                        self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR],
+                                                                        self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
+                                                                        self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
+                                                                        self.LOCOMOTION_FIELDS.SMOOTHED_ORIENTATION_ERROR],
                                                     vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
                                                             self._locomotion_state_helper,
@@ -358,8 +360,8 @@ class LocomotionVecEnv(RobotVecEnv):
 
         alpha = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.stepLength_sec)
         smoothed_tracking_err_vec = tracking_err_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]*alpha
-        smoothed_height_err_vec = height_err_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.HEIGHT_ERR]*alpha
-        smoothed_orient_err_vec = orient_err_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.ORIENT_ERR]*alpha
+        SMOOTHED_HEIGHT_ERROR_vec = height_err_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR]*alpha
+        SMOOTHED_ORIENTATION_ERROR_vec = orient_err_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_ORIENTATION_ERROR]*alpha
         # print(f"smoothed_tracking_err_vec.size() = {smoothed_tracking_err_vec.size()}")
         starting_eps = new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]<=0
         masked_assign(smoothed_tracking_err_vec,starting_eps.view((self.num_envs,)),tracking_err_vec)
@@ -407,8 +409,8 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._locomotion_conf.reward_weight_torquediff.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_POSITION_WEIGHT : self._locomotion_conf.reward_weight_position.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_tracking_err_vec,
-                            self.LOCOMOTION_FIELDS.HEIGHT_ERR : smoothed_height_err_vec,
-                            self.LOCOMOTION_FIELDS.ORIENT_ERR : smoothed_orient_err_vec,
+                            self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR : SMOOTHED_HEIGHT_ERROR_vec,
+                            self.LOCOMOTION_FIELDS.SMOOTHED_ORIENTATION_ERROR : SMOOTHED_ORIENTATION_ERROR_vec,
                             self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X : goal_rel_linvel_vec_xyz[:,0].unsqueeze(-1),
                             self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y : goal_rel_linvel_vec_xyz[:,1].unsqueeze(-1),
                             self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z : goal_rel_linvel_vec_xyz[:,2].unsqueeze(-1),
@@ -498,10 +500,10 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_position_limit   = -th.clamp(th.mean(th.pow(position_safenorm,50), dim=1),   -1,1)
         reward_velocity_limit   = -th.clamp(th.mean(th.pow(velocities_safenorm,50), dim=1), -1,1)
 
-        reward_height = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.HEIGHT_ERR],
+        reward_height = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR],
                                     zero_rew_dist=self._locomotion_conf.height_reward_settle_point)
 
-        reward_pitchnroll = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.ORIENT_ERR],
+        reward_pitchnroll = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_ORIENTATION_ERROR],
                                         zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
 
         velocity_tracking_err_vec = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]

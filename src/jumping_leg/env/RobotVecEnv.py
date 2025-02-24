@@ -171,7 +171,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        ui_camera_resolution_hw : tuple[int,int] = (144,256)
+                        ui_camera_resolution_hw : tuple[int,int] = (144,256),
+                        enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = []
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -333,6 +334,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                          th_device = self._th_device,
                          obs_dtype = self._obs_dtype,
                          seed = seed)
+        self._build()
+        ggLog.info(f"enable_link_collisions = {enable_link_collisions}")
+        if isinstance(self._adapter, BaseVecSimulationAdapter) and enable_link_collisions is not None:
+            self._adapter.set_body_collisions(enable_link_collisions)
+        self.initialize_episodes()
         ggLog.info(f"Built scenario")
         example_labels : dict[str,th.Tensor] = {}
         example_infos = self.get_infos(self._current_state, example_labels)

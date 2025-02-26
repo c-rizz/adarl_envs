@@ -673,7 +673,7 @@ class LocomotionVecEnv(RobotVecEnv):
         goal_vel_abs_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X,
                                                 self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Y,
                                                 self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z)) #type:ignore 
-        smooth_track_err_idx = self._locomotion_state_helper.field_idx(self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR) #type: ignore
+        smooth_track_err_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR)) #type: ignore
         body_linvel_abs_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z)) #type: ignore

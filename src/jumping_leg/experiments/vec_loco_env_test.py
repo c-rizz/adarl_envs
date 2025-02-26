@@ -444,7 +444,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 4096
+    train_envs = 2048
     if mode == "pybullet":
         env_device = th.device("cpu",0)
     elif mode == "mjx":
@@ -454,12 +454,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     eval_freq = 5
     env_builder_args = {
-        "action_delay_mustd" : (0.001,0.001),
+        "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
         "enable_rendering" : False,
-        "goal_err_smoothing_halflife_sec" : 0.2,
+        "goal_err_smoothing_halflife_sec" : 0.1,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
         "quiet" : True,
@@ -476,8 +476,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_tracking_weight" :          1.0,
         "reward_velocity_limit_weight" :    0.0,
         "reward_velocity_weight" :          0.0,
-        "reward_height_weight" :            0.5,
-        "reward_pitchnroll_weight" :        0.5,
+        "reward_height_weight" :            0.15,
+        "reward_pitchnroll_weight" :        0.15,
         "reward_position_weight" :          0.2,
         "safe_stiffness" : 400,
         "safe_damping" : 5,
@@ -591,17 +591,17 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_hyperparams(  device = "cuda",
-                                                    q_network_arch=[1024,256],
-                                                    q_lr=0.001,
-                                                    policy_lr=0.0005,
-                                                    policy_network_arch=[512,256],
+                                                    q_network_arch=[512,256],
+                                                    q_lr=0.0005,
+                                                    policy_lr=0.0001,
+                                                    policy_network_arch=[256,128],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=8192,
-                                                    buffer_size=1_000_000,
-                                                    total_steps=100_000_000,
+                                                    buffer_size=12_000_000,
+                                                    total_steps=300_000_000,
                                                     train_freq_vstep=10,
-                                                    grad_steps=10,
+                                                    grad_steps=40,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
                                                     parallel_envs=train_envs,
                                                     log_freq_vstep=max_steps_per_episode,
@@ -616,7 +616,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_batch_size=0,
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
-                    debug_level=1)                           
+                    debug_level=2)                           
     elif algo.lower() == "ppo":
         from rreal.algorithms.ppo2 import ppo_train, PPO_hyperparams
         ppo_train(  seed=seed,

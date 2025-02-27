@@ -340,6 +340,82 @@ def get_kyon_args():
         }
 
 
+def get_centauro_args():
+    return {"model_file" : adarl.utils.utils.pkgutil_get_path("iit-centauro-ros-pkg","centauro/urdf/centauro.urdf.xacro"),
+            "model_kwargs" : {"upper_body" : "false"},
+            "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("iit-centauro-ros-pkg","centauro_urdf")},
+            "homing_joint_pose" : { ("centauro","hip_yaw_1") : -0.746874,
+                                    ("centauro","hip_pitch_1") : -1.25409,
+                                    ("centauro","knee_pitch_1") : -1.55576,
+                                    ("centauro","ankle_pitch_1") : -0.301666,
+                                    ("centauro","ankle_yaw_1") : 0.746874,
+                                    ("centauro","hip_yaw_2") : 0.746874,
+                                    ("centauro","hip_pitch_2") : 1.25409,
+                                    ("centauro","knee_pitch_2") : 1.55576,
+                                    ("centauro","ankle_pitch_2") : 0.301666,
+                                    ("centauro","ankle_yaw_2") : -0.746874,
+                                    ("centauro","hip_yaw_3") : 0.746874,
+                                    ("centauro","hip_pitch_3") : 1.25409,
+                                    ("centauro","knee_pitch_3") : 1.55576,
+                                    ("centauro","ankle_pitch_3") : 0.301667,
+                                    ("centauro","ankle_yaw_3") : -0.746874,
+                                    ("centauro","hip_yaw_4") : -0.746874,
+                                    ("centauro","hip_pitch_4") : -1.25409,
+                                    ("centauro","knee_pitch_4") : -1.55576,
+                                    ("centauro","ankle_pitch_4") : -0.301667,
+                                    ("centauro","ankle_yaw_4") : 0.746874,
+                                    ("centauro","torso_yaw") : 3.56617e-13,
+                                    ("centauro","velodyne_joint") : 0,
+                                    ("centauro","d435_head_joint") : 0,
+                                    ("centauro","j_arm1_1") : 0.520149,
+                                    ("centauro","j_arm1_2") : 0.320865,
+                                    ("centauro","j_arm1_3") : 0.274669,
+                                    ("centauro","j_arm1_4") : -2.23604,
+                                    ("centauro","j_arm1_5") : 0.0500815,
+                                    ("centauro","j_arm1_6") : -0.781461,
+                                    ("centauro","j_arm2_1") : 0.520149,
+                                    ("centauro","j_arm2_2") : -0.320865,
+                                    ("centauro","j_arm2_3") : -0.274669,
+                                    ("centauro","j_arm2_4") : -2.23604,
+                                    ("centauro","j_arm2_5") : -0.0500815,
+                                    ("centauro","j_arm2_6") : -0.781461,
+                                    ("centauro","dagana_1_claw_joint") : 0,
+                                    ("centauro","dagana_2_claw_joint") : 0},
+            "robot_name" : "centauro",
+            "robot_main_body_link" : "pelvis",
+            "robot_root_link" : "pelvis",
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
+            "disallowed_contact_links" : [ ],
+            "terminating_contact_pairs" : [ ],
+            "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "enable_link_collisions" : [    (('kyon', 'knee_pitch_1_link'),[('ground','ground_link')]),
+                                            (('kyon', 'knee_pitch_2_link'),[('ground','ground_link')]),
+                                            (('kyon', 'knee_pitch_3_link'),[('ground','ground_link')]),
+                                            (('kyon', 'knee_pitch_4_link'),[('ground','ground_link')])]
+        }
+
+
+
+
+def named_loco_venv_builder(seed : int,
+                    run_folder : str,
+                    num_envs : int, 
+                    env_builder_args : dict,
+                    env_name : str = "") -> gym.vector.VectorEnv:
+    robot_model = env_builder_args["robot_model"]
+    if robot_model == "quad":
+        env_builder_args.update(get_quad_args())
+    elif robot_model == "kyon":
+        env_builder_args.update(get_kyon_args())
+    elif robot_model == "centauro":
+        env_builder_args.update(get_centauro_args())
+    else:
+        raise RuntimeError(f"Unknown robot_model {robot_model}")
+    return loco_venv_builder(seed = seed,
+                            log_folder = run_folder,
+                            env_builder_args = env_builder_args,
+                            num_envs=num_envs)[0]
+
 def quad_loco_venv_builder(seed : int,
                     run_folder : str,
                     num_envs : int, 
@@ -458,13 +534,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
+        "robot_model" : "kyon",
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.1,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
         "quiet" : True,
         "initial_pose_randomization" : 0.25,
-        "reward_acceleration_weight" :      1.0,
+        "reward_acceleration_weight" :      2.0,
         "reward_actdiff_weight" :           0.0,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
@@ -478,7 +555,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_weight" :          0.0,
         "reward_height_weight" :            0.15,
         "reward_pitchnroll_weight" :        0.15,
-        "reward_position_weight" :          1.0,
+        "reward_position_weight" :          2.0,
         "safe_stiffness" : 400,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
@@ -586,7 +663,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     folderName,
                     run_id,
                     args,
-                    vec_env_builder = quad_loco_venv_builder,
+                    vec_env_builder = named_loco_venv_builder,
                     env_builder = None,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,

@@ -19,7 +19,7 @@ import adarl.utils.dbg.dbg_img as dbg_img
 from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
-from jumping_leg.experiments.vec_loco_env_test import quad_loco_env_builder, kyon_loco_env_builder
+from jumping_leg.experiments.vec_loco_env_test import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args
 from jumping_leg.env.LocomotionVecEnv import LocomotionVecEnv
 from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
 
@@ -115,60 +115,52 @@ class SinPolicy(RLAgent):
     def input_device(self):
         return self._a_offset.device
         
-kyon_homing = { ("kyon","hip_roll_3") : [-3.14159*0.05, 0, 0, 400, 10],
-                ("kyon","hip_roll_4") : [ 3.14159*0.05, 0, 0, 400, 10],
-                ("kyon","hip_roll_1") : [ 3.14159*0.05, 0, 0, 400, 10],
-                ("kyon","hip_roll_2") : [-3.14159*0.05, 0, 0, 400, 10],
-                ("kyon","hip_pitch_3") : [0.75, 0, 0, 400, 10],
-                ("kyon","hip_pitch_4") : [-0.75, 0, 0, 400, 10],
-                ("kyon","hip_pitch_1") : [0.75, 0, 0, 400, 10],
-                ("kyon","hip_pitch_2") : [-0.75, 0, 0, 400, 10],
-                ("kyon","knee_pitch_3") : [-1.8, 0, 0, 400, 10],
-                ("kyon","knee_pitch_4") : [ 1.8, 0, 0, 400, 10],
-                ("kyon","knee_pitch_1") : [-1.8, 0, 0, 400, 10],
-                ("kyon","knee_pitch_2") : [ 1.8, 0, 0, 400, 10]}
-quad_homing = { ("quad","hip_joint_x_back_left") : [-3.14159*0.4, 0, 0, 400, 10],
-                ("quad","hip_joint_x_back_right") : [-3.14159*0.4, 0, 0, 400, 10],
-                ("quad","hip_joint_x_front_left") : [-3.14159*0.4, 0, 0, 400, 10],
-                ("quad","hip_joint_x_front_right") : [-3.14159*0.4, 0, 0, 400, 10],
-                ("quad","hip_joint_y_back_left") : [0.75, 0, 0, 400, 10],
-                ("quad","hip_joint_y_back_right") : [0.75, 0, 0, 400, 10],
-                ("quad","hip_joint_y_front_left") : [0.75, 0, 0, 400, 10],
-                ("quad","hip_joint_y_front_right") : [0.75, 0, 0, 400, 10],
-                ("quad","knee_joint_back_left") : [1.8, 0, 0, 400, 10],
-                ("quad","knee_joint_back_right") : [1.8, 0, 0, 400, 10],
-                ("quad","knee_joint_front_left") : [1.8, 0, 0, 400, 10],
-                ("quad","knee_joint_front_right") : [1.8, 0, 0, 400, 10]}
 def build_sin_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":
-        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(quad_homing)
+        home_jpose = get_quad_args()["homing_joint_pose"]
+    elif robot == "kyon":
+        home_jpose = get_kyon_args()["homing_joint_pose"]
+    elif robot == "centauro":
+        home_jpose = get_centauro_args()["homing_joint_pose"]
+    else:
+        RuntimeError(f"Unknown robot '{robot}")
+    home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
+    home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_pvesd)
+    if robot == "quad":
         act_range = th.as_tensor([0.0, 0.1, 0.2,
                                   0.0, 0.1, 0.2,
                                   0.0, 0.1, 0.2,
                                   0.0, 0.1, 0.2])
+        action_size=12
     elif robot == "kyon":
-        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(kyon_homing)
         act_range = th.as_tensor([0.0, 0.1, 0.2,
                                 -0.0, -0.1, -0.2,
                                 0.0, 0.1, 0.2,
                                 -0.0, -0.1, -0.2])
+        action_size=12
+    elif robot == "centauro":
+        act_range = th.as_tensor([0.1])
+        action_size=37
     else:
-        RuntimeError(f"Unknown robot '{robot}")
+        raise RuntimeError(f"Unknown robot '{robot}")
     model = SinPolicy(  act_scale=act_range*scale,
                         act_offset=home_action,
                         act_speed=th.as_tensor([0.8]),
-                        action_size=12,
+                        action_size=action_size,
                         dt=0.05)
     return model
 
 
 def build_fixed_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":
-        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(quad_homing)
+        home_jpose = get_quad_args()["homing_joint_pose"]
     elif robot == "kyon":
-        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(kyon_homing)
+        home_jpose = get_kyon_args()["homing_joint_pose"]
+    elif robot == "centaurp":
+        home_jpose = get_centauro_args()["homing_joint_pose"]
     else:
         RuntimeError(f"Unknown robot '{robot}")
+    home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_jpose)
     model = Fixedpolicy(  cmd = home_action)
     return model
 
@@ -224,25 +216,18 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "show_gui" : args["gui"],
-        "ui_camera_resolution_hw" : (pixel_resolution,int(pixel_resolution*16/9))
+        "ui_camera_resolution_hw" : (pixel_resolution,int(pixel_resolution*16/9)),
+        "robot_model" : args["robot"]
     }
-
-    robot = args["robot"]
-    if robot == "quad":
-        builder = quad_loco_env_builder
-    elif robot == "kyon":
-        builder = kyon_loco_env_builder
-    else:
-        raise RuntimeError(f"Unknown robot '{robot}'")
 
     return play(seed,
                 folderName,
                 run_id, args,
-                env_builder = builder,
+                env_builder = named_loco_single_env_builder,
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
                 render=not args["gui"],
-                robot = robot)
+                robot = args["robot"])
 
 
 

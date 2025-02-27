@@ -708,6 +708,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._main_body_link_ids = self._adapter.get_links_ids([self._configuration.main_body_link])
         self._controlled_joints_ids = self._adapter.get_joints_ids(self._configuration.controlled_joints)
 
+        ggLog.info(f"Detecting always present self collisions...")
         self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
         # self._robot_model.remove_collision_pairs([("rail_link_0","slider_link_0")])            
         self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
@@ -716,7 +717,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
             moving_joints=[jn[1] for jn in self._configuration.controlled_joints],
             fixed_joints_pose={self._configuration.robot_root_joint : self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy()}
-                                            if self._configuration.robot_is_floating else {})
+                                            if self._configuration.robot_is_floating else {},
+                                            samples=100)
+        ggLog.info(f"Always present self collisions = {self._always_present_collisions}")
         self._adapter.set_monitored_joints(self._configuration.controlled_joints)
         self._adapter.set_impedance_controlled_joints(self._configuration.controlled_joints)
         # ggLog.info("Initialized RobotVecEnv scenario")

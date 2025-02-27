@@ -1050,6 +1050,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # i["tot_step_count"] = th.as_tensor(self._tot_step_counter)
         # i["tot_init_count"] = th.as_tensor(self._tot_init_counter)
         i["joint_homing_dist"] = state[self.STATE_ROBOT][:,0,:,0] - self._configuration.homing_ctrl_joints_pvesd[:,0]
+        if labels is not None:
+            labels["joint_homing_dist"] = to_string_tensor([jn[1] for jn in self._configuration.controlled_joints])
 
         if self._configuration.verbose_infos:
             statenorm = self._state_helper.normalize(state)

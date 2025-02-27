@@ -341,8 +341,11 @@ def get_kyon_args():
 
 
 def get_centauro_args():
-    return {"model_file" : adarl.utils.utils.pkgutil_get_path("iit-centauro-ros-pkg","centauro/urdf/centauro.urdf.xacro"),
-            "model_kwargs" : {"upper_body" : "false"},
+    return {"model_file" : adarl.utils.utils.pkgutil_get_path("iit-centauro-ros-pkg","centauro_urdf/urdf/centauro.urdf.xacro"),
+            "model_kwargs" : {  "realsense":"false",
+                                "velodyne" :"false",
+                                "floating_joint":"true"
+                                },
             "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("iit-centauro-ros-pkg","centauro_urdf")},
             "homing_joint_pose" : { ("centauro","hip_yaw_1") : -0.746874,
                                     ("centauro","hip_pitch_1") : -1.25409,
@@ -379,19 +382,24 @@ def get_centauro_args():
                                     ("centauro","j_arm2_4") : -2.23604,
                                     ("centauro","j_arm2_5") : -0.0500815,
                                     ("centauro","j_arm2_6") : -0.781461,
-                                    ("centauro","dagana_1_claw_joint") : 0,
-                                    ("centauro","dagana_2_claw_joint") : 0},
+                                    ("centauro","j_wheel_1") : 0.0,
+                                    ("centauro","j_wheel_2") : 0.0,
+                                    ("centauro","j_wheel_3") : 0.0,
+                                    ("centauro","j_wheel_4") : 0.0,
+                                    # ("centauro","dagana_1_claw_joint") : 0,
+                                    # ("centauro","dagana_2_claw_joint") : 0
+                                    },
             "robot_name" : "centauro",
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
-            "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.6,0.,0.,0.,1.),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
-            "enable_link_collisions" : [    (('kyon', 'knee_pitch_1_link'),[('ground','ground_link')]),
-                                            (('kyon', 'knee_pitch_2_link'),[('ground','ground_link')]),
-                                            (('kyon', 'knee_pitch_3_link'),[('ground','ground_link')]),
-                                            (('kyon', 'knee_pitch_4_link'),[('ground','ground_link')])]
+            "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
+                                            (('centauro', 'wheel_2'),[('ground','ground_link')]),
+                                            (('centauro', 'wheel_3'),[('ground','ground_link')]),
+                                            (('centauro', 'wheel_4'),[('ground','ground_link')])]
         }
 
 
@@ -416,50 +424,68 @@ def named_loco_venv_builder(seed : int,
                             env_builder_args = env_builder_args,
                             num_envs=num_envs)[0]
 
-def quad_loco_venv_builder(seed : int,
-                    run_folder : str,
-                    num_envs : int, 
-                    env_builder_args : dict,
-                    env_name : str = "") -> gym.vector.VectorEnv:
-    env_builder_args.update(get_quad_args())
-    return loco_venv_builder(seed = seed,
-                            log_folder = run_folder,
-                            env_builder_args = env_builder_args,
-                            num_envs=num_envs)[0]
-
-
-def quad_loco_env_builder(seed : int,
+def named_loco_single_env_builder(seed : int,
                     log_folder : str,
                     is_eval : bool, 
                     env_builder_args : dict) -> tuple[gym.Env,float]:
-    env_builder_args.update(get_quad_args())
+    robot_model = env_builder_args["robot_model"]
+    if robot_model == "quad":
+        env_builder_args.update(get_quad_args())
+    elif robot_model == "kyon":
+        env_builder_args.update(get_kyon_args())
+    elif robot_model == "centauro":
+        env_builder_args.update(get_centauro_args())
+    else:
+        raise RuntimeError(f"Unknown robot_model {robot_model}")
     return loco_env_builder(seed = seed,
                             log_folder = log_folder,
-                            is_eval=is_eval,
-                            env_builder_args = env_builder_args)
-
-
-
-
-def kyon_loco_env_builder(seed : int,
-                    log_folder : str,
-                    is_eval : bool, 
-                    env_builder_args : dict) -> tuple[gym.Env,float]:
-    env_builder_args.update(get_kyon_args())
-    return loco_env_builder(seed = seed,
-                            log_folder = log_folder,
-                            is_eval=is_eval,
-                            env_builder_args = env_builder_args)
-
-def kyon_loco_venv_builder(seed : int,
-                    run_folder : str,
-                    num_envs : int, 
-                    env_builder_args : dict) -> gym.vector.VectorEnv:
-    env_builder_args.update(get_kyon_args())
-    return loco_venv_builder(seed = seed,
-                            log_folder = run_folder,
                             env_builder_args = env_builder_args,
-                            num_envs=num_envs)[0]
+                            is_eval=is_eval)
+
+# def quad_loco_venv_builder(seed : int,
+#                     run_folder : str,
+#                     num_envs : int, 
+#                     env_builder_args : dict,
+#                     env_name : str = "") -> gym.vector.VectorEnv:
+#     env_builder_args.update(get_quad_args())
+#     return loco_venv_builder(seed = seed,
+#                             log_folder = run_folder,
+#                             env_builder_args = env_builder_args,
+#                             num_envs=num_envs)[0]
+
+
+# def quad_loco_env_builder(seed : int,
+#                     log_folder : str,
+#                     is_eval : bool, 
+#                     env_builder_args : dict) -> tuple[gym.Env,float]:
+#     env_builder_args.update(get_quad_args())
+#     return loco_env_builder(seed = seed,
+#                             log_folder = log_folder,
+#                             is_eval=is_eval,
+#                             env_builder_args = env_builder_args)
+
+
+
+
+# def kyon_loco_env_builder(seed : int,
+#                     log_folder : str,
+#                     is_eval : bool, 
+#                     env_builder_args : dict) -> tuple[gym.Env,float]:
+#     env_builder_args.update(get_kyon_args())
+#     return loco_env_builder(seed = seed,
+#                             log_folder = log_folder,
+#                             is_eval=is_eval,
+#                             env_builder_args = env_builder_args)
+
+# def kyon_loco_venv_builder(seed : int,
+#                     run_folder : str,
+#                     num_envs : int, 
+#                     env_builder_args : dict) -> gym.vector.VectorEnv:
+#     env_builder_args.update(get_kyon_args())
+#     return loco_venv_builder(seed = seed,
+#                             log_folder = run_folder,
+#                             env_builder_args = env_builder_args,
+#                             num_envs=num_envs)[0]
 
 
 

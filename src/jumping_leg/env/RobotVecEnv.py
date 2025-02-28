@@ -577,7 +577,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
 
         if isinstance(self._adapter, MjxAdapter):
-            self._adapter.alter_model_rel(link_masses = (self._adapter.get_link_ids(self._configuration.main_body_link),
+            self._adapter.alter_model_rel(link_masses = (self._main_body_link_ids,
                                                          self._thrandn(size=(self.num_envs, 1))*0.1))
 
         self._update_state()

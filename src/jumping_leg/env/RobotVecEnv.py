@@ -3,6 +3,7 @@ from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAda
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
 from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
 from adarl.adapters.BaseSimulationAdapter import ModelSpawnDef
+from adarl.adapters.MjxAdapter import MjxAdapter
 from adarl.envs.vec.ControlledVecEnv import ControlledVecEnv
 from adarl.envs.vec.BaseVecEnv import Observation
 from adarl.utils.robot_helpers import Robot
@@ -574,6 +575,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._realworld_initialization(vec_mask=vec_mask)
         self._last_out_actions = th.clamp(self._action_helper.pvesd_to_action(self._last_sent_v_j_pvesd), min=-1, max=1)
         # ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
+
+        if isinstance(self._adapter, MjxAdapter):
+            self._adapter.alter_model_rel(link_masses = (self._adapter.get_link_ids(self._configuration.main_body_link),
+                                                         self._thrandn(size=(self.num_envs, 1))*0.1))
 
         self._update_state()
         self._update_stats()

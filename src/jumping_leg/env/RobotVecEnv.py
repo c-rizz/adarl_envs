@@ -17,7 +17,7 @@ from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
 from dataclasses import dataclass
 from gymnasium import Space
 from enum import Enum, IntEnum
-from typing import Sequence, Literal, TypedDict, Any
+from typing import Sequence, Literal, TypedDict, Any, Callable
 from typing_extensions import override
 import adarl.utils.dbg.ggLog as ggLog
 import adarl.utils.tensor_trees
@@ -35,6 +35,8 @@ def hash_tensor(tensor):
 
 JOINT_FILTERS = Enum("JOINT_FILTERS",["ALL_REVOLUTE",
                                          "ALL"])
+
+LINK_FILTERS = Enum("LINK_FILTERS",["ALL","ALL_ROBOT"])
 
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
@@ -60,6 +62,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         joint_safe_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_stiffness : dict[tuple[str,str],th.Tensor]
         main_body_link : tuple[str,str]
+        mass_randomized_links : tuple[tuple[str,str],...]
+        mass_randomization_ratios : th.Tensor
         model_urdf_string : str
         noise_angvel_ep_mustdstd : th.Tensor
         noise_gravity_ep_mustdstd : th.Tensor
@@ -122,6 +126,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     
     joint_filters = {JOINT_FILTERS.ALL : lambda joint_name, robot_model: True,
                      JOINT_FILTERS.ALL_REVOLUTE : lambda joint_name, robot_model: robot_model.get_joint_properties([joint_name])[joint_name]["type"] == Robot.JOINT_TYPES.REVOLUTE}
+    link_filters  = {LINK_FILTERS.ALL : lambda link_name, robot_model: True}
 
     @dataclass
     class EpisodeConfiguration:
@@ -173,7 +178,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         ui_camera_resolution_hw : tuple[int,int] = (144,256),
-                        enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = []
+                        enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
+                        mass_randomized_links : list[tuple[str,str]] = [],
+                        mass_randomization_ratio : float = 0.1
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -197,6 +204,22 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         controlled_joints_str.append(jn)
             else:
                 raise RuntimeError(f"Unexpected controlled joint request {j} of type {type(j)} (self.joint_filters = {self.joint_filters})")
+
+        self.link_filters[LINK_FILTERS.ALL_ROBOT] = lambda link_name, robot_model: robot_model==robot_name
+        actual_mass_randomized_links = []
+        for l in mass_randomized_links:
+            if isinstance(l, tuple):
+                actual_mass_randomized_links.append(l)
+            elif isinstance(l,Callable):
+                for ln in self._robot_model.get_frame_names():
+                    if l(ln,self._robot_model):
+                        actual_mass_randomized_links.append(ln)
+            elif l in self.link_filters:
+                for ln in self._robot_model.get_frame_names():
+                    if self.link_filters[l](ln,self._robot_model):
+                        actual_mass_randomized_links.append(ln)
+            else:
+                raise RuntimeError(f"Unexpected mass-randomized link {l} of type {type(l)} (self.link_filters = {self.link_filters})")
 
         controlled_joints_rn : list[tuple[str,str]] = [(robot_name,jn) for jn in controlled_joints_str]
         phys_limits_minmax_pve = {(robot_name,k):self._thtens(l) 
@@ -254,6 +277,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
                                                     joint_safe_limits_minmax_stiffness = minmax_stiffness_thdict,
                                                     main_body_link=(robot_name,robot_main_body_link),
+                                                    mass_randomized_links=tuple(actual_mass_randomized_links),
+                                                    mass_randomization_ratios = self._thtens(mass_randomization_ratio).expand((len(actual_mass_randomized_links),)),
                                                     robot_root_link=(robot_name,robot_root_link),
                                                     model_urdf_string=robot_urdf_string,
                                                     obs_dtype = self._obs_dtype,
@@ -577,8 +602,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
 
         if isinstance(self._adapter, MjxAdapter):
-            self._adapter.alter_model_rel(link_masses = (self._adapter.get_link_ids(self._configuration.main_body_link),
-                                                         self._thrandn(size=(self.num_envs, 1))*0.1))
+            self._adapter.alter_model_rel(link_masses = (self._mass_randomized_link_ids,
+                                                         self._thrandn(size=(self.num_envs, len(self._configuration.mass_randomization_ratios)))*self._configuration.mass_randomization_ratios))
 
         self._update_state()
         self._update_stats()
@@ -712,6 +737,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
         self._main_body_link_ids = self._adapter.get_links_ids([self._configuration.main_body_link])
         self._controlled_joints_ids = self._adapter.get_joints_ids(self._configuration.controlled_joints)
+        self._mass_randomized_link_ids = self._adapter.get_links_ids(self._configuration.mass_randomized_links)
+
 
         ggLog.info(f"Detecting always present self collisions...")
         self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])

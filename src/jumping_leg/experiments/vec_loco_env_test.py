@@ -189,7 +189,9 @@ def loco_runner_builder(seed,
                             terminating_contact_pairs=terminating_contact_pairs if env_builder_args.pop("terminate_on_body_contact") else [],
                             enable_link_collisions=env_builder_args.pop("enable_link_collisions"),
                             mass_randomized_links=env_builder_args.pop("mass_randomized_links"),
-                            mass_randomization_ratio=env_builder_args.pop("mass_randomization_ratio")
+                            mass_randomization_ratio=env_builder_args.pop("mass_randomization_ratio"),
+                            friction_randomized_links=env_builder_args.pop("friction_randomized_links"),
+                            friction_slide_spin_roll_randomization_ratios=env_builder_args.pop("friction_slide_spin_roll_randomization_ratios")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -307,6 +309,7 @@ def get_quad_args():
             "terminating_contact_pairs" : [(("quad","body_link"),("ground_plane","planeLink"))],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "mass_randomized_links" : [LINK_FILTERS.ALL_ROBOT],
+            "friction_randomized_links" : [LINK_FILTERS.ALL],
             # "enable_link_collisions" : None,
             "enable_link_collisions" : [    (('quad', 'foot_center_link_back_left'),[('ground','ground_link')]),
                                             (('quad', 'foot_center_link_back_right'),[('ground','ground_link')]),
@@ -606,7 +609,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
-        "mass_randomization_ratio" : 0.1
+        "mass_randomization_ratio" : 0.1,
+        "friction_slide_spin_roll_randomization_ratios" : (0.1,0.1,0.1)
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

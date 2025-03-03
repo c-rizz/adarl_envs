@@ -64,6 +64,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         main_body_link : tuple[str,str]
         mass_randomized_links : tuple[tuple[str,str],...]
         mass_randomization_ratios : th.Tensor
+        friction_randomized_links : tuple[tuple[str,str],...]
+        friction_slide_spin_roll_rand_ratios : th.Tensor
         model_urdf_string : str
         noise_angvel_ep_mustdstd : th.Tensor
         noise_gravity_ep_mustdstd : th.Tensor
@@ -180,7 +182,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         ui_camera_resolution_hw : tuple[int,int] = (144,256),
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
                         mass_randomized_links : list[tuple[str,str]] = [],
-                        mass_randomization_ratio : float = 0.1
+                        mass_randomization_ratio : float = 0.1,
+                        friction_randomized_links : list[tuple[str,str]] = [],
+                        friction_slide_spin_roll_randomization_ratios : tuple[float, float, float] = (0.1,0.1,0.1)
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -205,22 +209,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             else:
                 raise RuntimeError(f"Unexpected controlled joint request {j} of type {type(j)} (self.joint_filters = {self.joint_filters})")
 
-        self.link_filters[LINK_FILTERS.ALL_ROBOT] = lambda link_name, robot_model: robot_model==robot_name
-        actual_mass_randomized_links = []
-        for l in mass_randomized_links:
-            if isinstance(l, tuple):
-                actual_mass_randomized_links.append(l)
-            elif isinstance(l,Callable):
-                for ln in self._robot_model.get_frame_names():
-                    if l(ln,self._robot_model):
-                        actual_mass_randomized_links.append(ln)
-            elif l in self.link_filters:
-                for ln in self._robot_model.get_frame_names():
-                    if self.link_filters[l](ln,self._robot_model):
-                        actual_mass_randomized_links.append(ln)
-            else:
-                raise RuntimeError(f"Unexpected mass-randomized link {l} of type {type(l)} (self.link_filters = {self.link_filters})")
-
+        self.link_filters[LINK_FILTERS.ALL_ROBOT] = lambda link_name, robot_model: link_name[0]==robot_name
+        
         controlled_joints_rn : list[tuple[str,str]] = [(robot_name,jn) for jn in controlled_joints_str]
         phys_limits_minmax_pve = {(robot_name,k):self._thtens(l) 
                                     for k,l in self._robot_model.get_joint_limits(controlled_joints_str).items()}
@@ -277,8 +267,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
                                                     joint_safe_limits_minmax_stiffness = minmax_stiffness_thdict,
                                                     main_body_link=(robot_name,robot_main_body_link),
-                                                    mass_randomized_links=tuple(actual_mass_randomized_links),
-                                                    mass_randomization_ratios = self._thtens(mass_randomization_ratio).expand((len(actual_mass_randomized_links),)),
+                                                    mass_randomized_links=None, # Will fill up later
+                                                    mass_randomization_ratios = None, # Will fill up later
+                                                    friction_randomized_links=None, # Will fill up later
+                                                    friction_slide_spin_roll_rand_ratios = None, # Will fill up later
                                                     robot_root_link=(robot_name,robot_root_link),
                                                     model_urdf_string=robot_urdf_string,
                                                     obs_dtype = self._obs_dtype,
@@ -315,8 +307,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
-                                                    vec_init_on_reset = th.ones(size=(adapter.vec_size(),), device=th_device, dtype=th.bool),
-                                                    vec_max_ep_steps = th.full(fill_value=maxStepsPerEpisode, size=(adapter.vec_size(),), device=th_device, dtype=th.int64))
+                                                    vec_init_on_reset = th.ones(size=(adapter.vec_size(),), dtype=th.bool).to(device=th_device, non_blocking=th_device.type=="cuda"),
+                                                    vec_max_ep_steps = th.full(fill_value=maxStepsPerEpisode, size=(adapter.vec_size(),), dtype=th.int64).to(device=th_device, non_blocking=th_device.type=="cuda"))
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
 
 
@@ -361,6 +353,21 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                          obs_dtype = self._obs_dtype,
                          seed = seed)
         self._build()
+
+        # Randomizations
+        mass_randomized_links = self._expand_link_filters(mass_randomized_links)
+        friction_randomized_links = self._expand_link_filters(friction_randomized_links)        
+        self._configuration.mass_randomized_links = tuple(mass_randomized_links)
+        self._configuration.mass_randomization_ratios = self._thtens(mass_randomization_ratio).expand((len(mass_randomized_links),))
+        self._configuration.friction_randomized_links = tuple(friction_randomized_links)
+        self._configuration.friction_slide_spin_roll_rand_ratios = self._thtens(friction_slide_spin_roll_randomization_ratios).expand((len(friction_randomized_links),3))
+        self._mass_randomized_link_ids = self._adapter.get_links_ids(self._configuration.mass_randomized_links)
+        self._friction_randomized_link_ids = self._adapter.get_links_ids(self._configuration.friction_randomized_links)
+
+
+
+
+
         ggLog.info(f"enable_link_collisions = {enable_link_collisions}")
         if isinstance(self._adapter, BaseVecSimulationAdapter) and enable_link_collisions is not None:
             self._adapter.set_body_collisions(enable_link_collisions)
@@ -375,6 +382,23 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.startup()
 
+
+    def _expand_link_filters(self, links : Sequence[tuple[str,str]]) -> list[tuple[str,str]]:
+        actual_links = []
+        for l in links:
+            if isinstance(l, tuple):
+                actual_links.append(l)
+            elif isinstance(l,Callable):
+                for ln in self._robot_model.get_frame_names():
+                    if l(ln,self._robot_model):
+                        actual_links.append(ln)
+            elif l in self.link_filters:
+                for ln in self._adapter.get_detected_links():
+                    if self.link_filters[l](ln,self._robot_model):
+                        actual_links.append(ln)
+            else:
+                raise RuntimeError(f"Unexpected mass-randomized link {l} of type {type(l)} (self.link_filters = {self.link_filters})")
+        return actual_links
     # @property
     # def _rng(self):
     #     import traceback
@@ -495,10 +519,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         prev_actions = self._current_state[self.STATE_ACT][:,0,self.ACT_FIELDS.ACTION].detach().to(device=self._configuration.th_device)
         actions = actions*(1-alpha) + prev_actions*alpha
         actions = th.clamp(actions, min=-1, max=1)
-        n = th.randn(size=(self._adapter.vec_size(),),
-                    generator=self._rng,
-                    dtype=self._configuration.obs_dtype,
-                    device=self._configuration.th_device)
+        n = self._thrandn(size=(self._adapter.vec_size(),))
         action_delay = th.clamp(self._configuration.action_delay_mustd[0] + self._configuration.action_delay_mustd[1]*n, min = 0.0)
         return actions, action_delay
 
@@ -585,7 +606,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def _initialize_episodes(self, vec_mask : th.Tensor | None = None, options = {}) -> None:
         # ggLog.info(f"_initialize_episodes({vec_mask})")
         if vec_mask is None:
-            vec_mask = th.ones((self.num_envs,), device=self._configuration.th_device, dtype=th.bool)
+            vec_mask = th.ones((self.num_envs,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
         # ggLog.info(f"initializing episodes {vec_mask}")
         resetted_state = self._state_helper.reset_state()
         map2_tensor_tree(self._current_state, resetted_state,
@@ -602,8 +623,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
 
         if isinstance(self._adapter, MjxAdapter):
-            self._adapter.alter_model_rel(link_masses = (self._mass_randomized_link_ids,
-                                                         self._thrandn(size=(self.num_envs, len(self._configuration.mass_randomization_ratios)))*self._configuration.mass_randomization_ratios))
+            ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")
+            self._adapter.alter_model_rel(  link_masses = ( self._mass_randomized_link_ids,
+                                                            self._thrandn(size=(self.num_envs, len(self._configuration.mass_randomization_ratios)))*self._configuration.mass_randomization_ratios),
+                                            link_frictions = (self._friction_randomized_link_ids,
+                                                              self._thrandn(size=(self.num_envs,)+self._configuration.friction_slide_spin_roll_rand_ratios.size())*self._configuration.friction_slide_spin_roll_rand_ratios))
 
         self._update_state()
         self._update_stats()
@@ -657,7 +681,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if  self._configuration.init_on_reset_ratio<1.0 and self._init_counter_since_reset>1:
             vec_init_on_reset = self._thrand((selected_vecs_num,)) < self._configuration.init_on_reset_ratio
         else:
-            vec_init_on_reset = th.ones((selected_vecs_num,), dtype=th.bool, device=self._configuration.th_device)
+            vec_init_on_reset = th.ones((selected_vecs_num,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
         # ggLog.info(f"initial_jpose = {initial_joint_pose}, homing = {homing}")
         self._robot_model.set_collision_pairs(original_collision_pairs)
         masked_assign(self._current_episode_config.vec_initial_ctrl_joint_pose, vec_mask, initial_jposes)
@@ -737,7 +761,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
         self._main_body_link_ids = self._adapter.get_links_ids([self._configuration.main_body_link])
         self._controlled_joints_ids = self._adapter.get_joints_ids(self._configuration.controlled_joints)
-        self._mass_randomized_link_ids = self._adapter.get_links_ids(self._configuration.mass_randomized_links)
 
 
         ggLog.info(f"Detecting always present self collisions...")

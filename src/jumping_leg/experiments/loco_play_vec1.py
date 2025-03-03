@@ -19,7 +19,7 @@ import adarl.utils.dbg.dbg_img as dbg_img
 from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
-from jumping_leg.experiments.vec_loco_env_test import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args
+from jumping_leg.experiments.loco_builder import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args
 from jumping_leg.env.LocomotionVecEnv import LocomotionVecEnv
 from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
 
@@ -217,7 +217,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "show_gui" : args["gui"],
         "ui_camera_resolution_hw" : (pixel_resolution,int(pixel_resolution*16/9)),
-        "robot_model" : args["robot"]
+        "robot_model" : args["robot"],
+        "mass_randomization_ratio" : 0.0,
+        "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0)
     }
 
     return play(seed,

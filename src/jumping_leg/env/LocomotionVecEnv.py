@@ -470,22 +470,22 @@ class LocomotionVecEnv(RobotVecEnv):
     
     @staticmethod
     @th.jit.script
-    def _flattened_penalty_reward(x, max_rew, exponent, flattening_scale):
-        """A penalty pordcued by raising x at the power of exponent, and flattening it with
+    def _flattened_penalty_reward(x, max_rew, exponent : float, flattening_scale : float):
+        """A penalty produced by raising abs(x) at the power of exponent, and flattening it with
             a flipped exponential, scaled with flattening_scale. With exponent=15 and 
-            flattening_scale=10000 resutls in an x^1.5 that is quite flat below 100.
+            flattening_scale=100 resutls in an x^1.5 that is quite flat below 100.
             This then is squashed with a tanh to be under max_rew.
             In formulas (not squashed): x^exponent * (-e^(-x^2/flattening_scale)+1)
         """
-        return th.tanh((th.mean(th.pow(x,exponent), dim=1)*(-th.exp(-(x**2)/flattening_scale + 1)))/max_rew)*max_rew
+        return th.tanh((th.mean(th.pow(th.abs(x),exponent)*(1-th.exp(-(x/flattening_scale)**2)), dim=1))/max_rew)*max_rew
     
     @staticmethod
     @th.jit.script
-    def _penalty_reward(x, max_rew, exponent):
-        """A penalty pordcued by raising x at the power of exponent, and squashing
+    def _penalty_reward(x, max_rew, exponent : float):
+        """A penalty produced by raising abs(x) at the power of exponent, and squashing
             it with a tanh to be under max_rew.
         """
-        return th.tanh(th.mean(th.pow(x,exponent),dim=1)/max_rew)*max_rew
+        return th.tanh(th.mean(th.pow(th.abs(x),exponent),dim=1)/max_rew)*max_rew
 
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
@@ -493,7 +493,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
-        max_rew = 1000
+        max_rew = self._configuration.reward_penalties_max
         current_state_locom_vec = state[self.STATE_LOCOMOTION][:, 0,:,0]
         state_action_vec = state[self.STATE_ACT]
         state_stats = state[self.STATE_ROBOT_STATS]
@@ -521,7 +521,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         reward_torque           = -self._penalty_reward(normtorques,max_rew=max_rew,exponent=2)
         reward_velocity         = -self._penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
-        reward_acceleration     = -self._flattened_penalty_reward(normaccelerations,1.5,10_000)
+        reward_acceleration     = -self._flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=1.5,flattening_scale=100)
         reward_position         = -self._penalty_reward(normposhomingdiff,max_rew=max_rew,exponent=2)
         reward_torquediff       = -self._penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
         reward_actdiff          = -self._penalty_reward(actdiff,max_rew=max_rew,exponent=2)

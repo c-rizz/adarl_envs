@@ -96,6 +96,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_jimp_cmd_size : tuple[int,int,int]
         vec_size : int
         verbose_infos : bool
+        reward_penalties_max : th.Tensor
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -303,7 +304,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     ui_camera_resolution_hw = ui_camera_resolution_hw,
                                                     vec_size=adapter.vec_size(),
                                                     vec_jimp_cmd_size=(adapter.vec_size(), len(controlled_joints_rn), 5),
-                                                    enable_dbg_checks = enable_dbg_checks
+                                                    enable_dbg_checks = enable_dbg_checks,
+                                                    reward_penalties_max = self._thtens(1000.0)
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),

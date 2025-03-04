@@ -168,7 +168,11 @@ class LocomotionVecEnv(RobotVecEnv):
                         obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         ui_camera_resolution_hw : tuple[int,int] = (256,144),
-                        enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = []
+                        enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
+                        mass_randomized_links : list[tuple[str,str]] = [],
+                        mass_randomization_ratio : float = 0.1,
+                        friction_randomized_links : list[tuple[str,str]] = [],
+                        friction_slide_spin_roll_randomization_ratios : tuple[float, float, float] = (0.1,0.1,0.1)
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -240,7 +244,11 @@ class LocomotionVecEnv(RobotVecEnv):
                             obs_noise_posz_ep_mustd_step_std = obs_noise_posz_ep_mustd_step_std,
                             obs_noise_gravity_ep_mustd_step_std = obs_noise_gravity_ep_mustd_step_std,
                             ui_camera_resolution_hw = ui_camera_resolution_hw,
-                            enable_link_collisions = enable_link_collisions
+                            enable_link_collisions = enable_link_collisions,
+                            mass_randomized_links=mass_randomized_links,
+                            mass_randomization_ratio=mass_randomization_ratio,
+                            friction_randomized_links=friction_randomized_links,
+                            friction_slide_spin_roll_randomization_ratios=friction_slide_spin_roll_randomization_ratios
                         )
 
         

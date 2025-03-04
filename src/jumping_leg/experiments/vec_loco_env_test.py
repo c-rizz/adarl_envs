@@ -16,7 +16,7 @@ from pathlib import Path
 import adarl.utils.utils
 from typing import Sequence, Any
 from jumping_leg.env.LocomotionVecEnv import LocomotionVecEnv
-from jumping_leg.env.RobotVecEnv import JOINT_FILTERS
+from jumping_leg.env.RobotVecEnv import JOINT_FILTERS, LINK_FILTERS
 from adarl.envs.vec.EnvRunner import EnvRunner
 from adarl.envs.vec.GymRunnerWrapper import GymRunnerWrapper
 from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
@@ -187,7 +187,12 @@ def loco_runner_builder(seed,
                             goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
                             use_contacts=env_builder_args.pop("use_contacts"),
                             terminating_contact_pairs=terminating_contact_pairs if env_builder_args.pop("terminate_on_body_contact") else [],
-                            enable_link_collisions=env_builder_args.pop("enable_link_collisions"))
+                            enable_link_collisions=env_builder_args.pop("enable_link_collisions"),
+                            mass_randomized_links=env_builder_args.pop("mass_randomized_links"),
+                            mass_randomization_ratio=env_builder_args.pop("mass_randomization_ratio"),
+                            friction_randomized_links=env_builder_args.pop("friction_randomized_links"),
+                            friction_slide_spin_roll_randomization_ratios=env_builder_args.pop("friction_slide_spin_roll_randomization_ratios")
+                            )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
     # ggLog.info(f"action_space = {lrenv.action_space.shape}")
@@ -303,6 +308,8 @@ def get_quad_args():
                                             ("quad","body_link")],
             "terminating_contact_pairs" : [(("quad","body_link"),("ground_plane","planeLink"))],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "mass_randomized_links" : [LINK_FILTERS.ALL_ROBOT],
+            "friction_randomized_links" : [LINK_FILTERS.ALL],
             # "enable_link_collisions" : None,
             "enable_link_collisions" : [    (('quad', 'foot_center_link_back_left'),[('ground','ground_link')]),
                                             (('quad', 'foot_center_link_back_right'),[('ground','ground_link')]),
@@ -601,7 +608,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : (144,256),
-        "log_info_stats" : True
+        "log_info_stats" : True,
+        "mass_randomization_ratio" : 0.1,
+        "friction_slide_spin_roll_randomization_ratios" : (0.1,0.1,0.1)
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -702,6 +711,42 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     target_tau = 0.005,
                                                     batch_size=8192,
                                                     buffer_size=3_000_000,
+                                                    total_steps=300_000_000,
+                                                    train_freq_vstep=10,
+                                                    grad_steps=40,
+                                                    learning_starts=max_steps_per_episode*max(train_envs*1, 100),
+                                                    parallel_envs=train_envs,
+                                                    log_freq_vstep=max_steps_per_episode,
+                                                    reference_init_args =   {   "env_builder_args" : env_builder_args,
+                                                                                "eval_configuration" : eval_configurations},
+                                                    target_entropy = None
+                                                    ),
+                    checkpoint_freq=20,
+                    collector_device=env_device,
+                    max_episode_duration=max_steps_per_episode,
+                    validation_buffer_size=0,
+                    validation_batch_size=0,
+                    validation_holdout_ratio=0,
+                    no_wandb=args["no_wandb"],
+                    debug_level=2)                           
+    elif algo.lower() == "sac_small":
+        sac_train(  seed,
+                    folderName,
+                    run_id,
+                    args,
+                    vec_env_builder = named_loco_venv_builder,
+                    env_builder = None,
+                    env_builder_args = env_builder_args,
+                    eval_configurations = eval_configurations,
+                    hyperparams = SAC_hyperparams(  device = "cuda",
+                                                    q_network_arch=[256,128],
+                                                    q_lr=0.001,
+                                                    policy_lr=0.0003,
+                                                    policy_network_arch=[128,128],
+                                                    gamma=0.99,
+                                                    target_tau = 0.005,
+                                                    batch_size=512,
+                                                    buffer_size=100_000,
                                                     total_steps=300_000_000,
                                                     train_freq_vstep=10,
                                                     grad_steps=40,

@@ -22,9 +22,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     eval_freq = 5
     env_builder_args = {
-        "action_delay_mustd" : (0.0,0.0),
-        "action_noise_mustd" : (0.0,0.0),
-        "action_smoothing_halflife_sec" : 0.1,
+        "action_delay_mustd" : (0.0,0.01),
+        "action_noise_mustd" : (0.0,0.001),
+        "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
         "robot_model" : "quad",
         "enable_rendering" : False,
@@ -56,7 +56,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : 0,
         "goal_speed_minmax" : (0,1),
         "use_contacts" : False,
-        "frame_stack_length" : 1,
+        "frame_stack_length" : 3,
         "verbose_infos" : False,
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
@@ -169,7 +169,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=8192,
-                                                    buffer_size=10_000_000,
+                                                    buffer_size=3_000_000,
                                                     total_steps=300_000_000,
                                                     train_freq_vstep=10,
                                                     grad_steps=40,

@@ -123,7 +123,7 @@ def build_sin_policy(env, robot : str, scale : float = 0.0):
     elif robot == "centauro":
         home_jpose = get_centauro_args()["homing_joint_pose"]
     else:
-        RuntimeError(f"Unknown robot '{robot}")
+        raise RuntimeError(f"Unknown robot '{robot}")
     home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
     home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_pvesd)
     if robot == "quad":
@@ -140,7 +140,7 @@ def build_sin_policy(env, robot : str, scale : float = 0.0):
         action_size=12
     elif robot == "centauro":
         act_range = th.as_tensor([0.1])
-        action_size=37
+        action_size=21
     else:
         raise RuntimeError(f"Unknown robot '{robot}")
     model = SinPolicy(  act_scale=act_range*scale,
@@ -154,13 +154,20 @@ def build_sin_policy(env, robot : str, scale : float = 0.0):
 def build_fixed_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":
         home_jpose = get_quad_args()["homing_joint_pose"]
+        stiffness = 400
+        damping = 10
     elif robot == "kyon":
         home_jpose = get_kyon_args()["homing_joint_pose"]
-    elif robot == "centaurp":
+        stiffness = 400
+        damping = 10
+    elif robot == "centauro":
         home_jpose = get_centauro_args()["homing_joint_pose"]
+        stiffness = 1000
+        damping = 10
     else:
-        RuntimeError(f"Unknown robot '{robot}")
-    home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_jpose)
+        raise RuntimeError(f"Unknown robot '{robot}")
+    home_pvesd = {k:[v, 0.0, 0.0, stiffness, damping] for k,v in home_jpose.items()}
+    home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_pvesd)
     model = Fixedpolicy(  cmd = home_action)
     return model
 
@@ -197,7 +204,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_height_weight" : 1.0,
         "reward_pitchnroll_weight" : 1.0,
         "reward_position_weight" : 0.1,
-        "safe_stiffness" : 400,
+        "safe_stiffness" : 1000,
         "safe_damping" : 10,
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
@@ -260,11 +267,15 @@ def play(seed, folderName, run_id, args,
                             env_builder_args = env_builder_args,
                             is_eval=False)
     ggLog.info("Built")
-    if args["pretrained"] is not None:
-        model = load_model(args["pretrained"])
-    else:
-        # model = build_fixed_policy(env = env, robot=robot)
+    control_mode = args["control"].lower().strip()
+    if control_mode=="pretrained":
+        model = load_model(args["model"])
+    elif control_mode=="fixed":
+        model = build_fixed_policy(env = env, robot=robot)
+    elif control_mode == "sine":
         model = build_sin_policy(env, robot=robot, scale = 1.0)
+    else:
+        raise RuntimeError(f"Unknown control mode '{control_mode}'")
 
     play = True
     verbose = False
@@ -311,7 +322,7 @@ def play(seed, folderName, run_id, args,
             step_wallduration = float("nan")
             full_step_wallduration = float("nan")
             ep_wall_duration = 0
-            rt = 1.0
+            rt = args["rt_factor"]
             model.reset_hidden_state()
             if render:
                 img = env.render()
@@ -409,12 +420,14 @@ if __name__ == "__main__":
     # ap.add_argument("--robot_pc_ip", default=None, type=str, help="Ip of the pc connected to the robot (which runs the control, using its rt kernel)")
     ap.add_argument("--seedsOffset", default=0, type=int, help="Offset the used seeds by this amount")
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
-    ap.add_argument("--pretrained", required = False, default=None, type=str, help="Model to load")
+    ap.add_argument("--model", required = False, default=None, type=str, help="Model to load")
     ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use [pybullet,xbot-gazebo,mjx]")
     ap.add_argument("--robot", default="quad", type=str, help="Robot to be used")
+    ap.add_argument("--rt-factor", default=1.0, type=float, help="Tentative realtime factor")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
     ap.add_argument("--gui", default=False, action='store_true', help="Do not start the gui, instead stream renderings")
     ap.add_argument("--record", default=False, action='store_true', help="Record episode videos")
+    ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,pretrained]")
     
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())

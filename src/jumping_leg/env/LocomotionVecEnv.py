@@ -460,6 +460,25 @@ class LocomotionVecEnv(RobotVecEnv):
                             f" isinf={th.nonzero(th.isinf(norms))}")
         return th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_vec_xyz, dim = 1)
     
+    @staticmethod
+    @th.jit.script
+    def _flattened_penalty_reward(x, max_rew, exponent, flattening_scale):
+        """A penalty pordcued by raising x at the power of exponent, and flattening it with
+            a flipped exponential, scaled with flattening_scale. With exponent=15 and 
+            flattening_scale=10000 resutls in an x^1.5 that is quite flat below 100.
+            This then is squashed with a tanh to be under max_rew.
+            In formulas (not squashed): x^exponent * (-e^(-x^2/flattening_scale)+1)
+        """
+        return th.tanh((th.mean(th.pow(x,exponent), dim=1)*(-th.exp(-(x**2)/flattening_scale + 1)))/max_rew)*max_rew
+    
+    @staticmethod
+    @th.jit.script
+    def _penalty_reward(x, max_rew, exponent):
+        """A penalty pordcued by raising x at the power of exponent, and squashing
+            it with a tanh to be under max_rew.
+        """
+        return th.tanh(th.mean(th.pow(x,exponent),dim=1)/max_rew)*max_rew
+
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
@@ -492,15 +511,15 @@ class LocomotionVecEnv(RobotVecEnv):
         velocities_safenorm = state_robot_safenorm[:,0,:,1]
         torque_safenorm     = state_robot_safenorm[:,0,:,2]
 
-        reward_torque           = -th.clamp(th.mean(th.pow(normtorques,2), dim=1),          -max_rew,max_rew)
-        reward_velocity         = -th.clamp(th.mean(th.pow(normvelocities,2), dim=1),       -max_rew,max_rew)
-        reward_acceleration     = -th.clamp(th.mean(th.pow(normaccelerations,2), dim=1),    -max_rew,max_rew)
-        reward_position         = -th.clamp(th.mean(th.pow(normposhomingdiff,2), dim=1),    -max_rew,max_rew)
-        reward_torquediff       = -th.clamp(th.mean(th.pow(normtorquediff,2), dim=1),       -max_rew,max_rew)
-        reward_actdiff          = -th.clamp(th.mean(th.pow(actdiff,2), dim=1),              -max_rew,max_rew)
-        reward_torque_limit     = -th.clamp(th.mean(th.pow(torque_safenorm,50), dim=1),     -1,1)
-        reward_position_limit   = -th.clamp(th.mean(th.pow(position_safenorm,50), dim=1),   -1,1)
-        reward_velocity_limit   = -th.clamp(th.mean(th.pow(velocities_safenorm,50), dim=1), -1,1)
+        reward_torque           = -self._penalty_reward(normtorques,max_rew=max_rew,exponent=2)
+        reward_velocity         = -self._penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
+        reward_acceleration     = -self._flattened_penalty_reward(normaccelerations,1.5,10_000)
+        reward_position         = -self._penalty_reward(normposhomingdiff,max_rew=max_rew,exponent=2)
+        reward_torquediff       = -self._penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
+        reward_actdiff          = -self._penalty_reward(actdiff,max_rew=max_rew,exponent=2)
+        reward_torque_limit     = -self._penalty_reward(torque_safenorm,max_rew=max_rew,exponent=50)
+        reward_position_limit   = -self._penalty_reward(position_safenorm,max_rew=max_rew,exponent=50)
+        reward_velocity_limit   = -self._penalty_reward(velocities_safenorm,max_rew=max_rew,exponent=50)
 
         reward_height = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR],
                                     zero_rew_dist=self._locomotion_conf.height_reward_settle_point)

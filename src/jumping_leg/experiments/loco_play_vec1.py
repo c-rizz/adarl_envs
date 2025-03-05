@@ -133,10 +133,10 @@ def build_sin_policy(env, robot : str, scale : float = 0.0):
                                   0.0, 0.1, 0.2])
         action_size=12
     elif robot == "kyon":
-        act_range = th.as_tensor([0.0, 0.1, 0.2,
-                                -0.0, -0.1, -0.2,
-                                0.0, 0.1, 0.2,
-                                -0.0, -0.1, -0.2])
+        act_range = th.as_tensor([   0.0, -0.1,  0.17,
+                                    -0.0,  0.1, -0.17,
+                                     0.0, -0.1,  0.17,
+                                    -0.0,  0.1, -0.17])
         action_size=12
     elif robot == "centauro":
         act_range = th.as_tensor([0.1])
@@ -341,6 +341,7 @@ def play(seed, folderName, run_id, args,
                 if render:
                     img = env.render()
                     dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
+                # input("press enter")
                 if verbose:
                     print(f"obs = {obs}\n"+
                         f"rew = {reward}\n"+

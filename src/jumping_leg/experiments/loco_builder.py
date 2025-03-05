@@ -107,10 +107,11 @@ def loco_runner_builder(seed,
                                                   default_max_joint_impedance_ctrl_torque=100.0,
                                                   show_gui=show_gui,
                                                   log_freq=10_000,
-                                                  record_whole_joint_trajectories = True,
+                                                  record_whole_joint_trajectories = False,
                                                   log_freq_joints_trajectories = int(250*(50/1024)/(2/4096)),
                                                   log_folder=log_folder,
-                                                  revolute_dof_armature_override=0.5)
+                                                  safe_revolute_dof_armature=0.1,
+                                                  opt_preset={"centauro":"fast", "kyon":"fastest", "quad":"fastest"}.get(env_builder_args["robot_model"], "faster"))
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)
@@ -312,7 +313,8 @@ def get_quad_args():
 
 def get_kyon_args():
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
-            "model_kwargs" : {"upper_body" : "false"},
+            "model_kwargs" : {"upper_body" : "false",
+                              "footonly_collision" : "true"},
             "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf")},
             "homing_joint_pose" : { ("kyon","hip_roll_3") : -3.14159*0.05,
                                     ("kyon","hip_roll_4") :  3.14159*0.05,
@@ -335,10 +337,10 @@ def get_kyon_args():
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "mass_randomized_links" : [LINK_FILTERS.ALL_ROBOT],
             "friction_randomized_links" : [LINK_FILTERS.ALL],
-            "enable_link_collisions" : [    (('kyon', 'knee_pitch_1_link'),[('ground','ground_link')]),
-                                            (('kyon', 'knee_pitch_2_link'),[('ground','ground_link')]),
-                                            (('kyon', 'knee_pitch_3_link'),[('ground','ground_link')]),
-                                            (('kyon', 'knee_pitch_4_link'),[('ground','ground_link')])]
+            "enable_link_collisions" : [    (('kyon', 'contact_1'),[('ground','ground_link')]),
+                                            (('kyon', 'contact_2'),[('ground','ground_link')]),
+                                            (('kyon', 'contact_3'),[('ground','ground_link')]),
+                                            (('kyon', 'contact_4'),[('ground','ground_link')])]
         }
 
 

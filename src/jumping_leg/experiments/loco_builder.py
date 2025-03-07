@@ -107,10 +107,10 @@ def loco_runner_builder(seed,
                                                   default_max_joint_impedance_ctrl_torque=100.0,
                                                   show_gui=show_gui,
                                                   log_freq=10_000,
-                                                  record_whole_joint_trajectories = True,
+                                                  record_whole_joint_trajectories = False,
                                                   log_freq_joints_trajectories = int(250*(50/1024)/(2/4096)),
                                                   log_folder=log_folder,
-                                                  revolute_dof_armature_override=0.5)
+                                                  revolute_dof_armature_override=0.5 if env_builder_args["robot_model"] == "centauro" else 0.1)
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)

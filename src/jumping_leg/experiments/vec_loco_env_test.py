@@ -26,7 +26,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
-        "robot_model" : "quad",
+        "robot_model" : "kyon",
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.1,
         "max_steps_per_episode" : max_steps_per_episode,

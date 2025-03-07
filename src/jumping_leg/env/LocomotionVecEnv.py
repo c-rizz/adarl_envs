@@ -708,6 +708,7 @@ class LocomotionVecEnv(RobotVecEnv):
         i = super().get_infos(state=state, labels=labels)
         curr_locom_state = state[self.STATE_LOCOMOTION][:,0]
         curr_extri_state = state[self.STATE_EXTRINSIC][:,0]
+        act_raw_state = state[self.STATE_ACT_RAW]
         
         goal_vel_rel_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
                                                 self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
@@ -756,7 +757,17 @@ class LocomotionVecEnv(RobotVecEnv):
                 if labels is not None:
                     labels["state_"+substate] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                     labels["statenorm_"+substate] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
-
+            actdiff             = th.flatten((act_raw_state[:,0] - act_raw_state[:,1])/2, start_dim=1)
+            prev_actdiff        = th.flatten((act_raw_state[:,1] - act_raw_state[:,2])/2, start_dim=1)
+            act_acc             = actdiff - prev_actdiff
+            # ggLog.info(f"act_raw_state = {act_raw_state}")
+            # ggLog.info(f"act_acc = {act_acc}")
+            # ggLog.info(f"actdiff = {actdiff}")
+            i["act_diff"] = actdiff
+            i["act_acc"] = act_acc
+            if labels is not None:
+                labels["act_diff"] = to_string_tensor(self._state_helper.sub_helpers[self.STATE_ACT_RAW].flat_state_names()[:12])
+                labels["act_acc"] = labels["act_diff"]
 
 
         return i

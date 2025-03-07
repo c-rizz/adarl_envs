@@ -680,6 +680,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._robot_model.remove_collision_pairs(self._always_present_collisions)
         homing_pos = self._configuration.homing_ctrl_joints_pvesd[:,0]
         jp_dict = {k:v for k,v in self._configuration.homing_nonctrl_joints_position.items()}
+        t0 = time.monotonic()
         if self._configuration.initial_pose_randomization > 0:
             limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.controlled_joints], dim = 1)
             founds = [False]*selected_vecs_num
@@ -712,8 +713,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     if self._configuration.robot_is_floating:
                         self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:homing_body_pose_xyzxyzw})
                     collisions = self._robot_model.get_all_collisions()
-                    all_link_poses = self._robot_model.get_frame_poses_xyzxyzw() #frames=self._robot_model.get_tree_frame_names_under_joint(self._configuration.robot_root_joint))
-                    all_links_z = np.stack([pose[2] for pose in all_link_poses.values()])
+                    # all_link_poses = self._robot_model.get_frame_poses_xyzxyzw() #frames=self._robot_model.get_tree_frame_names_under_joint(self._configuration.robot_root_joint))
+                    # all_links_z = np.stack([pose[2] for pose in all_link_poses.values()])
                     if len(collisions) == 0: # and np.all(all_links_z>0):
                         # ggLog.info(f"joint_pose = {self._robot_model.get_joint_pose()}")
                         # ggLog.info(f"selected all_link_poses = {all_link_poses}")
@@ -729,6 +730,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_init_on_reset = self._thrand((selected_vecs_num,)) < self._configuration.init_on_reset_ratio
         else:
             vec_init_on_reset = th.ones((selected_vecs_num,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
+        ggLog.info(f"pose randomization took {time.monotonic()-t0:.6f}s")
         # ggLog.info(f"initial_jpose = {initial_joint_pose}, homing = {homing}")
         self._robot_model.set_collision_pairs(original_collision_pairs)
         masked_assign(self._current_episode_config.vec_initial_ctrl_joint_pose, vec_mask, initial_jposes)

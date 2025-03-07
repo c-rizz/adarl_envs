@@ -35,6 +35,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" :      2.0,
         "reward_actdiff_weight" :           0.0,
+        "reward_actacc_weight" :            5.0,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_health_weight" :            0.0,

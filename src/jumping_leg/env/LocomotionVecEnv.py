@@ -537,7 +537,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_position         = -self._penalty_reward(normposhomingdiff,max_rew=max_rew,exponent=2)
         reward_torquediff       = -self._penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
         reward_actdiff          = -self._penalty_reward(actdiff,max_rew=max_rew,exponent=2)
-        reward_actacc           = -self._penalty_reward(act_acc,max_rew=max_rew,exponent=2)
+        reward_actacc           = -self._flattened_penalty_reward(act_acc,max_rew=max_rew, exponent=0.5,flattening_scale=0.1)
         reward_torque_limit     = -self._penalty_reward(torque_safenorm,max_rew=max_rew,exponent=50)
         reward_position_limit   = -self._penalty_reward(position_safenorm,max_rew=max_rew,exponent=50)
         reward_velocity_limit   = -self._penalty_reward(velocities_safenorm,max_rew=max_rew,exponent=50)

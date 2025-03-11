@@ -35,7 +35,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" :      2.0,
         "reward_actdiff_weight" :           0.0,
-        "reward_actacc_weight" :            5.0,
+        "reward_actacc_weight" :            0.5,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_health_weight" :            0.0,
@@ -65,12 +65,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
         "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.02, 0.02),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
-        "mass_randomization_ratio" : 0.1,
-        "friction_slide_spin_roll_randomization_ratios" : (0.1,0.1,0.1)
+        "mass_randomization_ratio" : 0.3,
+        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3)
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

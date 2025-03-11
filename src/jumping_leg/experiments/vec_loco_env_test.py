@@ -26,15 +26,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
-        "robot_model" : "quad",
+        "robot_model" : args["robot"],
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.1,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
-        "quiet" : True,
+        "quiet" : False,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" :      2.0,
         "reward_actdiff_weight" :           0.0,
+        "reward_actacc_weight" :            0.5,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_health_weight" :            0.0,
@@ -64,12 +65,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
         "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.02, 0.02),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
-        "mass_randomization_ratio" : 0.1,
-        "friction_slide_spin_roll_randomization_ratios" : (0.1,0.1,0.1)
+        "mass_randomization_ratio" : 0.3,
+        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3)
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -271,6 +272,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--algorithm", default="sac", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
+    ap.add_argument("--robot", default="quad", type=str, help="Robot to be used ('quad'/'kyon'/'centauro')")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

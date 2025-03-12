@@ -1,6 +1,7 @@
 from __future__ import annotations
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
+from adarl.adapters.MjxAdapter import MjxAdapter
 from adarl.utils.utils import LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection, isinstance_noimport, quat_xyzw_between_vecs_py, masked_assign
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
 import adarl.utils.utils
@@ -44,6 +45,7 @@ def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
 
 class LocomotionVecEnv(RobotVecEnv):
     STATE_LOCOMOTION = "loco"
+    STATE_FEET = "feet"
 
     @dataclass
     class LocomotionConfiguration:
@@ -74,6 +76,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_vel_goal_relative_width : th.Tensor
         reward_vel_goal_relative_width_offset : th.Tensor
         reward_vel_goal_absolute_width : th.Tensor
+        feet_links : list[tuple[str,str]]
 
 
     @dataclass
@@ -113,6 +116,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     "SMOOTHED_ORIENTATION_ERROR",
                                                     "SUM_IMPULSES",
                                                     "CRASHED"], start=0)
+    
+    FEET_FIELDS = IntEnum("FEET_FIELDS" , ["FEET_LIFTOFF_TIMES"])
 
     def __init__(self,  action_delay_mustd : tuple[float,float],
                         action_noise_mustd : Sequence[float] | th.Tensor, 
@@ -172,6 +177,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        ground_link : tuple[str,str],
+                        feet_links : list[tuple[str,str]],
                         ui_camera_resolution_hw : tuple[int,int] = (256,144),
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
                         mass_randomized_links : list[tuple[str,str]] = [],
@@ -210,7 +217,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         vel_reward_goalrelative_weight = self._thtens(0.25),
                         reward_vel_goal_relative_width = self._thtens(1.5),
                         reward_vel_goal_absolute_width = self._thtens(0.25),
-                        reward_vel_goal_relative_width_offset = self._thtens(0.1))
+                        reward_vel_goal_relative_width_offset = self._thtens(0.1),
+                        feet_links = feet_links)
         
         super().__init__(   action_delay_mustd = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
@@ -254,7 +262,8 @@ class LocomotionVecEnv(RobotVecEnv):
                             mass_randomized_links=mass_randomized_links,
                             mass_randomization_ratio=mass_randomization_ratio,
                             friction_randomized_links=friction_randomized_links,
-                            friction_slide_spin_roll_randomization_ratios=friction_slide_spin_roll_randomization_ratios
+                            friction_slide_spin_roll_randomization_ratios=friction_slide_spin_roll_randomization_ratios,
+                            ground_link=ground_link
                         )
 
         
@@ -277,6 +286,14 @@ class LocomotionVecEnv(RobotVecEnv):
         self._stats["ep_avg_height_err_vec"] = self._thzeros((self._configuration.vec_size,))
         self._stats["ep_avg_pitchnroll_err_vec"] = self._thzeros((self._configuration.vec_size,))
         self._stats["ep_avg_bodyspeed_vec"] = self._thzeros((self._configuration.vec_size,))
+
+    @override
+    def _build(self):
+        super()._build()
+        self._feet_link_ids = self._adapter.get_links_ids(self._locomotion_conf.feet_links)
+        self._ground_link_id = self._adapter.get_links_ids([self._configuration.ground_link])
+
+
 
     def _build_state_helper(self, adapter : BaseVecJointImpedanceAdapter):
         super()._build_state_helper(adapter)
@@ -322,10 +339,22 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                         self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
                                                                         self.LOCOMOTION_FIELDS.SMOOTHED_ORIENTATION_ERROR],
                                                     vec_size=adapter.vec_size())
+        
+        self._feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET_FIELDS],
+                                                    obs_dtype=self._obs_dtype,
+                                                    th_device=self._th_device,
+                                                    field_size=(len(self._locomotion_conf.feet_links),),
+                                                    fields_minmax={ self.FEET_FIELDS.FEET_LIFTOFF_TIMES : th.as_tensor([[-1.0],[1000.0]]).expand(2,len(self._locomotion_conf.feet_links))},
+                                                    observable_fields=None,
+                                                    vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
                                                             self._locomotion_state_helper,
                                                             observable = True,
-                                                            flatten = True)
+                                                            flatten_obs = True)
+        self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_FEET,
+                                                            self._feet_state_helper,
+                                                            observable = False,
+                                                            flatten_obs = False)
         ggLog.info(f"Built state/obs/action helpers")
         
 
@@ -335,6 +364,7 @@ class LocomotionVecEnv(RobotVecEnv):
     def _get_new_instantaneous_state(self):
 
         prev_locom_state = self._current_state[self.STATE_LOCOMOTION][:, 0]
+        prev_feet_state = self._current_state[self.STATE_FEET][:, 0, 0]
         new_inst_state = super()._get_new_instantaneous_state()
         new_internal_state = new_inst_state[self.STATE_INTERNAL]
         new_extrinsic_state = new_inst_state[self.STATE_EXTRINSIC]
@@ -382,7 +412,8 @@ class LocomotionVecEnv(RobotVecEnv):
         SMOOTHED_HEIGHT_ERROR_vec = height_err_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR]*alpha
         SMOOTHED_ORIENTATION_ERROR_vec = orient_err_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_ORIENTATION_ERROR]*alpha
         # print(f"smoothed_tracking_err_vec.size() = {smoothed_tracking_err_vec.size()}")
-        starting_eps = new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]<=0
+        step_counts = new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
+        starting_eps = step_counts<=0
         masked_assign(smoothed_tracking_err_vec,starting_eps.view((self.num_envs,)),tracking_err_vec)
 
         if self._locomotion_conf.use_contacts:
@@ -444,8 +475,39 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.SUM_IMPULSES : sum_bad_impulses_vec,
                             self.LOCOMOTION_FIELDS.COLLISON_COUNT :collision_count_vec,
                             self.LOCOMOTION_FIELDS.CRASHED : crashed_vec}
-        new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
+        
+        # fstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._feet_link_ids, use_com_frame = False)
+        # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
+        if isinstance(self._adapter, MjxAdapter):
+            feet_are_touching_ground = self._adapter.check_colliding_links(self._feet_link_ids, self._ground_link_id)
+            ggLog.info(f"[{step_counts.item()}] feet_are_touching_ground = {feet_are_touching_ground}")
+            feet_were_touching_ground = prev_feet_state <= 0
+            ggLog.info(f"[{step_counts.item()}] feet_were_touching_ground = {feet_were_touching_ground}")
+            nenv_nfeet = (self.num_envs,len(self._locomotion_conf.feet_links))
+            # if foot is just lifting off, mark the time in the state
+            # if foot is already up, and stays up, leave the time there
+            # if it is just now touching down, flip the time to negative
+            # if it was already down, and stays down, write zero to it
+            lifting_off = th.logical_and(th.logical_not(feet_are_touching_ground), feet_were_touching_ground)
+            touching_down = th.logical_and(th.logical_not(feet_were_touching_ground), feet_are_touching_ground)
+            staying_down = th.logical_and(feet_are_touching_ground, feet_were_touching_ground)
+            new_feet_state_th = prev_feet_state*((touching_down*-2)+1) # foot touching down, flip to engative
+            ggLog.info(f"[{step_counts.item()}] lifting_off = {lifting_off}")
+            th.where(condition=lifting_off.expand(nenv_nfeet),
+                     input=self._thtens(self._adapter.getEnvTimeFromStartup()),
+                     other=new_feet_state_th,
+                     out=new_feet_state_th)
+            th.where(condition=staying_down.expand(nenv_nfeet),
+                     input=self._thtens(0.0),
+                     other=new_feet_state_th,
+                     out=new_feet_state_th)
+            ggLog.info(f"[{step_counts.item()}] new_feet_state_th = {new_feet_state_th}")
+        else:
+            new_feet_state_th = self._thtens([0.0]).expand(vsize,len(self._locomotion_conf.feet_links))
+        new_feet_state = {self.FEET_FIELDS.FEET_LIFTOFF_TIMES : new_feet_state_th}
 
+        new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
+        new_inst_state[self.STATE_FEET] = new_feet_state
         return new_inst_state
     
 

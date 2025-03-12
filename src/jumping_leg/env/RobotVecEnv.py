@@ -63,6 +63,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         joint_safe_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_stiffness : dict[tuple[str,str],th.Tensor]
         main_body_link : tuple[str,str]
+        ground_link : tuple[str,str]
         mass_randomized_links : tuple[tuple[str,str],...]
         mass_randomization_ratios : th.Tensor
         friction_randomized_links : tuple[tuple[str,str],...]
@@ -182,6 +183,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        ground_link : tuple[str,str],
                         ui_camera_resolution_hw : tuple[int,int] = (144,256),
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
                         mass_randomized_links : list[tuple[str,str]] = [],
@@ -270,6 +272,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
                                                     joint_safe_limits_minmax_stiffness = minmax_stiffness_thdict,
                                                     main_body_link=(robot_name,robot_main_body_link),
+                                                    ground_link=ground_link,
                                                     mass_randomized_links=None, # Will fill up later
                                                     mass_randomization_ratios = None, # Will fill up later
                                                     friction_randomized_links=None, # Will fill up later
@@ -634,6 +637,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_mask = th.ones((self.num_envs,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
         # ggLog.info(f"initializing episodes {vec_mask}")
         resetted_state = self._state_helper.reset_state()
+        ggLog.info(f"resetted_state = {resetted_state}")
         map2_tensor_tree(self._current_state, resetted_state,
                         lambda l1, l2: masked_assign(l1, vec_mask, l2)) # should not be necessary, just for safety
         self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.STEP_COUNT] = th.tensor(-1.) # all other fields will be overwritten accordingly in state_update

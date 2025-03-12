@@ -96,6 +96,7 @@ def loco_runner_builder(seed,
     elif mode == "mjx":
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
         import jax
+        ground_link = ("ground","ground_link")
         adapter = MjxJointImpedanceAdapter(vec_size=num_envs,
                                                   enable_rendering=env_builder_args.pop("enable_rendering"),
                                                   jax_device=jax.devices("gpu")[0],
@@ -187,7 +188,9 @@ def loco_runner_builder(seed,
                             mass_randomized_links=env_builder_args.pop("mass_randomized_links"),
                             mass_randomization_ratio=env_builder_args.pop("mass_randomization_ratio"),
                             friction_randomized_links=env_builder_args.pop("friction_randomized_links"),
-                            friction_slide_spin_roll_randomization_ratios=env_builder_args.pop("friction_slide_spin_roll_randomization_ratios")
+                            friction_slide_spin_roll_randomization_ratios=env_builder_args.pop("friction_slide_spin_roll_randomization_ratios"),
+                            ground_link=ground_link,                            
+                            feet_links=env_builder_args.pop("feet_links")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -311,7 +314,11 @@ def get_quad_args():
             "enable_link_collisions" : [    (('quad', 'foot_center_link_back_left'),[('ground','ground_link')]),
                                             (('quad', 'foot_center_link_back_right'),[('ground','ground_link')]),
                                             (('quad', 'foot_center_link_front_left'),[('ground','ground_link')]),
-                                            (('quad', 'foot_center_link_front_right'),[('ground','ground_link')])]
+                                            (('quad', 'foot_center_link_front_right'),[('ground','ground_link')])],
+            "feet_links" : [('quad', 'foot_center_link_back_left'),
+                            ('quad', 'foot_center_link_back_right'),
+                            ('quad', 'foot_center_link_front_left'),
+                            ('quad', 'foot_center_link_front_right')]
             }
 
 def get_kyon_args():

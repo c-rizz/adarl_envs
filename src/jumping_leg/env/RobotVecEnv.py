@@ -632,6 +632,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"_initialize_episodes({vec_mask})")
         if vec_mask is None:
             vec_mask = th.ones((self.num_envs,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
+        if isinstance(self._adapter, MjxAdapter):
+            self._adapter.reset_model_alterations(vec_mask)
         # ggLog.info(f"initializing episodes {vec_mask}")
         resetted_state = self._state_helper.reset_state()
         map2_tensor_tree(self._current_state, resetted_state,
@@ -939,11 +941,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         dbg_check(lambda: th.all(th.isfinite(bstates_v_13)),
                   lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(bstates_v_13)).nonzero()}: {bstates_v_13[th.logical_not(th.isfinite(bstates_v_13))]} : {bstates_v_13}", just_warn=True)
         if not th.all(th.isfinite(bstates_v_13)) and isinstance(self._adapter, MjxAdapter):
-            bad_sim_id = th.logical_not(th.isfinite(bstates_v_13)).nonzero()[0,0]
+            bad_sim_id = th.logical_not(th.isfinite(bstates_v_13)).nonzero()[0,0].item()
             import jax.numpy as jnp
             ggLog.info(f"diverging sim {bad_sim_id}:\n"
-                       f" model.geom_friction = {self._adapter._mjx_model.geom_friction[bad_sim_id]} (avg = {jnp.mean(self._adapter._mjx_model.geom_friction)})\n"
-                       f" model.body_mass = {self._adapter._mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(self._adapter._mjx_model.body_mass)})")
+                       f" model.geom_friction = {self._adapter._mjx_model.geom_friction[bad_sim_id]} (avg = {jnp.mean(self._adapter._mjx_model.geom_friction, axis=0)})\n"
+                       f" model.body_mass = {self._adapter._mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(self._adapter._mjx_model.body_mass, axis=0)})")
         # bstates_v_13 = th.zeros(size=(1,13), dtype=th.float32, device=self._adapter._th_device)
         new_inst_state = self._build_new_instantaneous_state_vec(   bstates_v_13,
                                                                     internal_states,

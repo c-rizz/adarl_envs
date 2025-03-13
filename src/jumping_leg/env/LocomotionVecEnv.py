@@ -325,7 +325,7 @@ class LocomotionVecEnv(RobotVecEnv):
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
                                                             self._locomotion_state_helper,
                                                             observable = True,
-                                                            flatten = True)
+                                                            flatten_obs = True)
         ggLog.info(f"Built state/obs/action helpers")
         
 

@@ -660,9 +660,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if isinstance(self._adapter, MjxAdapter):
             # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")
             self._adapter.alter_model_rel(  link_masses = ( self._mass_randomized_link_ids,
-                                                            self._thrandn(size=(self.num_envs, len(self._configuration.mass_randomization_ratios)))*self._configuration.mass_randomization_ratios),
+                                                            (self._thrand(size=(self.num_envs, len(self._configuration.mass_randomization_ratios)))*2-1)*self._configuration.mass_randomization_ratios),
                                             link_frictions = (self._friction_randomized_link_ids,
-                                                              self._thrandn(size=(self.num_envs,)+self._configuration.friction_slide_spin_roll_rand_ratios.size())*self._configuration.friction_slide_spin_roll_rand_ratios))
+                                                              (self._thrand(size=(self.num_envs,)+self._configuration.friction_slide_spin_roll_rand_ratios.size())*2-1)*self._configuration.friction_slide_spin_roll_rand_ratios))
 
         self._update_state()
         self._update_stats()
@@ -943,9 +943,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"jstates_v_j_pve.device = {jstates_v_j_pve.device}")
         # ggLog.info(f"self._last_sent_v_j_pvesd.device = {self._last_sent_v_j_pvesd.device}")
         dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)),
-                  lambda: f"non finite values in joint stats at {th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae)).nonzero()}: {vec_stats_minmaxavgstd_j_pvae}", just_warn=True)
+                  lambda: f"non finite values in joint stats at {th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae)).nonzero()}: {vec_stats_minmaxavgstd_j_pvae[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae))]} : {vec_stats_minmaxavgstd_j_pvae}", just_warn=True)
         dbg_check(lambda: th.all(th.isfinite(bstates_v_13)),
-                  lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(bstates_v_13)).nonzero()}: {bstates_v_13}", just_warn=True)
+                  lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(bstates_v_13)).nonzero()}: {bstates_v_13[th.logical_not(th.isfinite(bstates_v_13))]} : {bstates_v_13}", just_warn=True)
+        if not th.all(th.isfinite(bstates_v_13)) and isinstance(self._adapter, MjxAdapter):
+            bad_sim_id = th.logical_not(th.isfinite(bstates_v_13)).nonzero()[0,0]
+            import jax.numpy as jnp
+            ggLog.info(f"diverging sim {bad_sim_id}:\n"
+                       f" model.geom_friction = {self._adapter._mjx_model.geom_friction[bad_sim_id]} (avg = {jnp.mean(self._adapter._mjx_model.geom_friction)})\n"
+                       f" model.body_mass = {self._adapter._mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(self._adapter._mjx_model.body_mass)})")
         # bstates_v_13 = th.zeros(size=(1,13), dtype=th.float32, device=self._adapter._th_device)
         new_inst_state = self._build_new_instantaneous_state_vec(   bstates_v_13,
                                                                     internal_states,

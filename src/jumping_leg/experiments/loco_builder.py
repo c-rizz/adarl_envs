@@ -101,7 +101,7 @@ def loco_runner_builder(seed,
                                                   enable_rendering=env_builder_args.pop("enable_rendering"),
                                                   jax_device=jax.devices("gpu")[0],
                                                   output_th_device = th_device,
-                                                  sim_step_dt=4/8192,
+                                                  sim_step_dt=8/8192,
                                                   step_length_sec=stepLength_sec,
                                                   realtime_factor=-1.0,
                                                   gui_env_index=0,
@@ -113,7 +113,9 @@ def loco_runner_builder(seed,
                                                   log_folder=log_folder,
                                                   revolute_dof_armature_override=0.5 if env_builder_args["robot_model"] == "centauro" else 0.1,
                                                   safe_revolute_dof_armature=0.1,
-                                                  opt_preset={"centauro":"fast", "kyon":"fastest", "quad":"fastest"}.get(env_builder_args["robot_model"], "faster"))
+                                                  opt_preset={"centauro":"fast",
+                                                              "kyon":"faster",
+                                                              "quad":"faster"}.get(env_builder_args["robot_model"], "faster"))
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)

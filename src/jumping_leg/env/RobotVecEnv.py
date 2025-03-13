@@ -112,7 +112,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     
     
     INTERNAL_FIELDS = IntEnum("INTERNAL_FIELDS", [  "SAFETY_TRIGGERED",
-                                                    "STEP_COUNT"], start=0)
+                                                    "STEP_COUNT",
+                                                    "SIM_TIME"], start=0)
 
     EXTRINSIC_FIELDS = IntEnum("EXTRINSIC_FIELS", ["BODY_REL_LINVEL_X",
                                                    "BODY_REL_LINVEL_Y",
@@ -200,7 +201,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._robot_model = Robot(model_urdf_string=robot_urdf_string)
         root_joint_name = self._robot_model.get_parent_joint(robot_root_link)
         is_floating = self._robot_model.get_joint_properties([root_joint_name])[root_joint_name]["type"] == Robot.JOINT_TYPES.FLOATING
-        self._build_new_instantaneous_state = th.vmap(self._build_new_instantaneous_state_single)
+        # self._build_new_instantaneous_state = th.vmap(self._build_new_instantaneous_state_single)
         ggLog.info("Properties:"+("\n".join([str(jp) for jp in self._robot_model.get_joint_properties(self._robot_model.get_joint_names()).items()])))
         # exit()
         controlled_joints_str = []
@@ -338,6 +339,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._build_state_helper(adapter)
         ggLog.info(f"self._state_helper.observation_names() = {self._state_helper.observation_names()}")
         self._current_state = self._state_helper.reset_state()
+        self._eps_start_stime = self._thzeros(size=(adapter.vec_size(),))
         self._safety_limits = self._state_helper.sub_helpers[self.STATE_ROBOT].build_robot_limits(joint_limit_minmax_pve=self._configuration.joint_safe_limits_minmax_pve,
                                                                     stiffness_minmax=self._configuration.joint_safe_limits_minmax_stiffness,
                                                                     damping_minmax=self._configuration.joint_safe_limits_minmax_damping)
@@ -438,7 +440,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     th_device=self._th_device,
                                                     field_size=(1,),
                                                     fields_minmax={   self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1],
-                                                                        self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000_000]},
+                                                                        self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000],
+                                                                        self.INTERNAL_FIELDS.SIM_TIME : [-1,1000_000]},
                                                     observable_fields=[],
                                                     vec_size=adapter.vec_size())
         extrinsic_state_helper =  ThBoxStateHelper(field_names=[e for e in self.EXTRINSIC_FIELDS],
@@ -637,10 +640,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_mask = th.ones((self.num_envs,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
         # ggLog.info(f"initializing episodes {vec_mask}")
         resetted_state = self._state_helper.reset_state()
-        ggLog.info(f"resetted_state = {resetted_state}")
+        # ggLog.info(f"resetted_state = {resetted_state}")
         map2_tensor_tree(self._current_state, resetted_state,
                         lambda l1, l2: masked_assign(l1, vec_mask, l2)) # should not be necessary, just for safety
         self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.STEP_COUNT] = th.tensor(-1.) # all other fields will be overwritten accordingly in state_update
+        masked_assign(self._eps_start_stime, vec_mask, self._adapter.getEnvTimeFromStartup())
         self._last_obs = self._state_helper.observe(self._current_state)
         self._set_current_ep_config(reset_options = options, vec_mask=vec_mask)
         
@@ -961,80 +965,80 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} build={t4-t3:.6f} check={t5-t4:.6f} tot={t5-t0}")
         return new_inst_state
 
-    def _build_new_instantaneous_state_single(self, body_state_13 : th.Tensor,
-                                                    single_internal_state : th.Tensor,
-                                                    stats_minmaxavgstd_j_pvae : th.Tensor,
-                                                    jstates_j_pve : th.Tensor,
-                                                    last_sent_j_pvesd : th.Tensor):
-        body_abs_linvel_xyz = body_state_13[7:10]
-        body_angvel_xyz = body_state_13[10:13]
-        body_position_xyz = body_state_13[0:3]
-        conj_body_quat_xyzw = th_quat_conj(body_state_13[3:7])
-        # th.as_tensor([0.0,0.0,-1.0]).expand(conj_body_quat_xyzw[...,:3].size())
-        gdir = th.zeros_like(conj_body_quat_xyzw[...,:3])
-        gdir[...,2] = -1
-        # ggLog.info(f"body_state_13[3:7] = {body_state_13[3:7]}")
-        gravity_vec         = th_quat_rotate_py(gdir, conj_body_quat_xyzw)
-        body_rel_linvel_xyz = th_quat_rotate_py(body_abs_linvel_xyz,     conj_body_quat_xyzw)
-        body_rel_angvel_xyz = th_quat_rotate_py(body_angvel_xyz,     conj_body_quat_xyzw)
+    # def _build_new_instantaneous_state_single(self, body_state_13 : th.Tensor,
+    #                                                 single_internal_state : th.Tensor,
+    #                                                 stats_minmaxavgstd_j_pvae : th.Tensor,
+    #                                                 jstates_j_pve : th.Tensor,
+    #                                                 last_sent_j_pvesd : th.Tensor):
+    #     body_abs_linvel_xyz = body_state_13[7:10]
+    #     body_angvel_xyz = body_state_13[10:13]
+    #     body_position_xyz = body_state_13[0:3]
+    #     conj_body_quat_xyzw = th_quat_conj(body_state_13[3:7])
+    #     # th.as_tensor([0.0,0.0,-1.0]).expand(conj_body_quat_xyzw[...,:3].size())
+    #     gdir = th.zeros_like(conj_body_quat_xyzw[...,:3])
+    #     gdir[...,2] = -1
+    #     # ggLog.info(f"body_state_13[3:7] = {body_state_13[3:7]}")
+    #     gravity_vec         = th_quat_rotate_py(gdir, conj_body_quat_xyzw)
+    #     body_rel_linvel_xyz = th_quat_rotate_py(body_abs_linvel_xyz,     conj_body_quat_xyzw)
+    #     body_rel_angvel_xyz = th_quat_rotate_py(body_angvel_xyz,     conj_body_quat_xyzw)
 
 
-        step_count = single_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
-        safety_triggered = single_internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
-        # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")
-        pveidx = th.as_tensor([0,1,3]).to(device=stats_minmaxavgstd_j_pvae.device, non_blocking=True)
-        triggered_limits = th.logical_or(   stats_minmaxavgstd_j_pvae[0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
-                                            stats_minmaxavgstd_j_pvae[1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
-        safety_triggered = th.any(triggered_limits)
-        safety_triggered = th.logical_and(safety_triggered, step_count>=1)
-        safety_triggered = th.logical_or(safety_triggered, safety_triggered)
+    #     step_count = single_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
+    #     safety_triggered = single_internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
+    #     # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")
+    #     pveidx = th.as_tensor([0,1,3]).to(device=stats_minmaxavgstd_j_pvae.device, non_blocking=True)
+    #     triggered_limits = th.logical_or(   stats_minmaxavgstd_j_pvae[0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
+    #                                         stats_minmaxavgstd_j_pvae[1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
+    #     safety_triggered = th.any(triggered_limits)
+    #     safety_triggered = th.logical_and(safety_triggered, step_count>=1)
+    #     safety_triggered = th.logical_or(safety_triggered, safety_triggered)
 
-        # if step_count!=-1 and single_internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0:
-        #     safety_triggered = True
-        # elif step_count>=1: # stats are not valid at step 0
-        #     triggered_limits = th.logical_or(stats_minmaxavgstd_j_pvae[0, :, [0,1,3]] < self._safe_limits_minmax_j_pve[0],
-        #                                      stats_minmaxavgstd_j_pvae[1, :, [0,1,3]] > self._safe_limits_minmax_j_pve[1])
-        #     safety_triggered = th.any(triggered_limits, dim = 1)
-        #     if safety_triggered:       
-        #         elements = np.array([[f"{jn[1]}_pos",f"{jn[1]}_vel",f"{jn[1]}_eff"] for jn in self._configuration.controlled_joints], dtype=object) #type: ignore
-        #         triggered = []
-        #         for i in np.ndindex(elements.shape):
-        #             if triggered_limits[i]:
-        #                 triggered.append(elements[i])
-        #         if not self._configuration.quiet:
-        #             ggLog.info( f"SAFETY TRIGGERED (step {step_count.item()}):"
-        #                         f"\n    triggered ({len(triggered)}) = {triggered}"
-        #                         # f"\n    joints_minmax = \n{stats_minmaxavgstd_j_pve[:2]}"
-        #                         # f"\n    j_safety_lims  = \n{self._safe_limits_minmax_j_pve} "
-        #                         )
-        # else:
-        #     safety_triggered = False
+    #     # if step_count!=-1 and single_internal_state[self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0:
+    #     #     safety_triggered = True
+    #     # elif step_count>=1: # stats are not valid at step 0
+    #     #     triggered_limits = th.logical_or(stats_minmaxavgstd_j_pvae[0, :, [0,1,3]] < self._safe_limits_minmax_j_pve[0],
+    #     #                                      stats_minmaxavgstd_j_pvae[1, :, [0,1,3]] > self._safe_limits_minmax_j_pve[1])
+    #     #     safety_triggered = th.any(triggered_limits, dim = 1)
+    #     #     if safety_triggered:       
+    #     #         elements = np.array([[f"{jn[1]}_pos",f"{jn[1]}_vel",f"{jn[1]}_eff"] for jn in self._configuration.controlled_joints], dtype=object) #type: ignore
+    #     #         triggered = []
+    #     #         for i in np.ndindex(elements.shape):
+    #     #             if triggered_limits[i]:
+    #     #                 triggered.append(elements[i])
+    #     #         if not self._configuration.quiet:
+    #     #             ggLog.info( f"SAFETY TRIGGERED (step {step_count.item()}):"
+    #     #                         f"\n    triggered ({len(triggered)}) = {triggered}"
+    #     #                         # f"\n    joints_minmax = \n{stats_minmaxavgstd_j_pve[:2]}"
+    #     #                         # f"\n    j_safety_lims  = \n{self._safe_limits_minmax_j_pve} "
+    #     #                         )
+    #     # else:
+    #     #     safety_triggered = False
 
 
-        new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : safety_triggered.to(dtype=th.float32),
-                                self.INTERNAL_FIELDS.STEP_COUNT : step_count+1}
-        new_robot_state = th.cat([jstates_j_pve, last_sent_j_pvesd], dim = 1)
-        # build stats:
-        # with permute the first dimension becomes the joint (ordered as in set_monitored_joints)
-        # with flatten the second dimension becomes minp,minv,mina,mmine,maxp,maxv,...
-        new_robot_stats_state = stats_minmaxavgstd_j_pvae.permute(1,0,2).flatten(start_dim=1)
-        new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : body_rel_linvel_xyz[0].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : body_rel_linvel_xyz[1].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : body_rel_linvel_xyz[2].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : body_rel_angvel_xyz[0].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : body_rel_angvel_xyz[1].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : body_rel_angvel_xyz[2].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : body_abs_linvel_xyz[0].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : body_abs_linvel_xyz[1].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : body_abs_linvel_xyz[2].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z : body_position_xyz[2].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : gravity_vec[0].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : gravity_vec[1].unsqueeze(0),
-                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : gravity_vec[2].unsqueeze(0)}
-        return {    self.STATE_EXTRINSIC    : new_extrinsic_state,
-                    self.STATE_INTERNAL     : new_internal_state,
-                    self.STATE_ROBOT        : new_robot_state,
-                    self.STATE_ROBOT_STATS  : new_robot_stats_state}
+    #     new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : safety_triggered.to(dtype=th.float32),
+    #                             self.INTERNAL_FIELDS.STEP_COUNT : step_count+1}
+    #     new_robot_state = th.cat([jstates_j_pve, last_sent_j_pvesd], dim = 1)
+    #     # build stats:
+    #     # with permute the first dimension becomes the joint (ordered as in set_monitored_joints)
+    #     # with flatten the second dimension becomes minp,minv,mina,mmine,maxp,maxv,...
+    #     new_robot_stats_state = stats_minmaxavgstd_j_pvae.permute(1,0,2).flatten(start_dim=1)
+    #     new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : body_rel_linvel_xyz[0].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : body_rel_linvel_xyz[1].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : body_rel_linvel_xyz[2].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : body_rel_angvel_xyz[0].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : body_rel_angvel_xyz[1].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : body_rel_angvel_xyz[2].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : body_abs_linvel_xyz[0].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : body_abs_linvel_xyz[1].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : body_abs_linvel_xyz[2].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z : body_position_xyz[2].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : gravity_vec[0].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : gravity_vec[1].unsqueeze(0),
+    #                             self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : gravity_vec[2].unsqueeze(0)}
+    #     return {    self.STATE_EXTRINSIC    : new_extrinsic_state,
+    #                 self.STATE_INTERNAL     : new_internal_state,
+    #                 self.STATE_ROBOT        : new_robot_state,
+    #                 self.STATE_ROBOT_STATS  : new_robot_stats_state}
         
 
     def _build_new_instantaneous_state_vec(self, vec_body_state_13 : th.Tensor,
@@ -1088,7 +1092,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
         new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : vec_safety_triggered.to(dtype=th.float32).view(self.num_envs,1),
-                                self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1)}
+                                self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1),
+                                self.INTERNAL_FIELDS.SIM_TIME : self._adapter.getEnvTimeFromStartup() - self._eps_start_stime}
         new_robot_state = th.cat([vec_jstates_j_pve, vec_last_sent_j_pvesd], dim = -1)
         # build stats:
         # with permute the first dimension becomes the joint (ordered as in set_monitored_joints)

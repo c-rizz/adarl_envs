@@ -480,9 +480,9 @@ class LocomotionVecEnv(RobotVecEnv):
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
         if isinstance(self._adapter, MjxAdapter):
             feet_are_touching_ground = self._adapter.check_colliding_links(self._feet_link_ids, self._ground_link_id)
-            ggLog.info(f"[{step_counts.item()}] feet_are_touching_ground = {feet_are_touching_ground}")
+            ggLog.info(f"[{step_counts[0]}] feet_are_touching_ground = {feet_are_touching_ground}")
             feet_were_touching_ground = prev_feet_state <= 0
-            ggLog.info(f"[{step_counts.item()}] feet_were_touching_ground = {feet_were_touching_ground}")
+            ggLog.info(f"[{step_counts[0]}] feet_were_touching_ground = {feet_were_touching_ground}")
             nenv_nfeet = (self.num_envs,len(self._locomotion_conf.feet_links))
             # if foot is just lifting off, mark the time in the state
             # if foot is already up, and stays up, leave the time there
@@ -492,16 +492,16 @@ class LocomotionVecEnv(RobotVecEnv):
             touching_down = th.logical_and(th.logical_not(feet_were_touching_ground), feet_are_touching_ground)
             staying_down = th.logical_and(feet_are_touching_ground, feet_were_touching_ground)
             new_feet_state_th = prev_feet_state*((touching_down*-2)+1) # foot touching down, flip to engative
-            ggLog.info(f"[{step_counts.item()}] lifting_off = {lifting_off}")
+            ggLog.info(f"[{step_counts[0]}] lifting_off = {lifting_off}")
             th.where(condition=lifting_off.expand(nenv_nfeet),
-                     input=self._thtens(self._adapter.getEnvTimeFromStartup()),
+                     input=new_internal_state[self.INTERNAL_FIELDS.SIM_TIME],
                      other=new_feet_state_th,
                      out=new_feet_state_th)
             th.where(condition=staying_down.expand(nenv_nfeet),
                      input=self._thtens(0.0),
                      other=new_feet_state_th,
                      out=new_feet_state_th)
-            ggLog.info(f"[{step_counts.item()}] new_feet_state_th = {new_feet_state_th}")
+            ggLog.info(f"[{step_counts[0]}] new_feet_state_th = {new_feet_state_th}")
         else:
             new_feet_state_th = self._thtens([0.0]).expand(vsize,len(self._locomotion_conf.feet_links))
         new_feet_state = {self.FEET_FIELDS.FEET_LIFTOFF_TIMES : new_feet_state_th}
@@ -625,6 +625,18 @@ class LocomotionVecEnv(RobotVecEnv):
         
         reward_contacts = - th.clamp(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 
+        prev_goal_abs_vec_xyz = current_state_locom_vec[:,[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X,
+                                                    self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Y,
+                                                    self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z]]
+        feet_state = state[self.STATE_FEET][:,0,0]
+        finished_steps_starts  = (feet_state < 0)*(-feet_state) # When the vaslue is negative it marks a finished step
+        finished_steps_durations = finished_steps_starts-state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]
+        reward_feet_air_time = th.mean(finished_steps_durations - 0.1, dim=1)
+        reward_feet_air_time = reward_feet_air_time*(th.linalg.norm(prev_goal_abs_vec_xyz,dim=1)>0.05) # Disable reward if goal velocity is less than 0.05
+        ggLog.info(f"feet_state = {feet_state}")
+        ggLog.info(f"finished_steps_durations = {finished_steps_durations}")
+        ggLog.info(f"reward_feet_air_time = {reward_feet_air_time}")
+
         sub_rewards_return["tracking"] = reward_velocity_tracking
         sub_rewards_return["torque"] = reward_torque
         sub_rewards_return["torque_limit"] = reward_torque_limit
@@ -639,6 +651,7 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return["position"] = reward_position
         sub_rewards_return["actdiff"] = reward_actdiff
         sub_rewards_return["actacc"] = reward_actacc
+        sub_rewards_return["feet_air_time"] = reward_feet_air_time
         sub_rewards_return["health"] = th.ones((current_state_locom_vec.size()[0],), device=current_state_locom_vec.device)
         sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards_return.items()}
 
@@ -661,7 +674,8 @@ class LocomotionVecEnv(RobotVecEnv):
                     "pitchnroll" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_PITCHNROLL_WEIGHT],
                     "actdiff" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_ACTDIFF_WEIGHT],
                     "position" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_POSITION_WEIGHT],
-                    "actacc" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_ACTACC_WEIGHT]
+                    "actacc" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_ACTACC_WEIGHT],
+                    "feet_air_time" : 0.2
                     }
         for k in sub_rewards_return:
             sub_rewards_return[k] = self._locomotion_conf.reward_scale*sub_rewards_return[k]*weights[k]
@@ -812,7 +826,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         if self._configuration.verbose_infos:
             statenorm = self._state_helper.normalize(state)
-            for substate in [self.STATE_LOCOMOTION]:
+            for substate in [self.STATE_LOCOMOTION, self.STATE_FEET]:
                 i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
                 i["statenorm_"+substate] = self._state_helper.sub_helpers[substate].flatten(statenorm[substate])
                 # Would make sense to put the labels in the info_space definition, maybe make an info_helper?

@@ -114,6 +114,40 @@ class SinPolicy(RLAgent):
     
     def input_device(self):
         return self._a_offset.device
+    
+class RandPolicy(RLAgent):
+    def __init__(self,  act_scale : th.Tensor,
+                        action_size : int):
+        self._a_scale = act_scale.expand((action_size,))
+
+    def predict_action(self, observation_batch, deterministic = False):
+        a = (th.rand_like(self._a_scale)*2-1)*self._a_scale
+        return a
+    
+    def get_hidden_state(self):
+        return None
+    
+    def update(self, transitions : TransitionBatch):
+        raise NotImplementedError()
+
+    def reset_hidden_state(self):
+        pass
+
+    def train_model(self, global_step, iterations, buffer: BaseBuffer) -> tuple[float, float, float]:
+        raise NotImplementedError()
+    
+    def save(self, path: str):
+        pass
+
+    @classmethod
+    def load(cls, path: str):
+        pass
+    
+    def load_(self, path: str):
+        pass
+    
+    def input_device(self):
+        return self._a_scale.device
         
 def build_sin_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":
@@ -147,6 +181,35 @@ def build_sin_policy(env, robot : str, scale : float = 0.0):
                         dt=0.05)
     return model
 
+def build_rand_policy(env, robot : str, scale : float = 0.0):
+    if robot == "quad":
+        home_jpose = get_quad_args()["homing_joint_pose"]
+    elif robot == "kyon":
+        home_jpose = get_kyon_args()["homing_joint_pose"]
+    elif robot == "centauro":
+        home_jpose = get_centauro_args()["homing_joint_pose"]
+    else:
+        raise RuntimeError(f"Unknown robot '{robot}")
+    home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
+    home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_pvesd)
+    if robot == "quad":
+        act_range = th.as_tensor([0.0, 0.1, 0.2,
+                                  0.0, 0.1, 0.2,
+                                  0.0, 0.1, 0.2,
+                                  0.0, 0.1, 0.2])
+    elif robot == "kyon":
+        act_range = th.as_tensor([   0.0, -0.1,  0.17,
+                                    -0.0,  0.1, -0.17,
+                                     0.0, -0.1,  0.17,
+                                    -0.0,  0.1, -0.17])
+    elif robot == "centauro":
+        act_range = th.as_tensor([0.1])
+    else:
+        raise RuntimeError(f"Unknown robot '{robot}")
+    model = RandPolicy(  act_scale=act_range*scale,
+                        action_size=env.get_runner().get_base_env()._action_helper.single_action_len())
+    return model
+
 
 def build_fixed_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":
@@ -178,7 +241,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
-        "action_smoothing_halflife_sec" : 0.1,
+        "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
         "enable_rendering" : not args["gui"] or args["record"],
         "goal_err_smoothing_halflife_sec" : 0.2,
@@ -270,6 +333,8 @@ def play(seed, folderName, run_id, args,
         model = load_model(args["model"])
     elif control_mode=="fixed":
         model = build_fixed_policy(env = env, robot=robot)
+    elif control_mode=="random":
+        model = build_rand_policy(env=env, robot=robot, scale=1.0)
     elif control_mode == "sine":
         model = build_sin_policy(env, robot=robot, scale = 1.0)
     else:
@@ -426,7 +491,7 @@ if __name__ == "__main__":
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
     ap.add_argument("--gui", default=False, action='store_true', help="Do not start the gui, instead stream renderings")
     ap.add_argument("--record", default=False, action='store_true', help="Record episode videos")
-    ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,pretrained]")
+    ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,random,pretrained]")
     
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())

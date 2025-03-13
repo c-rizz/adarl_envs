@@ -96,6 +96,7 @@ def loco_runner_builder(seed,
     elif mode == "mjx":
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
         import jax
+        ground_link = ("ground","ground_link")
         adapter = MjxJointImpedanceAdapter(vec_size=num_envs,
                                                   enable_rendering=env_builder_args.pop("enable_rendering"),
                                                   jax_device=jax.devices("gpu")[0],
@@ -189,7 +190,9 @@ def loco_runner_builder(seed,
                             mass_randomized_links=env_builder_args.pop("mass_randomized_links"),
                             mass_randomization_ratio=env_builder_args.pop("mass_randomization_ratio"),
                             friction_randomized_links=env_builder_args.pop("friction_randomized_links"),
-                            friction_slide_spin_roll_randomization_ratios=env_builder_args.pop("friction_slide_spin_roll_randomization_ratios")
+                            friction_slide_spin_roll_randomization_ratios=env_builder_args.pop("friction_slide_spin_roll_randomization_ratios"),
+                            ground_link=ground_link,                            
+                            feet_links=env_builder_args.pop("feet_links")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -313,7 +316,11 @@ def get_quad_args():
             "enable_link_collisions" : [    (('quad', 'foot_center_link_back_left'),[('ground','ground_link')]),
                                             (('quad', 'foot_center_link_back_right'),[('ground','ground_link')]),
                                             (('quad', 'foot_center_link_front_left'),[('ground','ground_link')]),
-                                            (('quad', 'foot_center_link_front_right'),[('ground','ground_link')])]
+                                            (('quad', 'foot_center_link_front_right'),[('ground','ground_link')])],
+            "feet_links" : [('quad', 'foot_center_link_back_left'),
+                            ('quad', 'foot_center_link_back_right'),
+                            ('quad', 'foot_center_link_front_left'),
+                            ('quad', 'foot_center_link_front_right')]
             }
 
 def get_kyon_args():
@@ -379,20 +386,20 @@ def get_centauro_args():
                                     ("centauro","ankle_pitch_4") : -0.301667,
                                     ("centauro","ankle_yaw_4") : 0.746874,
                                     ("centauro","torso_yaw") : 3.56617e-13,
-                                    # ("centauro","velodyne_joint") : 0,
-                                    # ("centauro","d435_head_joint") : 0,
-                                    # ("centauro","j_arm1_1") : 0.520149,
-                                    # ("centauro","j_arm1_2") : 0.320865,
-                                    # ("centauro","j_arm1_3") : 0.274669,
-                                    # ("centauro","j_arm1_4") : -2.23604,
-                                    # ("centauro","j_arm1_5") : 0.0500815,
-                                    # ("centauro","j_arm1_6") : -0.781461,
-                                    # ("centauro","j_arm2_1") : 0.520149,
-                                    # ("centauro","j_arm2_2") : -0.320865,
-                                    # ("centauro","j_arm2_3") : -0.274669,
-                                    # ("centauro","j_arm2_4") : -2.23604,
-                                    # ("centauro","j_arm2_5") : -0.0500815,
-                                    # ("centauro","j_arm2_6") : -0.781461,
+                                    ("centauro","velodyne_joint") : 0,
+                                    ("centauro","d435_head_joint") : 0,
+                                    ("centauro","j_arm1_1") : 0.520149,
+                                    ("centauro","j_arm1_2") : 0.320865,
+                                    ("centauro","j_arm1_3") : 0.274669,
+                                    ("centauro","j_arm1_4") : -2.23604,
+                                    ("centauro","j_arm1_5") : 0.0500815,
+                                    ("centauro","j_arm1_6") : -0.781461,
+                                    ("centauro","j_arm2_1") : 0.520149,
+                                    ("centauro","j_arm2_2") : -0.320865,
+                                    ("centauro","j_arm2_3") : -0.274669,
+                                    ("centauro","j_arm2_4") : -2.23604,
+                                    ("centauro","j_arm2_5") : -0.0500815,
+                                    ("centauro","j_arm2_6") : -0.781461,
                                     # ("centauro","j_wheel_1") : 0.0,
                                     # ("centauro","j_wheel_2") : 0.0,
                                     # ("centauro","j_wheel_3") : 0.0,

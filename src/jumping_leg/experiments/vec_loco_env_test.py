@@ -12,7 +12,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    train_envs = 32
+
+    algo = args["algorithm"]                                
+    if algo == "sac" or algo == "ppo":
+        train_envs = 2048
+    elif algo == "sac_small":
+        train_envs = 8
+    else:
+        raise RuntimeError(f"Unexpected algo '{algo}'")
+    
     if mode == "pybullet":
         env_device = th.device("cpu",0)
     elif mode == "mjx":
@@ -49,6 +57,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_height_weight" :            0.15,
         "reward_pitchnroll_weight" :        0.15,
         "reward_position_weight" :          5.0,
+        "reward_feet_air_time_weight" :     0.5,
+        "reward_heading_weight" :           0.1,
         "safe_stiffness" : 400,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
@@ -152,7 +162,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                             # #  eval_conf_video_feasible,
                             # #  eval_conf_video_jump_feasible
                         ]
-    algo = args["algorithm"]                                
     if algo.lower() == "sac":
         sac_train(  seed,
                     folderName,
@@ -169,7 +178,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     policy_network_arch=[128,128],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
-                                                    batch_size=8192,
+                                                    batch_size=1024,
                                                     buffer_size=3_000_000,
                                                     total_steps=300_000_000,
                                                     train_freq_vstep=10,
@@ -181,7 +190,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy = None
                                                     ),
-                    checkpoint_freq=20,
+                    checkpoint_freq=5,
                     collector_device=env_device,
                     max_episode_duration=max_steps_per_episode,
                     validation_buffer_size=0,
@@ -217,7 +226,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy = None
                                                     ),
-                    checkpoint_freq=20,
+                    checkpoint_freq=5,
                     collector_device=env_device,
                     max_episode_duration=max_steps_per_episode,
                     validation_buffer_size=0,

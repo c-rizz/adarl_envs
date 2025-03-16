@@ -948,12 +948,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                   lambda: f"non finite values in joint stats at {th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae)).nonzero()}: {vec_stats_minmaxavgstd_j_pvae[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae))]} : {vec_stats_minmaxavgstd_j_pvae}", just_warn=True)
         dbg_check(lambda: th.all(th.isfinite(bstates_v_13)),
                   lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(bstates_v_13)).nonzero()}: {bstates_v_13[th.logical_not(th.isfinite(bstates_v_13))]} : {bstates_v_13}", just_warn=True)
-        if not th.all(th.isfinite(bstates_v_13)) and isinstance(self._adapter, MjxAdapter):
+        if not th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)), th.all(th.isfinite(bstates_v_13))) and isinstance(self._adapter, MjxAdapter):
             bad_sim_id = th.logical_not(th.isfinite(bstates_v_13)).nonzero()[0,0].item()
             import jax.numpy as jnp
             ggLog.info(f"diverging sim {bad_sim_id}:\n"
-                       f" model.geom_friction = {self._adapter._mjx_model.geom_friction[bad_sim_id]} (avg = {jnp.mean(self._adapter._mjx_model.geom_friction, axis=0)})\n"
-                       f" model.body_mass = {self._adapter._mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(self._adapter._mjx_model.body_mass, axis=0)})")
+                       f" model.geom_friction = {self._adapter._sim_state.mjx_model.geom_friction[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.geom_friction, axis=0)})\n"
+                       f" model.body_mass = {self._adapter._sim_state.mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.body_mass, axis=0)})")
         # bstates_v_13 = th.zeros(size=(1,13), dtype=th.float32, device=self._adapter._th_device)
         new_inst_state = self._build_new_instantaneous_state_vec(   bstates_v_13,
                                                                     internal_states,
@@ -1101,7 +1101,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : vec_safety_triggered.to(dtype=th.float32).view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1),
-                                self.INTERNAL_FIELDS.SIM_TIME : self._adapter.getEnvTimeFromStartup() - self._eps_start_stime}
+                                self.INTERNAL_FIELDS.SIM_TIME : (self._adapter.getEnvTimeFromStartup() - self._eps_start_stime).view(self.num_envs,1)}
         new_robot_state = th.cat([vec_jstates_j_pve, vec_last_sent_j_pvesd], dim = -1)
         # build stats:
         # with permute the first dimension becomes the joint (ordered as in set_monitored_joints)

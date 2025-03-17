@@ -639,18 +639,20 @@ class LocomotionVecEnv(RobotVecEnv):
         max_rew = self._configuration.reward_penalties_max
         current_state_locom_vec = state[self.STATE_LOCOMOTION][:, 0,:,0]
         state_action_vec = state[self.STATE_ACT_RAW]
-        state_stats = state[self.STATE_ROBOT_STATS]
+        state_stats = state[self.STATE_JOINT_STEP_STATS]
 
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
         normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
         state_robot_norm     = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)
+        longterm_stats_pos_norm     = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
+                                                                                                      warn_limits_violation=False)
         dbg_run(lambda: self._warn_out_of_bounds(state_robot_norm))
         state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
         # state_stats_norm = self._state_helper.sub_helpers[self.STATE_ROBOT_STATS].normalize(state_stats)
         # ggLog.info(f"current_state_locom_vec.size() = {current_state_locom_vec.size()}")
         # ggLog.info(f"state_robot_norm.size() = {state_robot_norm.size()}")
         # ggLog.info(f"state_robot_safenorm.size() = {state_robot_safenorm.size()}")
-        normposhomingdiff   = state_robot_norm[:,0,:,0] - normhoming
+        normposhomingdiff   = longterm_stats_pos_norm[:,0,0] - normhoming
         normvelocities      = state_robot_norm[:,0,:,1]
         normtorques         = state_robot_norm[:,0,:,2]
         # normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
@@ -701,13 +703,14 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Y,
                                                     self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z]]
         feet_state = state[self.STATE_FEET][:,0,0]
-        finished_steps_starts  =   (feet_state < 0)*(-feet_state) # When the vaslue is negative it marks a finished step
+        steps_finished = feet_state < 0
+        steps_starts  = -feet_state # When the vaslue is negative it marks a finished step
         # subtracting 0.1 from the duratoins makes it so that not lifting the feet is better than lifting it for less than 0.1s
         # this makes doing small steps worse than doing nothing
-        finished_steps_durations = (feet_state < 0)*(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]-finished_steps_starts - 0.1)
+        offsetted_finished_steps_durations = steps_finished*(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]-steps_starts - 0.1)
         max_good_step_duration = 1.5
-        finished_steps_durations = th.tanh(finished_steps_durations/max_good_step_duration)*max_good_step_duration
-        reward_feet_air_time = th.mean(finished_steps_durations, dim=1)
+        offsetted_finished_steps_durations = th.tanh(offsetted_finished_steps_durations/max_good_step_duration)*max_good_step_duration
+        reward_feet_air_time = th.mean(offsetted_finished_steps_durations, dim=1)
         reward_feet_air_time = reward_feet_air_time*(th.linalg.norm(prev_goal_abs_vec_xyz,dim=1)>0.05) # Disable reward if goal velocity is less than 0.05
         # ggLog.info(f"feet_state = {feet_state}")
         # ggLog.info(f"finished_steps_durations = {finished_steps_durations}")

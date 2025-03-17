@@ -11,7 +11,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
@@ -42,8 +42,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" :      2.0,
-        "reward_actdiff_weight" :           0.0,
-        "reward_actacc_weight" :            0.5,
+        "reward_actdiff_weight" :           0.2,
+        "reward_actacc_weight" :            0.2,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_health_weight" :            0.0,
@@ -56,10 +56,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_weight" :          0.0,
         "reward_height_weight" :            0.15,
         "reward_pitchnroll_weight" :        0.15,
-        "reward_position_weight" :          5.0,
-        "reward_feet_air_time_weight" :     0.5,
-        "reward_heading_weight" :           0.1,
-        "safe_stiffness" : 400,
+        "reward_position_weight" :          20.0,
+        "reward_feet_air_time_weight" :     10.0,
+        "reward_heading_weight" :           0.2,
+        "safe_stiffness" : 200,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
@@ -178,7 +178,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     policy_network_arch=[128,128],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
-                                                    batch_size=1024,
+                                                    batch_size=4096,
                                                     buffer_size=3_000_000,
                                                     total_steps=300_000_000,
                                                     train_freq_vstep=10,

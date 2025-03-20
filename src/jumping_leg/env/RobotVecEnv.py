@@ -166,7 +166,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         robot_urdf_string : str,
                         safe_damping : float,
                         safe_stiffness : float,
-                        safety_limits_factor : float,
+                        safety_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
+                        safe_limits_position_offset : dict[tuple[str,str], float],
                         seed : int,
                         stepLength_sec,
                         step_precision_tolerance : float,
@@ -194,7 +195,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         mass_randomization_ratio : float = 0.1,
                         friction_randomized_links : list[tuple[str,str]] = [],
                         friction_slide_spin_roll_randomization_ratios : tuple[float, float, float] = (0.1,0.1,0.1),
-                        longterm_states_decimation_time = 2.0
+                        longterm_states_decimation_time = 0.01
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -224,8 +225,26 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         controlled_joints_rn : list[tuple[str,str]] = [(robot_name,jn) for jn in controlled_joints_str]
         phys_limits_minmax_pve = {(robot_name,k):self._thtens(l) 
                                     for k,l in self._robot_model.get_joint_limits(controlled_joints_str).items()}
-        safe_limits_minmax_pve = {k:(lims_minmax-0.5*(lims_minmax[1]+lims_minmax[0]))*safety_limits_factor+0.5*(lims_minmax[1]+lims_minmax[0])
-                                    for k,lims_minmax in phys_limits_minmax_pve.items()}
+        
+        # if isinstance(safety_limits_ratios_minmax_pve,(float,int)):
+        #     safety_limits_ratios_minmax_pve = [float(safety_limits_ratios_minmax_pve)]*3
+        # if isinstance(safety_limits_ratios_minmax_pve, (list, tuple)):
+        #     safety_limits_ratios_minmax_pve = self._thtens(safety_limits_ratios_minmax_pve)
+        if isinstance(safety_limits_ratios_minmax_pve, dict):
+            safety_limits_dict_ratios_minmax_pve = safety_limits_ratios_minmax_pve
+        else:
+            safety_limits_dict_ratios_minmax_pve = {k:safety_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
+        safety_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) 
+                                               for k,v in safety_limits_dict_ratios_minmax_pve.items()}
+        print(f"safety_limits_ratios_minmax_pve_th = {safety_limits_ratios_minmax_pve_th}")
+        safe_limits_minmax_pve = {k: lim_minmax_pve*safety_limits_ratios_minmax_pve_th[k]
+                                    for k,lim_minmax_pve in phys_limits_minmax_pve.items()}
+        print(f"safe_limits_minmax_pve = {safe_limits_minmax_pve}")
+        safe_limits_minmax_pve = {jn:minmax_pve + self._thtens([safe_limits_position_offset[jn], 0, 0]).expand(2,3) for jn,minmax_pve in safe_limits_minmax_pve.items()}
+        # safe_limits_minmax_pve = {k:(lims_minmax-0.5*(lims_minmax[1]+lims_minmax[0]))*safety_limits_ratios_minmax_pve+(0.5+safety_limits_normalized_offset)*(lims_minmax[1]+lims_minmax[0])
+        #                             for k,lims_minmax in phys_limits_minmax_pve.items()}
+        # if safety_limits_normalized_offset + safety_limits_ratios_minmax_pve >= 1:
+        #     raise RuntimeError(f"safety_limits_factor={safety_limits_ratios_minmax_pve} and safety_limits_normalized_offset={safety_limits_normalized_offset} exceed physical limits")
 
         for jn in safe_limits_minmax_pve.keys():
             if jn not in control_limits_minmax_pve:
@@ -448,7 +467,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                        th.stack([minmax_pve[:,0]
                                                                                   for minmax_pve in self._configuration.joint_physical_limits_minmax_pve.values()],
                                                                                 dim = 1)},
-                                                        observable_fields=[],
+                                                        observable_fields=None,
                                                         vec_size=adapter.vec_size())
         internal_state_helper =   ThBoxStateHelper( field_names=[e for e in self.INTERNAL_FIELDS],
                                                     obs_dtype=self._obs_dtype,
@@ -527,7 +546,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.STATE_EXTRINSIC,
                                     self.STATE_INTERNAL,
                                     self.STATE_ACT_PREPROC,
-                                    # self.STATE_ACT_RAW
+                                    # self.STATE_ACT_RAW,
+                                    self.STATE_JOINT_LONGTERM_STATS
                                     ]
         else:
             observable_fields = [   self.STATE_ROBOT,
@@ -546,11 +566,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                               noise = {
                                                     self.STATE_ROBOT : robot_state_noise,
                                                     self.STATE_EXTRINSIC : extrinsic_state_noise},
-                                              flatten_in_obs=[   self.STATE_ROBOT,
+                                              flatten_in_obs=[  self.STATE_ROBOT,
                                                                 self.STATE_EXTRINSIC,
                                                                 self.STATE_INTERNAL,
                                                                 # self.STATE_ACT_RAW,
-                                                                self.STATE_ACT_PREPROC],
+                                                                self.STATE_ACT_PREPROC,
+                                                                self.STATE_JOINT_LONGTERM_STATS],
                                               flattened_part_name="vec")        
 
     

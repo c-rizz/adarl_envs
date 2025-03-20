@@ -100,6 +100,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         verbose_infos : bool
         reward_penalties_max : th.Tensor
         longterm_stats_alpha : th.Tensor
+        impulse_probability_per_sec : th.Tensor
+        impulse_mean_std : th.Tensor
+        impulse_duration_minmax : th.Tensor
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -194,7 +197,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         mass_randomization_ratio : float = 0.1,
                         friction_randomized_links : list[tuple[str,str]] = [],
                         friction_slide_spin_roll_randomization_ratios : tuple[float, float, float] = (0.1,0.1,0.1),
-                        longterm_states_decimation_time = 2.0
+                        longterm_states_decimation_time = 2.0,
+                        impulse_probability_per_sec : float = 0.0,
+                        impulse_duration_minmax : tuple[float,float ]= (0.01, 5.0),
+                        impulse_mean_std : tuple[float,float ]= (50.0, 50.0)
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -316,7 +322,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_jimp_cmd_size=(adapter.vec_size(), len(controlled_joints_rn), 5),
                                                     enable_dbg_checks = enable_dbg_checks,
                                                     reward_penalties_max = self._thtens(100.0),
-                                                    longterm_stats_alpha = self._thtens(0.1**(stepLength_sec/longterm_states_decimation_time)) # alpha so that the contribution of a sample longterm_states_decimation_time seconds ago is 0.1
+                                                    longterm_stats_alpha = self._thtens(0.1**(stepLength_sec/longterm_states_decimation_time)), # alpha so that the contribution of a sample longterm_states_decimation_time seconds ago is 0.1
+                                                    impulse_probability_per_sec = self._thtens(impulse_probability_per_sec),
+                                                    impulse_duration_minmax = self._thtens(impulse_duration_minmax),
+                                                    impulse_mean_std=self._thtens(impulse_mean_std)
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
@@ -578,7 +587,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             actions, action_delay = self._preproc_acts(actions)
             self._last_preprocessed_actions = actions
             v_j_pvesd = self._action_helper.action_to_pvesd(actions)
-            # do this better, avoid this if, whatever, put it in the helper
+            # do this better, avoid this if condition, put it in the helper
             if self._configuration.control_mode in [JointImpedanceActionHelper.CONTROL_MODES.POSITION, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_STIFFNESS, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_TORQUES] :
                 v_j_pvesd[:,:,1] = th.clamp((v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec, 
                                             min=self._safe_limits_minmax_j_pve[0,:,1], 
@@ -928,7 +937,44 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
     @override
-    def on_step(self):
+    def pre_step(self):
+        if isinstance(self._adapter, BaseVecSimulationAdapter):
+            impulse_prob_per_env_dt = 1-th.pow(1-self._configuration.impulse_probability_per_sec, self._intendedStepLength_sec)
+            apply_impulse = self._thrand((self.num_envs,1)) < impulse_prob_per_env_dt
+            impulse = self._thrand_truncnorm((self.num_envs,1),
+                                             mean = self._configuration.impulse_mean_std[0].item(),
+                                             std = self._configuration.impulse_mean_std[1].item(),
+                                             min_val = 0.0,
+                                             max_val = 100)
+            duration = self._thrand((self.num_envs,1)) * (self._configuration.impulse_duration_minmax[1] - self._configuration.impulse_duration_minmax[0]) + self._configuration.impulse_duration_minmax[0]
+
+            # ggLog.info(f"impulse={impulse}\n"
+            #            f"durations={duration}\n")
+            force = impulse/duration
+            dir_incl_azim = self._thrand((self.num_envs,2))*2*th.pi
+            direction = th.stack([th.sin(dir_incl_azim[:,0])*th.cos(dir_incl_azim[:,1]),
+                                    th.sin(dir_incl_azim[:,0])*th.sin(dir_incl_azim[:,1]),
+                                    th.cos(dir_incl_azim[:,0])], dim=1)
+            forcevector = direction*force
+            th.where(apply_impulse, forcevector, th.zeros_like(forcevector[0,0]), out=forcevector)
+
+            torque = th.zeros_like(forcevector)
+
+            delays = self._thrand((self.num_envs,)) * self._intendedStepLength_sec
+
+            # ggLog.info(f"Setting impulses:\n"
+            #            f"force_torque_xyzxyz={th.cat([forcevector, torque], dim = 1)}\n"
+            #            f"durations={duration}\n"
+            #            f"delays={delays}\n"
+            #            f"vec_mask={apply_impulse}\n")
+            self._adapter.set_link_impulses(self._main_body_link_ids,
+                                            force_torque_xyzxyz=th.cat([forcevector, torque], dim = 1).view((self.num_envs,1,6)),
+                                            durations=duration.view((self.num_envs,1)),
+                                            delays=delays.view((self.num_envs,1)),
+                                            vec_mask=apply_impulse.view((self.num_envs,)))
+
+    @override
+    def post_step(self):
         # t0 = time.monotonic()
         self._update_state()
         # t1 = time.monotonic()

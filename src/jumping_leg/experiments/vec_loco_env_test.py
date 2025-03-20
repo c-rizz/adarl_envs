@@ -42,8 +42,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "initial_pose_randomization" : 0.25,
         "reward_acceleration_weight" :      2.0,
-        "reward_actdiff_weight" :           0.2,
-        "reward_actacc_weight" :            0.2,
+        "reward_actdiff_weight" :           0.0,
+        "reward_actacc_weight" :            0.5,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_health_weight" :            0.0,
@@ -56,9 +56,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_weight" :          0.0,
         "reward_height_weight" :            0.15,
         "reward_pitchnroll_weight" :        0.15,
-        "reward_position_weight" :          20.0,
-        "reward_feet_air_time_weight" :     10.0,
-        "reward_heading_weight" :           0.2,
+        "reward_position_weight" :          5.0,
+        "reward_feet_air_time_weight" :     0.0,
+        "reward_heading_weight" :           0.0,
         "safe_stiffness" : 200,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
@@ -80,7 +80,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
         "mass_randomization_ratio" : 0.3,
-        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3)
+        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
+        "impulse_probability_per_sec" : 0.5,
+        "impulse_duration_minmax" : (0.01, 2.5),
+        "impulse_mean_std" : (50.0,50.0)
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

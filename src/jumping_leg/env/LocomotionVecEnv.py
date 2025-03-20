@@ -194,7 +194,10 @@ class LocomotionVecEnv(RobotVecEnv):
                         mass_randomized_links : list[tuple[str,str]] = [],
                         mass_randomization_ratio : float = 0.1,
                         friction_randomized_links : list[tuple[str,str]] = [],
-                        friction_slide_spin_roll_randomization_ratios : tuple[float, float, float] = (0.1,0.1,0.1)
+                        friction_slide_spin_roll_randomization_ratios : tuple[float, float, float] = (0.1,0.1,0.1),
+                        impulse_probability_per_sec : float = 0.0,
+                        impulse_duration_minmax : tuple[float,float ]= (0.01, 5.0),
+                        impulse_mean_std : tuple[float,float ]= (50.0, 50.0)
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -234,7 +237,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_vel_goal_relative_width = self._thtens(1.5),
                         reward_vel_goal_absolute_width = self._thtens(0.25),
                         reward_vel_goal_relative_width_offset = self._thtens(0.1),
-                        feet_links = feet_links)
+                        feet_links = feet_links
+                        )
         
         super().__init__(   action_delay_mustd = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
@@ -279,7 +283,10 @@ class LocomotionVecEnv(RobotVecEnv):
                             mass_randomization_ratio=mass_randomization_ratio,
                             friction_randomized_links=friction_randomized_links,
                             friction_slide_spin_roll_randomization_ratios=friction_slide_spin_roll_randomization_ratios,
-                            ground_link=ground_link
+                            ground_link=ground_link,
+                            impulse_probability_per_sec = impulse_probability_per_sec,
+                            impulse_duration_minmax = impulse_duration_minmax,
+                            impulse_mean_std = impulse_mean_std
                         )
 
         

@@ -236,11 +236,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             safety_limits_dict_ratios_minmax_pve = {k:safety_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
         safety_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) 
                                                for k,v in safety_limits_dict_ratios_minmax_pve.items()}
-        print(f"safety_limits_ratios_minmax_pve_th = {safety_limits_ratios_minmax_pve_th}")
+        # print(f"safety_limits_ratios_minmax_pve_th = {safety_limits_ratios_minmax_pve_th}")
         safe_limits_minmax_pve = {k: lim_minmax_pve*safety_limits_ratios_minmax_pve_th[k]
                                     for k,lim_minmax_pve in phys_limits_minmax_pve.items()}
-        print(f"safe_limits_minmax_pve = {safe_limits_minmax_pve}")
+        # print(f"safe_limits_minmax_pve = {safe_limits_minmax_pve}")
         safe_limits_minmax_pve = {jn:minmax_pve + self._thtens([safe_limits_position_offset[jn], 0, 0]).expand(2,3) for jn,minmax_pve in safe_limits_minmax_pve.items()}
+        safe_limits_minmax_pve = {jn:lims.clamp(min=phys_limits_minmax_pve[jn][0].expand(2,-1), max=phys_limits_minmax_pve[jn][1].expand(2,-1)) 
+                                  for jn,lims in safe_limits_minmax_pve.items()}
         # safe_limits_minmax_pve = {k:(lims_minmax-0.5*(lims_minmax[1]+lims_minmax[0]))*safety_limits_ratios_minmax_pve+(0.5+safety_limits_normalized_offset)*(lims_minmax[1]+lims_minmax[0])
         #                             for k,lims_minmax in phys_limits_minmax_pve.items()}
         # if safety_limits_normalized_offset + safety_limits_ratios_minmax_pve >= 1:

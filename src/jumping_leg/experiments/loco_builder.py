@@ -196,7 +196,10 @@ def loco_runner_builder(seed,
                             friction_randomized_links=env_builder_args.pop("friction_randomized_links"),
                             friction_slide_spin_roll_randomization_ratios=env_builder_args.pop("friction_slide_spin_roll_randomization_ratios"),
                             ground_link=ground_link,                            
-                            feet_links=env_builder_args.pop("feet_links")
+                            feet_links=env_builder_args.pop("feet_links"),
+                            impulse_probability_per_sec=env_builder_args.pop("impulse_probability_per_sec"),
+                            impulse_duration_minmax=env_builder_args.pop("impulse_duration_minmax"),
+                            impulse_mean_std=env_builder_args.pop("impulse_mean_std")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

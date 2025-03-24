@@ -83,6 +83,8 @@ def loco_runner_builder(seed,
     elif mode == "pybullet":
         from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
         from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
+        ground_link = ("ground_plane","ground_link")
+        env_builder_args["enable_link_collisions"] = None
         adapter = VecSimJointImpedanceAdapterWrapper(adapter = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
                                                                             restore_on_reset=False,
                                                                             debug_gui=show_gui,
@@ -115,7 +117,7 @@ def loco_runner_builder(seed,
                                                   safe_revolute_dof_armature=0.1,
                                                   opt_preset={"centauro":"fast",
                                                               "kyon":"faster",
-                                                              "quad":"faster"}.get(env_builder_args["robot_model"], "faster"))
+                                                              "quad":"fastest"}.get(env_builder_args["robot_model"], "faster"))
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)

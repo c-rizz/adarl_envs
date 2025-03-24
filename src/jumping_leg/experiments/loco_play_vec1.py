@@ -237,21 +237,24 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     step_length_sec = 20/1024 
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     env_device = th.device("cpu")
-    height_pixels = 360 if args["mode"] == "mjx" else 720
+    mode = args["mode"]
+    height_pixels = 360 #if mode == "mjx" else 720
     pixel_resolution = (height_pixels,int(height_pixels*16/9))
-
+    
     env_builder_args = {
+            "action_delay_mustd" : (0.0,0.01),
+        "action_noise_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
         "robot_model" : args["robot"],
-        "enable_rendering" : True,
+        "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.1,
         "max_steps_per_episode" : max_steps_per_episode,
-        "mode" : args["mode"],
+        "mode" : mode,
         "quiet" : False,
         "reward_acceleration_weight" :      2.0,
-        "reward_actdiff_weight" :           0.2,
-        "reward_actacc_weight" :            0.2,
+        "reward_actdiff_weight" :           0.0,
+        "reward_actacc_weight" :            0.1,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_health_weight" :            0.0,
@@ -266,22 +269,37 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_pitchnroll_weight" :        0.15,
         "reward_position_weight" :          1.0,
         "reward_feet_air_time_weight" :     10.0,
-        "reward_heading_weight" :           0.2,
-        "reward_underground_weight" :       10.0,
+        "reward_heading_weight" :           0.0,
         "safe_stiffness" : 200,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
         "th_device" : env_device,
+        "video_save_freq" : 0,
         "goal_speed_minmax" : (0,1),
         "use_contacts" : False,
         "frame_stack_length" : 3,
+        "verbose_infos" : False,
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
-        "init_on_reset_ratio" : 0.8
+        "init_on_reset_ratio" : 0.8,
+        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
+        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.02, 0.02),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
+        "ui_camera_resolution_hw" : (144,256),
+        "log_info_stats" : True,
+        "initial_pose_randomization" : 0.8,
+        "mass_randomization_ratio" : 0.3,
+        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
+        "impulse_probability_per_sec" : 0.5,
+        "impulse_duration_minmax" : (0.01, 2.5),
+        "impulse_mean_std" : (50.0,50.0)
     }
 
     env_builder_args.update({
+        "enable_rendering" : True,
         "verbose_infos" : True,
         "video_save_freq" : True if args["record"] else 0,
         "action_delay_mustd" : (0.0,0.0),
@@ -295,7 +313,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "log_info_stats" : True,
         "initial_pose_randomization" : 0.0,
         "mass_randomization_ratio" : 0.0,
-        "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0)})
+        "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
+        "impulse_probability_per_sec" : 0.0})
     return play(seed,
                 folderName,
                 run_id, args,

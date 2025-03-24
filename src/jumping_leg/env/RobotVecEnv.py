@@ -356,6 +356,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
         self._always_present_collisions : set[tuple[str,str]] = set()
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
+        self._impulse_disturbances_enabled = impulse_probability_per_sec > 0
 
         self._action_helper = JointImpedanceActionHelper(
                                 vec_size=adapter.vec_size(),
@@ -928,7 +929,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"cam quat = {cam_rel_quat}")
         try:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
-                body_states13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = False)[:,0,:]
+                body_states13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
                 cam_link_state[:3] += body_states13[0,:3] #body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all links
                 cam_link_state = cam_link_state.expand(self._adapter.vec_size(),1,13)
                 # cam_link_state[:,:,:3] += body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all sims
@@ -962,39 +963,40 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     @override
     def pre_step(self):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
-            impulse_prob_per_env_dt = 1-th.pow(1-self._configuration.impulse_probability_per_sec, self._intendedStepLength_sec)
-            apply_impulse = self._thrand((self.num_envs,1)) < impulse_prob_per_env_dt
-            impulse = self._thrand_truncnorm((self.num_envs,1),
-                                             mean = self._configuration.impulse_mean_std[0].item(),
-                                             std = self._configuration.impulse_mean_std[1].item(),
-                                             min_val = 0.0,
-                                             max_val = 100)
-            duration = self._thrand((self.num_envs,1)) * (self._configuration.impulse_duration_minmax[1] - self._configuration.impulse_duration_minmax[0]) + self._configuration.impulse_duration_minmax[0]
+            if self._impulse_disturbances_enabled:
+                impulse_prob_per_env_dt = 1-th.pow(1-self._configuration.impulse_probability_per_sec, self._intendedStepLength_sec)
+                apply_impulse = self._thrand((self.num_envs,1)) < impulse_prob_per_env_dt
+                impulse = self._thrand_truncnorm((self.num_envs,1),
+                                                mean = self._configuration.impulse_mean_std[0].item(),
+                                                std = self._configuration.impulse_mean_std[1].item(),
+                                                min_val = 0.0,
+                                                max_val = 100)
+                duration = self._thrand((self.num_envs,1)) * (self._configuration.impulse_duration_minmax[1] - self._configuration.impulse_duration_minmax[0]) + self._configuration.impulse_duration_minmax[0]
 
-            # ggLog.info(f"impulse={impulse}\n"
-            #            f"durations={duration}\n")
-            force = impulse/duration
-            dir_incl_azim = self._thrand((self.num_envs,2))*2*th.pi
-            direction = th.stack([th.sin(dir_incl_azim[:,0])*th.cos(dir_incl_azim[:,1]),
-                                    th.sin(dir_incl_azim[:,0])*th.sin(dir_incl_azim[:,1]),
-                                    th.cos(dir_incl_azim[:,0])], dim=1)
-            forcevector = direction*force
-            th.where(apply_impulse, forcevector, th.zeros_like(forcevector[0,0]), out=forcevector)
+                # ggLog.info(f"impulse={impulse}\n"
+                #            f"durations={duration}\n")
+                force = impulse/duration
+                dir_incl_azim = self._thrand((self.num_envs,2))*2*th.pi
+                direction = th.stack([th.sin(dir_incl_azim[:,0])*th.cos(dir_incl_azim[:,1]),
+                                        th.sin(dir_incl_azim[:,0])*th.sin(dir_incl_azim[:,1]),
+                                        th.cos(dir_incl_azim[:,0])], dim=1)
+                forcevector = direction*force
+                th.where(apply_impulse, forcevector, th.zeros_like(forcevector[0,0]), out=forcevector)
 
-            torque = th.zeros_like(forcevector)
+                torque = th.zeros_like(forcevector)
 
-            delays = self._thrand((self.num_envs,)) * self._intendedStepLength_sec
+                delays = self._thrand((self.num_envs,)) * self._intendedStepLength_sec
 
-            # ggLog.info(f"Setting impulses:\n"
-            #            f"force_torque_xyzxyz={th.cat([forcevector, torque], dim = 1)}\n"
-            #            f"durations={duration}\n"
-            #            f"delays={delays}\n"
-            #            f"vec_mask={apply_impulse}\n")
-            self._adapter.set_link_impulses(self._main_body_link_ids,
-                                            force_torque_xyzxyz=th.cat([forcevector, torque], dim = 1).view((self.num_envs,1,6)),
-                                            durations=duration.view((self.num_envs,1)),
-                                            delays=delays.view((self.num_envs,1)),
-                                            vec_mask=apply_impulse.view((self.num_envs,)))
+                # ggLog.info(f"Setting impulses:\n"
+                #            f"force_torque_xyzxyz={th.cat([forcevector, torque], dim = 1)}\n"
+                #            f"durations={duration}\n"
+                #            f"delays={delays}\n"
+                #            f"vec_mask={apply_impulse}\n")
+                self._adapter.set_link_impulses(self._main_body_link_ids,
+                                                force_torque_xyzxyz=th.cat([forcevector, torque], dim = 1).view((self.num_envs,1,6)),
+                                                durations=duration.view((self.num_envs,1)),
+                                                delays=delays.view((self.num_envs,1)),
+                                                vec_mask=apply_impulse.view((self.num_envs,)))
 
     @override
     def post_step(self):
@@ -1015,8 +1017,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"jstates_v_j_pve = {jstates_v_j_pve}")
         # th.cuda.synchronize()
         # t1 = time.monotonic()
-        bstates_v_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = False)[:,0,:]
-        # ggLog.info(f"axes pose = {self._adapter.getLinksState(requestedLinks = self._adapter.get_links_ids([('axes','root')]), use_com_frame = False)[:,0,:]}")
+        bstates_v_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
+        # ggLog.info(f"axes pose = {self._adapter.getLinksState(requestedLinks = self._adapter.get_links_ids([('axes','root')]), use_com_pose = False)[:,0,:]}")
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # th.cuda.synchronize()
         # t2 = time.monotonic()

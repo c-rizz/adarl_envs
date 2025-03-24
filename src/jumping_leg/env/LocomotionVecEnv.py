@@ -417,7 +417,7 @@ class LocomotionVecEnv(RobotVecEnv):
         #                                             self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z]]
 
         # compute linvel error
-        borient_quat_vec_xyzw = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = False)[:,0,3:7]
+        borient_quat_vec_xyzw = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,3:7]
         vsize = borient_quat_vec_xyzw.size()[0]
         abs_linvel_goal_vec_xyz = self._locomotion_episode_config.goal_abs_vel_vec_xyz
         abs_planar_linvel_goal = abs_linvel_goal_vec_xyz # should be always planar
@@ -545,7 +545,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.COLLISON_COUNT :collision_count_vec,
                             self.LOCOMOTION_FIELDS.CRASHED : crashed_vec}
         
-        # fstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._feet_link_ids, use_com_frame = False)
+        # fstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._feet_link_ids, use_com_pose = False)
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
         if isinstance(self._adapter, MjxAdapter):
             feet_are_touching_ground = self._adapter.check_colliding_links(self._feet_link_ids, self._ground_link_id)
@@ -1013,7 +1013,7 @@ class LocomotionVecEnv(RobotVecEnv):
                 masked_assign(goals_fixed,zero_goals,self._thtens([0,0,-1.0]))
                 
             q = quat_xyzw_between_vecs_py(self._thtens([1.0,0,0]).expand((self._adapter.vec_size(),3)), goals_fixed)
-            bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_frame = False)[:,0,:]
+            bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
             pose = bstates_vec_13[:,:7]
             pose[:,2] = th.linalg.norm(self._locomotion_episode_config.goal_abs_vel_vec_xyz, dim = 1)
             pose[:,3:7] = q

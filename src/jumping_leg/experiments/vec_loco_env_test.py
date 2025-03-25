@@ -58,7 +58,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_position_weight" :          1.0,
         "reward_feet_air_time_weight" :     10.0,
         "reward_heading_weight" :           0.0,
-        "safe_stiffness" : 200,
+        "safe_stiffness" : 400,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,

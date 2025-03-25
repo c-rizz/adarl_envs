@@ -332,22 +332,23 @@ def get_quad_args():
             }
 
 def get_kyon_args():
+    homing = {  ("kyon","hip_roll_3") : -3.14159*0.01,
+                ("kyon","hip_roll_4") :  3.14159*0.01,
+                ("kyon","hip_roll_1") :  3.14159*0.01,
+                ("kyon","hip_roll_2") : -3.14159*0.01,
+                ("kyon","hip_pitch_3") :  0.75,
+                ("kyon","hip_pitch_4") : -0.75,
+                ("kyon","hip_pitch_1") :  0.75,
+                ("kyon","hip_pitch_2") : -0.75,
+                ("kyon","knee_pitch_3") : -1.8,
+                ("kyon","knee_pitch_4") :  1.8,
+                ("kyon","knee_pitch_1") : -1.8,
+                ("kyon","knee_pitch_2") :  1.8}
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
             "model_kwargs" : {"upper_body" : "false",
                               "footonly_collision" : "true"},
             "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf")},
-            "homing_joint_pose" : { ("kyon","hip_roll_3") : -3.14159*0.05,
-                                    ("kyon","hip_roll_4") :  3.14159*0.05,
-                                    ("kyon","hip_roll_1") :  3.14159*0.05,
-                                    ("kyon","hip_roll_2") : -3.14159*0.05,
-                                    ("kyon","hip_pitch_3") :  0.75,
-                                    ("kyon","hip_pitch_4") : -0.75,
-                                    ("kyon","hip_pitch_1") :  0.75,
-                                    ("kyon","hip_pitch_2") : -0.75,
-                                    ("kyon","knee_pitch_3") : -1.8,
-                                    ("kyon","knee_pitch_4") :  1.8,
-                                    ("kyon","knee_pitch_1") : -1.8,
-                                    ("kyon","knee_pitch_2") :  1.8,},
+            "homing_joint_pose" : homing,
             "robot_name" : "kyon",
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
@@ -357,11 +358,17 @@ def get_kyon_args():
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "mass_randomized_links" : [LINK_FILTERS.ALL_ROBOT],
             "friction_randomized_links" : [LINK_FILTERS.ALL],
-            "safety_limits_ratios_minmax_pve" : 0.9,
+            "safety_limits_ratios_minmax_pve" : {k:[[ 0.3, 0.9, 0.9],
+                                                    [ 0.3, 0.9, 0.9]] for k,v in homing.items()},
+            "safe_limits_position_offset" : homing,
             "enable_link_collisions" : [    (('kyon', 'contact_1'),[('ground','ground_link')]),
                                             (('kyon', 'contact_2'),[('ground','ground_link')]),
                                             (('kyon', 'contact_3'),[('ground','ground_link')]),
-                                            (('kyon', 'contact_4'),[('ground','ground_link')])]
+                                            (('kyon', 'contact_4'),[('ground','ground_link')])],
+            "feet_links" : [('kyon', 'contact_1'),
+                            ('kyon', 'contact_2'),
+                            ('kyon', 'contact_3'),
+                            ('kyon', 'contact_4')]
         }
 
 

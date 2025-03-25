@@ -375,14 +375,7 @@ def get_kyon_args():
 
 
 def get_centauro_args():
-    return {"model_file" : adarl.utils.utils.pkgutil_get_path("iit-centauro-ros-pkg","centauro_urdf/urdf/centauro.urdf.xacro"),
-            "model_kwargs" : {  "realsense":"false",
-                                "velodyne" :"false",
-                                "floating_joint":"true",
-                                "sphere_wheel_collision":"true"
-                                },
-            "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("iit-centauro-ros-pkg","centauro_urdf")},
-            "homing_joint_pose" : { ("centauro","hip_yaw_1") : -0.746874,
+    homing = { ("centauro","hip_yaw_1") : -0.746874,
                                     ("centauro","hip_pitch_1") : -1.25409,
                                     ("centauro","knee_pitch_1") : -1.55576,
                                     ("centauro","ankle_pitch_1") : -0.301666,
@@ -423,7 +416,15 @@ def get_centauro_args():
                                     # ("centauro","j_wheel_4") : 0.0,
                                     # ("centauro","dagana_1_claw_joint") : 0,
                                     # ("centauro","dagana_2_claw_joint") : 0
-                                    },
+                                    }
+    return {"model_file" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf/urdf/centauro.urdf.xacro"),
+            "model_kwargs" : {  "realsense":"false",
+                                "velodyne" :"false",
+                                "floating_joint":"true",
+                                "sphere_wheel_collision":"true"
+                                },
+            "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf")},
+            "homing_joint_pose" : homing,
             "robot_name" : "centauro",
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
@@ -433,11 +434,17 @@ def get_centauro_args():
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "mass_randomized_links" : [LINK_FILTERS.ALL_ROBOT],
             "friction_randomized_links" : [LINK_FILTERS.ALL],
-            "safety_limits_ratios_minmax_pve" : 0.9,
+            "safety_limits_ratios_minmax_pve" : {k:[[ 0.3, 0.9, 0.9],
+                                                    [ 0.3, 0.9, 0.9]] for k,v in homing.items()},
+            "safe_limits_position_offset" : homing,
             "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_2'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_3'),[('ground','ground_link')]),
-                                            (('centauro', 'wheel_4'),[('ground','ground_link')])]
+                                            (('centauro', 'wheel_4'),[('ground','ground_link')])],
+            "feet_links" : [('centauro', 'wheel_1'),
+                            ('centauro', 'wheel_2'),
+                            ('centauro', 'wheel_3'),
+                            ('centauro', 'wheel_4')]
         }
 
 

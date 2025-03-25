@@ -238,7 +238,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     env_device = th.device("cpu")
     mode = args["mode"]
-    height_pixels = 360 #if mode == "mjx" else 720
+    height_pixels = args["resolution"] #if mode == "mjx" else 720
     pixel_resolution = (height_pixels,int(height_pixels*16/9))
     
     env_builder_args = {
@@ -270,7 +270,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_position_weight" :          1.0,
         "reward_feet_air_time_weight" :     10.0,
         "reward_heading_weight" :           0.0,
-        "safe_stiffness" : 200,
+        "safe_stiffness" : 400,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
@@ -322,7 +322,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
                 render=not args["gui"],
-                robot = args["robot"])
+                robot = args["robot"],
+                deterministic = args["deterministic"])
 
 
 
@@ -330,7 +331,8 @@ def play(seed, folderName, run_id, args,
          env_builder : EnvBuilderProtocol, 
          env_builder_args : dict[str,Any], 
          step_length_sec : float, render : bool,
-         robot : str):
+         robot : str,
+         deterministic : bool):
     
     ggLog.info(f"Starting run")
     if render:
@@ -424,7 +426,7 @@ def play(seed, folderName, run_id, args,
                 ggLog.info(f"step = {step_count} rtfactor = {step_length_sec/full_step_wallduration:.2f} max_rtfactor = {step_length_sec/step_wallduration:.2f} \t goal_velocity_xy={goal_velocity_xy}")
                 # ggLog.info(f"ep_config = {info['ep_config']}")
                 obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
-                action, hidden_state = model.predict(obs_batch, deterministic = True)
+                action, hidden_state = model.predict(obs_batch, deterministic = deterministic)
                 obs, reward, terminated, truncated, info = env.step(action.detach().squeeze()) #type: ignore
                 if render:
                     img = env.render()
@@ -517,6 +519,8 @@ if __name__ == "__main__":
     ap.add_argument("--gui", default=False, action='store_true', help="Do not start the gui, instead stream renderings")
     ap.add_argument("--record", default=False, action='store_true', help="Record episode videos")
     ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,random,pretrained]")
+    ap.add_argument("--resolution", default=240, type=int, help="Vertical video resolution")
+    ap.add_argument("--deterministic", default=False, action='store_true', help="Force the policy to be deterministic")
     
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())

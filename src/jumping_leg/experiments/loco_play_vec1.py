@@ -242,7 +242,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     pixel_resolution = (height_pixels,int(height_pixels*16/9))
     
     env_builder_args = {
-            "action_delay_mustd" : (0.0,0.01),
+        "action_delay_mustd" : (0.0,0.01),
         "action_noise_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
@@ -260,7 +260,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_health_weight" :            0.0,
         "reward_position_limit_weight" :    0.1,
         "reward_torque_limit_weight" :      0.0,
-        "reward_torque_weight" :            0.0,
+        "reward_torque_weight" :            1.0,
         "reward_torquediff_weight" :        0.0,
         "reward_tracking_weight" :          1.0,
         "reward_velocity_limit_weight" :    0.0,
@@ -269,7 +269,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_pitchnroll_weight" :        0.15,
         "reward_position_weight" :          1.0,
         "reward_feet_air_time_weight" :     10.0,
-        "reward_heading_weight" :           0.0,
+        "reward_heading_weight" :           0.05,
         "safe_stiffness" : 400,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,

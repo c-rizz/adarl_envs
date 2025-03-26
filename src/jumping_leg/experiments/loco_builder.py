@@ -334,18 +334,21 @@ def get_quad_args():
             }
 
 def get_kyon_args():
-    homing = {  ("kyon","hip_roll_3") : -3.14159*0.01,
-                ("kyon","hip_roll_4") :  3.14159*0.01,
-                ("kyon","hip_roll_1") :  3.14159*0.01,
-                ("kyon","hip_roll_2") : -3.14159*0.01,
-                ("kyon","hip_pitch_3") :  0.75,
-                ("kyon","hip_pitch_4") : -0.75,
-                ("kyon","hip_pitch_1") :  0.75,
-                ("kyon","hip_pitch_2") : -0.75,
-                ("kyon","knee_pitch_3") : -1.8,
-                ("kyon","knee_pitch_4") :  1.8,
-                ("kyon","knee_pitch_1") : -1.8,
-                ("kyon","knee_pitch_2") :  1.8}
+    hip_pitch = 50/180*3.14159
+    hip_roll = 2/180*3.14159
+    knee = 90/180*3.14159
+    homing = {  ("kyon","hip_roll_3") : -hip_roll,
+                ("kyon","hip_roll_4") :  hip_roll,
+                ("kyon","hip_roll_1") :  hip_roll,
+                ("kyon","hip_roll_2") : -hip_roll,
+                ("kyon","hip_pitch_3") :  hip_pitch,
+                ("kyon","hip_pitch_4") : -hip_pitch,
+                ("kyon","hip_pitch_1") :  hip_pitch,
+                ("kyon","hip_pitch_2") : -hip_pitch,
+                ("kyon","knee_pitch_3") : -knee,
+                ("kyon","knee_pitch_4") :  knee,
+                ("kyon","knee_pitch_1") : -knee,
+                ("kyon","knee_pitch_2") :  knee}
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
             "model_kwargs" : {"upper_body" : "false",
                               "footonly_collision" : "true"},

@@ -114,7 +114,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 train_steps=50_000_000,
                 run_folder=folderName,
                 gpuid = None, # seed%th.cuda.device_count(),
-                modelFile=resumeModelFile,
+                pretrained_model_file=resumeModelFile,
                 env_builder=env_builder,
                 env_builder_args = env_builder_args,
                 eval_configurations=eval_confs,

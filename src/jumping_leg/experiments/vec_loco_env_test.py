@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 2048
+        train_envs = 1024
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -66,7 +66,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : 0,
         "goal_speed_minmax" : (0,1),
         "use_contacts" : False,
-        "frame_stack_length" : 3,
+        "frame_stack_length" : 1,
         "verbose_infos" : False,
         "terminate_on_body_contact" : False,
         "use_wandb" : False,
@@ -78,9 +78,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
-        "initial_pose_randomization" : 0.8,
-        "mass_randomization_ratio" : 0.3,
-        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
+        "initial_pose_randomization" : 0.1,
+        "mass_randomization_ratio" : 0.0,
+        "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
         "impulse_probability_per_sec" : 0.5,
         "impulse_duration_minmax" : (0.01, 2.5),
         "impulse_mean_std" : (50.0,50.0)
@@ -182,7 +182,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=4096,
-                                                    buffer_size=3_000_000,
+                                                    buffer_size=1_000_000,
                                                     total_steps=300_000_000,
                                                     train_freq_vstep=10,
                                                     grad_steps=40,

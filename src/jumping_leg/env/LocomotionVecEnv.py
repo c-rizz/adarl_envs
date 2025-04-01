@@ -21,6 +21,7 @@ from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import adarl.utils.tensor_trees
 import traceback
 from adarl.utils.spaces import get_space_labels
+import pprint
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -300,7 +301,7 @@ class LocomotionVecEnv(RobotVecEnv):
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
         obs_labels = self._state_helper.observation_names()
-        ggLog.info(f"Obs labels = {obs_labels}")
+        ggLog.info(f"Obs labels = \n{pprint.pformat(obs_labels)}")
         ggLog.info(f"Env constructed")
 
     @override

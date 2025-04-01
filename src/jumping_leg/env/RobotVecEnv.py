@@ -29,6 +29,7 @@ import torch as th
 import time
 from pathlib import Path
 from adarl.utils.spaces import get_space_labels
+import pprint
 
 
 def hash_tensor(tensor):
@@ -424,7 +425,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
         ggLog.info(f"Built info helper")
-        ggLog.info(f"get_space_labels(self.single_observation_space) = {get_space_labels(self.single_observation_space)}")
+        # ggLog.info(f"get_space_labels(self.single_observation_space) = {get_space_labels(self.single_observation_space)}")
 
         self.set_seeds(th.as_tensor(seed))
         self._adapter.set_monitored_links([self._configuration.main_body_link])
@@ -762,6 +763,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
                     
             for v in range(selected_vecs_num): # TODO: this may be sloooooow, can I parallelize it?
+                always_present = set()
                 for i in range(1000):
                     normpos = (self._thrand(size=(len(self._configuration.controlled_joints),))*2-1)*self._configuration.initial_pose_randomization
                     # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
@@ -774,6 +776,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     collisions = self._robot_model.get_all_collisions()
                     # all_link_poses = self._robot_model.get_frame_poses_xyzxyzw() #frames=self._robot_model.get_tree_frame_names_under_joint(self._configuration.robot_root_joint))
                     # all_links_z = np.stack([pose[2] for pose in all_link_poses.values()])
+                    if i == 0:
+                        always_present = always_present.union(set(collisions))
+                    else:
+                        always_present = always_present.intersection(set(collisions))
                     if len(collisions) == 0: # and np.all(all_links_z>0):
                         # ggLog.info(f"joint_pose = {self._robot_model.get_joint_pose()}")
                         # ggLog.info(f"selected all_link_poses = {all_link_poses}")
@@ -782,7 +788,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         break
                 if not founds[v]:
                     initial_jposes[v] = homing_pos
-                    ggLog.warn(f"Failed to find initial joint configuration. Last collisions = {collisions}, always present collisions = {self._always_present_collisions}")
+                    ggLog.warn(f"Failed to find initial joint configuration for env {v}. Last collisions = {collisions}, filtered collisions = {self._always_present_collisions}\n always_present={always_present}")
         else:
             initial_jposes = homing_pos.expand(selected_vecs_num, len(self._configuration.controlled_joints))
         if  self._configuration.init_on_reset_ratio<1.0 and self._init_counter_since_reset>1:
@@ -881,8 +887,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             moving_joints=[jn[1] for jn in self._configuration.controlled_joints],
             fixed_joints_pose={self._configuration.robot_root_joint : self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy()}
                                             if self._configuration.robot_is_floating else {},
-                                            samples=100)
-        ggLog.info(f"Always present self collisions = {self._always_present_collisions}")
+            samples=1000,
+            threshold=0.6)
+        ggLog.info(f"Always present self collisions = {pprint.pformat(self._always_present_collisions)}")
         self._adapter.set_monitored_joints(self._configuration.controlled_joints)
         self._adapter.set_impedance_controlled_joints(self._configuration.controlled_joints)
         # ggLog.info("Initialized RobotVecEnv scenario")

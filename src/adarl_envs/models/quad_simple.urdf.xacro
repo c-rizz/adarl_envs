@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="utf-8"  ?>
+<robot name="quad_simple" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <xacro:include filename="$(find adarl_envs)/models/commons.xacro"/>
+    <xacro:include filename="$(find adarl_envs)/models/leg_simple.xacro"/>
+
+	<!-- <xacro:arg name="hip_out_offset" default="0.2146" />  -->
+    <!-- Hip offset shoulbe be wide enough to prevent self collisions 
+         To prevent collision when 45 degrees open outward it should be more than thigh_width/2*1.414,
+         When opening inward it's a bit more complicated, depends on the maximum inward angle -->
+	<xacro:arg name="hip_out_offset" default="0.07" /> 
+	<xacro:arg name="front_legs_pos" default="0.35" />
+	<xacro:arg name="back_legs_pos" default="-0.35" />
+
+	<xacro:arg name="thigh_width" default="0.09" />
+	<xacro:arg name="thigh_height" default="0.3" />
+	<xacro:arg name="thigh_mass" default="2" />
+	<xacro:arg name="thigh_color" default="1 0.5088 0.0468 1" />
+
+	<xacro:arg name="knee_y_offset" default="-0.09" /> <!-- Wide enough to prevent self collisions (should be more than shin_width/2 + thigh_width/2) -->
+
+	<xacro:arg name="shin_width" default="0.06" />
+	<xacro:arg name="shin_height" default="0.35" />
+	<xacro:arg name="shin_mass" default="1" />
+	<xacro:arg name="shin_color" default="1 0.5088 0.0468 1" />
+
+	<xacro:arg name="body_width" default="0.45" />
+	<xacro:arg name="body_length" default="0.8" />
+	<xacro:arg name="body_height" default="0.20" />
+	<xacro:arg name="body_mass" default="12" />
+
+	<xacro:arg name="hip_friction" default="0.1" />
+	<xacro:arg name="knee_friction" default="0.1" />
+
+	<xacro:arg name="use_cylinders" default="True" />
+	
+    <xacro:arg name="all_collisions" default="True" />
+
+
+
+
+	<xacro:property name="legs_out_offset"  default="$(arg hip_out_offset)" /> 
+	<xacro:property name="front_legs_pos"  default="$(arg front_legs_pos)" /> 
+	<xacro:property name="back_legs_pos"  default="$(arg back_legs_pos)" /> 
+
+	<xacro:property name="thigh_width"  default="$(arg thigh_width)" />
+	<xacro:property name="thigh_height" default="$(arg thigh_height)" />
+	<xacro:property name="thigh_mass"   default="$(arg thigh_mass)" />
+	<xacro:property name="thigh_color"  default="$(arg thigh_color)" /> 
+
+	<xacro:property name="knee_y_offset"  default="$(arg knee_y_offset)" /> 
+
+	<xacro:property name="shin_width"  default="$(arg shin_width)" />
+	<xacro:property name="shin_height" default="$(arg shin_height)" />
+	<xacro:property name="shin_mass"   default="$(arg shin_mass)" />
+	<xacro:property name="shin_color"  default="$(arg shin_color)" /> 
+
+	<xacro:property name="body_width" default="$(arg body_width)" />
+	<xacro:property name="body_length" default="$(arg body_length)" />
+	<xacro:property name="body_height" default="$(arg body_height)" />
+	<xacro:property name="body_mass" default="$(arg body_mass)" />
+
+	
+	<xacro:property name="knee_friction" default="$(arg knee_friction)" />
+	<xacro:property name="hip_friction" default="$(arg hip_friction)" />
+
+	<xacro:property name="use_cylinders" default="$(arg use_cylinders)" />
+	<xacro:arg name="enable_body_collisions" default="$(arg all_collisions)" />
+	<xacro:arg name="enable_thigh_collisions" default="$(arg all_collisions)" />
+	<xacro:arg name="enable_shin_collisions" default="$(arg all_collisions)" />
+	<xacro:property name="enable_body_collisions" default="$(arg enable_body_collisions)" />
+	<xacro:property name="enable_thigh_collisions" default="$(arg enable_thigh_collisions)" />
+	<xacro:property name="enable_shin_collisions" default="$(arg enable_shin_collisions)" />
+
+
+    <xacro:property name="hip_x_min_pos" default="-2.4" />
+    <xacro:property name="hip_x_max_pos" default="0.0" />
+    <xacro:property name="hip_y_min_pos" default="-2.4" />
+    <xacro:property name="hip_y_max_pos" default="2.4" />
+    <xacro:property name="knee_min_pos" default="-2.4" />
+    <xacro:property name="knee_max_pos" default="2.4" />
+
+    <xacro:macro name="default_contact_params" params="">
+        <contact>
+        <!-- 
+        Defaults maybe are these (from bullet3/examples/Importers/ImportURDFDemo/URDFJointTypes.h line 33)
+        URDFLinkContactInfo()
+            : m_lateralFriction(0.5),
+            m_rollingFriction(0),
+            m_spinningFriction(0),
+            m_restitution(0),
+            m_inertiaScaling(1),
+            m_contactCfm(0),
+            m_contactErp(0),
+            m_contactStiffness(1e4),
+            m_contactDamping(1)
+        -->
+            <lateral_friction value="1"/>
+            <rolling_friction value="0.00001"/>
+        </contact>
+    </xacro:macro>
+
+
+
+    <link name="body_link">
+		<visual name = "body_link_v">
+			<origin xyz="0 0 0" rpy="0 0 0"/>
+			<geometry>
+				<box size="${body_length} ${body_width} ${body_height}"/>
+			</geometry>
+            <material name="light_orange">
+                <color rgba="0.85 0.30 0.1 1.0"/>
+            </material>
+	   	</visual>
+        <xacro:if value="${enable_body_collisions}">
+            <collision name = "body_link_c">
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <box size="${body_length} ${body_width} ${body_height}"/>
+                </geometry>
+            </collision>
+		</xacro:if>
+		<xacro:box_inertial mass="${body_mass}"
+                            x="${body_length}" y="${body_width}" z="${body_height}"
+                            pose_xyz = "0 0 0"
+                            pose_rpy = "0 0 0"/>
+        <xacro:default_contact_params />
+	</link>
+
+
+    <xacro:leg_simple   hip_x_offset = "${front_legs_pos}"
+                        hip_y_offset = "${body_width/2 + legs_out_offset}"
+                        hip_z_offset = "0"
+                        thigh_width  = "${thigh_width}"
+                        thigh_height = "${thigh_height}"
+                        thigh_mass = "${thigh_mass}"
+                        thigh_color = "${thigh_color}"
+                        knee_y_offset = "${knee_y_offset}"
+                        shin_width = "${shin_width}"
+                        shin_height = "${shin_height}"
+                        shin_mass = "${shin_mass}"
+                        shin_color = "${shin_color}"
+                        hip_friction = "${hip_friction}"
+                        knee_friction = "${knee_friction}"
+                        parent_link = "body_link"
+                        leg_name = "front_left"
+                        is_left_leg = "true"
+                        hip_x_min_pos = "${hip_x_min_pos}"
+                        hip_x_max_pos = "${hip_x_max_pos}"
+                        hip_y_min_pos = "${hip_y_min_pos}"
+                        hip_y_max_pos = "${hip_y_max_pos}"
+                        knee_min_pos = "${knee_min_pos}"
+                        knee_max_pos = "${knee_max_pos}"
+                        use_cylinders = "${use_cylinders}"
+                        enable_thigh_collisions = "${enable_thigh_collisions}"
+                        enable_shin_collisions = "${enable_shin_collisions}"
+                        />
+
+    <xacro:leg_simple   hip_x_offset = "${front_legs_pos}"
+                        hip_y_offset = "${body_width/2 + legs_out_offset}"
+                        hip_z_offset = "0"
+                        thigh_width  = "${thigh_width}"
+                        thigh_height = "${thigh_height}"
+                        thigh_mass = "${thigh_mass}"
+                        thigh_color = "${thigh_color}"
+                        knee_y_offset = "${knee_y_offset}"
+                        shin_width = "${shin_width}"
+                        shin_height = "${shin_height}"
+                        shin_mass = "${shin_mass}"
+                        shin_color = "${shin_color}"
+                        hip_friction = "${hip_friction}"
+                        knee_friction = "${knee_friction}"
+                        parent_link = "body_link"
+                        leg_name = "front_right"
+                        is_left_leg = "false"
+                        hip_x_min_pos = "${hip_x_min_pos}"
+                        hip_x_max_pos = "${hip_x_max_pos}"
+                        hip_y_min_pos = "${hip_y_min_pos}"
+                        hip_y_max_pos = "${hip_y_max_pos}"
+                        knee_min_pos = "${knee_min_pos}"
+                        knee_max_pos = "${knee_max_pos}"
+                        use_cylinders = "${use_cylinders}"
+                        enable_thigh_collisions = "${enable_thigh_collisions}"
+                        enable_shin_collisions = "${enable_shin_collisions}"
+                        />
+
+    <xacro:leg_simple   hip_x_offset = "${back_legs_pos}"
+                        hip_y_offset = "${body_width/2 + legs_out_offset}"
+                        hip_z_offset = "0"
+                        thigh_width  = "${thigh_width}"
+                        thigh_height = "${thigh_height}"
+                        thigh_mass = "${thigh_mass}"
+                        thigh_color = "${thigh_color}"
+                        knee_y_offset = "${knee_y_offset}"
+                        shin_width = "${shin_width}"
+                        shin_height = "${shin_height}"
+                        shin_mass = "${shin_mass}"
+                        shin_color = "${shin_color}"
+                        hip_friction = "${hip_friction}"
+                        knee_friction = "${knee_friction}"
+                        parent_link = "body_link"
+                        leg_name = "back_left"
+                        is_left_leg = "true"
+                        hip_x_min_pos = "${hip_x_min_pos}"
+                        hip_x_max_pos = "${hip_x_max_pos}"
+                        hip_y_min_pos = "${hip_y_min_pos}"
+                        hip_y_max_pos = "${hip_y_max_pos}"
+                        knee_min_pos = "${knee_min_pos}"
+                        knee_max_pos = "${knee_max_pos}"
+                        use_cylinders = "${use_cylinders}"
+                        enable_thigh_collisions = "${enable_thigh_collisions}"
+                        enable_shin_collisions = "${enable_shin_collisions}"
+                        />
+
+    <xacro:leg_simple   hip_x_offset = "${back_legs_pos}"
+                        hip_y_offset = "${body_width/2 + legs_out_offset}"
+                        hip_z_offset = "0"
+                        thigh_width  = "${thigh_width}"
+                        thigh_height = "${thigh_height}"
+                        thigh_mass = "${thigh_mass}"
+                        thigh_color = "${thigh_color}"
+                        knee_y_offset = "${knee_y_offset}"
+                        shin_width = "${shin_width}"
+                        shin_height = "${shin_height}"
+                        shin_mass = "${shin_mass}"
+                        shin_color = "${shin_color}"
+                        hip_friction = "${hip_friction}"
+                        knee_friction = "${knee_friction}"
+                        parent_link = "body_link"
+                        leg_name = "back_right"
+                        is_left_leg = "false"
+                        hip_x_min_pos = "${hip_x_min_pos}"
+                        hip_x_max_pos = "${hip_x_max_pos}"
+                        hip_y_min_pos = "${hip_y_min_pos}"
+                        hip_y_max_pos = "${hip_y_max_pos}"
+                        knee_min_pos = "${knee_min_pos}"
+                        knee_max_pos = "${knee_max_pos}"
+                        use_cylinders = "${use_cylinders}"
+                        enable_thigh_collisions = "${enable_thigh_collisions}"
+                        enable_shin_collisions = "${enable_shin_collisions}"
+                        />
+
+    <link name="world"/>
+	<joint name="world_to_body" type="floating">
+        <parent link="world"/>
+        <child link="body_link"/>
+    </joint>
+
+
+
+  <!-- <mujoco>
+    <compiler  discardvisual="false"/>
+  </mujoco> -->
+</robot>

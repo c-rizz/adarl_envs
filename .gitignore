@@ -1,4 +1,4 @@
-src/*.egg-info/*
+*.egg-info*
 *__pycache__*
 *.gch
 build/*

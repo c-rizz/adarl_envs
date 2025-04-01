@@ -36,12 +36,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "control_mode" : "position",
         "robot_model" : args["robot"],
         "enable_rendering" : False,
-        "goal_err_smoothing_halflife_sec" : 0.2,
+        "goal_err_smoothing_halflife_sec" : 0.05,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
         "quiet" : False,
         "reward_acceleration_weight" :      2.0,
-        "reward_actdiff_weight" :           0.6,
+        "reward_actdiff_weight" :           0.2,
         "reward_actacc_weight" :            0.1,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
@@ -55,10 +55,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_weight" :          1.0,
         "reward_height_weight" :            0.15,
         "reward_pitchnroll_weight" :        0.15,
-        "reward_position_weight" :          5.0,
+        "reward_position_weight" :          1.0,
         "reward_feet_air_time_weight" :     20.0,
         "reward_heading_weight" :           0.05,
-        "safe_stiffness" : 200,
+        "safe_stiffness" : 400,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
         "stop_on_safety" : False,
@@ -83,7 +83,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
         "impulse_probability_per_sec" : 0.5,
         "impulse_duration_minmax" : (0.01, 2.5),
-        "impulse_mean_std" : (100.0,50.0)
+        "impulse_mean_std" : (50.0,50.0)
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

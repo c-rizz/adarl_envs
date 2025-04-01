@@ -1044,7 +1044,7 @@ class LocomotionVecEnv(RobotVecEnv):
             self._locomotion_episode_config.goal_abs_vel_vec_xyz[:,2] = 0
         else:
             goal_velocity_vec_xy = self._thtens([0.0,0.0])
-            self._locomotion_episode_config.goal_rel_vel_vec_xy = self._thtens(rel_goal_xy)    
+            self._locomotion_episode_config.goal_rel_vel_vec_xy = self._thtens(rel_goal_xy)
 
 
 

@@ -349,10 +349,10 @@ def get_kyon_args():
                 ("kyon","knee_pitch_4") :  knee,
                 ("kyon","knee_pitch_1") : -knee,
                 ("kyon","knee_pitch_2") :  knee}
-    return {"model_file" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf/urdf/kyon.urdf.xacro"),
+    return {"model_file" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro"),
             "model_kwargs" : {"upper_body" : "false",
                               "footonly_collision" : "true"},
-            "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("iit-kyon-ros-pkg","kyon_urdf")},
+            "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf")},
             "homing_joint_pose" : homing,
             "robot_name" : "kyon",
             "robot_main_body_link" : "pelvis",

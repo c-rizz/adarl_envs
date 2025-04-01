@@ -469,7 +469,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                               history_length=self._configuration.history_length,
                                               obs_history_length = self._configuration.frame_stack_length,
                                               vec_size=adapter.vec_size(),
-                                              observable_subfields = ["pos","vel","cmdeff","senseff","refpos","refvel","refeff","stiff","damp"])
+                                              observable_subfields = ["pos","vel","cmdeff","refpos","refvel","refeff","stiff","damp"])
         joint_step_stats_state_helper = RobotStatsStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
                                                         obs_dtype=self._configuration.obs_dtype,
                                                         th_device=self._configuration.th_device,
@@ -1028,7 +1028,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def _get_new_instantaneous_state(self):
         # ggLog.info(f"_stepCounter = {self._stepCounter}")
         # t0 = time.monotonic()
-        jstates_v_j_pveae = self._adapter.getExtendedJointsState(requestedJoints=self._controlled_joints_ids)
+        if isinstance_noimport(self._adapter, "MjxAdapter"):
+            jstates_v_j_pveae = self._adapter.getExtendedJointsState(requestedJoints=self._controlled_joints_ids)
+        else:
+            jstates_v_j_pve = self._adapter.getJointsState(requestedJoints=self._controlled_joints_ids)
+            jstates_v_j_pveae = th.cat([jstates_v_j_pve, th.zeros(jstates_v_j_pve.shape[:2]+(2,), dtype=jstates_v_j_pve.dtype, device=jstates_v_j_pve.device)], dim = -1)
         # ggLog.info(f"jstates_v_j_pve = {jstates_v_j_pve}")
         # th.cuda.synchronize()
         # t1 = time.monotonic()

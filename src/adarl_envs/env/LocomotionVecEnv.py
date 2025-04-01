@@ -1,7 +1,6 @@
 from __future__ import annotations
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
-from adarl.adapters.MjxAdapter import MjxAdapter
 from adarl.utils.utils import (LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection, isinstance_noimport, 
                                quat_xyzw_between_vecs_py, masked_assign, quat_mul_xyzw, quat_angle_xyzw)
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
@@ -590,7 +589,7 @@ class LocomotionVecEnv(RobotVecEnv):
         
         # fstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._feet_link_ids, use_com_pose = False)
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
-        if isinstance(self._adapter, MjxAdapter):
+        if isinstance(self._adapter, "MjxAdapter"):
             feet_are_touching_ground = self._adapter.check_colliding_links(self._feet_link_ids, self._ground_link_id)
             # ggLog.info(f"[{step_counts[0]}] feet_are_touching_ground = {feet_are_touching_ground}")
             feet_were_touching_ground = prev_feet_state <= 0

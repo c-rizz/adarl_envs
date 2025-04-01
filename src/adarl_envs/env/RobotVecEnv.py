@@ -3,7 +3,6 @@ from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAda
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
 from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
 from adarl.adapters.BaseSimulationAdapter import ModelSpawnDef
-from adarl.adapters.MjxAdapter import MjxAdapter
 from adarl.envs.vec.ControlledVecEnv import ControlledVecEnv
 from adarl.envs.vec.BaseVecEnv import Observation
 from adarl.utils.robot_helpers import Robot
@@ -691,7 +690,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"_initialize_episodes({vec_mask})")
         if vec_mask is None:
             vec_mask = th.ones((self.num_envs,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
-        if isinstance(self._adapter, MjxAdapter):
+        if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
             self._adapter.reset_model_alterations(vec_mask)
         # ggLog.info(f"initializing episodes {vec_mask}")
         resetted_state = self._state_helper.reset_state()
@@ -712,7 +711,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         # ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
 
-        if isinstance(self._adapter, MjxAdapter):
+        if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
             # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")
             self._adapter.alter_model_rel(  link_masses = ( self._mass_randomized_link_ids,
                                                             (self._thrand(size=(self.num_envs, len(self._configuration.mass_randomization_ratios)))*2-1)*self._configuration.mass_randomization_ratios),
@@ -1049,7 +1048,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                   lambda: f"non finite values in joint stats at {th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae)).nonzero()}: {vec_stats_minmaxavgstd_j_pvae[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae))]} : {vec_stats_minmaxavgstd_j_pvae}", just_warn=True)
         dbg_check(lambda: th.all(th.isfinite(bstates_v_13)),
                   lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(bstates_v_13)).nonzero()}: {bstates_v_13[th.logical_not(th.isfinite(bstates_v_13))]} : {bstates_v_13}", just_warn=True)
-        if not th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)), th.all(th.isfinite(bstates_v_13))) and isinstance(self._adapter, MjxAdapter):
+        if not th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)), th.all(th.isfinite(bstates_v_13))) and adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
             bad_sim_id = th.logical_not(th.isfinite(bstates_v_13)).nonzero()[0,0].item()
             import jax.numpy as jnp
             ggLog.info(f"diverging sim {bad_sim_id}:\n"

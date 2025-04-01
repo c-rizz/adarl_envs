@@ -749,24 +749,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             initial_jposes = th.zeros(  size = (selected_vecs_num, len(self._configuration.controlled_joints)),
                                         dtype=th.float32).to(device=self._configuration.th_device, non_blocking=True)
             # ggLog.info(f"Setting body pose: {self._configuration.robot_root_joint} : {self._configuration.homing_body_pose_xyz_xyzw}")
-            if self._configuration.robot_is_floating:
-                # Correct any offset on the floating joint, to make it as if it is just at the origin
-                # TODO: actually perform some inverse kinematics here, this just work for simple cases
-                homing_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy()
-                self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:np.array([0.,0.,0.,  0.,0.,0.,1.])})
-                root_joint_offset = self._robot_model.get_frame_poses_xyzxyzw(frames=[self._configuration.main_body_link[1]])[self._configuration.main_body_link[1]]
-                homing_body_pose_xyzxyzw = np.concatenate([homing_body_pose_xyzxyzw[:3]-root_joint_offset[:3],
-                                                           quat_mul_xyzw_np(homing_body_pose_xyzxyzw[3:],
-                                                                            quat_conj_xyzw_np(root_joint_offset[3:]).astype(np.float32))])
-                # ggLog.info(f"joint_pose = {self._robot_model.get_joint_pose()}")                
-                # ggLog.info(f"root_joint_offset = {root_joint_offset}")
-                # ggLog.info(f"self._configuration.main_body_link[1] = {self._configuration.main_body_link[1]}")
-                # ggLog.info(f"homing_body_pose_xyzxyzw = {homing_body_pose_xyzxyzw}")
-
                     
             for v in range(selected_vecs_num): # TODO: this may be sloooooow, can I parallelize it?
-                always_present = set()
-                for i in range(1000):
+                coll_counter = {}
+                samples = 1000
+                for i in range(samples):
                     normpos = (self._thrand(size=(len(self._configuration.controlled_joints),))*2-1)*self._configuration.initial_pose_randomization
                     # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
                     initial_joint_pose = ((normpos>=0)*((limits_minmax[1]-homing_pos)*normpos + homing_pos) + 
@@ -774,14 +761,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     jp_dict.update({jn:initial_joint_pose[i] for i,jn in enumerate(self._configuration.controlled_joints)})
                     self._robot_model.set_joint_pose_by_names({jn[1]:jp.cpu().numpy() for jn,jp in jp_dict.items()})
                     if self._configuration.robot_is_floating:
-                        self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:homing_body_pose_xyzxyzw})
+                        self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:self._pinocchio_corrected_homing_body_pose_xyzxyzw})
                     collisions = self._robot_model.get_all_collisions()
                     # all_link_poses = self._robot_model.get_frame_poses_xyzxyzw() #frames=self._robot_model.get_tree_frame_names_under_joint(self._configuration.robot_root_joint))
+                    # pprint.pprint(all_link_poses)
                     # all_links_z = np.stack([pose[2] for pose in all_link_poses.values()])
-                    if i == 0:
-                        always_present = always_present.union(set(collisions))
-                    else:
-                        always_present = always_present.intersection(set(collisions))
+                    coll_counter.update({ln:coll_counter.get(ln,0)+1 for ln in collisions})                    
                     if len(collisions) == 0: # and np.all(all_links_z>0):
                         # ggLog.info(f"joint_pose = {self._robot_model.get_joint_pose()}")
                         # ggLog.info(f"selected all_link_poses = {all_link_poses}")
@@ -790,7 +775,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         break
                 if not founds[v]:
                     initial_jposes[v] = homing_pos
-                    ggLog.warn(f"Failed to find initial joint configuration for env {v}. Last collisions = {collisions}, filtered collisions = {self._always_present_collisions}\n always_present={always_present}")
+                    coll_counter = {k:c/samples for k,c in coll_counter.items()}
+                    ggLog.warn(f"Failed to find initial joint configuration for env {v}."
+                               f" last collisions = {collisions}\n"
+                               f" filtered collisions = {self._always_present_collisions}\n"
+                               f" coll_ratio={coll_counter}")
         else:
             initial_jposes = homing_pos.expand(selected_vecs_num, len(self._configuration.controlled_joints))
         if  self._configuration.init_on_reset_ratio<1.0 and self._init_counter_since_reset>1:
@@ -879,6 +868,19 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._controlled_joints_ids = self._adapter.get_joints_ids(self._configuration.controlled_joints)
 
 
+        if self._configuration.robot_is_floating:
+                # Correct any offset on the floating joint, to make it as if it is just at the origin
+                # TODO: actually perform some inverse kinematics here, this just work for simple cases
+                self._pinocchio_corrected_homing_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy()
+                self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:np.array([0.,0.,0.,  0.,0.,0.,1.])})
+                root_joint_offset = self._robot_model.get_frame_poses_xyzxyzw(frames=[self._configuration.main_body_link[1]])[self._configuration.main_body_link[1]]
+                self._pinocchio_corrected_homing_body_pose_xyzxyzw = np.concatenate([self._pinocchio_corrected_homing_body_pose_xyzxyzw[:3]-root_joint_offset[:3],
+                                                           quat_mul_xyzw_np(self._pinocchio_corrected_homing_body_pose_xyzxyzw[3:],
+                                                                            quat_conj_xyzw_np(root_joint_offset[3:]).astype(np.float32))])
+                # ggLog.info(f"joint_pose = {self._robot_model.get_joint_pose()}")                
+                # ggLog.info(f"root_joint_offset = {root_joint_offset}")
+                # ggLog.info(f"self._configuration.main_body_link[1] = {self._configuration.main_body_link[1]}")
+                ggLog.info(f"_corrected_homing_body_pose_xyzxyzw = {self._pinocchio_corrected_homing_body_pose_xyzxyzw}")
         ggLog.info(f"Detecting always present self collisions...")
         self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
         # self._robot_model.remove_collision_pairs([("rail_link_0","slider_link_0")])            
@@ -887,10 +889,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                     collision_obj_id="ground_collision")
         self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
             moving_joints=[jn[1] for jn in self._configuration.controlled_joints],
-            fixed_joints_pose={self._configuration.robot_root_joint : self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy()}
+            fixed_joints_pose={self._configuration.robot_root_joint : self._pinocchio_corrected_homing_body_pose_xyzxyzw}
                                             if self._configuration.robot_is_floating else {},
             samples=1000,
-            threshold=0.6)
+            threshold=1.0)
         ggLog.info(f"Always present self collisions = {pprint.pformat(self._always_present_collisions)}")
         self._adapter.set_monitored_joints(self._configuration.controlled_joints)
         self._adapter.set_impedance_controlled_joints(self._configuration.controlled_joints)

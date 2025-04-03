@@ -1,0 +1,26 @@
+# In a clean container with ros noetic and xbot
+
+cd /home/host
+. /opt/ros/noetic/setup.bash
+. /opt/xbot/setup.sh
+mkdir lr_ros1_ws
+cd lr_ros1_ws
+mkdir forest_ws
+mkdir virtualenv
+cd virtualenv
+python3.8 -m venv38
+cd ..
+. virtualenv/venv38/bin/activate
+pip install --upgrade pip setuptools wheel
+pip installl hhcm-forest
+
+cd forest_ws
+forest init
+. setup.bash
+forest add-recipes git@github.com:ADVRHumanoids/multidof_recipes.git --tag master
+forest grow -j10 xbot2_mujoco
+forest grow -j10 iit-kyon-ros-pkg
+
+cd ..
+pip install -r src/adarl/requrements_2004.txti
+apt remove liboctomap-dev

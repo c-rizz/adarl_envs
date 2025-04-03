@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+from __future__ import annotations
 import time
 import inspect
 from adarl.utils.buffers import BaseBuffer
@@ -321,7 +321,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder = named_loco_single_env_builder,
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
-                render=not args["gui"],
+                render=not args["gui"] and not args["norender"],
                 robot = args["robot"],
                 deterministic = args["deterministic"])
 
@@ -521,6 +521,7 @@ if __name__ == "__main__":
     ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,random,pretrained]")
     ap.add_argument("--resolution", default=240, type=int, help="Vertical video resolution")
     ap.add_argument("--deterministic", default=False, action='store_true', help="Force the policy to be deterministic")
+    ap.add_argument("--norender", default=False, action='store_true', help="Force disable the rendering")
     
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())

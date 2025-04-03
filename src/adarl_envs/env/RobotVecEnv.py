@@ -375,6 +375,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._build_state_helper(adapter)
         ggLog.info(f"self._state_helper.observation_names() = {self._state_helper.observation_names()}")
         self._current_state = self._state_helper.reset_state()
+        self._last_obs = self._state_helper.observe(self._current_state)
         self._eps_start_stime = self._thzeros(size=(adapter.vec_size(),))
         self._safety_limits = self._state_helper.sub_helpers[self.STATE_ROBOT].build_robot_limits(
                                                     joint_limit_minmax_pve=self._configuration.joint_safe_limits_minmax_pve,
@@ -420,7 +421,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         ggLog.info(f"enable_link_collisions = {enable_link_collisions}")
         if isinstance(self._adapter, BaseVecSimulationAdapter) and enable_link_collisions is not None:
             self._adapter.set_body_collisions(enable_link_collisions)
-        self.initialize_episodes()
         ggLog.info(f"Built scenario")
         example_labels : dict[str,th.Tensor] = {}
         example_infos = self.get_infos(self._current_state, example_labels)
@@ -431,6 +431,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self.set_seeds(th.as_tensor(seed))
         self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.startup()
+        self.initialize_episodes()
         
 
 
@@ -795,7 +796,53 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self.set_max_episode_steps(self._current_episode_config.vec_max_ep_steps)
         # ggLog.info(f"_current_episode_config = {self._current_episode_config}")
 
+
+    def _realworld_robot_init_move(self, vec_mask : th.Tensor):
+        if isinstance_noimport(self._adapter,"VecRosXBotAdapterWrapper"):
+            vjpose = self._current_episode_config.vec_initial_ctrl_joint_pose
+            initial_cmd_vec_j_pvesd = th.stack([vjpose,
+                                        th.zeros_like(vjpose),
+                                        th.zeros_like(vjpose),
+                                        th.full_like(vjpose, self._configuration.safe_stiffness),
+                                        th.full_like(vjpose, self._configuration.safe_damping)], dim = 2)
+            # initial_state_pve = th.zeros(size=(self.num_envs, len(self._configuration.controlled_joints), 3))
+            not_resetting_sims = th.logical_not(self._current_episode_config.vec_init_on_reset)
+            # if th.any(not_resetting_sims):
+            # ggLog.info(f"initial_cmd_vec_j_pvesd.device = {initial_cmd_vec_j_pvesd.device}, self._last_sent_v_j_pvesd.deive = {self._last_sent_v_j_pvesd.device} not_resetting_sims.device={not_resetting_sims.device}")
+            masked_assign(initial_cmd_vec_j_pvesd, not_resetting_sims, self._last_sent_v_j_pvesd)
+            try:
+                self._adapter.moveToJointPoseSync(  joint_names = self._configuration.controlled_joints,
+                                                    positions = initial_cmd_vec_j_pvesd[:,:,0],
+                                                    velocity_scaling = 0.1,
+                                                    acceleration_scaling = 0.1,
+                                                    joint_position_tolerance = 0.01,
+                                                    max_time_s = 60)
+            except adarl.utils.utils.MoveFailError as e:
+                ggLog.warn(f"Timed out reaching position: {adarl.utils.utils.exc_to_str(e)}")
+            time.sleep(1)
+            self._adapter.setJointsImpedanceCommand(initial_cmd_vec_j_pvesd, vec_mask=vec_mask)
+            time.sleep(1)
+            self._adapter.set_current_joint_impedance_command(initial_cmd_vec_j_pvesd, vec_mask=vec_mask)
+            masked_assign(self._last_sent_v_j_pvesd, vec_mask, initial_cmd_vec_j_pvesd)
+        else:
+            raise NotImplementedError(f"Unsupported real-world initialization for adapter of type '{type(self._adapter)}'")
+
     def _realworld_initialization(self, vec_mask : th.Tensor):
+        while True:
+            print(f"Episode Initialization:\n"
+                  f"Will move the robot joints into the homing pose and set the initial joint impedance command.")
+            r = input("Enter 'move' to move the robot or 'skip' to skip the robot pose initialization > ")
+            if r == "move":
+                self._realworld_robot_init_move(vec_mask)
+            elif r == "skip":
+                pass
+            else:
+                print(f"Invalid answer '{r}'")
+                continue
+            
+            r = input("Please ensure the robot is in a suitable pose and type 'start' to start episode > ")
+            if r == "start":
+                return
         raise NotImplementedError()
     
     def _simulation_initialization(self, vec_mask : th.Tensor):
@@ -851,16 +898,23 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("PyBulletJointImpedanceAdapter")):
                 self._adapter.build_scenario(models = self._get_spawn_defs())
                 self._arrow_base = ("arrow","world")
-            elif adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("RosXbotAdapter", "RosXbotGazeboAdapter")):
+            elif adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("RosXbotGazeboAdapter")):
+                self._adapter.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path( "adarl_envs",
+                                                                                                            "gazebo/all_gazebo_xbot.launch"),
+                                            launch_file_args={"gui":"false"})
+                self._arrow_base = ("arrow","arrow_link")
+            else:
+                raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
+        elif isinstance_noimport(self._adapter, "VecRosXBotAdapterWrapper"):
+            if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("RosXbotAdapter")):
                 if self._configuration.real:
                     raise NotImplementedError()
                 else:
-                    self._adapter.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path( "adarl_envs",
-                                                                                                                "gazebo/all_gazebo_xbot.launch"),
-                                                launch_file_args={"gui":"false"})
+                    # self._adapter.build_scenario(   models = [],
+                    #                                 launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path(  "adarl_envs",
+                    #                                                                                                 "ros/all_kyon_mujoco.launch"),
+                    #                                 launch_file_args={"gui":"false"})
                     self._arrow_base = ("arrow","arrow_link")
-            else:
-                raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         else:
             raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         
@@ -1042,7 +1096,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # th.cuda.synchronize()
         # t2 = time.monotonic()
         internal_states = self._current_state[self.STATE_INTERNAL][:,0]
-        vec_stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
+        try:
+            vec_stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
+        except NotImplementedError:
+            vec_stats_minmaxavgstd_j_pvae = self._thzeros((self.num_envs,4,len(self._configuration.controlled_joints),4))*float("nan")
         # th.cuda.synchronize()
         # t3 = time.monotonic()
         # ggLog.info(f"vec_stats_minmaxavgstd_j_pvae = {vec_stats_minmaxavgstd_j_pvae}")
@@ -1051,10 +1108,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"jstates_v_j_pve.device = {jstates_v_j_pve.device}")
         # ggLog.info(f"self._last_sent_v_j_pvesd.device = {self._last_sent_v_j_pvesd.device}")
         dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)),
-                  lambda: f"non finite values in joint stats at {th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae)).nonzero()}: {vec_stats_minmaxavgstd_j_pvae[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae))]} : {vec_stats_minmaxavgstd_j_pvae}", just_warn=True)
+                  lambda: f"non finite values in joint stats at {th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae)).nonzero()}: {vec_stats_minmaxavgstd_j_pvae[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae))]} : {vec_stats_minmaxavgstd_j_pvae}",
+                  just_warn=True)
         dbg_check(lambda: th.all(th.isfinite(bstates_v_13)),
-                  lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(bstates_v_13)).nonzero()}: {bstates_v_13[th.logical_not(th.isfinite(bstates_v_13))]} : {bstates_v_13}", just_warn=True)
-        if not th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)), th.all(th.isfinite(bstates_v_13))) and adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
+                  lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(bstates_v_13)).nonzero()}: {bstates_v_13[th.logical_not(th.isfinite(bstates_v_13))]} : {bstates_v_13}",
+                  just_warn=True)
+        if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter") and not th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)), th.all(th.isfinite(bstates_v_13))):
             bad_sim_id = th.logical_not(th.isfinite(bstates_v_13)).nonzero()[0,0].item()
             import jax.numpy as jnp
             ggLog.info(f"diverging sim {bad_sim_id}:\n"
@@ -1071,13 +1130,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_body_rel_linvel_xyz = th_quat_rotate_py(body_abs_linvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
             vec_body_rel_angvel_xyz = th_quat_rotate_py(body_abs_angvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
         else:
+            vec_body_rel_gravity_dir = self._adapter.get_link_gravity_direction(self._main_body_link_ids)[:,0,:]
+            body_abs_linvel_xyz_vec = th.zeros_like(vec_body_rel_gravity_dir)
+            vec_body_rel_linvel_xyz = th.zeros_like(vec_body_rel_gravity_dir)
+            vec_body_rel_angvel_xyz = th.zeros_like(vec_body_rel_gravity_dir)
+            vec_body_ground_dist = th.zeros_like(vec_body_rel_gravity_dir[:,0])
             # - vec_ground_dist can be obtained with some simple sensor, a depth camera, something like that
             # - gravity_dir with an accelerometer
             # - rel_linvel e rel_angvel, may be obtainable with some slam kind of thing, even something quite simple that tracks local features
             #     maybe something like these: 
             #         https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam
             #         https://wiki.ros.org/orb_slam2_ros
-            raise NotImplementedError("")
+            # raise NotImplementedError("")
 
         new_inst_state = self._build_new_instantaneous_state_vec(   
                                     internal_states,

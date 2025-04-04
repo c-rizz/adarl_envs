@@ -810,6 +810,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             # if th.any(not_resetting_sims):
             # ggLog.info(f"initial_cmd_vec_j_pvesd.device = {initial_cmd_vec_j_pvesd.device}, self._last_sent_v_j_pvesd.deive = {self._last_sent_v_j_pvesd.device} not_resetting_sims.device={not_resetting_sims.device}")
             masked_assign(initial_cmd_vec_j_pvesd, not_resetting_sims, self._last_sent_v_j_pvesd)
+            ggLog.info(f"Moving robot...")
             try:
                 self._adapter.moveToJointPoseSync(  joint_names = self._configuration.controlled_joints,
                                                     positions = initial_cmd_vec_j_pvesd[:,:,0],
@@ -817,8 +818,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     acceleration_scaling = 0.1,
                                                     joint_position_tolerance = 0.01,
                                                     max_time_s = 60)
+                ggLog.info(f"Moved robot.")
             except adarl.utils.utils.MoveFailError as e:
                 ggLog.warn(f"Timed out reaching position: {adarl.utils.utils.exc_to_str(e)}")
+
             time.sleep(1)
             self._adapter.setJointsImpedanceCommand(initial_cmd_vec_j_pvesd, vec_mask=vec_mask)
             time.sleep(1)

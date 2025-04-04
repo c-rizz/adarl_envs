@@ -6,6 +6,8 @@
   <include file="$(find kyon_mujoco)/launch/kyon_world.launch">
   </include>
 
+  <param name="use_sim_time" type="bool" value="false" />
+  
   <node name="kyon_xbotcore" pkg="adarl_ros" type="run_xbot_core.sh" respawn="false" output="screen"
         args="-C $(find kyon_config)/kyon_basic.yaml --"/>
 

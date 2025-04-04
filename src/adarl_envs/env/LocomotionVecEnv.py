@@ -1038,7 +1038,7 @@ class LocomotionVecEnv(RobotVecEnv):
             goal_velocity_vec_xy = goal_velocity_vec_xy.expand(self._adapter.vec_size(),2)
             self._locomotion_episode_config.goal_abs_vel_vec_xyz[:,:2] = goal_velocity_vec_xy
             self._locomotion_episode_config.goal_abs_vel_vec_xyz[:,2] = 0
-        elif rel_goal_xy is not None:
+        elif goal_velocity_diff_speed_yaw is not None:
             if isinstance(goal_velocity_diff_speed_yaw, Sequence):
                 goal_velocity_diff_speed_yaw = th.as_tensor(goal_velocity_diff_speed_yaw,device=self._configuration.th_device)
             elif not isinstance(goal_velocity_diff_speed_yaw, th.Tensor):

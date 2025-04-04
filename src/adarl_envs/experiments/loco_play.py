@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+from __future__ import annotations
 import time
 import inspect
 import adarl.utils.dbg.dbg_img

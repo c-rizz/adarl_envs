@@ -1,7 +1,6 @@
 from __future__ import annotations
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
-from adarl.adapters.MjxAdapter import MjxAdapter
 from adarl.utils.utils import (LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection, isinstance_noimport, 
                                quat_xyzw_between_vecs_py, masked_assign, quat_mul_xyzw, quat_angle_xyzw)
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
@@ -253,6 +252,12 @@ class LocomotionVecEnv(RobotVecEnv):
                         feet_links = feet_links,
                         heightmap_resolution_xy = (heightmap_resolution,heightmap_resolution)
                         )
+        
+        self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xyz     = self._thzeros((adapter.vec_size(), 3)),
+                                                                                     goal_rel_vel_vec_xy      = None,
+                                                                                     goal_abs_gravity_vec_xyz = self._thtens([0.0,0.0,-1.0]).repeat(adapter.vec_size(), 1),
+                                                                                     goal_abs_height_vec_z    = self._thtens([0.45]).repeat(adapter.vec_size(), 1),
+                                                                                     goal_heading_rel2linvelgoal_vec_yaw = self._thtens([0.0]).repeat(adapter.vec_size(), 1))
         
         super().__init__(   action_delay_mustd = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
@@ -590,7 +595,7 @@ class LocomotionVecEnv(RobotVecEnv):
         
         # fstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._feet_link_ids, use_com_pose = False)
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
-        if isinstance(self._adapter, MjxAdapter):
+        if isinstance_noimport(self._adapter, "MjxAdapter"):
             feet_are_touching_ground = self._adapter.check_colliding_links(self._feet_link_ids, self._ground_link_id)
             # ggLog.info(f"[{step_counts[0]}] feet_are_touching_ground = {feet_are_touching_ground}")
             feet_were_touching_ground = prev_feet_state <= 0
@@ -616,10 +621,13 @@ class LocomotionVecEnv(RobotVecEnv):
             # ggLog.info(f"[{step_counts[0]}] new_feet_state_th.shape = {new_feet_state_th.shape}")
         else:
             new_feet_liftoffs_vec_foot_t = self._thtens([0.0]).expand(vsize,len(self._locomotion_conf.feet_links))
-        feet_linvels_vec_foot_xyz = self._adapter.getLinksState(self._feet_link_ids)[:,:,7:10]
-        new_feet_state = {self.FEET_FIELDS.FEET_LIFTOFF_TIMES : new_feet_liftoffs_vec_foot_t,
-                          self.FEET_FIELDS.FEET_VEL_X : feet_linvels_vec_foot_xyz[:,:,0],
-                          self.FEET_FIELDS.FEET_VEL_Y : feet_linvels_vec_foot_xyz[:,:,1]}
+        if isinstance(self._adapter,BaseVecSimulationAdapter):
+            feet_linvels_vec_foot_xyz = self._adapter.getLinksState(self._feet_link_ids)[:,:,7:10]
+        else:
+            feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
+        new_feet_state = {  self.FEET_FIELDS.FEET_LIFTOFF_TIMES : new_feet_liftoffs_vec_foot_t,
+                            self.FEET_FIELDS.FEET_VEL_X : feet_linvels_vec_foot_xyz[:,:,0],
+                            self.FEET_FIELDS.FEET_VEL_Y : feet_linvels_vec_foot_xyz[:,:,1]}
 
         new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
         new_inst_state[self.STATE_FEET] = new_feet_state
@@ -1030,7 +1038,7 @@ class LocomotionVecEnv(RobotVecEnv):
             goal_velocity_vec_xy = goal_velocity_vec_xy.expand(self._adapter.vec_size(),2)
             self._locomotion_episode_config.goal_abs_vel_vec_xyz[:,:2] = goal_velocity_vec_xy
             self._locomotion_episode_config.goal_abs_vel_vec_xyz[:,2] = 0
-        elif rel_goal_xy is not None:
+        elif goal_velocity_diff_speed_yaw is not None:
             if isinstance(goal_velocity_diff_speed_yaw, Sequence):
                 goal_velocity_diff_speed_yaw = th.as_tensor(goal_velocity_diff_speed_yaw,device=self._configuration.th_device)
             elif not isinstance(goal_velocity_diff_speed_yaw, th.Tensor):

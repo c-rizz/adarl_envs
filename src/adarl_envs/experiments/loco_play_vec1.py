@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+from __future__ import annotations
 import time
 import inspect
 from adarl.utils.buffers import BaseBuffer
@@ -321,7 +321,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder = named_loco_single_env_builder,
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
-                render=not args["gui"],
+                render=not args["gui"] and not args["norender"],
                 robot = args["robot"],
                 deterministic = args["deterministic"])
 
@@ -379,14 +379,18 @@ def play(seed, folderName, run_id, args,
     if render:
         img = env.render()
         dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
-
     try:
         while play:
             cmd = None
             options = {}
             if args["evaluate"] is None:
                 while cmd != "c":
-                    cmd = input("Enter 'c' to continue. Type 'quit' to quit:\n > ")
+                    cmd = input(f"\n"
+                                f"Enter:\n"
+                                f"  - 'c' to start an episode.\n"
+                                f"  - 'interactive' to enter interactive control.\n"
+                                f"  - 'quit' to quit:\n"
+                                f" > ")
                     if cmd == "quit":
                         play = False
                         break
@@ -403,6 +407,8 @@ def play(seed, folderName, run_id, args,
             else:
                 if session.run_info["collected_episodes"].value >= args["evaluate"]:
                     break
+            if not play:
+                break
             obs : TensorTree[th.Tensor]
             obs, info = env.reset(options = options)  #type: ignore
             # ggLog.info(f"ep_config = {info['ep_config']}")
@@ -493,7 +499,7 @@ def play(seed, folderName, run_id, args,
     ggLog.info(f"Avg reward = {rewards.mean()}, {rewards.std()} std")
     ggLog.info(f"Avg durations = {durations.mean()}, {durations.std()} std")
     # ggLog.info(f"Avg avg10_dists = {avg10_dists.mean()}, {avg10_dists.std()} std")
-    env.reset() # trigger video saving
+    # env.reset() # trigger video saving
     env.close()
 
 if __name__ == "__main__":
@@ -521,6 +527,7 @@ if __name__ == "__main__":
     ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,random,pretrained]")
     ap.add_argument("--resolution", default=240, type=int, help="Vertical video resolution")
     ap.add_argument("--deterministic", default=False, action='store_true', help="Force the policy to be deterministic")
+    ap.add_argument("--norender", default=False, action='store_true', help="Force disable the rendering")
     
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())

@@ -59,7 +59,32 @@ def loco_runner_builder(seed,
     elif mode == "gazebo":
         raise NotImplementedError()
     elif mode == "xbot":
-        raise NotImplementedError()
+        from adarl_ros.adapters.RosXbotAdapter import RosXbotAdapter
+        from adarl_ros.adapters.VecRosXBotAdapterWrapper import VecRosXBotAdapterWrapper
+        forced_ros_master_uri="http://127.0.0.1:11311"
+        ground_link = ("ground_plane","ground_link")
+        adapter = VecRosXBotAdapterWrapper(   adapter = RosXbotAdapter( model_name = robot_name,
+                                                                        stepLength_sec = stepLength_sec,
+                                                                        forced_ros_master_uri = forced_ros_master_uri,
+                                                                        maxObsDelay = float("+inf"),
+                                                                        blocking_observation = False,
+                                                                        is_floating_base = True,
+                                                                        reference_frame = "world",
+                                                                        torch_device = th.device("cpu"),
+                                                                        fallback_cmd_stiffness = 200.0,
+                                                                        fallback_cmd_damping = 10.0,
+                                                                        allow_fallback = True,
+                                                                        jpos_cmd_max_vel = {},
+                                                                        jpos_cmd_max_vel_default = 5.0,
+                                                                        jpos_cmd_max_acc = {},
+                                                                        jpos_cmd_max_acc_default = 5.0,
+                                                                        enable_filters=True,
+                                                                        position_commands_stiffness = 400.0,
+                                                                        position_commands_damping = 10.0),
+                                                vec_size = 1,
+                                                th_device = th_device)
+
+
     elif mode == "xbot-gazebo":
         from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
         from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
@@ -337,18 +362,18 @@ def get_kyon_args():
     hip_pitch = 50/180*3.14159
     hip_roll = 2/180*3.14159
     knee = 90/180*3.14159
-    homing = {  ("kyon","hip_roll_3") : -hip_roll,
-                ("kyon","hip_roll_4") :  hip_roll,
-                ("kyon","hip_roll_1") :  hip_roll,
-                ("kyon","hip_roll_2") : -hip_roll,
-                ("kyon","hip_pitch_3") :  hip_pitch,
-                ("kyon","hip_pitch_4") : -hip_pitch,
-                ("kyon","hip_pitch_1") :  hip_pitch,
-                ("kyon","hip_pitch_2") : -hip_pitch,
-                ("kyon","knee_pitch_3") : -knee,
-                ("kyon","knee_pitch_4") :  knee,
-                ("kyon","knee_pitch_1") : -knee,
-                ("kyon","knee_pitch_2") :  knee}
+    homing = {  ("kyon","hip_roll_3") :  hip_roll,
+                ("kyon","hip_roll_4") : -hip_roll,
+                ("kyon","hip_roll_1") : -hip_roll,
+                ("kyon","hip_roll_2") :  hip_roll,
+                ("kyon","hip_pitch_3") : -hip_pitch,
+                ("kyon","hip_pitch_4") :  hip_pitch,
+                ("kyon","hip_pitch_1") : -hip_pitch,
+                ("kyon","hip_pitch_2") :  hip_pitch,
+                ("kyon","knee_pitch_3") :  knee,
+                ("kyon","knee_pitch_4") : -knee,
+                ("kyon","knee_pitch_1") :  knee,
+                ("kyon","knee_pitch_2") : -knee}
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro"),
             "model_kwargs" : {"upper_body" : "false",
                               "footonly_collision" : "true"},

@@ -183,7 +183,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         seed : int,
                         stepLength_sec : float,
                         step_precision_tolerance : float,
-                        stop_on_safety : bool,
+                        stop_on_failure : bool,
+                        fail_on_safety : bool,
                         terminating_contact_pairs : list[tuple[tuple[str,str],tuple[str,str]]],
                         th_device : th.device,
                         use_contacts : bool,
@@ -280,7 +281,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             seed = seed,
                             stepLength_sec = stepLength_sec,
                             step_precision_tolerance = step_precision_tolerance,
-                            stop_on_safety = stop_on_safety,
+                            stop_on_failure = stop_on_failure,
                             th_device = th_device,
                             homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
                             homing_joint_pose = homing_joint_pose,
@@ -306,7 +307,8 @@ class LocomotionVecEnv(RobotVecEnv):
                             ground_link=ground_link,
                             impulse_probability_per_sec = impulse_probability_per_sec,
                             impulse_duration_minmax = impulse_duration_minmax,
-                            impulse_mean_std = impulse_mean_std
+                            impulse_mean_std = impulse_mean_std,
+                            fail_on_safety = fail_on_safety
                         )
 
         
@@ -738,8 +740,8 @@ class LocomotionVecEnv(RobotVecEnv):
 
         reward_torque           = -self._penalty_reward(normtorques,max_rew=max_rew,exponent=2)
         reward_velocity         = -self._penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
-        reward_acceleration     = -self._flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=1.5,flattening_scale=0.02)
-        reward_position         = -self._penalty_reward(normposhomingdiff,max_rew=max_rew,exponent=2)
+        reward_acceleration     = -self._flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=1.5, flattening_scale=0.02)
+        reward_position         = -self._flattened_penalty_reward(normposhomingdiff,max_rew=max_rew, exponent=0.5, flattening_scale=0.02)
         reward_torquediff       = -self._penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
         reward_actdiff          = -self._penalty_reward(actdiff,max_rew=max_rew,exponent=2)
         reward_actacc           = -self._flattened_penalty_reward(act_acc,max_rew=max_rew, exponent=0.5,flattening_scale=0.1)
@@ -747,12 +749,14 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_position_limit   = -self._penalty_reward(position_safenorm,max_rew=max_rew,exponent=50)
         reward_velocity_limit   = -self._penalty_reward(velocities_safenorm,max_rew=max_rew,exponent=50)
 
-        reward_height = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR],
-                                    zero_rew_dist=self._locomotion_conf.height_reward_settle_point)
-        reward_pitchnroll = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR],
-                                        zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
-        reward_heading = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR],
-                                    zero_rew_dist=self._locomotion_conf.heading_reward_settle_point)
+        # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
+        #                                     zero_rew_dist=self._thtens(0.02))
+        reward_height       = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR],
+                                            zero_rew_dist=self._locomotion_conf.height_reward_settle_point)
+        reward_pitchnroll   = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR],
+                                            zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
+        reward_heading      = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR],
+                                            zero_rew_dist=self._locomotion_conf.heading_reward_settle_point)
 
         goalrelative_weight = self._locomotion_conf.vel_reward_goalrelative_weight
         rel_goal_bell_width = self._locomotion_conf.reward_vel_goal_relative_width
@@ -963,6 +967,7 @@ class LocomotionVecEnv(RobotVecEnv):
         body_linvel_rel_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z)) #type: ignore
+
         i["goal_rel_xyz_vec"] = curr_locom_state[:,goal_vel_rel_xyz_idx]
         goal_abs = curr_locom_state[:,goal_vel_abs_xyz_idx]
         i["goal_abs_speed_vec"] = th.linalg.norm(goal_abs,dim=1)

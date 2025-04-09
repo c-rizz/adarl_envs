@@ -677,7 +677,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if self._configuration.saturate_jimp_ref_limits:
                 v_j_pvesd = th.clamp(v_j_pvesd, min=self._safe_limits_minmax_j_pve[0], max=self._safe_limits_minmax_j_pve[1])
                 pref_diff = v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0]
-                pref_diff = th.clamp(pref_diff, min=self._safe_limits_minmax_j_pve[0,:,1], max=self._safe_limits_minmax_j_pve[1,:,1])
+                pref_diff = th.clamp(pref_diff,
+                                     min=self._safe_limits_minmax_j_pve[0,:,1]*self._configuration.stepLength_sec,
+                                     max=self._safe_limits_minmax_j_pve[1,:,1]*self._configuration.stepLength_sec)
                 v_j_pvesd[:,:,0] = self._last_sent_v_j_pvesd[:,:,0] + pref_diff
             self._last_sent_v_j_pvesd = v_j_pvesd# ggLog.info(f"sending jimp: {self._last_sent_v_j_pvesd}")
             self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_v_j_pvesd,

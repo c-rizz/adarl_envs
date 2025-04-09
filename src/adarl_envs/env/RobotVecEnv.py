@@ -39,6 +39,49 @@ JOINT_FILTERS = Enum("JOINT_FILTERS",["ALL_REVOLUTE",
 
 LINK_FILTERS = Enum("LINK_FILTERS",["ALL","ALL_ROBOT"])
 
+def find_pose(  root_joint : str,
+                homing_body_pose_xyzxyzw : np.ndarray,
+                controlled_joints : Sequence[tuple[str,str]],
+                initial_pose_randomization : float,
+                limits_minmax : th.Tensor,
+                homing_pos : th.Tensor,
+                noncontrolled_jointpos : dict[tuple[str,str], th.Tensor],
+                robot_model : Robot,
+                is_floating_base : bool,
+                rng : th.Generator,
+                always_present_collisions):
+    found = False
+    coll_counter = {}
+    samples = 1000
+    jp_dict = noncontrolled_jointpos
+    for i in range(samples):
+        normpos = (th.rand(size=(len(controlled_joints),), generator=rng)*2-1)*initial_pose_randomization
+        # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
+        initial_joint_pose = ((normpos>=0)*((limits_minmax[1]-homing_pos)*normpos + homing_pos) + 
+                                (normpos< 0)*((homing_pos-limits_minmax[0])*normpos + homing_pos))
+        jp_dict.update({jn:initial_joint_pose[i] for i,jn in enumerate(controlled_joints)})
+        robot_model.set_joint_pose_by_names({jn[1]:jp.cpu().numpy() for jn,jp in jp_dict.items()})
+        if is_floating_base:
+            robot_model.set_joint_pose_by_names({root_joint:homing_body_pose_xyzxyzw})
+        collisions = robot_model.get_all_collisions()
+        # all_link_poses = self._robot_model.get_frame_poses_xyzxyzw() #frames=self._robot_model.get_tree_frame_names_under_joint(self._configuration.robot_root_joint))
+        # pprint.pprint(all_link_poses)
+        # all_links_z = np.stack([pose[2] for pose in all_link_poses.values()])
+        coll_counter.update({ln:coll_counter.get(ln,0)+1 for ln in collisions})                    
+        if len(collisions) == 0: # and np.all(all_links_z>0):
+            # ggLog.info(f"joint_pose = {self._robot_model.get_joint_pose()}")
+            # ggLog.info(f"selected all_link_poses = {all_link_poses}")
+            found = True
+            initial_jpose = initial_joint_pose
+            break
+        if not found:
+            initial_jpose = homing_pos
+            coll_counter = {k:c/samples for k,c in coll_counter.items()}
+            ggLog.warn(f"Failed to find initial joint configuration."
+                        f" last collisions = {collisions}\n"
+                        f" filtered collisions = {always_present_collisions}\n"
+                        f" coll_ratio={coll_counter}")
+    return initial_jpose
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     @dataclass
@@ -105,6 +148,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_size : int
         verbose_infos : bool
         enable_posref_safety : bool
+        saturate_jimp_ref_limits : bool
+        enable_limits_safety : bool
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -351,7 +396,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_jimp_cmd_size=(adapter.vec_size(), len(controlled_joints_rn), 5),
                                                     vec_size=adapter.vec_size(),
                                                     verbose_infos = verbose_infos,
-                                                    enable_posref_safety = True
+                                                    enable_posref_safety = True,
+                                                    enable_limits_safety = True,
+                                                    saturate_jimp_ref_limits = True
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
@@ -627,6 +674,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 v_j_pvesd[:,:,1] = th.clamp((v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec, 
                                             min=self._safe_limits_minmax_j_pve[0,:,1], 
                                             max=self._safe_limits_minmax_j_pve[1,:,1]) # set velocity reference
+            if self._configuration.saturate_jimp_ref_limits:
+                v_j_pvesd = th.clamp(v_j_pvesd, min=self._safe_limits_minmax_j_pve[0], max=self._safe_limits_minmax_j_pve[1])
+                pref_diff = v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0]
+                pref_diff = th.clamp(pref_diff, min=self._safe_limits_minmax_j_pve[0,:,1], max=self._safe_limits_minmax_j_pve[1,:,1])
+                v_j_pvesd[:,:,0] = self._last_sent_v_j_pvesd[:,:,0] + pref_diff
             self._last_sent_v_j_pvesd = v_j_pvesd# ggLog.info(f"sending jimp: {self._last_sent_v_j_pvesd}")
             self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_v_j_pvesd,
                                                     delay_sec=action_delay)
@@ -757,19 +809,22 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             initial_jposes = th.zeros(  size = (selected_vecs_num, len(self._configuration.controlled_joints)),
                                         dtype=th.float32).to(device=self._configuration.th_device, non_blocking=True)
             # ggLog.info(f"Setting body pose: {self._configuration.robot_root_joint} : {self._configuration.homing_body_pose_xyz_xyzw}")
-                    
+            root_joint = self._configuration.robot_root_joint
+            homing_body_pose_xyzxyzw = self._pinocchio_corrected_homing_body_pose_xyzxyzw
+            controlled_joints = self._configuration.controlled_joints
+            initial_pose_randomization = self._configuration.initial_pose_randomization
             for v in range(selected_vecs_num): # TODO: this may be sloooooow, can I parallelize it?
                 coll_counter = {}
                 samples = 1000
                 for i in range(samples):
-                    normpos = (self._thrand(size=(len(self._configuration.controlled_joints),))*2-1)*self._configuration.initial_pose_randomization
+                    normpos = (self._thrand(size=(len(controlled_joints),))*2-1)*initial_pose_randomization
                     # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
                     initial_joint_pose = ((normpos>=0)*((limits_minmax[1]-homing_pos)*normpos + homing_pos) + 
                                           (normpos< 0)*((homing_pos-limits_minmax[0])*normpos + homing_pos))
-                    jp_dict.update({jn:initial_joint_pose[i] for i,jn in enumerate(self._configuration.controlled_joints)})
+                    jp_dict.update({jn:initial_joint_pose[i] for i,jn in enumerate(controlled_joints)})
                     self._robot_model.set_joint_pose_by_names({jn[1]:jp.cpu().numpy() for jn,jp in jp_dict.items()})
                     if self._configuration.robot_is_floating:
-                        self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:self._pinocchio_corrected_homing_body_pose_xyzxyzw})
+                        self._robot_model.set_joint_pose_by_names({root_joint:homing_body_pose_xyzxyzw})
                     collisions = self._robot_model.get_all_collisions()
                     # all_link_poses = self._robot_model.get_frame_poses_xyzxyzw() #frames=self._robot_model.get_tree_frame_names_under_joint(self._configuration.robot_root_joint))
                     # pprint.pprint(all_link_poses)
@@ -1192,15 +1247,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
         vec_step_count = vec_internal_state[:,self.INTERNAL_FIELDS.STEP_COUNT]
-        prev_safety_triggered_vec = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
+        vec_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")
         pveidx = th.as_tensor([0,1,3]).to(device=vec_stats_minmaxavgstd_j_pvae.device, non_blocking=True)
-        vec_triggered_limits = th.logical_or(   vec_stats_minmaxavgstd_j_pvae[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
-                                                vec_stats_minmaxavgstd_j_pvae[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
-        vec_safety_triggered = th.any(vec_triggered_limits, dim=(1,2))
-        vec_safety_triggered = th.logical_and(vec_safety_triggered, vec_step_count.view((self.num_envs,))>=1)
-        vec_safety_triggered = th.logical_or(vec_safety_triggered, prev_safety_triggered_vec.view((self.num_envs,)))
-
+        if self._configuration.enable_limits_safety:
+            vec_triggered_limits = th.logical_or(   vec_stats_minmaxavgstd_j_pvae[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
+                                                    vec_stats_minmaxavgstd_j_pvae[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
+            vec_limits_safety_triggered = th.any(vec_triggered_limits, dim=(1,2))
+            vec_limits_safety_triggered = th.logical_and(vec_limits_safety_triggered, vec_step_count.view((self.num_envs,))>=1)
+            vec_safety_triggered = th.logical_or(vec_limits_safety_triggered, vec_safety_triggered.view((self.num_envs,)))
         if self._configuration.enable_posref_safety:
             posref_diff = vec_last_sent_j_pvesd[:,:,0] - vec_robot_state[:,0,:,5]
             posref_safety_triggered = th.logical_or(posref_diff/self._configuration.stepLength_sec < self._safe_limits_minmax_j_pve[0,:,1],

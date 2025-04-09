@@ -209,7 +209,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         impulse_probability_per_sec : float = 0.0,
                         impulse_duration_minmax : tuple[float,float ]= (0.01, 5.0),
                         impulse_mean_std : tuple[float,float ]= (50.0, 50.0),
-                        heightmap_resolution : int = -1
+                        heightmap_resolution : int = -1,
+                        longterm_states_decimation_time : float = 0.0001
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -308,7 +309,8 @@ class LocomotionVecEnv(RobotVecEnv):
                             impulse_probability_per_sec = impulse_probability_per_sec,
                             impulse_duration_minmax = impulse_duration_minmax,
                             impulse_mean_std = impulse_mean_std,
-                            fail_on_safety = fail_on_safety
+                            fail_on_safety = fail_on_safety,
+                            longterm_states_decimation_time = longterm_states_decimation_time
                         )
 
         

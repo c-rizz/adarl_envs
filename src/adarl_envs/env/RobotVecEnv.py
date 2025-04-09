@@ -54,8 +54,9 @@ def find_pose(  root_joint : str,
     coll_counter = {}
     samples = 1000
     jp_dict = noncontrolled_jointpos
+    dev = homing_pos.device
     for i in range(samples):
-        normpos = (th.rand(size=(len(controlled_joints),), generator=rng)*2-1)*initial_pose_randomization
+        normpos = (th.rand(size=(len(controlled_joints),), generator=rng, device = dev)*2-1)*initial_pose_randomization
         # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
         initial_joint_pose = ((normpos>=0)*((limits_minmax[1]-homing_pos)*normpos + homing_pos) + 
                                 (normpos< 0)*((homing_pos-limits_minmax[0])*normpos + homing_pos))
@@ -74,13 +75,13 @@ def find_pose(  root_joint : str,
             found = True
             initial_jpose = initial_joint_pose
             break
-        if not found:
-            initial_jpose = homing_pos
-            coll_counter = {k:c/samples for k,c in coll_counter.items()}
-            ggLog.warn(f"Failed to find initial joint configuration."
-                        f" last collisions = {collisions}\n"
-                        f" filtered collisions = {always_present_collisions}\n"
-                        f" coll_ratio={coll_counter}")
+    if not found:
+        initial_jpose = homing_pos
+        coll_counter = {k:c/samples for k,c in coll_counter.items()}
+        ggLog.warn(f"Failed to find initial joint configuration."
+                    f" last collisions = {collisions}\n"
+                    f" filtered collisions = {always_present_collisions}\n"
+                    f" coll_ratio={coll_counter}")
     return initial_jpose
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 

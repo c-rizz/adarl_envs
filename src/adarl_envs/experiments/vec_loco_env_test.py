@@ -30,7 +30,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     eval_freq = 5
     env_builder_args = {
-        "action_delay_mustd" : (0.0,0.01),
+        "action_delay_mustd" : (0.001,0.01),
         "action_noise_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
@@ -40,6 +40,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
         "quiet" : False,
+        "record_video" : True,
         "reward_acceleration_weight" :      2.0,
         "reward_actdiff_weight" :           0.2,
         "reward_actacc_weight" :            0.1,

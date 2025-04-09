@@ -248,27 +248,27 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "control_mode" : "position",
         "robot_model" : args["robot"],
         "enable_rendering" : False,
-        "goal_err_smoothing_halflife_sec" : 0.1,
+        "goal_err_smoothing_halflife_sec" : 0.05,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
         "quiet" : False,
         "reward_acceleration_weight" :      2.0,
-        "reward_actdiff_weight" :           0.0,
+        "reward_actdiff_weight" :           0.2,
         "reward_actacc_weight" :            0.1,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_health_weight" :            0.0,
         "reward_position_limit_weight" :    0.1,
         "reward_torque_limit_weight" :      0.0,
-        "reward_torque_weight" :            1.0,
+        "reward_torque_weight" :            5.0,
         "reward_torquediff_weight" :        0.0,
-        "reward_tracking_weight" :          1.0,
-        "reward_velocity_limit_weight" :    0.0,
-        "reward_velocity_weight" :          0.0,
-        "reward_height_weight" :            0.15,
-        "reward_pitchnroll_weight" :        0.15,
+        "reward_tracking_weight" :          0.0,
+        "reward_velocity_limit_weight" :    0.1,
+        "reward_velocity_weight" :          1.0,
+        "reward_height_weight" :            0.0,
+        "reward_pitchnroll_weight" :        0.0,
         "reward_position_weight" :          1.0,
-        "reward_feet_air_time_weight" :     10.0,
+        "reward_feet_air_time_weight" :     20.0,
         "reward_heading_weight" :           0.05,
         "safe_stiffness" : 400,
         "safe_damping" : 5,
@@ -276,7 +276,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "stop_on_safety" : False,
         "th_device" : env_device,
         "video_save_freq" : 0,
-        "goal_speed_minmax" : (0,1),
+        "goal_speed_minmax" : (0,0),
         "use_contacts" : False,
         "frame_stack_length" : 3,
         "verbose_infos" : False,
@@ -290,9 +290,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
-        "initial_pose_randomization" : 0.8,
-        "mass_randomization_ratio" : 0.3,
-        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
+        "initial_pose_randomization" : 0.5,
+        "mass_randomization_ratio" : 0.0,
+        "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
         "impulse_probability_per_sec" : 0.5,
         "impulse_duration_minmax" : (0.01, 2.5),
         "impulse_mean_std" : (50.0,50.0)
@@ -300,6 +300,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     env_builder_args.update({
         "enable_rendering" : True,
+        "record_video" : args["mode"]!="xbot",
         "verbose_infos" : True,
         "video_save_freq" : True if args["record"] else 0,
         "action_delay_mustd" : (0.0,0.0),
@@ -314,7 +315,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "initial_pose_randomization" : 0.0,
         "mass_randomization_ratio" : 0.0,
         "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
-        "impulse_probability_per_sec" : 0.0})
+        "impulse_probability_per_sec" : 0.0,
+        "show_gui" : args["gui"]})
     return play(seed,
                 folderName,
                 run_id, args,
@@ -411,6 +413,7 @@ def play(seed, folderName, run_id, args,
                 break
             obs : TensorTree[th.Tensor]
             obs, info = env.reset(options = options)  #type: ignore
+            ggLog.info(f"env resetted")
             # ggLog.info(f"ep_config = {info['ep_config']}")
             done = False
             ep_reward = 0

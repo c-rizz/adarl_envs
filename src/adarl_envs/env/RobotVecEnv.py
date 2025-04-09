@@ -1014,7 +1014,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def get_observations(self, state) -> dict[Any, th.Tensor]:
         self._last_obs = self._state_helper.observe(state)
         if self._configuration.enable_dbg_checks:
-            if not adarl.utils.tensor_trees.is_all_finite(state):
+            if isinstance(self._adapter, BaseVecSimulationAdapter) and not adarl.utils.tensor_trees.is_all_finite(state):
                 ggLog.warn(f"Non-finite values in state {state}")
             if not adarl.utils.tensor_trees.is_all_finite(self._last_obs):
                 ggLog.warn(f"Non-finite values in obs {self._last_obs}")
@@ -1078,7 +1078,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._update_stats()
         # tf = time.monotonic()
         # ggLog.info(f"update_state: {t1-t0} update_stats: {tf-t1}")
-        self._last_step_simtime = self._adapter.getEnvTimeFromReset()
         # ggLog.info(f"on_step(): {self._current_state[self.STATE_ROBOT][0,0]}")
 
 
@@ -1213,7 +1212,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : vec_body_rel_gravity_dir[:,1].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : vec_body_rel_gravity_dir[:,2].view(self.num_envs,1)}
         
-        step_avg_pos = vec_stats_minmaxavgstd_j_pvae[:,2,:,0]
+        # step_avg_pos = vec_stats_minmaxavgstd_j_pvae[:,2,:,0]
+        step_avg_pos = vec_jstates_j_pveae[:,:,0]
         # print(f"vec_step_count={vec_step_count} step_avg_pos={step_avg_pos}")
         step_avg_pos = th.where(vec_step_count < 1,
                                 step_avg_pos,

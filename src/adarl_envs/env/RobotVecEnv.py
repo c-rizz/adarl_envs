@@ -1203,8 +1203,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         if self._configuration.enable_posref_safety:
             posref_diff = vec_last_sent_j_pvesd[:,:,0] - vec_robot_state[:,0,:,5]
-            posref_safety_triggered = th.logical_or(posref_diff < self._safe_limits_minmax_j_pve[0,:,1],
-                                                    posref_diff > self._safe_limits_minmax_j_pve[1,:,1])
+            posref_safety_triggered = th.logical_or(posref_diff/self._configuration.stepLength_sec < self._safe_limits_minmax_j_pve[0,:,1],
+                                                    posref_diff/self._configuration.stepLength_sec > self._safe_limits_minmax_j_pve[1,:,1])
             posref_safety_triggered = th.any(posref_safety_triggered, dim=1)
             posref_safety_triggered = th.logical_and(posref_safety_triggered, vec_step_count.view((self.num_envs,))>=1)
             vec_safety_triggered = th.logical_or(vec_safety_triggered, posref_safety_triggered)
@@ -1320,12 +1320,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     labels["state_"+substate] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                     labels["statenorm_"+substate] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                     labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["vec"]])
+                i["posref_diff"] = state[self.STATE_ROBOT][:,1,:,5] - state[self.STATE_ROBOT][:,0,:,5]
+                i["posref_vel"] = i["posref_diff"]/self._configuration.stepLength_sec
             i["vec_obs"] = self._last_obs["vec"]
             if labels is not None:
                 labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["vec"]])
         sub_rewards = {}
-        self.compute_rewards(state, sub_rewards)
+        reward = self.compute_rewards(state, sub_rewards)
         i.update({f"sub_reward_{k}":r for k,r in sub_rewards.items()})
+        i.update({f"tot_reward":reward})
             
         i.update({"ep_config."+k:v for k,v in dataclasses.asdict(self._current_episode_config).items()})
         i["safety_triggered"] = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED]

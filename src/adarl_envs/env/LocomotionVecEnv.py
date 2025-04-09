@@ -798,6 +798,9 @@ class LocomotionVecEnv(RobotVecEnv):
 
         failed = (current_state_extrinsic_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
 
+        if self._configuration.fail_on_safety:
+            failed = th.logical_or(failed, state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED,0])
+
         sub_rewards_return["tracking"] = reward_velocity_tracking
         sub_rewards_return["height"] = reward_height
         sub_rewards_return["pitchnroll"] = reward_pitchnroll

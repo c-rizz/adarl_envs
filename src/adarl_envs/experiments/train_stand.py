@@ -84,7 +84,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
         "impulse_probability_per_sec" : 0.5,
         "impulse_duration_minmax" : (0.01, 2.5),
-        "impulse_mean_std" : (50.0,50.0)
+        "impulse_mean_std" : (50.0,50.0),
+        "longterm_states_decimation_time" : 0.1 # Averaging of the joint pose for the position reward
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

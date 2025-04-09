@@ -46,7 +46,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "safe_stiffness" : 200,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
-        "stop_on_safety" : False,
+        "stop_on_failure" : False,
         "th_device" : env_device,
         "video_save_freq" : 0,
         "goal_speed_minmax" : (0,1),

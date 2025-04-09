@@ -175,7 +175,8 @@ def loco_runner_builder(seed,
                             seed=seed,
                             stepLength_sec=stepLength_sec,
                             step_precision_tolerance=0 if isinstance(adapter, BaseSimulationAdapter) else 0.001,
-                            stop_on_safety=env_builder_args.pop("stop_on_safety"),
+                            stop_on_failure=env_builder_args.pop("stop_on_failure"),
+                            fail_on_safety=env_builder_args.pop("fail_on_safety"),
                             th_device=th_device,
                             homing_joint_pose=homing_joint_pose,
                             frame_stack_length=env_builder_args.pop("frame_stack_length"),
@@ -225,7 +226,8 @@ def loco_runner_builder(seed,
                             feet_links=env_builder_args.pop("feet_links"),
                             impulse_probability_per_sec=env_builder_args.pop("impulse_probability_per_sec"),
                             impulse_duration_minmax=env_builder_args.pop("impulse_duration_minmax"),
-                            impulse_mean_std=env_builder_args.pop("impulse_mean_std")
+                            impulse_mean_std=env_builder_args.pop("impulse_mean_std"),
+                            longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

@@ -153,6 +153,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         enable_limits_safety : bool
         posref_safety_period : float
         observe_full_robot_state : bool
+        observe_body_vels_and_height : bool
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -404,7 +405,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     enable_limits_safety = True,
                                                     saturate_jimp_ref_limits = True,
                                                     posref_safety_period = posref_safety_period,
-                                                    observe_full_robot_state = False
+                                                    observe_full_robot_state = False,
+                                                    observe_body_vels_and_height=False
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
@@ -558,6 +560,26 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                         self.INTERNAL_FIELDS.SIM_TIME : [-1,1000_000]},
                                                     observable_fields=[self.INTERNAL_FIELDS.SAFETY_TRIGGERED],
                                                     vec_size=adapter.vec_size())
+        if self._configuration.observe_body_vels_and_height:
+            extrinsic_observable_fields = [
+                                            self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                            self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z
+                                            ]
+        else:
+            extrinsic_observable_fields = [
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z
+                                            ]
+
         extrinsic_state_helper =  ThBoxStateHelper(field_names=[e for e in self.EXTRINSIC_FIELDS],
                                                     obs_dtype=th.float32,
                                                     th_device=self._th_device,
@@ -575,18 +597,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : [-1,1],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
-                                                    observable_fields=[
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
-                                                                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z
-                                                                        ],
+                                                    observable_fields=extrinsic_observable_fields,
                                                     history_length=self._configuration.history_length,
                                                     obs_history_length = self._configuration.frame_stack_length,
                                                     vec_size=adapter.vec_size())

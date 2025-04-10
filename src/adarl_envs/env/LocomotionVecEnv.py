@@ -993,12 +993,7 @@ class LocomotionVecEnv(RobotVecEnv):
         i["avg10_pitchnroll_errs_vec"] = th.mean(self._stats["pitchnroll_errs_vec"], dim = 1)
         i["avg10_body_speeds_vec"] = th.mean(self._stats["body_speeds_vec"], dim = 1)
         i["success_vec"] = i["avg10_vel_errs_vec"] < 0.05
-        sub_rews = {}
-        self.compute_rewards(state, sub_rews)
-        i["rewards"] = th.stack(list(sub_rews.values()), dim = 1) 
-        # ggLog.info(f"i['rewards'] = {i['rewards'].size()}")
-        if labels is not None:
-            labels["rewards"] = to_string_tensor(list(sub_rews.keys())) 
+        
 
         if self._configuration.verbose_infos:
             statenorm = self._state_helper.normalize(state)

@@ -696,16 +696,21 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._last_preprocessed_actions = actions
             v_j_pvesd = self._action_helper.action_to_pvesd(actions)
             # do this better, avoid this if condition, put it in the helper
-            if self._configuration.control_mode in [JointImpedanceActionHelper.CONTROL_MODES.POSITION, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_STIFFNESS, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_TORQUES] :
-                v_j_pvesd[:,:,1] = th.clamp((v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec, 
-                                            min=self._safe_limits_minmax_j_pve[0,:,1], 
-                                            max=self._safe_limits_minmax_j_pve[1,:,1]) # set velocity reference
             if self._configuration.saturate_jimp_ref_limits:
                 v_j_pvesd[:,:,:3] = th.clamp(v_j_pvesd[:,:,:3], min=self._safe_limits_minmax_j_pve[0], max=self._safe_limits_minmax_j_pve[1])
                 posref_diff = v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0]
                 posref_diff = th.clamp(posref_diff, min=self._posref_saturation_minmmax_diff[0], max=self._posref_saturation_minmmax_diff[1])
                 v_j_pvesd[:,:,0] = self._last_sent_v_j_pvesd[:,:,0] + posref_diff
-            self._last_sent_v_j_pvesd = v_j_pvesd# ggLog.info(f"sending jimp: {self._last_sent_v_j_pvesd}")
+                # ggLog.info(f"prev_posref: {self._last_sent_v_j_pvesd[:,:,0]}")
+                # ggLog.info(f"new_posref:  {v_j_pvesd[:,:,0]}")
+                # ggLog.info(f"posref_diff: {posref_diff}")
+            if self._configuration.control_mode in [JointImpedanceActionHelper.CONTROL_MODES.POSITION, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_STIFFNESS, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_TORQUES] :
+                v_j_pvesd[:,:,1] = th.clamp((v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec, 
+                                            min=self._safe_limits_minmax_j_pve[0,:,1], 
+                                            max=self._safe_limits_minmax_j_pve[1,:,1]) # set velocity reference
+
+            self._last_sent_v_j_pvesd = v_j_pvesd
+            # ggLog.info(f"sending jimp: {self._last_sent_v_j_pvesd}")
             self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_v_j_pvesd,
                                                     delay_sec=action_delay)
             
@@ -901,6 +906,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if r == "move":
                 self._realworld_robot_init_move(vec_mask)
             elif r == "skip":
+                masked_assign(self._last_sent_v_j_pvesd, vec_mask, self._adapter.get_current_joint_impedance_command())
                 pass
             else:
                 print(f"Invalid answer '{r}'")
@@ -1362,7 +1368,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # i["tot_init_count"] = th.as_tensor(self._tot_init_counter)
         i["joint_homing_dist"] = state[self.STATE_JOINT_LONGTERM_STATS][:,0,0,:] - self._configuration.homing_ctrl_joints_pvesd[:,0]
         if labels is not None:
-            labels["joint_homing_dist"] = to_string_tensor([jn[1] for jn in self._configuration.controlled_joints])
+            if not hasattr(self, "_joint_names_th"):
+                self._joint_names_th = to_string_tensor([jn[1] for jn in self._configuration.controlled_joints])
+            labels["joint_homing_dist"] = self._joint_names_th
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
         normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
         smoothed_joint_pose_norm     = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
@@ -1392,9 +1400,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             i["vec_obs"] = self._last_obs["vec"]
             if labels is not None:
                 labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["vec"]])
-        sub_rewards = {}
-        reward = self.compute_rewards(state, sub_rewards)
-        i.update({f"sub_reward_{k}":r for k,r in sub_rewards.items()})
+        sub_rews = {}
+        reward = self.compute_rewards(state, sub_rews)
+        i["rewards"] = th.stack(list(sub_rews.values()), dim = 1) 
+        # ggLog.info(f"i['rewards'] = {i['rewards'].size()}")
+        if labels is not None:
+            if not hasattr(self, "_sub_rew_names_th"):
+                self._sub_rew_names_th = to_string_tensor(list(sub_rews.keys()))
+            labels["rewards"] = self._sub_rew_names_th
         i.update({f"tot_reward":reward})
             
         i.update({"ep_config."+k:v for k,v in dataclasses.asdict(self._current_episode_config).items()})

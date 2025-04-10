@@ -152,6 +152,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         saturate_jimp_ref_limits : bool
         enable_limits_safety : bool
         posref_safety_period : float
+        observe_full_robot_state : bool
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -402,7 +403,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     enable_posref_safety = True,
                                                     enable_limits_safety = True,
                                                     saturate_jimp_ref_limits = True,
-                                                    posref_safety_period = posref_safety_period
+                                                    posref_safety_period = posref_safety_period,
+                                                    observe_full_robot_state = False
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
@@ -520,6 +522,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._stats = {}
 
     def _build_state_helper(self, adapter : BaseVecJointImpedanceAdapter):
+        if self._configuration.observe_full_robot_state:
+            observable_robot_state = ["pos","vel","cmdeff","refpos","refvel","refeff","stiff","damp"] 
+        else:
+            observable_robot_state = ["pos","refpos","stiff","damp"] 
         robot_state_helper = RobotStateHelper(joint_limit_minmax_pveae=self._configuration.joint_physical_limits_minmax_pve,
                                               stiffness_minmax=self._configuration.joint_safe_limits_minmax_stiffness,
                                               damping_minmax=self._configuration.joint_safe_limits_minmax_damping,
@@ -528,7 +534,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                               history_length=self._configuration.history_length,
                                               obs_history_length = self._configuration.frame_stack_length,
                                               vec_size=adapter.vec_size(),
-                                              observable_subfields = ["pos","vel","cmdeff","refpos","refvel","refeff","stiff","damp"])
+                                              observable_subfields = observable_robot_state)
         joint_step_stats_state_helper = RobotStatsStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
                                                         obs_dtype=self._configuration.obs_dtype,
                                                         th_device=self._configuration.th_device,

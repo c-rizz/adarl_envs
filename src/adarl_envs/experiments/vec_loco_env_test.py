@@ -66,6 +66,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "fail_on_safety" : False,
         "th_device" : env_device,
         "video_save_freq" : 0,
+        "record_video" : True,
         "goal_speed_minmax" : (0,1.0),
         "use_contacts" : False,
         "frame_stack_length" : 3,

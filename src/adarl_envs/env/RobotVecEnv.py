@@ -403,7 +403,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     verbose_infos = verbose_infos,
                                                     enable_posref_safety = True,
                                                     enable_limits_safety = True,
-                                                    saturate_jimp_ref_limits = True,
+                                                    saturate_jimp_ref_limits = False,
                                                     posref_safety_period = posref_safety_period,
                                                     observe_full_robot_state = False,
                                                     observe_body_vels_and_height=False
@@ -1261,7 +1261,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_triggered_limits = th.logical_or(   vec_stats_minmaxavgstd_j_pvae[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
                                                     vec_stats_minmaxavgstd_j_pvae[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
             vec_limits_safety_triggered = th.any(vec_triggered_limits, dim=(1,2))
-            vec_limits_safety_triggered = th.logical_and(vec_limits_safety_triggered, vec_step_count.view((self.num_envs,))>=1)
             # vec_safety_triggered = th.logical_or(vec_limits_safety_triggered, vec_prev_safety_triggered)
             newly_triggered = th.logical_and(vec_limits_safety_triggered,
                                              th.logical_not((vec_safety_state>0)))
@@ -1273,13 +1272,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             posref_safety_triggered = th.logical_or(posref_diff < self._posref_safety_minmmax_diff[0],
                                                     posref_diff > self._posref_safety_minmmax_diff[1])
             posref_safety_triggered = th.any(posref_safety_triggered, dim=1)
-            posref_safety_triggered = th.logical_and(posref_safety_triggered, vec_step_count.view((self.num_envs,))>=1)
-            # vec_safety_triggered = th.logical_or(vec_safety_triggered, posref_safety_triggered)
             newly_triggered = th.logical_and(posref_safety_triggered,
                                              th.logical_not((vec_safety_state>0)))
             vec_safety_state = th.where(newly_triggered,
                                         100.0, # 100 means safety triggered by posref
                                         vec_safety_state)
+        vec_safety_state = th.logical_and(vec_safety_state, vec_step_count.view((self.num_envs,))>=1)
 
         new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : vec_safety_state.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1),

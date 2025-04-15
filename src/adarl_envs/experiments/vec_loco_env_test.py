@@ -195,7 +195,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5
+                                                    target_entropy_factor = -0.5,
+                                                    actor_log_std_init = 1.0
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -231,7 +232,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5
+                                                    target_entropy_factor = -0.5,
+                                                    actor_log_std_init = 1.0
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

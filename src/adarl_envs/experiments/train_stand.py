@@ -42,21 +42,22 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "reward_acceleration_weight" :      2.0,
         "reward_actdiff_weight" :           1.0,
-        "reward_actacc_weight" :            0.1,
+        "reward_actacc_weight" :            0.0,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
+        "reward_failure_weight" :           0.9,
         "reward_health_weight" :            0.25,
-        "reward_position_limit_weight" :    0.1,
+        "reward_position_limit_weight" :    0.0,
         "reward_torque_limit_weight" :      0.0,
-        "reward_torque_weight" :            5.0,
+        "reward_torque_weight" :            0.0,
         "reward_torquediff_weight" :        0.0,
         "reward_tracking_weight" :          0.0,
-        "reward_velocity_limit_weight" :    0.1,
+        "reward_velocity_limit_weight" :    0.0,
         "reward_velocity_weight" :          10.0,
         "reward_height_weight" :            0.0,
         "reward_pitchnroll_weight" :        0.1,
         "reward_position_weight" :          1.0,
-        "reward_feet_air_time_weight" :     20.0,
+        "reward_feet_air_time_weight" :     0.0,
         "reward_heading_weight" :           0.0,
         "safe_stiffness" : 400,
         "safe_damping" : 5,
@@ -87,7 +88,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_duration_minmax" : (0.01, 2.5),
         "impulse_mean_std" : (50.0,50.0),
         "longterm_states_decimation_time" : 0.0001, # Averaging of the joint pose for the position reward
-        "posref_safety_period" : 0.001
+        "posref_safety_period" : 0.01
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -195,7 +196,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5
+                                                    target_entropy_factor = -0.5,
+                                                    actor_log_std_init = 1.0
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -231,7 +233,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5
+                                                    target_entropy_factor = -0.5,
+                                                    actor_log_std_init = 1.0
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

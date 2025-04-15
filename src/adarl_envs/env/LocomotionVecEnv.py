@@ -155,6 +155,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_acceleration_weight : float,
                         reward_actdiff_weight : float,
                         reward_actacc_weight : float,
+                        reward_failure_weight :float,
                         reward_feet_air_time_weight : float,
                         reward_contacts_weight : float,
                         reward_energy_weight : float,
@@ -244,7 +245,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_actdiff = self._thtens(reward_actdiff_weight),
                         reward_weight_actacc = self._thtens(reward_actacc_weight),
                         reward_weight_feet_air_time = self._thtens(reward_feet_air_time_weight),
-                        reward_weight_failure = self._thtens(1.0),
+                        reward_weight_failure = self._thtens(reward_failure_weight),
                         height_reward_settle_point=self._thtens(0.2), # ~zero reward after this meter distance
                         pitchnroll_reward_settle_point=self._thtens(0.2), # ~zero reward after this 3d-unit-vector distance
                         heading_reward_settle_point = self._thtens(3.14159/16), # ~zero reward after this distance (w component of the quat difference)

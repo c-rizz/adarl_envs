@@ -163,6 +163,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_acceleration_weight : float,
                         reward_actdiff_weight : float,
                         reward_actacc_weight : float,
+                        reward_failure_weight :float,
                         reward_feet_air_time_weight : float,
                         reward_contacts_weight : float,
                         reward_energy_weight : float,

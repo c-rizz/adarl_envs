@@ -213,6 +213,11 @@ def loco_runner_builder(seed,
                             reward_position_weight=env_builder_args.pop("reward_position_weight"),
                             reward_feet_air_time_weight = env_builder_args.pop("reward_feet_air_time_weight"),
                             reward_heading_weight = env_builder_args.pop("reward_heading_weight"),
+                            reward_failure_weight = env_builder_args.pop("reward_failure_weight"),
+                            reward_slip_weight = env_builder_args.pop("reward_slip_weight"),
+                            reward_velref_weight = env_builder_args.pop("reward_velref_weight"),
+                            reward_torqueref_weight = env_builder_args.pop("reward_torqueref_weight"),
+                            reward_pos2posref_weight = env_builder_args.pop("reward_pos2posref_weight"),
                             disallowed_contact_links = disallowed_contact_links,
                             goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
                             use_contacts=env_builder_args.pop("use_contacts"),
@@ -228,7 +233,12 @@ def loco_runner_builder(seed,
                             impulse_duration_minmax=env_builder_args.pop("impulse_duration_minmax"),
                             impulse_mean_std=env_builder_args.pop("impulse_mean_std"),
                             longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
-                            posref_safety_period = env_builder_args.pop("posref_safety_period")
+                            posref_safety_period = env_builder_args.pop("posref_safety_period"),
+                            enable_posref_safety = env_builder_args.pop("enable_posref_safety"),
+                            enable_limits_safety = env_builder_args.pop("enable_limits_safety"),
+                            saturate_jimp_ref_limits = env_builder_args.pop("saturate_jimp_ref_limits"),
+                            observe_full_robot_state = env_builder_args.pop("observe_full_robot_state"),
+                            observe_body_vels_and_height = env_builder_args.pop("observe_body_vels_and_height")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

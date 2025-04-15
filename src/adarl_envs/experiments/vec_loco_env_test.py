@@ -59,6 +59,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_position_weight" :          1.0,
         "reward_feet_air_time_weight" :     20.0,
         "reward_heading_weight" :           0.05,
+        "reward_failure_weight" :           1.0,
+        "reward_slip_weight" :              0.1,
+        "reward_velref_weight" :            0.0,
+        "reward_torqueref_weight" :         1.0,
+        "reward_pos2posref_weight" :        0.0,       
         "safe_stiffness" : 400,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
@@ -84,23 +89,29 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "initial_pose_randomization" : 0.8,
         "mass_randomization_ratio" : 0.3,
         "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
-        "impulse_probability_per_sec" : 0.5,
+        "impulse_probability_per_sec" : 0.1,
         "impulse_duration_minmax" : (0.01, 2.5),
         "impulse_mean_std" : (50.0,50.0),
-        "longterm_states_decimation_time" : 0.1 # Averaging of the joint pose for the position reward
+        "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
+        "posref_safety_period" : 0.005,
+        "enable_posref_safety" : True,
+        "enable_limits_safety" : True,
+        "saturate_jimp_ref_limits" : False,
+        "observe_full_robot_state" : False,
+        "observe_body_vels_and_height" : False
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["verbose_infos"] = True
     video_eval_env_builder_args["video_save_freq"] = 1
+    video_eval_env_builder_args["init_on_reset_ratio"] = 1.0
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,
         "eval_freq_ep" : eval_freq*train_envs,
         "eval_eps" : 1,
         "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 1,
-        "init_on_reset_ratio" : 1.0
+        "num_envs" : 1
     }
     eval_conf_video_stoch = {
         "name" : "video_stoch",
@@ -109,7 +120,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 1,
         "env_builder_args" : video_eval_env_builder_args,
         "num_envs" : 1,
-        "init_on_reset_ratio" : 1.0
     }
     # video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
     # video_norand_eval_env_builder_args["enable_rendering"] = True

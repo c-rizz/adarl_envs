@@ -149,7 +149,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_size : int
         verbose_infos : bool
         enable_posref_safety : bool
-        saturate_jimp_ref_limits : bool
+        saturate_jimp_posref_limits : bool
         enable_limits_safety : bool
         posref_safety_period : float
         observe_full_robot_state : bool
@@ -208,7 +208,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         action_noise_mustd : Sequence[float] | th.Tensor, 
                         action_smoothing_halflife_sec : float,
                         adapter: BaseVecJointImpedanceAdapter,
-                        control_mode : Literal["impedance","impedance_no_gains","position_and_torques", "position_and_gains","torque","velocity","position"],
+                        control_mode : Literal["pvesd","pve","pt", "ps","pt","v","p"],
                         controlled_joints : Sequence[str | JOINT_FILTERS],
                         goal_err_smoothing_halflife_sec : float,
                         maxStepsPerEpisode : int,
@@ -254,7 +254,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         impulse_probability_per_sec : float = 0.0,
                         impulse_duration_minmax : tuple[float,float ]= (0.01, 5.0),
                         impulse_mean_std : tuple[float,float ]= (50.0, 50.0),
-                        posref_safety_period = 0.001
+                        posref_safety_period = 0.001,
+                        enable_posref_safety : bool = True,
+                        enable_limits_safety : bool = True,
+                        saturate_jimp_ref_limits : bool = True,
+                        observe_full_robot_state : bool = False,
+                        observe_body_vels_and_height : bool = False
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -401,12 +406,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_jimp_cmd_size=(adapter.vec_size(), len(controlled_joints_rn), 5),
                                                     vec_size=adapter.vec_size(),
                                                     verbose_infos = verbose_infos,
-                                                    enable_posref_safety = True,
-                                                    enable_limits_safety = True,
-                                                    saturate_jimp_ref_limits = True,
+                                                    enable_posref_safety = enable_posref_safety,
+                                                    enable_limits_safety = enable_limits_safety,
+                                                    saturate_jimp_posref_limits = saturate_jimp_ref_limits,
                                                     posref_safety_period = posref_safety_period,
-                                                    observe_full_robot_state = False,
-                                                    observe_body_vels_and_height=False
+                                                    observe_full_robot_state = observe_full_robot_state,
+                                                    observe_body_vels_and_height = observe_body_vels_and_height
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
@@ -696,21 +701,17 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._last_preprocessed_actions = actions
             v_j_pvesd = self._action_helper.action_to_pvesd(actions)
             # do this better, avoid this if condition, put it in the helper
-            if self._configuration.saturate_jimp_ref_limits:
+            if self._configuration.saturate_jimp_posref_limits:
                 v_j_pvesd[:,:,:3] = th.clamp(v_j_pvesd[:,:,:3], min=self._safe_limits_minmax_j_pve[0], max=self._safe_limits_minmax_j_pve[1])
                 posref_diff = v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0]
                 posref_diff = th.clamp(posref_diff, min=self._posref_saturation_minmmax_diff[0], max=self._posref_saturation_minmmax_diff[1])
                 v_j_pvesd[:,:,0] = self._last_sent_v_j_pvesd[:,:,0] + posref_diff
-                # ggLog.info(f"prev_posref: {self._last_sent_v_j_pvesd[:,:,0]}")
-                # ggLog.info(f"new_posref:  {v_j_pvesd[:,:,0]}")
-                # ggLog.info(f"posref_diff: {posref_diff}")
-            if self._configuration.control_mode in [JointImpedanceActionHelper.CONTROL_MODES.POSITION, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_STIFFNESS, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_TORQUES] :
+            if self._configuration.control_mode in [JointImpedanceActionHelper.CONTROL_MODES.POSITION, JointImpedanceActionHelper.CONTROL_MODES.PS, JointImpedanceActionHelper.CONTROL_MODES.PT] :
                 v_j_pvesd[:,:,1] = th.clamp((v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec, 
                                             min=self._safe_limits_minmax_j_pve[0,:,1], 
                                             max=self._safe_limits_minmax_j_pve[1,:,1]) # set velocity reference
 
             self._last_sent_v_j_pvesd = v_j_pvesd
-            # ggLog.info(f"sending jimp: {self._last_sent_v_j_pvesd}")
             self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_v_j_pvesd,
                                                     delay_sec=action_delay)
             
@@ -851,11 +852,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             initial_jposes = th.stack(initial_jposes_list).to(device=self._configuration.th_device, non_blocking=True)
         else:
             initial_jposes = homing_pos.expand(selected_vecs_num, len(self._configuration.controlled_joints))
+        ggLog.info(f"pose randomization took {time.monotonic()-t0:.6f}s")
         if  self._configuration.init_on_reset_ratio<1.0 and self._init_counter_since_reset>1:
             vec_init_on_reset = self._thrand((selected_vecs_num,)) < self._configuration.init_on_reset_ratio
         else:
             vec_init_on_reset = th.ones((selected_vecs_num,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
-        ggLog.info(f"pose randomization took {time.monotonic()-t0:.6f}s")
         # ggLog.info(f"initial_jpose = {initial_joint_pose}, homing = {homing}")
         self._robot_model.set_collision_pairs(original_collision_pairs)
         masked_assign(self._current_episode_config.vec_initial_ctrl_joint_pose, vec_mask, initial_jposes)

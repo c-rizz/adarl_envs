@@ -151,6 +151,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         enable_posref_safety : bool
         saturate_jimp_ref_limits : bool
         enable_limits_safety : bool
+        posref_safety_period : float
+        observe_full_robot_state : bool
+        observe_body_vels_and_height : bool
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -250,7 +253,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         longterm_states_decimation_time = 0.0001,
                         impulse_probability_per_sec : float = 0.0,
                         impulse_duration_minmax : tuple[float,float ]= (0.01, 5.0),
-                        impulse_mean_std : tuple[float,float ]= (50.0, 50.0)
+                        impulse_mean_std : tuple[float,float ]= (50.0, 50.0),
+                        posref_safety_period = 0.001
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -399,7 +403,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     verbose_infos = verbose_infos,
                                                     enable_posref_safety = True,
                                                     enable_limits_safety = True,
-                                                    saturate_jimp_ref_limits = True
+                                                    saturate_jimp_ref_limits = False,
+                                                    posref_safety_period = posref_safety_period,
+                                                    observe_full_robot_state = False,
+                                                    observe_body_vels_and_height=False
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
@@ -409,6 +416,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
         self._always_present_collisions : set[tuple[str,str]] = set()
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
+        self._posref_safety_minmmax_diff = self._safe_limits_minmax_j_pve[:,:,1]*self._configuration.posref_safety_period
+        self._posref_saturation_minmmax_diff = self._posref_safety_minmmax_diff*0.999
         self._impulse_disturbances_enabled = impulse_probability_per_sec > 0
 
         self._action_helper = JointImpedanceActionHelper(
@@ -515,6 +524,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._stats = {}
 
     def _build_state_helper(self, adapter : BaseVecJointImpedanceAdapter):
+        if self._configuration.observe_full_robot_state:
+            observable_robot_state = ["pos","vel","cmdeff","refpos","refvel","refeff","stiff","damp"] 
+        else:
+            observable_robot_state = ["pos","refpos","stiff","damp"] 
         robot_state_helper = RobotStateHelper(joint_limit_minmax_pveae=self._configuration.joint_physical_limits_minmax_pve,
                                               stiffness_minmax=self._configuration.joint_safe_limits_minmax_stiffness,
                                               damping_minmax=self._configuration.joint_safe_limits_minmax_damping,
@@ -523,7 +536,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                               history_length=self._configuration.history_length,
                                               obs_history_length = self._configuration.frame_stack_length,
                                               vec_size=adapter.vec_size(),
-                                              observable_subfields = ["pos","vel","cmdeff","refpos","refvel","refeff","stiff","damp"])
+                                              observable_subfields = observable_robot_state)
         joint_step_stats_state_helper = RobotStatsStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
                                                         obs_dtype=self._configuration.obs_dtype,
                                                         th_device=self._configuration.th_device,
@@ -542,11 +555,31 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     obs_dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=(1,),
-                                                    fields_minmax={   self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1],
+                                                    fields_minmax={   self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1000],
                                                                         self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000],
                                                                         self.INTERNAL_FIELDS.SIM_TIME : [-1,1000_000]},
-                                                    observable_fields=[],
+                                                    observable_fields=[self.INTERNAL_FIELDS.SAFETY_TRIGGERED],
                                                     vec_size=adapter.vec_size())
+        if self._configuration.observe_body_vels_and_height:
+            extrinsic_observable_fields = [
+                                            self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                            self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z
+                                            ]
+        else:
+            extrinsic_observable_fields = [
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z
+                                            ]
+
         extrinsic_state_helper =  ThBoxStateHelper(field_names=[e for e in self.EXTRINSIC_FIELDS],
                                                     obs_dtype=th.float32,
                                                     th_device=self._th_device,
@@ -564,18 +597,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : [-1,1],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
-                                                    observable_fields=[
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
-                                                                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
-                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z
-                                                                        ],
+                                                    observable_fields=extrinsic_observable_fields,
                                                     history_length=self._configuration.history_length,
                                                     obs_history_length = self._configuration.frame_stack_length,
                                                     vec_size=adapter.vec_size())
@@ -613,7 +635,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 self._configuration.noise_posz_ep_mustdstd[2].expand(1),
                                                                 self._configuration.noise_gravity_ep_mustdstd[2].expand(3)]).unsqueeze(-1))
         if self._configuration.observe_body_state:
-            observable_fields = [   self.STATE_ROBOT,
+            observable_substates = [self.STATE_ROBOT,
                                     self.STATE_EXTRINSIC,
                                     self.STATE_INTERNAL,
                                     self.STATE_ACT_PREPROC,
@@ -621,8 +643,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.STATE_JOINT_LONGTERM_STATS
                                     ]
         else:
-            observable_fields = [   self.STATE_ROBOT,
-                                    self.STATE_INTERNAL]
+            observable_substates = [self.STATE_ROBOT,
+                                    self.STATE_INTERNAL,
+                                    self.STATE_ACT_PREPROC,
+                                    # self.STATE_ACT_RAW,
+                                    self.STATE_JOINT_LONGTERM_STATS]
         statehelpers : dict[str,ThBoxStateHelper] = {self.STATE_ROBOT : robot_state_helper,
                         self.STATE_JOINT_STEP_STATS : joint_step_stats_state_helper,
                         self.STATE_EXTRINSIC : extrinsic_state_helper,
@@ -633,7 +658,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info("\n".join([f"{k} : state={s._state_space.shape}  obs ={s._obs_space.shape}" for k,s in statehelpers.items()]))
 
         self._state_helper = DictStateHelper(statehelpers,
-                                              observable_fields=observable_fields,
+                                              observable_fields=observable_substates,
                                               noise = {
                                                     self.STATE_ROBOT : robot_state_noise,
                                                     self.STATE_EXTRINSIC : extrinsic_state_noise},
@@ -671,18 +696,21 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._last_preprocessed_actions = actions
             v_j_pvesd = self._action_helper.action_to_pvesd(actions)
             # do this better, avoid this if condition, put it in the helper
+            if self._configuration.saturate_jimp_ref_limits:
+                v_j_pvesd[:,:,:3] = th.clamp(v_j_pvesd[:,:,:3], min=self._safe_limits_minmax_j_pve[0], max=self._safe_limits_minmax_j_pve[1])
+                posref_diff = v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0]
+                posref_diff = th.clamp(posref_diff, min=self._posref_saturation_minmmax_diff[0], max=self._posref_saturation_minmmax_diff[1])
+                v_j_pvesd[:,:,0] = self._last_sent_v_j_pvesd[:,:,0] + posref_diff
+                # ggLog.info(f"prev_posref: {self._last_sent_v_j_pvesd[:,:,0]}")
+                # ggLog.info(f"new_posref:  {v_j_pvesd[:,:,0]}")
+                # ggLog.info(f"posref_diff: {posref_diff}")
             if self._configuration.control_mode in [JointImpedanceActionHelper.CONTROL_MODES.POSITION, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_STIFFNESS, JointImpedanceActionHelper.CONTROL_MODES.POSITION_AND_TORQUES] :
                 v_j_pvesd[:,:,1] = th.clamp((v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec, 
                                             min=self._safe_limits_minmax_j_pve[0,:,1], 
                                             max=self._safe_limits_minmax_j_pve[1,:,1]) # set velocity reference
-            if self._configuration.saturate_jimp_ref_limits:
-                v_j_pvesd[:,:,:3] = th.clamp(v_j_pvesd[:,:,:3], min=self._safe_limits_minmax_j_pve[0], max=self._safe_limits_minmax_j_pve[1])
-                pref_diff = v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0]
-                pref_diff = th.clamp(pref_diff,
-                                     min=self._safe_limits_minmax_j_pve[0,:,1]*self._configuration.stepLength_sec,
-                                     max=self._safe_limits_minmax_j_pve[1,:,1]*self._configuration.stepLength_sec)
-                v_j_pvesd[:,:,0] = self._last_sent_v_j_pvesd[:,:,0] + pref_diff
-            self._last_sent_v_j_pvesd = v_j_pvesd# ggLog.info(f"sending jimp: {self._last_sent_v_j_pvesd}")
+
+            self._last_sent_v_j_pvesd = v_j_pvesd
+            # ggLog.info(f"sending jimp: {self._last_sent_v_j_pvesd}")
             self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = self._last_sent_v_j_pvesd,
                                                     delay_sec=action_delay)
             
@@ -878,6 +906,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if r == "move":
                 self._realworld_robot_init_move(vec_mask)
             elif r == "skip":
+                masked_assign(self._last_sent_v_j_pvesd, vec_mask, self._adapter.get_current_joint_impedance_command())
                 pass
             else:
                 print(f"Invalid answer '{r}'")
@@ -1054,7 +1083,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def get_observations(self, state) -> dict[Any, th.Tensor]:
         self._last_obs = self._state_helper.observe(state)
         if self._configuration.enable_dbg_checks:
-            if not adarl.utils.tensor_trees.is_all_finite(state):
+            if isinstance(self._adapter, BaseVecSimulationAdapter) and not adarl.utils.tensor_trees.is_all_finite(state):
                 ggLog.warn(f"Non-finite values in state {state}")
             if not adarl.utils.tensor_trees.is_all_finite(self._last_obs):
                 ggLog.warn(f"Non-finite values in obs {self._last_obs}")
@@ -1118,7 +1147,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._update_stats()
         # tf = time.monotonic()
         # ggLog.info(f"update_state: {t1-t0} update_stats: {tf-t1}")
-        self._last_step_simtime = self._adapter.getEnvTimeFromReset()
         # ggLog.info(f"on_step(): {self._current_state[self.STATE_ROBOT][0,0]}")
 
 
@@ -1225,24 +1253,33 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
         vec_step_count = vec_internal_state[:,self.INTERNAL_FIELDS.STEP_COUNT]
-        vec_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
+        vec_safety_state = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED].view((self.num_envs,))
+        # vec_prev_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")
         pveidx = th.as_tensor([0,1,3]).to(device=vec_stats_minmaxavgstd_j_pvae.device, non_blocking=True)
         if self._configuration.enable_limits_safety:
             vec_triggered_limits = th.logical_or(   vec_stats_minmaxavgstd_j_pvae[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
                                                     vec_stats_minmaxavgstd_j_pvae[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
             vec_limits_safety_triggered = th.any(vec_triggered_limits, dim=(1,2))
-            vec_limits_safety_triggered = th.logical_and(vec_limits_safety_triggered, vec_step_count.view((self.num_envs,))>=1)
-            vec_safety_triggered = th.logical_or(vec_limits_safety_triggered, vec_safety_triggered.view((self.num_envs,)))
+            # vec_safety_triggered = th.logical_or(vec_limits_safety_triggered, vec_prev_safety_triggered)
+            newly_triggered = th.logical_and(vec_limits_safety_triggered,
+                                             th.logical_not((vec_safety_state>0)))
+            vec_safety_state = th.where(newly_triggered,
+                                        10.0, # 10 means safety triggered by limits
+                                        vec_safety_state)
         if self._configuration.enable_posref_safety:
             posref_diff = vec_last_sent_j_pvesd[:,:,0] - vec_robot_state[:,0,:,5]
-            posref_safety_triggered = th.logical_or(posref_diff/self._configuration.stepLength_sec < self._safe_limits_minmax_j_pve[0,:,1],
-                                                    posref_diff/self._configuration.stepLength_sec > self._safe_limits_minmax_j_pve[1,:,1])
+            posref_safety_triggered = th.logical_or(posref_diff < self._posref_safety_minmmax_diff[0],
+                                                    posref_diff > self._posref_safety_minmmax_diff[1])
             posref_safety_triggered = th.any(posref_safety_triggered, dim=1)
-            posref_safety_triggered = th.logical_and(posref_safety_triggered, vec_step_count.view((self.num_envs,))>=1)
-            vec_safety_triggered = th.logical_or(vec_safety_triggered, posref_safety_triggered)
+            newly_triggered = th.logical_and(posref_safety_triggered,
+                                             th.logical_not((vec_safety_state>0)))
+            vec_safety_state = th.where(newly_triggered,
+                                        100.0, # 100 means safety triggered by posref
+                                        vec_safety_state)
+        vec_safety_state = th.logical_and(vec_safety_state, vec_step_count.view((self.num_envs,))>=1)
 
-        new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : vec_safety_triggered.to(dtype=th.float32).view(self.num_envs,1),
+        new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : vec_safety_state.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.SIM_TIME : (self._adapter.getEnvTimeFromStartup() - self._eps_start_stime).view(self.num_envs,1)}
         new_robot_state = th.cat([vec_jstates_j_pveae, vec_last_sent_j_pvesd], dim = -1)
@@ -1264,7 +1301,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : vec_body_rel_gravity_dir[:,1].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : vec_body_rel_gravity_dir[:,2].view(self.num_envs,1)}
         
-        step_avg_pos = vec_stats_minmaxavgstd_j_pvae[:,2,:,0]
+        # step_avg_pos = vec_stats_minmaxavgstd_j_pvae[:,2,:,0]
+        step_avg_pos = vec_jstates_j_pveae[:,:,0]
         # print(f"vec_step_count={vec_step_count} step_avg_pos={step_avg_pos}")
         step_avg_pos = th.where(vec_step_count < 1,
                                 step_avg_pos,
@@ -1328,7 +1366,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # i["tot_init_count"] = th.as_tensor(self._tot_init_counter)
         i["joint_homing_dist"] = state[self.STATE_JOINT_LONGTERM_STATS][:,0,0,:] - self._configuration.homing_ctrl_joints_pvesd[:,0]
         if labels is not None:
-            labels["joint_homing_dist"] = to_string_tensor([jn[1] for jn in self._configuration.controlled_joints])
+            if not hasattr(self, "_joint_names_th"):
+                self._joint_names_th = to_string_tensor([jn[1] for jn in self._configuration.controlled_joints])
+            labels["joint_homing_dist"] = self._joint_names_th
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
         normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
         smoothed_joint_pose_norm     = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
@@ -1367,13 +1407,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if labels is not None:
                 labels["act_diff"] = to_string_tensor(self._state_helper.sub_helpers[self.STATE_ACT_RAW].flat_state_names()[:12])
                 labels["act_acc"] = labels["act_diff"]
-        sub_rewards = {}
-        reward = self.compute_rewards(state, sub_rewards)
-        i.update({f"sub_reward_{k}":r for k,r in sub_rewards.items()})
+        sub_rews = {}
+        reward = self.compute_rewards(state, sub_rews)
+        i["rewards"] = th.stack(list(sub_rews.values()), dim = 1) 
+        # ggLog.info(f"i['rewards'] = {i['rewards'].size()}")
+        if labels is not None:
+            if not hasattr(self, "_sub_rew_names_th"):
+                self._sub_rew_names_th = to_string_tensor(list(sub_rews.keys()))
+            labels["rewards"] = self._sub_rew_names_th
         i.update({f"tot_reward":reward})
             
         i.update({"ep_config."+k:v for k,v in dataclasses.asdict(self._current_episode_config).items()})
-        i["safety_triggered"] = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED]
+        i["safety_triggered"] = (state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0) * 1.0
         
         return i
     

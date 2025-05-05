@@ -248,36 +248,36 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "control_mode" : "position",
         "robot_model" : args["robot"],
         "enable_rendering" : False,
-        "goal_err_smoothing_halflife_sec" : 0.1,
+        "goal_err_smoothing_halflife_sec" : 0.0,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
         "quiet" : False,
         "reward_acceleration_weight" :      2.0,
-        "reward_actdiff_weight" :           0.0,
+        "reward_actdiff_weight" :           1.0,
         "reward_actacc_weight" :            0.1,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
-        "reward_health_weight" :            0.0,
+        "reward_health_weight" :            0.25,
         "reward_position_limit_weight" :    0.1,
         "reward_torque_limit_weight" :      0.0,
-        "reward_torque_weight" :            1.0,
+        "reward_torque_weight" :            5.0,
         "reward_torquediff_weight" :        0.0,
-        "reward_tracking_weight" :          1.0,
-        "reward_velocity_limit_weight" :    0.0,
-        "reward_velocity_weight" :          0.0,
-        "reward_height_weight" :            0.15,
-        "reward_pitchnroll_weight" :        0.15,
+        "reward_tracking_weight" :          0.0,
+        "reward_velocity_limit_weight" :    0.1,
+        "reward_velocity_weight" :          1.0,
+        "reward_height_weight" :            0.0,
+        "reward_pitchnroll_weight" :        0.1,
         "reward_position_weight" :          1.0,
-        "reward_feet_air_time_weight" :     10.0,
-        "reward_heading_weight" :           0.05,
+        "reward_feet_air_time_weight" :     20.0,
+        "reward_heading_weight" :           0.0,
         "safe_stiffness" : 400,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
         "stop_on_failure" : False,
-        "fail_on_safety" : False,
+        "fail_on_safety" : True,
         "th_device" : env_device,
         "video_save_freq" : 0,
-        "goal_speed_minmax" : (0,1),
+        "goal_speed_minmax" : (0,0),
         "use_contacts" : False,
         "frame_stack_length" : 3,
         "verbose_infos" : False,
@@ -291,17 +291,20 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
-        "initial_pose_randomization" : 0.8,
-        "mass_randomization_ratio" : 0.3,
-        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
+        "initial_pose_randomization" : 0.5,
+        "mass_randomization_ratio" : 0.0,
+        "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
         "impulse_probability_per_sec" : 0.5,
         "impulse_duration_minmax" : (0.01, 2.5),
-        "impulse_mean_std" : (50.0,50.0)
+        "impulse_mean_std" : (50.0,50.0),
+        "longterm_states_decimation_time" : 0.0001, # Averaging of the joint pose for the position reward
+        "posref_safety_period" : 0.001
     }
 
     env_builder_args.update({
         "enable_rendering" : True,
-        "verbose_infos" : True,
+        "record_video" : args["mode"]!="xbot",
+        "verbose_infos" : False,
         "video_save_freq" : True if args["record"] else 0,
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
@@ -315,7 +318,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "initial_pose_randomization" : 0.0,
         "mass_randomization_ratio" : 0.0,
         "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
-        "impulse_probability_per_sec" : 0.0})
+        "impulse_probability_per_sec" : 0.0,
+        "show_gui" : args["gui"]})
     return play(seed,
                 folderName,
                 run_id, args,
@@ -412,6 +416,7 @@ def play(seed, folderName, run_id, args,
                 break
             obs : TensorTree[th.Tensor]
             obs, info = env.reset(options = options)  #type: ignore
+            ggLog.info(f"env resetted")
             # ggLog.info(f"ep_config = {info['ep_config']}")
             done = False
             ep_reward = 0
@@ -428,13 +433,14 @@ def play(seed, folderName, run_id, args,
             while not done:
                 t0 = time.monotonic()
                 session.run_info["collected_steps"].value += 1
-                base_env : LocomotionVecEnv = env.get_runner().get_base_env()
-                goal_velocity_xy = base_env.get_goals()[0]
-                ggLog.info(f"step = {step_count} rtfactor = {step_length_sec/full_step_wallduration:.2f} max_rtfactor = {step_length_sec/step_wallduration:.2f} \t goal_velocity_xy={goal_velocity_xy}")
+                goal_velocity_xy = []
                 # ggLog.info(f"ep_config = {info['ep_config']}")
+                t0_pred = time.monotonic()
                 obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
                 action, hidden_state = model.predict(obs_batch, deterministic = deterministic)
+                t0_step = time.monotonic()
                 obs, reward, terminated, truncated, info = env.step(action.detach().squeeze()) #type: ignore
+                t1_step = time.monotonic()
                 if render:
                     img = env.render()
                     dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
@@ -460,24 +466,26 @@ def play(seed, folderName, run_id, args,
                     if keyboard_listener.get_key_press_count("l")>0: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
 
                     if keyboard_listener.get_key_press_count("t")>0: truncated = True
+                    base_env : LocomotionVecEnv = env.get_runner().get_base_env()
                     base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
                     if flip:
                         base_env.set_goal(-base_env.get_goals()[0,:2])
                     else:
                         base_env.set_goal(goal_velocity_diff_speed_yaw = tuple(speed_yaw_diff))
                     keyboard_listener.reset_key_press_counters()
+                    goal_velocity_xy = base_env.get_goals()[0]
                 step_count += 1
 
                 done = terminated or truncated
-                # def f(): 
-                #     nonlocal done
-                #     done = True
-                # adarl.utils.sigint_handler.run_on_sigint_received(f)
                 ep_reward += reward
                 step_wallduration = time.monotonic()-t0
                 ep_wall_duration += step_wallduration
-                time.sleep(max(0,step_length_sec/rt - step_wallduration))
+                if args["mode"] != "xbot":
+                    time.sleep(max(0,step_length_sec/rt - step_wallduration))
                 full_step_wallduration = time.monotonic()-t0
+                ggLog.info(f"step = {step_count} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
+                           f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
+                           f" tstep={t1_step-t0_step:1.4f} \t goal_velocity_xy={goal_velocity_xy}")
             if step_count>0:
                 rewards.append(ep_reward)
                 durations.append(step_count)

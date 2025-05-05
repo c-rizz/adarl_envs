@@ -1357,7 +1357,6 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         super().performStep()
         self._update_state()
         self._update_stats()
-        self._last_step_simtime = self._adapter.getEnvTimeFromReset()
 
 
 

@@ -30,7 +30,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     eval_freq = 5
     env_builder_args = {
-        "action_delay_mustd" : (0.0,0.01),
+        "action_delay_mustd" : (0.001,0.01),
         "action_noise_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
@@ -40,6 +40,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
         "quiet" : False,
+        "record_video" : True,
         "reward_acceleration_weight" :      2.0,
         "reward_actdiff_weight" :           0.2,
         "reward_actacc_weight" :            0.1,
@@ -65,6 +66,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "fail_on_safety" : False,
         "th_device" : env_device,
         "video_save_freq" : 0,
+        "record_video" : True,
         "goal_speed_minmax" : (0,1.0),
         "use_contacts" : False,
         "frame_stack_length" : 3,
@@ -193,7 +195,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5
+                                                    target_entropy_factor = -0.5,
+                                                    actor_log_std_init = 1.0
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -229,7 +232,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5
+                                                    target_entropy_factor = -0.5,
+                                                    actor_log_std_init = 1.0
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

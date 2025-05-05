@@ -199,6 +199,7 @@ def loco_runner_builder(seed,
                             reward_pitchnroll_weight=env_builder_args.pop("reward_pitchnroll_weight"),
                             reward_position_weight=env_builder_args.pop("reward_position_weight"),
                             reward_feet_air_time_weight = env_builder_args.pop("reward_feet_air_time_weight"),
+                            reward_failure_weight = env_builder_args.pop("reward_failure_weight"),
                             reward_heading_weight = env_builder_args.pop("reward_heading_weight"),
                             disallowed_contact_links = env_builder_args.pop("disallowed_contact_links"),
                             goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
@@ -214,7 +215,8 @@ def loco_runner_builder(seed,
                             impulse_probability_per_sec=env_builder_args.pop("impulse_probability_per_sec"),
                             impulse_duration_minmax=env_builder_args.pop("impulse_duration_minmax"),
                             impulse_mean_std=env_builder_args.pop("impulse_mean_std"),
-                            longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time")
+                            longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
+                            posref_safety_period = env_builder_args.pop("posref_safety_period")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -230,6 +232,7 @@ def loco_runner_builder(seed,
                                     publish=False,
                                     stream=True,
                                     vec_obs_key="vec",
+                                    record_video=env_builder_args["record_video"],
                                     overlay_text_xy=(0.025,0.025),
                                     overlay_text_height=0.035,
                                     overlay_text_color_rgb=(255,150,0),

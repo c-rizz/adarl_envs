@@ -155,6 +155,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_acceleration_weight : float,
                         reward_actdiff_weight : float,
                         reward_actacc_weight : float,
+                        reward_failure_weight :float,
                         reward_feet_air_time_weight : float,
                         reward_contacts_weight : float,
                         reward_energy_weight : float,
@@ -210,7 +211,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         impulse_duration_minmax : tuple[float,float ]= (0.01, 5.0),
                         impulse_mean_std : tuple[float,float ]= (50.0, 50.0),
                         heightmap_resolution : int = -1,
-                        longterm_states_decimation_time : float = 0.0001
+                        longterm_states_decimation_time : float = 0.0001,
+                        posref_safety_period = 0.001
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -243,7 +245,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_actdiff = self._thtens(reward_actdiff_weight),
                         reward_weight_actacc = self._thtens(reward_actacc_weight),
                         reward_weight_feet_air_time = self._thtens(reward_feet_air_time_weight),
-                        reward_weight_failure = self._thtens(1.0),
+                        reward_weight_failure = self._thtens(reward_failure_weight),
                         height_reward_settle_point=self._thtens(0.2), # ~zero reward after this meter distance
                         pitchnroll_reward_settle_point=self._thtens(0.2), # ~zero reward after this 3d-unit-vector distance
                         heading_reward_settle_point = self._thtens(3.14159/16), # ~zero reward after this distance (w component of the quat difference)
@@ -310,7 +312,8 @@ class LocomotionVecEnv(RobotVecEnv):
                             impulse_duration_minmax = impulse_duration_minmax,
                             impulse_mean_std = impulse_mean_std,
                             fail_on_safety = fail_on_safety,
-                            longterm_states_decimation_time = longterm_states_decimation_time
+                            longterm_states_decimation_time = longterm_states_decimation_time,
+                            posref_safety_period = posref_safety_period
                         )
 
         
@@ -944,12 +947,7 @@ class LocomotionVecEnv(RobotVecEnv):
         i["avg10_pitchnroll_errs_vec"] = th.mean(self._stats["pitchnroll_errs_vec"], dim = 1)
         i["avg10_body_speeds_vec"] = th.mean(self._stats["body_speeds_vec"], dim = 1)
         i["success_vec"] = i["avg10_vel_errs_vec"] < 0.05
-        sub_rews = {}
-        self.compute_rewards(state, sub_rews)
-        i["rewards"] = th.stack(list(sub_rews.values()), dim = 1) 
-        # ggLog.info(f"i['rewards'] = {i['rewards'].size()}")
-        if labels is not None:
-            labels["rewards"] = to_string_tensor(list(sub_rews.keys())) 
+        
 
         if self._configuration.verbose_infos:
             statenorm = self._state_helper.normalize(state)

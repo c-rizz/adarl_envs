@@ -295,7 +295,7 @@ class GraspVecEnv(RobotVecEnv):
                                                     vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_GRASPING,
                                                             camera_state_helper,
-                                                            observable = True,
+                                                            observable = not self._grasping_conf.observe_object_pose,
                                                             flatten_obs = False)
         ggLog.info(f"Built state/obs/action helpers")
         

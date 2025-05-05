@@ -17,6 +17,7 @@ import gymnasium as gym
 import copy
 from rreal.algorithms.sac_helpers import build_vec_env, VecEnvRunnerBuilderProtocol
 from math import pi
+from rreal.algorithms.sac_helpers import VecEnvBuilderProtocol, EnvBuilderProtocol
 
 def format_tensor(t, float_precision):
     t = t.squeeze().cpu().tolist()
@@ -321,61 +322,65 @@ def get_centauro_args():
                             ('centauro', 'wheel_4')]
         }
 
+       
 
+def runner_builder_to_vecenv(runner_builder: VecEnvRunnerBuilderProtocol) -> VecEnvBuilderProtocol:
+    def builder(seed,
+                run_folder,
+                num_envs : int,
+                env_builder_args : dict,
+                env_name : str = ""):
+        mode = env_builder_args["mode"].strip().lower()
+        quiet = env_builder_args["quiet"]
+        stepLength_sec = env_builder_args["stepLength_sec"]
 
-
-
-def single_env_builder(   seed : int,
-                        log_folder : str,
-                        is_eval : bool, 
-                        env_builder_args : dict,
-                        runner_builder : VecEnvRunnerBuilderProtocol):
-    quiet = env_builder_args["quiet"]
-    stepLength_sec = env_builder_args["stepLength_sec"]
-    vrunner = runner_builder( seed = seed,
-                                run_folder = log_folder,
-                                env_builder_args = env_builder_args,
-                                num_envs = 1,
-                                quiet=quiet,
-                                autoreset = False)
-    return GymRunnerWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
+        if mode == "pybullet":
+            device = env_builder_args["th_device"]
+            def env_builder(seed : int,
+                            log_folder : str,
+                            is_eval : bool, 
+                            env_builder_args : dict):
+                return env_builder(seed=seed, log_folder=log_folder,is_eval=is_eval,env_builder_args=env_builder_args,runner_builder=runner_builder)
+            env = build_vec_env(env_builder=env_builder,
+                                env_builder_args=env_builder_args,
+                                log_folder=run_folder,
+                                seed=seed,
+                                num_envs=num_envs,
+                                collector_device=device,
+                                env_action_device = device)
+        else:
+            vrunner = runner_builder( seed = seed,
+                                        run_folder = run_folder,
+                                        env_builder_args = env_builder_args,
+                                        num_envs = num_envs,
+                                        quiet=quiet)
+            env = GymVecRunnerWrapper(runner=vrunner, quiet=quiet)
         
+        # if video_save_freq >0:
+        #     env = wrap_with_recorder(env,
+        #                              stepLength_sec=stepLength_sec,
+        #                              log_folder=log_folder,
+        #                              video_save_freq=video_save_freq)
+        env.reset(seed=seed)
+        return env
+    return builder
 
-def vec_env_builder(  seed,
-                        log_folder,
-                        env_builder_args : dict,
-                        num_envs : int,
-                        runner_builder : VecEnvRunnerBuilderProtocol):
-    mode = env_builder_args["mode"].strip().lower()
-    quiet = env_builder_args["quiet"]
-    stepLength_sec = env_builder_args["stepLength_sec"]
 
-    if mode == "pybullet":
-        device = env_builder_args["th_device"]
-        def env_builder(seed : int,
-                        log_folder : str,
-                        is_eval : bool, 
-                        env_builder_args : dict):
-            return env_builder(seed=seed, log_folder=log_folder,is_eval=is_eval,env_builder_args=env_builder_args,runner_builder=runner_builder)
-        env = build_vec_env(env_builder=env_builder,
-                            env_builder_args=env_builder_args,
-                            log_folder=log_folder,
-                            seed=seed,
-                            num_envs=num_envs,
-                            collector_device=device,
-                            env_action_device = device)
-    else:
+def runner_builder_to_singleenv(runner_builder: VecEnvRunnerBuilderProtocol) -> EnvBuilderProtocol:
+    def builder(seed : int,
+                log_folder : str,
+                is_eval : bool, 
+                env_builder_args : dict)
+        quiet = env_builder_args["quiet"]
+        stepLength_sec = env_builder_args["stepLength_sec"]
         vrunner = runner_builder( seed = seed,
                                     run_folder = log_folder,
                                     env_builder_args = env_builder_args,
-                                    num_envs = num_envs,
-                                    quiet=quiet)
-        env = GymVecRunnerWrapper(runner=vrunner, quiet=quiet)
-    
-    # if video_save_freq >0:
-    #     env = wrap_with_recorder(env,
-    #                              stepLength_sec=stepLength_sec,
-    #                              log_folder=log_folder,
-    #                              video_save_freq=video_save_freq)
-    env.reset(seed=seed)
-    return env #, 1/stepLength_sec
+                                    num_envs = 1,
+                                    quiet=quiet,
+                                    autoreset = False)
+        return GymRunnerWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
+    return builder
+
+centgrasp_vecenv_builder = runner_builder_to_vecenv(runner_builder)
+centgrasp_singleenv_builder = runner_builder_to_singleenv(runner_builder)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
-from adarl_envs.experiments.loco_builder import named_loco_venv_builder
+from adarl_envs.experiments.centgrasp_builder import centgrasp_vecenv_builder
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
@@ -174,7 +174,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     folderName,
                     run_id,
                     args,
-                    vec_env_builder = named_loco_venv_builder,
+                    vec_env_builder = centgrasp_vecenv_builder,
                     env_builder = None,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
@@ -211,7 +211,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     folderName,
                     run_id,
                     args,
-                    vec_env_builder = named_loco_venv_builder,
+                    vec_env_builder = centgrasp_vecenv_builder,
                     env_builder = None,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
@@ -250,7 +250,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 run_id=run_id,
                 args=args,
                 env_builder=None,
-                vec_env_builder=named_loco_venv_builder,
+                vec_env_builder=centgrasp_vecenv_builder,
                 env_builder_args=env_builder_args,
                 agent_hyperparams=PPO_hyperparams(  minibatch_size=8192,
                                                     th_device=th.device("cuda"),

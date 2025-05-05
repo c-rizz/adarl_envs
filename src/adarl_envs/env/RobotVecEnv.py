@@ -542,29 +542,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                               obs_history_length = self._configuration.frame_stack_length,
                                               vec_size=adapter.vec_size(),
                                               observable_subfields = observable_robot_state)
-        joint_step_stats_state_helper = RobotStatsStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
-                                                        obs_dtype=self._configuration.obs_dtype,
-                                                        th_device=self._configuration.th_device,
-                                                        vec_size=adapter.vec_size())
-        joint_longterm_stats_helper = ThBoxStateHelper( field_names=[e for e in self.JOINT_LONGTERM_STATS_FIELDS],
-                                                        obs_dtype=self._obs_dtype,
-                                                        th_device=self._th_device,
-                                                        field_size=(len(self._configuration.joint_physical_limits_minmax_pve),),
-                                                        fields_minmax={self.JOINT_LONGTERM_STATS_FIELDS.AVG_POS : 
-                                                                       th.stack([minmax_pve[:,0]
-                                                                                  for minmax_pve in self._configuration.joint_physical_limits_minmax_pve.values()],
-                                                                                dim = 1)},
-                                                        observable_fields=None,
-                                                        vec_size=adapter.vec_size())
-        internal_state_helper =   ThBoxStateHelper( field_names=[e for e in self.INTERNAL_FIELDS],
-                                                    obs_dtype=self._obs_dtype,
-                                                    th_device=self._th_device,
-                                                    field_size=(1,),
-                                                    fields_minmax={   self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1000],
-                                                                        self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000],
-                                                                        self.INTERNAL_FIELDS.SIM_TIME : [-1,1000_000]},
-                                                    observable_fields=[self.INTERNAL_FIELDS.SAFETY_TRIGGERED],
-                                                    vec_size=adapter.vec_size())
         if self._configuration.observe_body_vels_and_height:
             extrinsic_observable_fields = [
                                             self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
@@ -605,6 +582,29 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     observable_fields=extrinsic_observable_fields,
                                                     history_length=self._configuration.history_length,
                                                     obs_history_length = self._configuration.frame_stack_length,
+                                                    vec_size=adapter.vec_size())
+        joint_step_stats_state_helper = RobotStatsStateHelper(joint_limit_minmax_pve=self._configuration.joint_physical_limits_minmax_pve,
+                                                        obs_dtype=self._configuration.obs_dtype,
+                                                        th_device=self._configuration.th_device,
+                                                        vec_size=adapter.vec_size())
+        joint_longterm_stats_helper = ThBoxStateHelper( field_names=[e for e in self.JOINT_LONGTERM_STATS_FIELDS],
+                                                        obs_dtype=self._obs_dtype,
+                                                        th_device=self._th_device,
+                                                        field_size=(len(self._configuration.joint_physical_limits_minmax_pve),),
+                                                        fields_minmax={self.JOINT_LONGTERM_STATS_FIELDS.AVG_POS : 
+                                                                       th.stack([minmax_pve[:,0]
+                                                                                  for minmax_pve in self._configuration.joint_physical_limits_minmax_pve.values()],
+                                                                                dim = 1)},
+                                                        observable_fields=None,
+                                                        vec_size=adapter.vec_size())
+        internal_state_helper =   ThBoxStateHelper( field_names=[e for e in self.INTERNAL_FIELDS],
+                                                    obs_dtype=self._obs_dtype,
+                                                    th_device=self._th_device,
+                                                    field_size=(1,),
+                                                    fields_minmax={   self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1000],
+                                                                        self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000],
+                                                                        self.INTERNAL_FIELDS.SIM_TIME : [-1,1000_000]},
+                                                    observable_fields=[self.INTERNAL_FIELDS.SAFETY_TRIGGERED],
                                                     vec_size=adapter.vec_size())
         act_history_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
                                                     obs_dtype=self._obs_dtype,

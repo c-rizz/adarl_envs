@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 2048
+        train_envs = 4096
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -89,7 +89,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "initial_pose_randomization" : 0.8,
         "mass_randomization_ratio" : 0.3,
         "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
-        "impulse_probability_per_sec" : 0.1,
+        "impulse_probability_per_sec" : 0.5,
         "impulse_duration_minmax" : (0.01, 2.5),
         "impulse_mean_std" : (50.0,50.0),
         "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward

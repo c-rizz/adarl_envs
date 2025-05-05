@@ -1379,6 +1379,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         i["joint_pos_error_instant"] = th.mean(th.abs(joint_pose - normhoming), dim=1)
 
         if self._configuration.verbose_infos:
+            act_raw_state = state[self.STATE_ACT_RAW]   
             statenorm = self._state_helper.normalize(state)
             for substate in [   self.STATE_ROBOT,
                                 self.STATE_EXTRINSIC,
@@ -1399,6 +1400,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             i["vec_obs"] = self._last_obs["vec"]
             if labels is not None:
                 labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["vec"]])
+            actdiff             = th.flatten((act_raw_state[:,0] - act_raw_state[:,1])/2, start_dim=1)
+            prev_actdiff        = th.flatten((act_raw_state[:,1] - act_raw_state[:,2])/2, start_dim=1)
+            act_acc             = actdiff - prev_actdiff
+            i["act_diff"] = actdiff
+            i["act_acc"] = act_acc
+            if labels is not None:
+                labels["act_diff"] = to_string_tensor(self._state_helper.sub_helpers[self.STATE_ACT_RAW].flat_state_names()[:12])
+                labels["act_acc"] = labels["act_diff"]
         sub_rews = {}
         reward = self.compute_rewards(state, sub_rews)
         i["rewards"] = th.stack(list(sub_rews.values()), dim = 1) 

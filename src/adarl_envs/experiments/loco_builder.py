@@ -15,7 +15,7 @@ from adarl.envs.vec.GymRunnerWrapper import GymRunnerWrapper
 from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
 import gymnasium as gym
 import copy
-from rreal.algorithms.sac_helpers import build_vec_env
+from rreal.algorithms.sac_helpers import build_vec_env, VecEnvRunnerBuilderProtocol
 from math import pi
 
 def format_tensor(t, float_precision):
@@ -26,34 +26,21 @@ def format_tensor(t, float_precision):
     return f"[{', '.join(t)}]"
 
 def loco_runner_builder(seed,
-                        log_folder,
-                        env_builder_args : dict,
+                        run_folder,
                         num_envs : int,
-                        mode : str,
-                        quiet : bool,
-                        autoreset : bool = True):
+                        env_builder_args : dict,
+                        env_name : str = "",
+                        autoreset : bool = True,
+                        quiet : bool = False):
     ggLog.info(f"Building env: thread={threading.current_thread()}, pid={os.getpid()}")
     ggLog.info(f"env_builder_args = {env_builder_args}")
     env_builder_args = copy.deepcopy(env_builder_args)
     stepLength_sec = env_builder_args.pop("stepLength_sec")
-    video_save_freq = env_builder_args.pop("video_save_freq")
     th_device = env_builder_args["th_device"]
-    # max_steps = 5/stepLength_sec
-    max_steps = env_builder_args.pop("max_steps_per_episode")
     show_gui = env_builder_args.pop("show_gui",False)
-
-    model_file = env_builder_args["model_file"]
-    model_kwargs = env_builder_args["model_kwargs"]
-    xacro_extra_pkg_paths = env_builder_args["xacro_extra_pkg_paths"]
-    homing_joint_pose = env_builder_args["homing_joint_pose"]
     robot_name = env_builder_args["robot_name"]
-    robot_main_body_link = env_builder_args["robot_main_body_link"]
-    robot_root_link = env_builder_args["robot_root_link"]
-    homing_body_pose_xyz_xyzw = env_builder_args["homing_body_pose_xyz_xyzw"]
-    disallowed_contact_links = env_builder_args["disallowed_contact_links"]
-    terminating_contact_pairs = env_builder_args["terminating_contact_pairs"]
-    controlled_joints = env_builder_args["controlled_joints"]
 
+    mode = env_builder_args["mode"]
     if mode == "gz":
         raise NotImplementedError()
     elif mode == "gazebo":
@@ -137,7 +124,7 @@ def loco_runner_builder(seed,
                                                   log_freq=10_000,
                                                   record_whole_joint_trajectories = False,
                                                   log_freq_joints_trajectories = int(250*(50/1024)/(2/4096)),
-                                                  log_folder=log_folder,
+                                                  log_folder=run_folder,
                                                   revolute_dof_armature_override=0.5 if env_builder_args["robot_model"] == "centauro" else 0.1,
                                                   safe_revolute_dof_armature=0.1,
                                                   opt_preset={"centauro":"fast",
@@ -149,24 +136,24 @@ def loco_runner_builder(seed,
 
     time.sleep(1)
 
+    max_steps = env_builder_args.pop("max_steps_per_episode")
+    urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(env_builder_args.pop("model_file")).read_text(),
+                                                            model_kwargs=env_builder_args.pop("model_kwargs"),
+                                                            extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
     
-    urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(model_file).read_text(),
-                                                            model_kwargs=model_kwargs,
-                                                            extra_pkg_paths=xacro_extra_pkg_paths)
-
     lrenv = LocomotionVecEnv(action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
                             action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
                             action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                             adapter=adapter,
                             control_mode = env_builder_args.pop("control_mode"),
-                            controlled_joints=controlled_joints,
+                            controlled_joints=env_builder_args.pop("controlled_joints"),
                             goal_err_smoothing_halflife_sec = env_builder_args.pop("goal_err_smoothing_halflife_sec"),
                             maxStepsPerEpisode=max_steps,
                             minmax_damping=(1.0,30.0),
                             minmax_stiffness=(50.0,1000.0),
-                            robot_main_body_link=robot_main_body_link,
+                            robot_main_body_link=env_builder_args.pop("robot_main_body_link"),
                             robot_name=robot_name,
-                            robot_root_link=robot_root_link,
+                            robot_root_link=env_builder_args.pop("robot_root_link"),
                             robot_urdf_string=urdf_string,
                             safe_damping=env_builder_args.pop("safe_damping"),
                             safe_stiffness=env_builder_args.pop("safe_stiffness"),
@@ -178,10 +165,10 @@ def loco_runner_builder(seed,
                             stop_on_failure=env_builder_args.pop("stop_on_failure"),
                             fail_on_safety=env_builder_args.pop("fail_on_safety"),
                             th_device=th_device,
-                            homing_joint_pose=homing_joint_pose,
+                            homing_joint_pose=env_builder_args.pop("homing_joint_pose"),
                             frame_stack_length=env_builder_args.pop("frame_stack_length"),
                             observe_body_velocity=True,
-                            homing_body_pose_xyz_xyzw=homing_body_pose_xyz_xyzw,
+                            homing_body_pose_xyz_xyzw=env_builder_args.pop("homing_body_pose_xyz_xyzw"),
                             control_limits_minmax_pve={},
                             verbose_infos=env_builder_args.pop("verbose_infos"),
                             quiet=quiet,
@@ -218,10 +205,10 @@ def loco_runner_builder(seed,
                             reward_velref_weight = env_builder_args.pop("reward_velref_weight"),
                             reward_torqueref_weight = env_builder_args.pop("reward_torqueref_weight"),
                             reward_pos2posref_weight = env_builder_args.pop("reward_pos2posref_weight"),
-                            disallowed_contact_links = disallowed_contact_links,
+                            disallowed_contact_links = env_builder_args.pop("disallowed_contact_links"),
                             goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
                             use_contacts=env_builder_args.pop("use_contacts"),
-                            terminating_contact_pairs=terminating_contact_pairs if env_builder_args.pop("terminate_on_body_contact") else [],
+                            terminating_contact_pairs=env_builder_args.pop("terminating_contact_pairs") if env_builder_args.pop("terminate_on_body_contact") else [],
                             enable_link_collisions=env_builder_args.pop("enable_link_collisions"),
                             mass_randomized_links=env_builder_args.pop("mass_randomized_links"),
                             mass_randomization_ratio=env_builder_args.pop("mass_randomization_ratio"),
@@ -243,14 +230,14 @@ def loco_runner_builder(seed,
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
     # ggLog.info(f"action_space = {lrenv.action_space.shape}")
-    vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=log_folder+"/vec_runner.log",
+    vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
                         render_envs=[0], autoreset=autoreset,
                         log_freq = max_steps)
     vrunner = EnvRunnerRecorderWrapper(vrunner,
                                     fps = 1/stepLength_sec,
-                                    outFolder=log_folder+"/RunnerRecorder",
+                                    outFolder=run_folder+"/RunnerRecorder",
                                     env_index=0,
-                                    saveFrequency_ep=video_save_freq,
+                                    saveFrequency_ep=env_builder_args.pop("video_save_freq"),
                                     publish=False,
                                     stream=True,
                                     vec_obs_key="vec",
@@ -273,31 +260,36 @@ def loco_runner_builder(seed,
 def loco_env_builder(   seed : int,
                         log_folder : str,
                         is_eval : bool, 
-                        env_builder_args : dict):
-    mode = env_builder_args["mode"].strip().lower()
+                        env_builder_args : dict,
+                        runner_builder : VecEnvRunnerBuilderProtocol):
     quiet = env_builder_args["quiet"]
     stepLength_sec = env_builder_args["stepLength_sec"]
-    vrunner = loco_runner_builder( seed = seed,
-                                log_folder = log_folder,
+    vrunner = runner_builder( seed = seed,
+                                run_folder = log_folder,
                                 env_builder_args = env_builder_args,
                                 num_envs = 1,
-                                mode = mode,
                                 quiet=quiet,
                                 autoreset = False)
     return GymRunnerWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
         
 
-def loco_venv_builder(   seed,
+def loco_venv_builder(  seed,
                         log_folder,
                         env_builder_args : dict,
-                        num_envs : int):
+                        num_envs : int,
+                        runner_builder : VecEnvRunnerBuilderProtocol):
     mode = env_builder_args["mode"].strip().lower()
     quiet = env_builder_args["quiet"]
     stepLength_sec = env_builder_args["stepLength_sec"]
 
     if mode == "pybullet":
         device = env_builder_args["th_device"]
-        env = build_vec_env(env_builder=loco_env_builder,
+        def env_builder(seed : int,
+                        log_folder : str,
+                        is_eval : bool, 
+                        env_builder_args : dict):
+            return loco_env_builder(seed=seed, log_folder=log_folder,is_eval=is_eval,env_builder_args=env_builder_args,runner_builder=runner_builder)
+        env = build_vec_env(env_builder=env_builder,
                             env_builder_args=env_builder_args,
                             log_folder=log_folder,
                             seed=seed,
@@ -305,11 +297,10 @@ def loco_venv_builder(   seed,
                             collector_device=device,
                             env_action_device = device)
     else:
-        vrunner = loco_runner_builder( seed = seed,
-                                    log_folder = log_folder,
+        vrunner = runner_builder( seed = seed,
+                                    run_folder = log_folder,
                                     env_builder_args = env_builder_args,
                                     num_envs = num_envs,
-                                    mode = mode,
                                     quiet=quiet)
         env = GymVecRunnerWrapper(runner=vrunner, quiet=quiet)
     
@@ -509,7 +500,8 @@ def named_loco_venv_builder(seed : int,
     return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
-                            num_envs=num_envs)[0]
+                            num_envs=num_envs,
+                            runner_builder=loco_runner_builder)[0]
 
 def named_loco_single_env_builder(seed : int,
                     log_folder : str,
@@ -527,7 +519,8 @@ def named_loco_single_env_builder(seed : int,
     return loco_env_builder(seed = seed,
                             log_folder = log_folder,
                             env_builder_args = env_builder_args,
-                            is_eval=is_eval)
+                            is_eval=is_eval,
+                            runner_builder=loco_runner_builder)
 
 # def quad_loco_venv_builder(seed : int,
 #                     run_folder : str,
@@ -574,28 +567,4 @@ def named_loco_single_env_builder(seed : int,
 #                             env_builder_args = env_builder_args,
 #                             num_envs=num_envs)[0]
 
-
-
-
-def adarl_envs_builder(seed : int,
-                    run_folder : str,
-                    num_envs : int, 
-                    env_builder_args : dict) -> gym.vector.VectorEnv:
-    import adarl.utils.utils
-    env_builder_args["model_file"] = adarl.utils.utils.pkgutil_get_path("adarl_envs","models/leg_rig_simple.urdf.xacro")
-    env_builder_args["homing_joint_pose"]={ ("leg","rail_joint") : 1.0,
-                        ("leg","hip_joint_1") : 1.0,
-                        ("leg","knee_joint_1") : 1.4}
-    env_builder_args["robot_name"] = "leg"
-    env_builder_args["robot_main_body_link"] = "slider_link"
-    env_builder_args["robot_root_link"] = "slider_link"
-    env_builder_args["homing_body_pose_xyz_xyzw"] = (0.,0.,0.0,0.,0.,0.,1.)
-    env_builder_args["disallowed_contact_links"]  = []
-    env_builder_args["terminating_contact_pairs"] = []
-    env_builder_args["controlled_joints"] = [JOINT_FILTERS.ALL_REVOLUTE]
-
-    return loco_venv_builder(seed = seed,
-                            log_folder = run_folder,
-                            env_builder_args = env_builder_args,
-                            num_envs=num_envs)[0]
 

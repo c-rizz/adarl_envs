@@ -452,10 +452,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                          self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
                                          self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z]], dim = 1)
         step_counts = new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
-        # goal_abs_linvel_vec_xyz = prev_locom_state[:,[self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X,
-        #                                             self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Y,
-        #                                             self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z]]
-
+        
         # compute linvel error
         vsize = step_counts.size()[0]
         if self._locomotion_episode_config.goal_rel_vel_vec_xy is None:
@@ -491,35 +488,11 @@ class LocomotionVecEnv(RobotVecEnv):
         # the w component is by itself a measure of the size of the rotation, 2acos(w) would be the actual angle, but it is numerically unstable
         # in practice at w=1 the orientations are close, at -1 they are 180 degrees apart
         heading_error_vec = (1-quat_mul_xyzw(th_quat_conj(rel_goal_heading_quat), rel_curr_heading_quat)[:,3]).view(vsize,1)
-        # th.set_printoptions(precision=4)
-        # print("\n")
-        # print(f"[{step_counts[0]}] abs_planar_linvel_goal={abs_planar_linvel_goal.shape},{abs_planar_linvel_goal}")
-        # print(f"[{step_counts[0]}] borient_quat_vec_xyzw={borient_quat_vec_xyzw.shape},{borient_quat_vec_xyzw}")
-        # print(f"[{step_counts[0]}] rel_planar_linvel_goal_vec_xyz={rel_planar_linvel_goal_vec_xyz.shape},{rel_planar_linvel_goal_vec_xyz}")
-        # print(f"[{step_counts[0]}] rel_curr_heading_quat={rel_curr_heading_quat.shape},{rel_curr_heading_quat}")
-        # print(f"[{step_counts[0]}] rel_goal_heading_quat={rel_goal_heading_quat.shape},{rel_goal_heading_quat}")
-        # print(f"[{step_counts[0]}] zero_goal={zero_goal.shape},{zero_goal}")
         masked_assign(heading_error_vec, zero_goal, self._zero) # would be nan otherwise
-        # print(f"[{step_counts[0]}] heading_error_vec={heading_error_vec.shape},{heading_error_vec}")
-        # heading_error_vec = self._thtens(10.0).expand(vsize,1)
-
+        
         # compute height error
         goal_height_z = prev_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT]
         height_err_vec = th.abs(new_extrinsic_state[self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - goal_height_z)
-
-        # print(f"body_rel_linvel_vec_xyz.size() = {body_rel_linvel_vec_xyz.size()}")
-        # print(f"gravity_rel_vec_xyz.size() = {gravity_rel_vec_xyz.size()}")
-        # print(f"goal_rel_linvel_vec_xyz.size() = {goal_rel_linvel_vec_xyz.size()}")
-        
-        # print(f"prev_locom_state.size() = {prev_locom_state.size()}")
-        # print(f"tracking_err_vec.size() = {tracking_err_vec.size()}")
-        # print(f"tracking_err_vec = {tracking_err_vec}")
-        # print(f"self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT].size() = {self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT].size()}")
-        # print(f"new_extrinsic_state[self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z].size() = {new_extrinsic_state[self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z].size()}")
-        # print(f"prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR].size() = {prev_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR].size()}")
-        # print(f"goal_height_z.size() = {goal_height_z.size()}")
-        # ggLog.info( f"abs_goal = {self._locomotion_episode_config.goal_abs_linvel_xyz}, body_rel_linvel_xyz = {body_rel_linvel_xyz}, goal_rel_linvel_xyz = {goal_rel_linvel_xyz}, gravity_rel_xyz={gravity_rel_xyz}\n"
-        #             f"tracking_err = {tracking_error} = norm({body_planar_rel_linvel_xyz}-{goal_rel_linvel_xyz}) = norm({body_planar_rel_linvel_xyz-goal_rel_linvel_xyz})")
 
         # compute pitch and roll error
         pitchnroll_err_vec = th.linalg.norm(gravity_rel_vec_xyz-self._locomotion_episode_config.goal_abs_gravity_vec_xyz, dim = 1, keepdim=True) # Would be nice to use geodesic distance or somethinglike that
@@ -529,7 +502,6 @@ class LocomotionVecEnv(RobotVecEnv):
         smoothed_height_error = height_err_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR]*alpha
         smoothed_pithnroll_error = pitchnroll_err_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR]*alpha
         smoothed_heading_error_vec = heading_error_vec*(1-alpha) + prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR]*alpha
-        # print(f"smoothed_tracking_err_vec.size() = {smoothed_tracking_err_vec.size()}")
         starting_eps = step_counts<=0
         masked_assign(smoothed_tracking_err_vec,starting_eps.view((self.num_envs,)),tracking_err_vec)
 
@@ -601,9 +573,7 @@ class LocomotionVecEnv(RobotVecEnv):
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
         if isinstance_noimport(self._adapter, "MjxAdapter"):
             feet_are_touching_ground = self._adapter.check_colliding_links(self._feet_link_ids, self._ground_link_id)
-            # ggLog.info(f"[{step_counts[0]}] feet_are_touching_ground = {feet_are_touching_ground}")
             feet_were_touching_ground = prev_feet_state <= 0
-            # ggLog.info(f"[{step_counts[0]}] feet_were_touching_ground = {feet_were_touching_ground}")
             nenv_nfeet = (self.num_envs,len(self._locomotion_conf.feet_links))
             # if foot is just lifting off, mark the time in the state
             # if foot is already up, and stays up, leave the time there
@@ -613,7 +583,6 @@ class LocomotionVecEnv(RobotVecEnv):
             touching_down = th.logical_and(th.logical_not(feet_were_touching_ground), feet_are_touching_ground)
             staying_down = th.logical_and(feet_are_touching_ground, feet_were_touching_ground)
             new_feet_liftoffs_vec_foot_t = prev_feet_state*((touching_down*-2)+1) # foot touching down, flip to engative
-            # ggLog.info(f"[{step_counts[0]}] lifting_off = {lifting_off}")
             th.where(condition=lifting_off.expand(nenv_nfeet),
                      input=new_internal_state[self.INTERNAL_FIELDS.SIM_TIME].expand(nenv_nfeet),
                      other=new_feet_liftoffs_vec_foot_t,
@@ -622,7 +591,6 @@ class LocomotionVecEnv(RobotVecEnv):
                      input=self._thtens(0.0),
                      other=new_feet_liftoffs_vec_foot_t,
                      out=new_feet_liftoffs_vec_foot_t)
-            # ggLog.info(f"[{step_counts[0]}] new_feet_state_th.shape = {new_feet_state_th.shape}")
         else:
             new_feet_liftoffs_vec_foot_t = self._thtens([0.0]).expand(vsize,len(self._locomotion_conf.feet_links))
         if isinstance(self._adapter,BaseVecSimulationAdapter):
@@ -665,13 +633,7 @@ class LocomotionVecEnv(RobotVecEnv):
         th.Tensor
             _description_
         """
-        # ggLog.info(f"tracking_error_vec(body_rel_linvel_vec_xyz.size()={body_rel_linvel_vec_xyz.size()}, gravity_rel_vec_xyz.size()={gravity_rel_vec_xyz.size()}, goal_rel_linvel_vec_xyz.size()={goal_rel_linvel_vec_xyz.size()}")
         body_planar_rel_linvel_xyz = body_rel_linvel_vec_xyz - vector_projection(body_rel_linvel_vec_xyz,gravity_rel_vec_xyz)
-        # ggLog.info(f" {body_rel_linvel_xyz.cpu().tolist()} + vector_projection({body_rel_linvel_xyz.cpu().tolist()},{gravity_rel_xyz.cpu().tolist()}) =\n"
-        #            f" {body_rel_linvel_xyz.cpu().tolist()} + {vector_projection(body_rel_linvel_xyz,gravity_rel_xyz).cpu().tolist()} = \n"
-        #            f"{body_planar_rel_linvel_xyz.cpu().tolist()}\n"
-        #            f"norm({body_planar_rel_linvel_xyz.cpu().tolist()} - {goal_rel_linvel_xyz.cpu().tolist()})={th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_xyz).cpu().tolist()}")
-        # time.sleep(0.1)
         # goal_rel_linvel_xyz should already be "planar", it's projection along gravity_rel should be zero
         norms = th.norm(vector_projection(goal_rel_linvel_vec_xyz,gravity_rel_vec_xyz), dim = 1)
         dbg_check(lambda: th.all(norms < 0.1) == True,
@@ -723,9 +685,6 @@ class LocomotionVecEnv(RobotVecEnv):
         dbg_run(lambda: self._warn_out_of_bounds(state_robot_norm))
         state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
         # state_stats_norm = self._state_helper.sub_helpers[self.STATE_ROBOT_STATS].normalize(state_stats)
-        # ggLog.info(f"current_state_locom_vec.size() = {current_state_locom_vec.size()}")
-        # ggLog.info(f"state_robot_norm.size() = {state_robot_norm.size()}")
-        # ggLog.info(f"state_robot_safenorm.size() = {state_robot_safenorm.size()}")
         normposhomingdiff   = longterm_stats_pos_norm[:,0,0] - normhoming
         normvelocities      = state_robot_norm[:,0,:,1]
         normtorques         = state_robot_norm[:,0,:,2]
@@ -765,8 +724,6 @@ class LocomotionVecEnv(RobotVecEnv):
         rel_goal_offset = self._locomotion_conf.reward_vel_goal_relative_width_offset
         abs_goal_bell_width = self._locomotion_conf.reward_vel_goal_absolute_width
         goal_norm = th.linalg.norm(self._locomotion_episode_config.goal_abs_vel_vec_xyz, dim = -1)
-        # ggLog.info(f"velocity_tracking_err_vec.size() = {velocity_tracking_err_vec.size()}")
-        # ggLog.info(f"goal_norm.size() = {goal_norm.size()}")
         velocity_tracking_err_vec = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
         reward_velocity_tracking = (   goalrelative_weight  * bell_reward(velocity_tracking_err_vec,
                                                                           zero_rew_dist=rel_goal_bell_width*(goal_norm+rel_goal_offset))+
@@ -789,9 +746,6 @@ class LocomotionVecEnv(RobotVecEnv):
         offsetted_finished_steps_durations = th.tanh(offsetted_finished_steps_durations/max_good_step_duration)*max_good_step_duration
         reward_feet_air_time = th.mean(offsetted_finished_steps_durations, dim=1)
         reward_feet_air_time = reward_feet_air_time*(th.linalg.norm(prev_goal_rel_vec_xyz,dim=1)>0.05) # Disable reward if goal velocity is less than 0.05
-        # ggLog.info(f"feet_state = {feet_state}")
-        # ggLog.info(f"finished_steps_durations = {finished_steps_durations}")
-        # ggLog.info(f"reward_feet_air_time = {reward_feet_air_time}")
         feet_linvels_xy = feet_state[:,1:3] # vec_size*fields*nfeet -> vec_size*2*nfeet
         feet_linvels = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*fields*nfeet -> vec_size*nfeet
         feet_touching_ground = feet_liftoffs <= 0
@@ -957,7 +911,6 @@ class LocomotionVecEnv(RobotVecEnv):
         i = super().get_infos(state=state, labels=labels)
         curr_locom_state = state[self.STATE_LOCOMOTION][:,0]
         curr_extri_state = state[self.STATE_EXTRINSIC][:,0]
-        act_raw_state = state[self.STATE_ACT_RAW]
         
         goal_vel_rel_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
                                                 self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
@@ -1007,17 +960,6 @@ class LocomotionVecEnv(RobotVecEnv):
                 if labels is not None:
                     labels["state_"+substate] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                     labels["statenorm_"+substate] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
-            actdiff             = th.flatten((act_raw_state[:,0] - act_raw_state[:,1])/2, start_dim=1)
-            prev_actdiff        = th.flatten((act_raw_state[:,1] - act_raw_state[:,2])/2, start_dim=1)
-            act_acc             = actdiff - prev_actdiff
-            # ggLog.info(f"act_raw_state = {act_raw_state}")
-            # ggLog.info(f"act_acc = {act_acc}")
-            # ggLog.info(f"actdiff = {actdiff}")
-            i["act_diff"] = actdiff
-            i["act_acc"] = act_acc
-            if labels is not None:
-                labels["act_diff"] = to_string_tensor(self._state_helper.sub_helpers[self.STATE_ACT_RAW].flat_state_names()[:12])
-                labels["act_acc"] = labels["act_diff"]
 
 
         return i
@@ -1087,9 +1029,6 @@ class LocomotionVecEnv(RobotVecEnv):
             goals_fixed = self._locomotion_episode_config.goal_abs_vel_vec_xyz.detach().clone()
             zero_goals = th.linalg.norm(goals_fixed, dim = 1) < 0.0001
             if len(zero_goals)>0:
-                # ggLog.info(f"downs.size() = {downs.size()}")
-                # ggLog.info(f"goals_fixed.size() = {goals_fixed.size()}")
-                # ggLog.info(f"goals_fixed[zero_goals].size() = {goals_fixed[zero_goals].size()}")
                 masked_assign(goals_fixed,zero_goals,self._thtens([0,0,-1.0]))
                 
             q = quat_xyzw_between_vecs_py(self._thtens([1.0,0,0]).expand((self._adapter.vec_size(),3)), goals_fixed)

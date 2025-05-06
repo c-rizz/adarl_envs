@@ -150,7 +150,8 @@ class GraspVecEnv(RobotVecEnv):
                         impulse_probability_per_sec : float = 0.0,
                         impulse_duration_minmax : tuple[float,float ]= (0.01, 5.0),
                         impulse_mean_std : tuple[float,float ]= (50.0, 50.0),
-                        longterm_states_decimation_time : float = 0.0001
+                        longterm_states_decimation_time : float = 0.0001,
+                        observe_object_pose : bool = False
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -163,7 +164,7 @@ class GraspVecEnv(RobotVecEnv):
                         reward_scale = self._thtens(reward_scale),
                         target_object_link=target_object_link,
                         gripper_link=gripper_link,
-                        observe_object_pose=False,
+                        observe_object_pose=observe_object_pose,
                         camera_resolution_xy = (64,64),
                         init_obj_area_minmax_xyz = th.as_tensor([[-0.5, -0.5, 0.0], [0.5, 0.5, 0.0]], device=th_device),
                         goal_obj_area_minmax_xyz = th.as_tensor([[-0.5, -0.5, 0.0], [0.5, 0.5, 0.5]], device=th_device)
@@ -182,7 +183,7 @@ class GraspVecEnv(RobotVecEnv):
                         velocity = self._thtens(reward_velocity_weight),
                         velocity_limit = self._thtens(reward_velocity_limit_weight)
                         )
-        self._reward_weights = th.as_tensor([v for v in dataclasses.asdict(self._sub_reward_weights)])
+        self._reward_weights = th.as_tensor([v for v in dataclasses.asdict(self._sub_reward_weights).values()])
         
         self._grasping_episode_config = GraspVecEnv.EpisodeGraspingConfiguration(initial_object_pose = self._thzeros((adapter.vec_size(), 7)),
                                                                                    goal_object_pose = self._thzeros((adapter.vec_size(), 7)))
@@ -286,13 +287,13 @@ class GraspVecEnv(RobotVecEnv):
                                                             grasping_state_helper,
                                                             observable = True,
                                                             flatten_obs = True)
-        camera_state_helper = ThBoxStateHelper( field_names=[e for e in self.GRASPING_FIELDS],
-                                                    obs_dtype=self._obs_dtype,
-                                                    th_device=self._th_device,
-                                                    field_size=self._grasping_conf.camera_resolution_xy,
-                                                    fields_minmax={ self.CAMERA_FIELDS.IMAGE : [-1,1]},
-                                                    observable_fields=observable_fields, #type: ignore
-                                                    vec_size=adapter.vec_size())
+        camera_state_helper = ThBoxStateHelper( field_names=[e for e in self.CAMERA_FIELDS],
+                                                obs_dtype=self._obs_dtype,
+                                                th_device=self._th_device,
+                                                field_size=self._grasping_conf.camera_resolution_xy,
+                                                fields_minmax={ self.CAMERA_FIELDS.IMAGE : [-1,1]},
+                                                observable_fields=observable_fields, #type: ignore
+                                                vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_GRASPING,
                                                             camera_state_helper,
                                                             observable = not self._grasping_conf.observe_object_pose,

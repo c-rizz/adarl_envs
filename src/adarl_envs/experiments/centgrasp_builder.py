@@ -206,7 +206,8 @@ def runner_builder(seed,
                         impulse_mean_std=env_builder_args.pop("impulse_mean_std"),
                         longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
                         target_object_link=env_builder_args.pop("target_object_link"),
-                        gripper_link=env_builder_args.pop("gripper_link")
+                        gripper_link=env_builder_args.pop("gripper_link"),
+                        observe_object_pose=env_builder_args.pop("observe_object_pose")
                 )
     
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
@@ -276,16 +277,18 @@ def get_centauro_args():
                 # ("centauro","j_wheel_2") : 0.0,
                 # ("centauro","j_wheel_3") : 0.0,
                 # ("centauro","j_wheel_4") : 0.0,
-                # ("centauro","dagana_1_claw_joint") : 0,
+                ("centauro","dagana_1_claw_joint") : 0,
                 # ("centauro","dagana_2_claw_joint") : 0
                 }
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf/urdf/centauro.urdf.xacro"),
             "model_kwargs" : {  "realsense":"false",
                                 "velodyne" :"false",
                                 "floating_joint":"true",
-                                "sphere_wheel_collision":"true"
+                                "sphere_wheel_collision":"true",
+                                "end_effector_left":"dagana"
                                 },
-            "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf")},
+            "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf"),
+                                       "dagana_urdf" : adarl.utils.utils.pkgutil_get_path("pydagana","iit-dagana-ros-pkg/dagana_urdf")},
             "homing_joint_pose" : homing,
             "robot_name" : "centauro",
             "robot_main_body_link" : "pelvis",
@@ -294,18 +297,19 @@ def get_centauro_args():
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : [
-                ("centauro","j_arm1_1"),
-                ("centauro","j_arm1_2"),
-                ("centauro","j_arm1_3"),
-                ("centauro","j_arm1_4"),
-                ("centauro","j_arm1_5"),
-                ("centauro","j_arm1_6"),
-                ("centauro","j_arm2_1"),
-                ("centauro","j_arm2_2"),
-                ("centauro","j_arm2_3"),
-                ("centauro","j_arm2_4"),
-                ("centauro","j_arm2_5"),
-                ("centauro","j_arm2_6"),
+                "j_arm1_1",
+                "j_arm1_2",
+                "j_arm1_3",
+                "j_arm1_4",
+                "j_arm1_5",
+                "j_arm1_6",
+                "dagana_1_claw_joint",
+                # "j_arm2_1",
+                # "j_arm2_2",
+                # "j_arm2_3",
+                # "j_arm2_4",
+                # "j_arm2_5",
+                # "j_arm2_6",
             ],
             "mass_randomized_links" : [LINK_FILTERS.ALL_ROBOT],
             "friction_randomized_links" : [LINK_FILTERS.ALL],
@@ -336,12 +340,12 @@ def runner_builder_to_vecenv(runner_builder: VecEnvRunnerBuilderProtocol) -> Vec
 
         if mode == "pybullet":
             device = env_builder_args["th_device"]
-            def env_builder(seed : int,
+            def single_env_builder(seed : int,
                             log_folder : str,
                             is_eval : bool, 
                             env_builder_args : dict):
                 return env_builder(seed=seed, log_folder=log_folder,is_eval=is_eval,env_builder_args=env_builder_args,runner_builder=runner_builder)
-            env = build_vec_env(env_builder=env_builder,
+            env = build_vec_env(env_builder=single_env_builder,
                                 env_builder_args=env_builder_args,
                                 log_folder=run_folder,
                                 seed=seed,
@@ -370,7 +374,7 @@ def runner_builder_to_singleenv(runner_builder: VecEnvRunnerBuilderProtocol) -> 
     def builder(seed : int,
                 log_folder : str,
                 is_eval : bool, 
-                env_builder_args : dict)
+                env_builder_args : dict):
         quiet = env_builder_args["quiet"]
         stepLength_sec = env_builder_args["stepLength_sec"]
         vrunner = runner_builder( seed = seed,

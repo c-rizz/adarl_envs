@@ -41,6 +41,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : mode,
         "quiet" : False,
         "record_video" : True,
+        "robot_name" : "centauro",
         "reward_acceleration_weight" :      2.0,
         "reward_actdiff_weight" :           0.2,
         "reward_actacc_weight" :            0.1,
@@ -87,7 +88,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_probability_per_sec" : 0.5,
         "impulse_duration_minmax" : (0.01, 2.5),
         "impulse_mean_std" : (50.0,50.0),
-        "longterm_states_decimation_time" : 0.1 # Averaging of the joint pose for the position reward
+        "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
+        "target_object_link" : ("cube","cube"),
+        "gripper_link" : ("centauro","dagana_1_tcp"),
+        "observe_object_pose" : True
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

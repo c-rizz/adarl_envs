@@ -2,9 +2,11 @@
 <robot name="axes" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
 	<xacro:arg name="add_world_link" default="False" />
+	<xacro:arg name="size" default="1.0" />
 
 	<xacro:property name="color_rgba" default="0.9 0.1 0.1 0.8" />
 	<xacro:property name="add_world_link" default="$(arg add_world_link)" />
+	<xacro:property name="size" default="$(arg size)" />
 
 
 	<material name="red">
@@ -28,9 +30,9 @@
 
 	<link name="x_arrow">
         <visual>
-			<origin xyz="0.5 0 0" rpy="0 0 0"/>
+			<origin xyz="${size/2} 0 0" rpy="0 0 0"/>
             <geometry>
-				<box size="1 0.1 0.1"/>
+				<box size="${size} ${0.1*size} ${0.1*size}"/>
                 <!-- <mesh filename="package://adarl_envs/models/arrow.stl"  scale="0.001 0.001 0.001"/> -->
             </geometry>
 			<material name="red"/>
@@ -49,9 +51,9 @@
     </gazebo>
 	<link name="y_arrow">
         <visual>
-			<origin xyz="0 0.5 0" rpy="0 0 1.5707"/>
+			<origin xyz="0 ${size/2} 0" rpy="0 0 1.5707"/>
             <geometry>
-				<box size="1 0.1 0.1"/>
+				<box size="${size} ${0.1*size} ${0.1*size}"/>
                 <!-- <mesh filename="package://adarl_envs/models/arrow.stl"  scale="0.001 0.001 0.001"/> -->
             </geometry>
 			<material name="green"/>
@@ -70,9 +72,9 @@
     </gazebo>
 	<link name="z_arrow">
         <visual>
-			<origin xyz="0 0 0.5" rpy="0 -1.5707 0"/>
+			<origin xyz="0 0 ${size/2}" rpy="0 -1.5707 0"/>
             <geometry>
-				<box size="1 0.1 0.1"/>
+				<box size="${size} ${0.1*size} ${0.1*size}"/>
                 <!-- <mesh filename="package://adarl_envs/models/arrow.stl"  scale="0.001 0.001 0.001"/> -->
             </geometry>
 			<material name="blue"/>

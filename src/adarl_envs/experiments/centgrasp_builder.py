@@ -41,6 +41,7 @@ def runner_builder(seed,
     show_gui = env_builder_args.pop("show_gui",False)
     robot_name = env_builder_args["robot_name"]
     env_builder_args.update(get_centauro_args())
+    max_steps = env_builder_args.pop("max_steps_per_episode")
 
     mode = env_builder_args["mode"]
     if mode == "gz":
@@ -113,32 +114,32 @@ def runner_builder(seed,
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
         import jax
         ground_link = ("ground","ground_link")
+        sim_dt = 1/1024
+        iterations_per_ep = int(max_steps*stepLength_sec/sim_dt)
         adapter = MjxJointImpedanceAdapter( vec_size=num_envs,
                                             enable_rendering=env_builder_args.pop("enable_rendering"),
                                             jax_device=jax.devices("gpu")[0],
                                             output_th_device = th_device,
-                                            sim_step_dt=8/8192,
+                                            sim_step_dt=sim_dt,
                                             step_length_sec=stepLength_sec,
                                             realtime_factor=-1.0,
                                             gui_env_index=0,
                                             default_max_joint_impedance_ctrl_torque=100.0,
                                             show_gui=show_gui,
-                                            log_freq=10_000,
+                                            log_freq=iterations_per_ep,
                                             record_whole_joint_trajectories = False,
-                                            log_freq_joints_trajectories = int(250*(50/1024)/(2/4096)),
+                                            log_freq_joints_trajectories = int(iterations_per_ep),
                                             log_folder=run_folder,
-                                            revolute_dof_armature_override=0.5 if env_builder_args["robot_model"] == "centauro" else 0.1,
+                                            revolute_dof_armature_override=0.5,
                                             safe_revolute_dof_armature=0.1,
-                                            opt_preset={"centauro":"fast",
-                                                        "kyon":"faster",
-                                                        "quad":"fastest"}.get(env_builder_args["robot_model"], "faster"))
+                                            opt_preset="fast",
+                                            opt_override = {"impratio" : 1.0})
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)
 
     time.sleep(1)
 
-    max_steps = env_builder_args.pop("max_steps_per_episode")
     urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(env_builder_args.pop("model_file")).read_text(),
                                                             model_kwargs=env_builder_args.pop("model_kwargs"),
                                                             extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
@@ -207,7 +208,11 @@ def runner_builder(seed,
                         longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
                         target_object_link=env_builder_args.pop("target_object_link"),
                         gripper_link=env_builder_args.pop("gripper_link"),
-                        observe_object_pose=env_builder_args.pop("observe_object_pose")
+                        observe_object_pose=env_builder_args.pop("observe_object_pose"),
+                        held_joints_stiffness=env_builder_args.pop("held_joints_stiffness"),
+                        held_joints_damping=env_builder_args.pop("held_joints_damping"),
+                        free_joints=[],
+                        manipulator_links=env_builder_args.pop("manipulator_links"),
                 )
     
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
@@ -238,26 +243,27 @@ def runner_builder(seed,
 
 
 def get_centauro_args():
-    homing = {  ("centauro","hip_yaw_1") : -0.746874,
-                ("centauro","hip_pitch_1") : -1.25409,
-                ("centauro","knee_pitch_1") : -1.55576,
-                ("centauro","ankle_pitch_1") : -0.301666,
-                ("centauro","ankle_yaw_1") : 0.746874,
-                ("centauro","hip_yaw_2") : 0.746874,
-                ("centauro","hip_pitch_2") : 1.25409,
-                ("centauro","knee_pitch_2") : 1.55576,
-                ("centauro","ankle_pitch_2") : 0.301666,
-                ("centauro","ankle_yaw_2") : -0.746874,
-                ("centauro","hip_yaw_3") : 0.746874,
-                ("centauro","hip_pitch_3") : 1.25409,
-                ("centauro","knee_pitch_3") : 1.55576,
-                ("centauro","ankle_pitch_3") : 0.301667,
-                ("centauro","ankle_yaw_3") : -0.746874,
-                ("centauro","hip_yaw_4") : -0.746874,
-                ("centauro","hip_pitch_4") : -1.25409,
-                ("centauro","knee_pitch_4") : -1.55576,
-                ("centauro","ankle_pitch_4") : -0.301667,
-                ("centauro","ankle_yaw_4") : 0.746874,
+    homing = {  
+                # ("centauro","hip_yaw_1") : -0.746874,
+                # ("centauro","hip_pitch_1") : -1.25409,
+                # ("centauro","knee_pitch_1") : -1.55576,
+                # ("centauro","ankle_pitch_1") : -0.301666,
+                # ("centauro","ankle_yaw_1") : 0.746874,
+                # ("centauro","hip_yaw_2") : 0.746874,
+                # ("centauro","hip_pitch_2") : 1.25409,
+                # ("centauro","knee_pitch_2") : 1.55576,
+                # ("centauro","ankle_pitch_2") : 0.301666,
+                # ("centauro","ankle_yaw_2") : -0.746874,
+                # ("centauro","hip_yaw_3") : 0.746874,
+                # ("centauro","hip_pitch_3") : 1.25409,
+                # ("centauro","knee_pitch_3") : 1.55576,
+                # ("centauro","ankle_pitch_3") : 0.301667,
+                # ("centauro","ankle_yaw_3") : -0.746874,
+                # ("centauro","hip_yaw_4") : -0.746874,
+                # ("centauro","hip_pitch_4") : -1.25409,
+                # ("centauro","knee_pitch_4") : -1.55576,
+                # ("centauro","ankle_pitch_4") : -0.301667,
+                # ("centauro","ankle_yaw_4") : 0.746874,
                 ("centauro","torso_yaw") : 3.56617e-13,
                 ("centauro","velodyne_joint") : 0,
                 ("centauro","d435_head_joint") : 0,
@@ -277,15 +283,17 @@ def get_centauro_args():
                 # ("centauro","j_wheel_2") : 0.0,
                 # ("centauro","j_wheel_3") : 0.0,
                 # ("centauro","j_wheel_4") : 0.0,
-                ("centauro","dagana_1_claw_joint") : 0,
+                ("centauro","dagana_1_claw_joint") : 0 #,
                 # ("centauro","dagana_2_claw_joint") : 0
                 }
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf/urdf/centauro.urdf.xacro"),
             "model_kwargs" : {  "realsense":"false",
                                 "velodyne" :"false",
-                                "floating_joint":"true",
+                                "floating_joint":"false",
                                 "sphere_wheel_collision":"true",
-                                "end_effector_left":"dagana"
+                                "end_effector_left":"dagana",
+                                "fixed_base_joint":"true",
+                                "legs":"false"
                                 },
             "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf"),
                                        "dagana_urdf" : adarl.utils.utils.pkgutil_get_path("pydagana","iit-dagana-ros-pkg/dagana_urdf")},
@@ -319,7 +327,10 @@ def get_centauro_args():
             "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_2'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_3'),[('ground','ground_link')]),
-                                            (('centauro', 'wheel_4'),[('ground','ground_link')])],
+                                            (('centauro', 'wheel_4'),[('ground','ground_link')]),
+                                            (('centauro', 'dagana_1_top_link'),[('ground','ground_link')]),
+                                            (('centauro', 'dagana_1_bottom_link'),[('ground','ground_link')])],
+            "manipulator_links" : [('centauro', 'dagana_1_top_link'),('centauro', 'dagana_1_bottom_link')],
             "feet_links" : [('centauro', 'wheel_1'),
                             ('centauro', 'wheel_2'),
                             ('centauro', 'wheel_3'),

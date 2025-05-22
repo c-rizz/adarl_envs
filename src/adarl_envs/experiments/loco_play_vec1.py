@@ -236,8 +236,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     step_length_sec = 20/1024 
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    env_device = th.device("cpu")
     mode = args["mode"]
+    env_device = th.device("cuda") if mode == "mjx" else th.device("cpu")
     height_pixels = args["resolution"] #if mode == "mjx" else 720
     pixel_resolution = (height_pixels,int(height_pixels*16/9))
     
@@ -246,65 +246,75 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
-        "robot_model" : args["robot"],
+        "enable_limits_safety" : True,
+        "enable_posref_safety" : True,
         "enable_rendering" : False,
+        "fail_on_safety" : True,
+        "frame_stack_length" : 3,
+        "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
         "goal_err_smoothing_halflife_sec" : 0.0,
+        "goal_speed_minmax" : (0,0),
+        "impulse_duration_minmax" : (0.01, 2.5),
+        "impulse_mean_std" : (50.0,50.0),
+        "impulse_probability_per_sec" : 0.5,
+        "init_on_reset_ratio" : 0.8,
+        "initial_pose_randomization" : 0.5,
+        "log_info_stats" : True,
+        "longterm_states_decimation_time" : 0.0001, # Averaging of the joint pose for the position reward
+        "mass_randomization_ratio" : 0.0,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
+        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
+        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
+        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.02, 0.02),
+        "observe_body_vels_and_height" : True,
+        "observe_full_robot_state" : True,
+        "posref_safety_period" : 0.001,
         "quiet" : False,
         "reward_acceleration_weight" :      2.0,
-        "reward_actdiff_weight" :           1.0,
         "reward_actacc_weight" :            0.1,
+        "reward_actdiff_weight" :           1.0,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
+        "reward_failure_weight" :           1.0,
+        "reward_feet_air_time_weight" :     20.0,
+        "reward_heading_weight" :           0.0,
         "reward_health_weight" :            0.25,
+        "reward_height_weight" :            0.0,
+        "reward_pitchnroll_weight" :        0.1,
+        "reward_pos2posref_weight" :        0.0,
         "reward_position_limit_weight" :    0.1,
+        "reward_position_weight" :          1.0,
+        "reward_slip_weight" :              0.1,
         "reward_torque_limit_weight" :      0.0,
         "reward_torque_weight" :            5.0,
         "reward_torquediff_weight" :        0.0,
+        "reward_torqueref_weight" :         0.0,
         "reward_tracking_weight" :          0.0,
         "reward_velocity_limit_weight" :    0.1,
         "reward_velocity_weight" :          1.0,
-        "reward_height_weight" :            0.0,
-        "reward_pitchnroll_weight" :        0.1,
-        "reward_position_weight" :          1.0,
-        "reward_feet_air_time_weight" :     20.0,
-        "reward_heading_weight" :           0.0,
-        "safe_stiffness" : 400,
+        "reward_velref_weight" :            0.0,
+        "robot_model" : args["robot"],
         "safe_damping" : 5,
+        "safe_stiffness" : 400,
+        "saturate_jimp_ref_limits" : False,
         "stepLength_sec" : step_length_sec,
         "stop_on_failure" : False,
-        "fail_on_safety" : True,
-        "th_device" : env_device,
-        "video_save_freq" : 0,
-        "goal_speed_minmax" : (0,0),
-        "use_contacts" : False,
-        "frame_stack_length" : 3,
-        "verbose_infos" : False,
         "terminate_on_body_contact" : False,
-        "use_wandb" : False,
-        "init_on_reset_ratio" : 0.8,
-        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
-        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.02, 0.02),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
+        "th_device" : env_device,
         "ui_camera_resolution_hw" : (144,256),
-        "log_info_stats" : True,
-        "initial_pose_randomization" : 0.5,
-        "mass_randomization_ratio" : 0.0,
-        "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
-        "impulse_probability_per_sec" : 0.5,
-        "impulse_duration_minmax" : (0.01, 2.5),
-        "impulse_mean_std" : (50.0,50.0),
-        "longterm_states_decimation_time" : 0.0001, # Averaging of the joint pose for the position reward
-        "posref_safety_period" : 0.001
+        "use_contacts" : False,
+        "use_wandb" : False,
+        "verbose_infos" : True,
+        "video_save_freq" : 0
     }
 
     env_builder_args.update({
         "enable_rendering" : True,
         "record_video" : args["mode"]!="xbot",
-        "verbose_infos" : False,
+        "verbose_infos" : True,
         "video_save_freq" : True if args["record"] else 0,
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
@@ -487,8 +497,8 @@ def play(seed, folderName, run_id, args,
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
                            f" tstep={t1_step-t0_step:1.4f} \t goal_velocity_xy={goal_velocity_xy}")
             if step_count>0:
-                rewards.append(ep_reward)
-                durations.append(step_count)
+                rewards.append(th.as_tensor(ep_reward,device="cpu").item())
+                durations.append(th.as_tensor(step_count,device="cpu").item())
                 # avg10_dists.append(info["avg_vel_track_err"])
             with session.run_info["collected_episodes"].get_lock():
                 session.run_info["collected_episodes"].value += 1

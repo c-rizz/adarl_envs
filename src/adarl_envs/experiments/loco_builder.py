@@ -25,6 +25,24 @@ def format_tensor(t, float_precision):
     t = [f"{e: .{float_precision}f}" if isinstance(e,float) else str(e) for e in t]
     return f"[{', '.join(t)}]"
 
+def overlay_text_func(vo, a, r, te, tr, info):   
+    if 'state_extrinsic' in info:
+        body_abs_linvel = format_tensor(info['state_extrinsic'][[LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z]], 3)
+    else:
+        body_abs_linvel = 'N/A'
+    if 'state_internal' in info:
+        safety_triggered = info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED] if 'state_internal' in info else 'N/A'
+    else:
+        safety_triggered = 'N/A'
+    return  (   f"\n"
+                f"Step    {info['ep_step_count']: .3f}\n"+
+                f"body_abs_linvel       {body_abs_linvel}\n"
+                f"goal_abs              {format_tensor(info['goal_abs_xyz_vec'], 3)}\n"
+                f"goal_rel              {format_tensor(info['goal_rel_xyz_vec'], 3)}\n"
+                f"smoothed_linvel_error {format_tensor(info['smoothed_linvel_error'], 3)}\n"
+                f"linvel_error          {format_tensor(info['linvel_error'], 3)}\n"
+                f"safety                {safety_triggered}\n")
+
 def loco_runner_builder(seed,
                         run_folder,
                         num_envs : int,
@@ -39,8 +57,9 @@ def loco_runner_builder(seed,
     th_device = env_builder_args["th_device"]
     show_gui = env_builder_args.pop("show_gui",False)
     robot_name = env_builder_args["robot_name"]
-
+    max_steps = env_builder_args.pop("max_steps_per_episode")
     mode = env_builder_args["mode"]
+
     if mode == "gz":
         raise NotImplementedError()
     elif mode == "gazebo":
@@ -111,32 +130,38 @@ def loco_runner_builder(seed,
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
         import jax
         ground_link = ("ground","ground_link")
-        adapter = MjxJointImpedanceAdapter(vec_size=num_envs,
-                                                  enable_rendering=env_builder_args.pop("enable_rendering"),
-                                                  jax_device=jax.devices("gpu")[0],
-                                                  output_th_device = th_device,
-                                                  sim_step_dt=8/8192,
-                                                  step_length_sec=stepLength_sec,
-                                                  realtime_factor=-1.0,
-                                                  gui_env_index=0,
-                                                  default_max_joint_impedance_ctrl_torque=100.0,
-                                                  show_gui=show_gui,
-                                                  log_freq=10_000,
-                                                  record_whole_joint_trajectories = False,
-                                                  log_freq_joints_trajectories = int(250*(50/1024)/(2/4096)),
-                                                  log_folder=run_folder,
-                                                  revolute_dof_armature_override=0.5 if env_builder_args["robot_model"] == "centauro" else 0.1,
-                                                  safe_revolute_dof_armature=0.1,
-                                                  opt_preset={"centauro":"fast",
-                                                              "kyon":"faster",
-                                                              "quad":"fastest"}.get(env_builder_args["robot_model"], "faster"))
+        sim_dt = 16/8192
+        iterations_per_ep = int(max_steps*stepLength_sec/sim_dt)
+        opt_override = {}
+        robot_model = env_builder_args["robot_model"]
+        if robot_model == "centauro":
+            opt_override["impratio"] = 1.5
+        adapter = MjxJointImpedanceAdapter( vec_size=num_envs,
+                                            enable_rendering=env_builder_args.pop("enable_rendering"),
+                                            jax_device=jax.devices("gpu")[0],
+                                            output_th_device = th_device,
+                                            sim_step_dt=sim_dt,
+                                            step_length_sec=stepLength_sec,
+                                            realtime_factor=-1.0,
+                                            gui_env_index=0,
+                                            default_max_joint_impedance_ctrl_torque=100.0,
+                                            show_gui=show_gui,
+                                            log_freq=iterations_per_ep,
+                                            record_whole_joint_trajectories = False,
+                                            log_freq_joints_trajectories = iterations_per_ep,
+                                            log_folder=run_folder,
+                                            revolute_dof_armature_override=0.5 if robot_model == "centauro" else 0.1,
+                                            safe_revolute_dof_armature=0.1,
+                                            opt_preset={"centauro":"fast",
+                                                        "kyon":"faster",
+                                                        "quad":"fastest"}.get(robot_model, "faster"),
+                                            opt_override=opt_override)
     else:
         print(f"Requested unknown controller '{mode}'")
         exit(0)
 
     time.sleep(1)
 
-    max_steps = env_builder_args.pop("max_steps_per_episode")
     urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(env_builder_args.pop("model_file")).read_text(),
                                                             model_kwargs=env_builder_args.pop("model_kwargs"),
                                                             extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
@@ -225,7 +250,10 @@ def loco_runner_builder(seed,
                             enable_limits_safety = env_builder_args.pop("enable_limits_safety"),
                             saturate_jimp_ref_limits = env_builder_args.pop("saturate_jimp_ref_limits"),
                             observe_full_robot_state = env_builder_args.pop("observe_full_robot_state"),
-                            observe_body_vels_and_height = env_builder_args.pop("observe_body_vels_and_height")
+                            observe_body_vels_and_height = env_builder_args.pop("observe_body_vels_and_height"),
+                            held_joints_stiffness=env_builder_args.pop("held_joints_stiffness"),
+                            held_joints_damping=env_builder_args.pop("held_joints_damping"),
+                            free_joints=[]
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -245,15 +273,7 @@ def loco_runner_builder(seed,
                                     overlay_text_xy=(0.025,0.025),
                                     overlay_text_height=0.035,
                                     overlay_text_color_rgb=(255,150,0),
-                                    overlay_text_func=lambda vo, a, r, te, tr, info:   
-                                            f"\n"
-                                            f"Step    {info['ep_step_count']: .3f}\n"+
-                                            f"body_abs_linvel       {format_tensor(info['state_extrinsic'][[LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z]], 3)}\n"
-                                            f"goal_abs              {format_tensor(info['goal_abs_xyz_vec'], 3)}\n"
-                                            f"goal_rel              {format_tensor(info['goal_rel_xyz_vec'], 3)}\n"
-                                            f"smoothed_linvel_error {format_tensor(info['smoothed_linvel_error'], 3)}\n"
-                                            f"linvel_error          {format_tensor(info['linvel_error'], 3)}\n"
-                                            f"safety                {info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]: .2f}\n")
+                                    overlay_text_func=overlay_text_func)
     return vrunner
 
 
@@ -443,10 +463,10 @@ def get_centauro_args():
                 ("centauro","j_arm2_4") : -2.23604,
                 ("centauro","j_arm2_5") : -0.0500815,
                 ("centauro","j_arm2_6") : -0.781461,
-                # ("centauro","j_wheel_1") : 0.0,
-                # ("centauro","j_wheel_2") : 0.0,
-                # ("centauro","j_wheel_3") : 0.0,
-                # ("centauro","j_wheel_4") : 0.0,
+                ("centauro","j_wheel_1") : 0.0,
+                ("centauro","j_wheel_2") : 0.0,
+                ("centauro","j_wheel_3") : 0.0,
+                ("centauro","j_wheel_4") : 0.0
                 # ("centauro","dagana_1_claw_joint") : 0,
                 # ("centauro","dagana_2_claw_joint") : 0
                 }

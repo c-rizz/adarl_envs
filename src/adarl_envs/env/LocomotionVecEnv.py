@@ -150,6 +150,9 @@ class LocomotionVecEnv(RobotVecEnv):
                         control_limits_minmax_pve : dict[tuple[str,str], th.Tensor],
                         control_mode : Literal["impedance","impedance_no_gains","position_and_torques", "position_and_gains","torque","velocity","position"],
                         controlled_joints : Sequence[str | JOINT_FILTERS],
+                        free_joints : Sequence[str],
+                        held_joints_stiffness : float,
+                        held_joints_damping : float,
                         disallowed_contact_links : list[tuple[str,str]],
                         frame_stack_length : int,
                         goal_err_smoothing_halflife_sec : float,
@@ -339,7 +342,10 @@ class LocomotionVecEnv(RobotVecEnv):
                             enable_limits_safety = enable_limits_safety,
                             saturate_jimp_ref_limits = saturate_jimp_ref_limits,
                             observe_full_robot_state = observe_full_robot_state,
-                            observe_body_vels_and_height = observe_body_vels_and_height
+                            observe_body_vels_and_height = observe_body_vels_and_height,
+                            free_joints=free_joints,
+                            held_joints_stiffness = held_joints_stiffness,
+                            held_joints_damping = held_joints_damping
                         )
 
         

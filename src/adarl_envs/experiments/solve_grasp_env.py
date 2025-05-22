@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 2048
+        train_envs = 32
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -34,13 +34,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
-        "robot_model" : args["robot"],
+        # "robot_model" : args["robot"],
         "enable_rendering" : False,
         "goal_err_smoothing_halflife_sec" : 0.0,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
         "quiet" : False,
-        "record_video" : True,
         "robot_name" : "centauro",
         "reward_acceleration_weight" :      2.0,
         "reward_actdiff_weight" :           0.2,
@@ -82,21 +81,24 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
-        "initial_pose_randomization" : 0.8,
+        "initial_pose_randomization" : 0.0,
         "mass_randomization_ratio" : 0.3,
         "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
-        "impulse_probability_per_sec" : 0.5,
+        "impulse_probability_per_sec" : 0.0,
         "impulse_duration_minmax" : (0.01, 2.5),
         "impulse_mean_std" : (50.0,50.0),
         "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
         "target_object_link" : ("cube","cube"),
         "gripper_link" : ("centauro","dagana_1_tcp"),
-        "observe_object_pose" : True
+        "observe_object_pose" : True,
+        "held_joints_stiffness" : 1000.0,
+        "held_joints_damping" : 15.0
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["verbose_infos"] = True
     video_eval_env_builder_args["video_save_freq"] = 1
+    video_eval_env_builder_args["ui_camera_resolution_hw"] = (270,480)
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,
@@ -294,7 +296,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--algorithm", default="sac", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
-    ap.add_argument("--robot", default="quad", type=str, help="Robot to be used ('quad'/'kyon'/'centauro')")
+    # ap.add_argument("--robot", default="quad", type=str, help="Robot to be used ('quad'/'kyon'/'centauro')")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

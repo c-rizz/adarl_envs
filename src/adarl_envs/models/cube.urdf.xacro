@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="cube" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  
+  
+  <xacro:arg name="mass" default="0.1" />
+  <xacro:property name="mass" value="$(arg mass)" />
+  <xacro:arg name="size" default="0.06" />
+  <xacro:property name="size" value="$(arg size)" />
+  <xacro:arg name="red" default="1" />
+  <xacro:property name="red" value="$(arg red)" />
+  <xacro:arg name="green" default="0.0" />
+  <xacro:property name="green" value="$(arg green)" />
+  <xacro:arg name="blue" default="0.0" />
+  <xacro:property name="blue" value="$(arg blue)" />
+  <xacro:arg name="alpha" default="1.0" />
+  <xacro:property name="alpha" value="$(arg alpha)" />
+  <xacro:arg name="gazebo" default="true" />
+  <xacro:property name="gazebo" value="$(arg gazebo)" />
+  <xacro:arg name="add_floating_joint" default="true" />
+  <xacro:property name="add_floating_joint" value="$(arg add_floating_joint)" />
+
+
+    <xacro:macro name="box_inertial" params="mass x y z pose_xyz pose_rpy">
+        <inertial>
+            <origin xyz="${pose_xyz}" rpy="${pose_rpy}"/>
+            <mass value="${mass}" />
+            <inertia ixx="${0.083 * mass * (y*y + z*z)}" ixy="0.0" ixz="0.0" iyy="${0.083 * mass * (x*x + z*z)}" iyz="0.0" izz="${0.083 * mass * (x*x + y*y)}"/>
+        </inertial>
+    </xacro:macro>
+
+    <link name="cube">
+		<visual>
+			<origin xyz="0 0 0" rpy="0 0 0"/>
+			<geometry>
+				<box size="${size} ${size} ${size}"/>
+			</geometry>
+	    </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="${size} ${size} ${size}"/>
+            </geometry>
+        </collision>
+        <xacro:box_inertial mass="${mass}" x="0.06" y="0.06" z="0.06" pose_xyz="0 0 0" pose_rpy="0 0 0"/>
+        <contact> <!-- for pybullet -->
+            <!-- 
+            Defaults maybe are these (from bullet3/examples/Importers/ImportURDFDemo/URDFJointTypes.h line 33)
+            URDFLinkContactInfo()
+                : m_lateralFriction(0.5),
+                m_rollingFriction(0),
+                m_spinningFriction(0),
+                m_restitution(0),
+                m_inertiaScaling(1),
+                m_contactCfm(0),
+                m_contactErp(0),
+                m_contactStiffness(1e4),
+                m_contactDamping(1)
+            -->
+            <lateral_friction value="1"/>
+            <rolling_friction value="0.00001"/>
+            <!-- <contact_cfm value="0.1 "/> -->
+            <!-- <contact_erp value="0.2"/> -->
+            <!-- <restitution value="0"/> -->
+            <!-- <spinning_friction value="0"/> -->
+            <!-- <friction_anchor value="0"/> -->
+            <!-- <inertia_scaling value="0"/> -->
+            <!-- <stiffness value="2500"/>  -->
+            <!-- <damping value="8"/>  -->
+        </contact>
+    </link>
+
+    <xacro:if value="${add_floating_joint}">
+        <link name="world"/>
+        <joint name="floating_joint" type="floating">
+            <parent link="world" />
+            <child link="cube" />
+        </joint>
+    </xacro:if>
+
+    <gazebo reference="cube"> <!-- reference to a existing "link" -->
+        <visual>
+        <material>
+            <ambient>${red} ${green} ${blue} ${alpha}</ambient>
+            <diffuse>${red} ${green} ${blue} ${alpha}</diffuse>
+            <specular>${red} ${green} ${blue} ${alpha}</specular>
+            <emissive>0 0 0 1</emissive>
+        </material>
+        </visual>
+    </gazebo>
+</robot>
+

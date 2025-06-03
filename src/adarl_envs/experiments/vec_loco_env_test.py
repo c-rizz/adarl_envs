@@ -30,7 +30,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     eval_freq = 5
     env_builder_args = {
-        "action_delay_mustd" : (0.001,0.01),
+        "action_delay_mustd" : (0.0,0.01),
         "action_noise_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
@@ -98,13 +98,20 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_limits_safety" : True,
         "saturate_jimp_ref_limits" : False,
         "observe_full_robot_state" : False,
-        "observe_body_vels_and_height" : False
+        "observe_body_vels_and_height" : True,
+        "held_joints_stiffness" : 500.0,
+        "held_joints_damping" : 10.0,
+        "min_good_step_duration" : 0.2,
+        "max_good_step_duration" : 1.5
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["verbose_infos"] = True
     video_eval_env_builder_args["video_save_freq"] = 1
     video_eval_env_builder_args["init_on_reset_ratio"] = 1.0
+    video_eval_env_builder_args["initial_pose_randomization"] = 0.02
+    video_eval_env_builder_args["mass_randomization_ratio"] = 0.0
+    video_eval_env_builder_args["friction_slide_spin_roll_randomization_ratios"] = (0.0,0.0,0.0)
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,
@@ -243,7 +250,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy_factor = -0.5,
-                                                    actor_log_std_init = 1.0
+                                                    actor_log_std_init = -3.0
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

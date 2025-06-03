@@ -291,7 +291,7 @@ class GraspVecEnv(RobotVecEnv):
         else:
             observable_fields=[ self.GRASPING_FIELDS.GOAL_POSE]
         grasping_state_helper = ThBoxStateHelper( field_names=[e for e in self.GRASPING_FIELDS],
-                                                    obs_dtype=self._obs_dtype,
+                                                    dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=(7,),
                                                     fields_minmax={ self.GRASPING_FIELDS.GOAL_POSE :    [-10, 10],
@@ -306,7 +306,7 @@ class GraspVecEnv(RobotVecEnv):
                                                             observable = True,
                                                             flatten_obs = True)
         camera_state_helper = ThBoxStateHelper( field_names=[e for e in self.CAMERA_FIELDS],
-                                                obs_dtype=self._obs_dtype,
+                                                dtype=self._obs_dtype,
                                                 th_device=self._th_device,
                                                 field_size=self._grasping_conf.camera_resolution_xy,
                                                 fields_minmax={ self.CAMERA_FIELDS.IMAGE : [-1,1]},

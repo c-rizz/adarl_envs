@@ -47,6 +47,7 @@ def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
 class LocomotionVecEnv(RobotVecEnv):
     STATE_LOCOMOTION = "loco"
     STATE_FEET = "feet"
+    STATE_HEIGHTMAP = "heightmap"
 
     @dataclass
     class LocomotionConfiguration:
@@ -87,6 +88,8 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_vel_goal_absolute_width : th.Tensor
         feet_links : list[tuple[str,str]]
         heightmap_resolution_xy : tuple[int,int]
+        min_good_step_duration : float
+        max_good_step_duration : float
 
 
     @dataclass
@@ -232,7 +235,9 @@ class LocomotionVecEnv(RobotVecEnv):
                         enable_limits_safety : bool = True,
                         saturate_jimp_ref_limits : bool = True,
                         observe_full_robot_state : bool = False,
-                        observe_body_vels_and_height : bool = False
+                        observe_body_vels_and_height : bool = False,
+                        min_good_step_duration : float = 0.1,
+                        max_good_step_duration : float = 1.5
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -278,7 +283,9 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_vel_goal_absolute_width = self._thtens(0.25),
                         reward_vel_goal_relative_width_offset = self._thtens(0.1),
                         feet_links = feet_links,
-                        heightmap_resolution_xy = (heightmap_resolution,heightmap_resolution)
+                        heightmap_resolution_xy = (heightmap_resolution,heightmap_resolution),
+                        min_good_step_duration=min_good_step_duration,
+                        max_good_step_duration=max_good_step_duration
                         )
         
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xyz     = self._thzeros((adapter.vec_size(), 3)),
@@ -393,7 +400,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                 self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
                                 self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]
         self._locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
-                                                    obs_dtype=self._obs_dtype,
+                                                    dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=(1,),
                                                     fields_minmax={ self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X : [-10,10],
@@ -435,39 +442,34 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.SUM_IMPULSES : [0,10000],
                                                                     self.LOCOMOTION_FIELDS.COLLISON_COUNT : [0,1000],
                                                                     self.LOCOMOTION_FIELDS.CRASHED : [0,1]},
-                                                    observable_fields=observable_fields, #type: ignore
+                                                    observation_definitions=ThBoxStateHelper.SimpleObsDef(observable_fields=observable_fields),
                                                     vec_size=adapter.vec_size())
         feet_num = len(self._locomotion_conf.feet_links)
         self._feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET_FIELDS],
-                                                    obs_dtype=self._obs_dtype,
+                                                    dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=(len(self._locomotion_conf.feet_links),),
                                                     fields_minmax={ 
                                                         self.FEET_FIELDS.FEET_LIFTOFF_TIMES : th.as_tensor([[-1.0],[1000.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_VEL_X : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_VEL_Y : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num)},
-                                                    observable_fields=None,
                                                     vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
                                                             self._locomotion_state_helper,
-                                                            observable = True,
-                                                            flatten_obs = True)
+                                                            obs_defs={"main":{"observable":True,"flatten":True,"noise":None}})
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_FEET,
                                                             self._feet_state_helper,
-                                                            observable = False,
-                                                            flatten_obs = False)
+                                                            obs_defs={"main":{"observable":False,"flatten":False,"noise":None}})
         if self._locomotion_conf.heightmap_resolution_xy[0] > 0:
             heightmap_state_helper = ThBoxStateHelper( field_names=["map"],
-                                                    obs_dtype=self._obs_dtype,
+                                                    dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=self._locomotion_conf.heightmap_resolution_xy,
                                                     fields_minmax={"map" : self._thtens([-10.0, 10.0])},
-                                                    observable_fields=None,
                                                     vec_size=adapter.vec_size())
-            self._state_helper.add_substate(LocomotionVecEnv.STATE_HEIGHTMAP,
-                                                            heightmap_state_helper,
-                                                            observable = True,
-                                                            flatten_obs = False)
+            self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_HEIGHTMAP,
+                                                                 heightmap_state_helper,
+                                                                 obs_defs={"main":{"observable":True,"flatten":False,"noise":None}})
         ggLog.info(f"Built state/obs/action helpers")
         
 
@@ -790,10 +792,8 @@ class LocomotionVecEnv(RobotVecEnv):
         steps_starts  = -feet_liftoffs # When the vaslue is negative it marks a finished step
         # subtracting 0.1 from the duratoins makes it so that not lifting the feet is better than lifting it for less than 0.1s
         # this makes doing small steps worse than doing nothing
-        min_good_step_duration = 0.1
-        offsetted_finished_steps_durations = steps_finished*(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]-steps_starts - min_good_step_duration)
-        max_good_step_duration = 1.5
-        offsetted_finished_steps_durations = th.tanh(offsetted_finished_steps_durations/max_good_step_duration)*max_good_step_duration
+        offsetted_finished_steps_durations = steps_finished*(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]-steps_starts - self._locomotion_conf.min_good_step_duration)
+        offsetted_finished_steps_durations = th.tanh(offsetted_finished_steps_durations/self._locomotion_conf.max_good_step_duration)*self._locomotion_conf.max_good_step_duration
         reward_feet_air_time = th.mean(offsetted_finished_steps_durations, dim=1)
         reward_feet_air_time = reward_feet_air_time*(th.linalg.norm(prev_goal_rel_vec_xyz,dim=1)>0.05) # Disable reward if goal velocity is less than 0.05
         feet_linvels_xy = feet_state[:,1:3] # vec_size*fields*nfeet -> vec_size*2*nfeet

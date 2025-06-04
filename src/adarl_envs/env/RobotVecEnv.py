@@ -473,6 +473,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._build_state_helper(adapter)
         ggLog.info(f"self._state_helper.observation_names() = {self._state_helper.observation_names()}")
         self._current_state = self._state_helper.reset_state()
+        ggLog.info(f"current_state = {self._current_state}")
         self._last_obs = self._state_helper.observe(self._current_state)
         self._eps_start_stime = self._thzeros(size=(adapter.vec_size(),))
         self._safety_limits = self._state_helper.sub_helpers[self.STATE_ROBOT].build_robot_limits(

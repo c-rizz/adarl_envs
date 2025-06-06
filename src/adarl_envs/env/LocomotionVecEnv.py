@@ -165,7 +165,6 @@ class LocomotionVecEnv(RobotVecEnv):
                         maxStepsPerEpisode : int,
                         minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
                         minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
-                        observe_body_velocity : bool,
                         reward_acceleration_weight : float,
                         reward_actdiff_weight : float,
                         reward_actacc_weight : float,
@@ -235,9 +234,9 @@ class LocomotionVecEnv(RobotVecEnv):
                         enable_limits_safety : bool = True,
                         saturate_jimp_ref_limits : bool = True,
                         observe_full_robot_state : bool = False,
-                        observe_body_vels_and_height : bool = False,
                         min_good_step_duration : float = 0.1,
-                        max_good_step_duration : float = 1.5
+                        max_good_step_duration : float = 1.5,
+                        merge_priviledged : bool = False
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -320,7 +319,6 @@ class LocomotionVecEnv(RobotVecEnv):
                             homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
                             homing_joint_pose = homing_joint_pose,
                             control_limits_minmax_pve = control_limits_minmax_pve,
-                            observe_body_velocity = observe_body_velocity,
                             frame_stack_length=frame_stack_length,
                             verbose_infos = verbose_infos,
                             quiet = quiet,
@@ -349,10 +347,10 @@ class LocomotionVecEnv(RobotVecEnv):
                             enable_limits_safety = enable_limits_safety,
                             saturate_jimp_ref_limits = saturate_jimp_ref_limits,
                             observe_full_robot_state = observe_full_robot_state,
-                            observe_body_vels_and_height = observe_body_vels_and_height,
                             free_joints=free_joints,
                             held_joints_stiffness = held_joints_stiffness,
-                            held_joints_damping = held_joints_damping
+                            held_joints_damping = held_joints_damping,
+                            merge_priviledged=merge_priviledged
                         )
 
         

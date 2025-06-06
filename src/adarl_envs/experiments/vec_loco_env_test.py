@@ -98,11 +98,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_limits_safety" : True,
         "saturate_jimp_ref_limits" : False,
         "observe_full_robot_state" : False,
-        "observe_body_vels_and_height" : True,
         "held_joints_stiffness" : 500.0,
         "held_joints_damping" : 10.0,
         "min_good_step_duration" : 0.2,
-        "max_good_step_duration" : 1.5
+        "max_good_step_duration" : 1.5,
+        "merge_priviledged" : True
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

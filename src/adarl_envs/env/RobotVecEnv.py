@@ -695,7 +695,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 noise_generators={  self.STATE_ROBOT : robot_state_noise,
                                                                                     self.STATE_EXTRINSIC : extrinsic_state_noise}),
                             "priviledged" : 
-                            DictStateHelper.SimpleDictObsDef(  observable_substates=observable_substates,
+                            DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_EXTRINSIC],
                                                                 flattened_subobss=[self.STATE_EXTRINSIC],
                                                                 flattened_part_name="vec",
                                                                 noise_generators={self.STATE_EXTRINSIC : extrinsic_state_noise})}
@@ -1448,12 +1448,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 if labels is not None:
                     labels["state_"+substate] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                     labels["statenorm_"+substate] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
-                    labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["main_vec"]])
+                    labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["main.vec"]])
                 i["posref_diff"] = state[self.STATE_ROBOT][:,1,:,5] - state[self.STATE_ROBOT][:,0,:,5]
                 i["posref_vel"] = i["posref_diff"]/self._configuration.stepLength_sec
-            i["vec_obs"] = self._last_obs["main_vec"]
+            i["vec_obs"] = self._last_obs["main.vec"]
             if labels is not None:
-                labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["main_vec"]])
+                labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["main.vec"]])
             actdiff             = th.flatten((act_raw_state[:,0] - act_raw_state[:,1])/2, start_dim=1)
             prev_actdiff        = th.flatten((act_raw_state[:,1] - act_raw_state[:,2])/2, start_dim=1)
             act_acc             = actdiff - prev_actdiff

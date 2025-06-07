@@ -29,6 +29,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
 
     eval_freq = 5
+    use_priviledged = True
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.01),
         "action_noise_mustd" : (0.0,0.001),
@@ -102,7 +103,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "held_joints_damping" : 10.0,
         "min_good_step_duration" : 0.2,
         "max_good_step_duration" : 1.5,
-        "merge_priviledged" : True
+        "merge_priviledged" : not use_priviledged
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -213,7 +214,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy_factor = -0.5,
-                                                    actor_log_std_init = 1.0
+                                                    actor_log_std_init = 1.0,
+                                                    actor_observation_filter=["main.vec"],
+                                                    critic_observation_filter=["main.vec","priviledged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -250,7 +253,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy_factor = -0.5,
-                                                    actor_log_std_init = -3.0
+                                                    actor_log_std_init = -3.0,
+                                                    actor_observation_filter=["main.vec"],
+                                                    critic_observation_filter=["main.vec","priviledged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

@@ -135,7 +135,7 @@ def runner_builder(seed,
                                             opt_preset="fast",
                                             opt_override = {"impratio" : 1.0})
     else:
-        print(f"Requested unknown controller '{mode}'")
+        print(f"Requested unknown adapter '{mode}'")
         exit(0)
 
     time.sleep(1)

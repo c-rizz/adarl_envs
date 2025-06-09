@@ -368,6 +368,7 @@ def play(seed, folderName, run_id, args,
 
     # th.cuda.set_sync_debug_mode("warn")
     device = adarl.utils.utils.torch_selectBestGpu()
+    env_device = env_builder_args["th_device"]
     ggLog.info("Building env...")
 
     env, fps = env_builder( log_folder=log_folder+"/eval",
@@ -381,9 +382,9 @@ def play(seed, folderName, run_id, args,
     elif control_mode=="fixed":
         model = build_fixed_policy(env = env, robot=robot)
     elif control_mode=="random":
-        model = build_rand_policy(env=env, robot=robot, scale=1.0, device = device)
+        model = build_rand_policy(env=env, robot=robot, scale=1.0, device = env_device)
     elif control_mode == "sine":
-        model = build_sin_policy(env, robot=robot, scale = 1.0, device = device)
+        model = build_sin_policy(env, robot=robot, scale = 1.0, device = env_device)
     else:
         raise RuntimeError(f"Unknown control mode '{control_mode}'")
 

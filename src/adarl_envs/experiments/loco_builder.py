@@ -157,7 +157,7 @@ def loco_runner_builder(seed,
                                                         "quad":"fastest"}.get(robot_model, "faster"),
                                             opt_override=opt_override)
     else:
-        print(f"Requested unknown controller '{mode}'")
+        print(f"Requested unknown adapter '{mode}'")
         exit(0)
 
     time.sleep(1)

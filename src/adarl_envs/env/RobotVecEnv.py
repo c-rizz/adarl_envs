@@ -98,6 +98,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         held_joints_stiffness : float
         held_joints_damping : float
         enable_dbg_checks : bool
+        enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None
         fail_on_safety : bool
         frame_stack_length : int
         friction_randomized_links : tuple[tuple[str,str],...]
@@ -373,6 +374,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     held_joints_stiffness = held_joints_stiffness,
                                                     held_joints_damping = held_joints_damping,
                                                     enable_dbg_checks = enable_dbg_checks,
+                                                    enable_link_collisions = enable_link_collisions,
                                                     fail_on_safety = fail_on_safety,
                                                     frame_stack_length = frame_stack_length,
                                                     friction_randomized_links=None, # Will fill up later
@@ -434,7 +436,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     enable_limits_safety = enable_limits_safety,
                                                     saturate_jimp_posref_limits = saturate_jimp_ref_limits,
                                                     posref_safety_period = posref_safety_period,
-                                                    observe_full_robot_state = observe_full_robot_state,
+                                                    observe_full_robot_state = observe_full_robot_state
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
@@ -1015,7 +1017,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def _build(self):
         envCtrlName = type(self._adapter).__name__
         if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
-            self._adapter.build_scenario(models = self._get_spawn_defs())
+            self._adapter.build_scenario(models = self._get_spawn_defs(),
+                                         default_link_group_collisions = self._configuration.enable_link_collisions)
             self._arrow_base = ("arrow","arrow_link")
         elif isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper):
             if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("PyBulletJointImpedanceAdapter")):

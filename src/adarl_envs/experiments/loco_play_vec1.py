@@ -149,7 +149,7 @@ class RandPolicy(RLAgent):
     def input_device(self):
         return self._a_scale.device
         
-def build_sin_policy(env, robot : str, scale : float = 0.0):
+def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("cpu")):
     if robot == "quad":
         home_jpose = get_quad_args()["homing_joint_pose"]
     elif robot == "kyon":
@@ -164,24 +164,24 @@ def build_sin_policy(env, robot : str, scale : float = 0.0):
         act_range = th.as_tensor([0.0, 0.1, 0.2,
                                   0.0, 0.1, 0.2,
                                   0.0, 0.1, 0.2,
-                                  0.0, 0.1, 0.2])
+                                  0.0, 0.1, 0.2], device = device)
     elif robot == "kyon":
         act_range = th.as_tensor([   0.0, -0.1,  0.17,
                                     -0.0,  0.1, -0.17,
                                      0.0, -0.1,  0.17,
-                                    -0.0,  0.1, -0.17])
+                                    -0.0,  0.1, -0.17],device = device)
     elif robot == "centauro":
-        act_range = th.as_tensor([0.1])
+        act_range = th.as_tensor([0.1], device = device)
     else:
         raise RuntimeError(f"Unknown robot '{robot}")
     model = SinPolicy(  act_scale=act_range*scale,
                         act_offset=home_action,
-                        act_speed=th.as_tensor([0.8]),
+                        act_speed=th.as_tensor([0.8], device = device),
                         action_size=env.get_runner().get_base_env()._action_helper.single_action_len(),
                         dt=0.05)
     return model
 
-def build_rand_policy(env, robot : str, scale : float = 0.0):
+def build_rand_policy(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
     if robot == "quad":
         home_jpose = get_quad_args()["homing_joint_pose"]
     elif robot == "kyon":
@@ -196,14 +196,14 @@ def build_rand_policy(env, robot : str, scale : float = 0.0):
         act_range = th.as_tensor([0.0, 0.1, 0.2,
                                   0.0, 0.1, 0.2,
                                   0.0, 0.1, 0.2,
-                                  0.0, 0.1, 0.2])
+                                  0.0, 0.1, 0.2], device = device)
     elif robot == "kyon":
         act_range = th.as_tensor([   0.0, -0.1,  0.17,
                                     -0.0,  0.1, -0.17,
                                      0.0, -0.1,  0.17,
-                                    -0.0,  0.1, -0.17])
+                                    -0.0,  0.1, -0.17], device = device )
     elif robot == "centauro":
-        act_range = th.as_tensor([0.1])
+        act_range = th.as_tensor([0.1], device = device)
     else:
         raise RuntimeError(f"Unknown robot '{robot}")
     model = RandPolicy(  act_scale=act_range*scale,
@@ -308,7 +308,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "use_contacts" : False,
         "use_wandb" : False,
         "verbose_infos" : True,
-        "video_save_freq" : 0
+        "video_save_freq" : 0,
+        "held_joints_stiffness" : 500.0,
+        "held_joints_damping" : 10.0,
+        "min_good_step_duration" : 0.2,
+        "max_good_step_duration" : 1.5,
+        "merge_priviledged" : False
     }
 
     env_builder_args.update({
@@ -376,9 +381,9 @@ def play(seed, folderName, run_id, args,
     elif control_mode=="fixed":
         model = build_fixed_policy(env = env, robot=robot)
     elif control_mode=="random":
-        model = build_rand_policy(env=env, robot=robot, scale=1.0)
+        model = build_rand_policy(env=env, robot=robot, scale=1.0, device = device)
     elif control_mode == "sine":
-        model = build_sin_policy(env, robot=robot, scale = 1.0)
+        model = build_sin_policy(env, robot=robot, scale = 1.0, device = device)
     else:
         raise RuntimeError(f"Unknown control mode '{control_mode}'")
 
@@ -541,7 +546,7 @@ if __name__ == "__main__":
     ap.add_argument("--robot", default="quad", type=str, help="Robot to be used")
     ap.add_argument("--rt-factor", default=1.0, type=float, help="Tentative realtime factor")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
-    ap.add_argument("--gui", default=False, action='store_true', help="Do not start the gui, instead stream renderings")
+    ap.add_argument("--gui", default=False, action='store_true', help="Start the gui, instead of streaming renderings")
     ap.add_argument("--record", default=False, action='store_true', help="Record episode videos")
     ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,random,pretrained]")
     ap.add_argument("--resolution", default=240, type=int, help="Vertical video resolution")

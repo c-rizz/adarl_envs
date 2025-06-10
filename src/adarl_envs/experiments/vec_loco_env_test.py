@@ -193,7 +193,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     run_id,
                     args,
                     vec_env_builder = named_loco_venv_builder,
-                    env_builder = None,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_hyperparams(  device = "cuda",

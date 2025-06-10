@@ -384,19 +384,6 @@ class LocomotionVecEnv(RobotVecEnv):
 
     def _build_state_helper(self, adapter : BaseVecJointImpedanceAdapter):
         super()._build_state_helper(adapter)
-        if self._configuration.goal_err_exp_smoothing_1s > 0:
-            observable_fields=[ self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
-                                self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
-                                self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z,
-                                self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
-                                self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
-                                self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,
-                                self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR
-                                ]
-        else:
-            observable_fields=[ self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
-                                self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
-                                self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]
         self._locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
@@ -440,7 +427,16 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.SUM_IMPULSES : [0,10000],
                                                                     self.LOCOMOTION_FIELDS.COLLISON_COUNT : [0,1000],
                                                                     self.LOCOMOTION_FIELDS.CRASHED : [0,1]},
-                                                    observation_definitions=ThBoxStateHelper.SimpleObsDef(observable_fields=observable_fields),
+                                                    observation_definitions={"main" : ThBoxStateHelper.SimpleObsDef(observable_fields=[
+                                                                                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
+                                                                                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
+                                                                                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]),
+                                                                             "priviledged" : ThBoxStateHelper.SimpleObsDef(observable_fields=[
+                                                                                            self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
+                                                                                            self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
+                                                                                            self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,
+                                                                                            self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR
+                                                                                            ])},
                                                     vec_size=adapter.vec_size())
         feet_num = len(self._locomotion_conf.feet_links)
         self._feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET_FIELDS],

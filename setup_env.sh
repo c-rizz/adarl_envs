@@ -1,4 +1,7 @@
 #!/bin/bash
+echo boh
+exit 0
+
 
 cd /home/host/adarl_ws
 mkdir virtualenv

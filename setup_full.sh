@@ -5,10 +5,10 @@ cd $HOME
 mkdir -p adarl_ws/src
 cd adarl_ws/src
 git clone https://github.com/c-rizz/adarl_docker_utils
-git clone https://gitlab.com/crzz/adarl_envs
+git clone git@github.com:ADVRHumanoids/adarl_envs.git
 git clone https://github.com/c-rizz/adarl
 git clone https://github.com/c-rizz/rreal
-git clone --recurse-submodules https://github.com/ADVRHumanoids/pykyon
+git clone --recurse-submodules git@github.com:ADVRHumanoids/pykyon.git
 git clone --recurse-submodules https://github.com/c-rizz/pycentauro
 cd ..
 

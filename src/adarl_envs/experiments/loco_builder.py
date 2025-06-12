@@ -469,26 +469,27 @@ def get_centauro_args():
                 # ("centauro","dagana_1_claw_joint") : 0,
                 # ("centauro","dagana_2_claw_joint") : 0
                 }
-    legs = ["hip_yaw_1",
-            "hip_pitch_1",
-            "knee_pitch_1",
-            "ankle_pitch_1",
-            "ankle_yaw_1",
-            "hip_yaw_2",
-            "hip_pitch_2",
-            "knee_pitch_2",
-            "ankle_pitch_2",
-            "ankle_yaw_2",
-            "hip_yaw_3",
-            "hip_pitch_3",
-            "knee_pitch_3",
-            "ankle_pitch_3",
-            "ankle_yaw_3",
-            "hip_yaw_4",
-            "hip_pitch_4",
-            "knee_pitch_4",
-            "ankle_pitch_4",
-            "ankle_yaw_4"]
+    legs = ["hip_yaw_1"
+            ,"hip_pitch_1"
+            ,"knee_pitch_1"
+            ,"ankle_pitch_1"
+            #,"ankle_yaw_1"
+            ,"hip_yaw_2"
+            ,"hip_pitch_2"
+            ,"knee_pitch_2"
+            ,"ankle_pitch_2"
+            #,"ankle_yaw_2"
+            ,"hip_yaw_3"
+            ,"hip_pitch_3"
+            ,"knee_pitch_3"
+            ,"ankle_pitch_3"
+            #,"ankle_yaw_3"
+            ,"hip_yaw_4"
+            ,"hip_pitch_4"
+            ,"knee_pitch_4"
+            ,"ankle_pitch_4"
+            # ,"ankle_yaw_4"
+            ]
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf/urdf/centauro.urdf.xacro"),
             "model_kwargs" : {  "realsense":"false",
                                 "velodyne" :"false",
@@ -506,8 +507,8 @@ def get_centauro_args():
             "controlled_joints" : legs,
             "mass_randomized_links" : [LINK_FILTERS.ALL_ROBOT],
             "friction_randomized_links" : [LINK_FILTERS.ALL],
-            "safety_limits_ratios_minmax_pve" : {k:[[ 0.3, 0.9, 0.9],
-                                                    [ 0.3, 0.9, 0.9]] for k,v in homing.items()},
+            "safety_limits_ratios_minmax_pve" : {k:[[ 0.8, 0.9, 0.9],
+                                                    [ 0.8, 0.9, 0.9]] for k,v in homing.items()},
             "safe_limits_position_offset" : homing,
             "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_2'),[('ground','ground_link')]),

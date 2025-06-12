@@ -23,7 +23,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "pybullet",
         "quiet" : True,
-        "initial_pose_randomization" : 0.25,
+        "initial_pose_randomization_range" : 0.25,
         "reward_acceleration_weight" : 0.1,
         "reward_actdiff_weight" : 0.1,
         "reward_contacts_weight" : 0.0,
@@ -83,7 +83,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_norand_eval_env_builder_args["enable_rendering"] = True
     video_norand_eval_env_builder_args["verbose_infos"] = True
     video_norand_eval_env_builder_args["video_save_freq"] = 1
-    video_norand_eval_env_builder_args["initial_pose_randomization"] = 0.0
+    video_norand_eval_env_builder_args["initial_pose_randomization_range"] = 0.0
     eval_conf_video_norand_det = {
         "name" : "video_norand_stoch",
         "deterministic" : False,
@@ -97,7 +97,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     run_1ms_env_builder_args["enable_rendering"] = True
     run_1ms_env_builder_args["verbose_infos"] = True
     run_1ms_env_builder_args["video_save_freq"] = 1
-    run_1ms_env_builder_args["initial_pose_randomization"] = 0.0
+    run_1ms_env_builder_args["initial_pose_randomization_range"] = 0.0
     eval_conf_run_1ms = {
         "name" : "run_1ms",
         "deterministic" : False,

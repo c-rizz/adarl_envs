@@ -81,7 +81,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
-        "initial_pose_randomization" : 0.0,
+        "initial_pose_randomization_range" : 0.0,
         "mass_randomization_ratio" : 0.3,
         "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
         "impulse_probability_per_sec" : 0.0,
@@ -121,7 +121,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # video_norand_eval_env_builder_args["enable_rendering"] = True
     # video_norand_eval_env_builder_args["verbose_infos"] = True
     # video_norand_eval_env_builder_args["video_save_freq"] = 1
-    # video_norand_eval_env_builder_args["initial_pose_randomization"] = 0.0
+    # video_norand_eval_env_builder_args["initial_pose_randomization_range"] = 0.0
     # eval_conf_video_norand_det = {
     #     "name" : "video_norand_stoch",
     #     "deterministic" : False,
@@ -135,7 +135,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # run_1ms_env_builder_args["enable_rendering"] = True
     # run_1ms_env_builder_args["verbose_infos"] = True
     # run_1ms_env_builder_args["video_save_freq"] = 1
-    # run_1ms_env_builder_args["initial_pose_randomization"] = 0.0
+    # run_1ms_env_builder_args["initial_pose_randomization_range"] = 0.0
     # eval_conf_run_1ms = {
     #     "name" : "run_1ms",
     #     "deterministic" : False,

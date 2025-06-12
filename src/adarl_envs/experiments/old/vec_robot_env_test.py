@@ -117,7 +117,7 @@ def robot_env_builder(  seed,
                         verbose_infos=env_builder_args.pop("verbose_infos"),
                         quiet=quiet,
                         enable_dbg_checks=True,
-                        initial_pose_randomization = env_builder_args.pop("initial_pose_randomization"),
+                        initial_pose_randomization_range = env_builder_args.pop("initial_pose_randomization_range"),
                         init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
                         obs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_noise_joints_pve_ep_mustd_step_std"),
                         obs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),
@@ -256,7 +256,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : "mjx", #"pybullet",
         "quiet" : True,
-        "initial_pose_randomization" : 0.25,
+        "initial_pose_randomization_range" : 0.25,
         "reward_acceleration_weight" : 0.1,
         "reward_actdiff_weight" : 0.1,
         "reward_contacts_weight" : 0.0,
@@ -316,7 +316,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # video_norand_eval_env_builder_args["enable_rendering"] = True
     # video_norand_eval_env_builder_args["verbose_infos"] = True
     # video_norand_eval_env_builder_args["video_save_freq"] = 1
-    # video_norand_eval_env_builder_args["initial_pose_randomization"] = 0.0
+    # video_norand_eval_env_builder_args["initial_pose_randomization_range"] = 0.0
     # eval_conf_video_norand_det = {
     #     "name" : "video_norand_stoch",
     #     "deterministic" : False,
@@ -330,7 +330,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # run_1ms_env_builder_args["enable_rendering"] = True
     # run_1ms_env_builder_args["verbose_infos"] = True
     # run_1ms_env_builder_args["video_save_freq"] = 1
-    # run_1ms_env_builder_args["initial_pose_randomization"] = 0.0
+    # run_1ms_env_builder_args["initial_pose_randomization_range"] = 0.0
     # eval_conf_run_1ms = {
     #     "name" : "run_1ms",
     #     "deterministic" : False,

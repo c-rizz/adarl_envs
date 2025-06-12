@@ -45,7 +45,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : args["mode"],
         "quiet" : True,
-        "initial_pose_randomization" : 0.25,
+        "initial_pose_randomization_range" : 0.25,
         "reward_acceleration_weight" : 0.1,
         "reward_actdiff_weight" : 0.1,
         "reward_contacts_weight" : 0.0,

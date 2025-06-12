@@ -130,12 +130,12 @@ def loco_runner_builder(seed,
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
         import jax
         ground_link = ("ground","ground_link")
-        sim_dt = 16/8192
+        sim_dt = 4/1024
         iterations_per_ep = int(max_steps*stepLength_sec/sim_dt)
         opt_override = {}
         robot_model = env_builder_args["robot_model"]
-        if robot_model == "centauro":
-            opt_override["impratio"] = 1.5
+        # if robot_model == "centauro":
+        #     opt_override["impratio"] = 1.5
         adapter = MjxJointImpedanceAdapter( vec_size=num_envs,
                                             enable_rendering=env_builder_args.pop("enable_rendering"),
                                             jax_device=jax.devices("gpu")[0],
@@ -150,10 +150,10 @@ def loco_runner_builder(seed,
                                             record_whole_joint_trajectories = False,
                                             log_freq_joints_trajectories = iterations_per_ep,
                                             log_folder=run_folder,
-                                            revolute_dof_armature_override=0.5 if robot_model == "centauro" else 0.1,
+                                            revolute_dof_armature_override=0.1,
                                             safe_revolute_dof_armature=0.1,
-                                            opt_preset={"centauro":"fast",
-                                                        "kyon":"faster",
+                                            opt_preset={"centauro":"fastest",
+                                                        "kyon":"fastest",
                                                         "quad":"fastest"}.get(robot_model, "faster"),
                                             opt_override=opt_override)
     else:
@@ -197,7 +197,7 @@ def loco_runner_builder(seed,
                             verbose_infos=env_builder_args.pop("verbose_infos"),
                             quiet=quiet,
                             enable_dbg_checks=True,
-                            initial_pose_randomization = env_builder_args.pop("initial_pose_randomization"),
+                            initial_pose_randomization_range = env_builder_args.pop("initial_pose_randomization_range"),
                             init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
                             obs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_noise_joints_pve_ep_mustd_step_std"),
                             obs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),

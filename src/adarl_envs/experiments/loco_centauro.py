@@ -11,7 +11,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
@@ -204,7 +204,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     target_tau = 0.005,
                                                     batch_size=4096,
                                                     buffer_size=3_000_000,
-                                                    total_steps=300_000_000,
+                                                    total_steps=500_000_000,
                                                     train_freq_vstep=10,
                                                     grad_steps=40,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),

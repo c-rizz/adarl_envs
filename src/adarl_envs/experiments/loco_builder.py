@@ -493,7 +493,7 @@ def get_centauro_args():
             "model_kwargs" : {  "realsense":"false",
                                 "velodyne" :"false",
                                 "floating_joint":"true",
-                                "sphere_wheel_collision":"true"
+                                "small_sphere_wheel_collision":"true"
                                 },
             "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf")},
             "homing_joint_pose" : homing,

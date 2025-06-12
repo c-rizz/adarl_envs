@@ -14,4 +14,6 @@ cd ..
 
 pwd
 ./src/adarl_docker_utils/basic/launch_persisting.sh --no-start
-docker exec adarl-2204-opengl-basic bash < ./src/adarl_ws/src/adarl_envs/setup_env.sh
+docker start adarl-2204-opengl-basic
+docker exec adarl-2204-opengl-basic bash /home/host/adarl_ws/src/adarl_envs/setup_env.sh
+docker stop adarl-2204-opengl-basic

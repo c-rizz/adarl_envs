@@ -19,6 +19,7 @@ Let me know if it doesn't work.
 
 ### Setup - Manual
 
+If the setup script didn't work, or if you want do do things differently, here are some instructions for settign things up manually.
 You will need to create a python virtualenv with adarl, rreal, and optionally pykyon or pycentauro, and their dependencies.
 Notice Some dependencies are "non-standard", maining you cannot use the official version, at least until their upstream repositories don't get updated/fixed (for example mujoco and xacro).
 

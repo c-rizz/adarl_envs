@@ -428,18 +428,18 @@ def get_kyon_args():
 
 
 def get_centauro_args():
-    # Standard homing
-    hip_yaw =      0.75
-    hip_pitch =    1.25
-    knee_pitch =   1.55
-    ankle_pitch =  0.30
-    ankle_yaw =   -0.75
-    # # Straight ankle homing:
+    # # Standard homing
     # hip_yaw =      0.75
     # hip_pitch =    1.25
-    # knee_pitch =   1.25
-    # ankle_pitch =  0.0
+    # knee_pitch =   1.55
+    # ankle_pitch =  0.30
     # ankle_yaw =   -0.75
+    # Straight ankle homing:
+    hip_yaw =      0.75
+    hip_pitch =    1.25
+    knee_pitch =   1.25
+    ankle_pitch =  0.0
+    ankle_yaw =   -0.75
     homing = {  ("centauro","hip_yaw_1") :      -hip_yaw,
                 ("centauro","hip_pitch_1") :    -hip_pitch,
                 ("centauro","knee_pitch_1") :   -knee_pitch,

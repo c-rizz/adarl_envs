@@ -34,7 +34,7 @@ fi
 ssh-add -t 600
 
 echo "Cloning repositories..."
-sleep 3
+sleep 1
 git clone https://github.com/c-rizz/adarl_docker_utils
 git clone git@github.com:ADVRHumanoids/adarl_envs.git
 git clone https://github.com/c-rizz/adarl
@@ -53,17 +53,17 @@ fi
 
 
 echo "Creating docker container..."
-sleep 3
+sleep 1
 
 if [[ prepare_for_ros1xbot ]]; then
     ./src/adarl_docker_utils/ros1-xbot/launch_persisting.sh --no-start
     docker start adarl-xbot-2004
-    docker exec -it adarl-xbot-2004 bash /home/host/$ws_name/src/adarl_envs/setup_workspace_ros1xbot.sh
+    docker exec -it adarl-xbot-2004 bash /home/host/$ws_name/src/adarl_envs/install_workspace_ros1xbot.sh
     docker stop adarl-xbot-2004
 else
     ./src/adarl_docker_utils/basic/launch_persisting.sh --no-start
     docker start adarl-2204-opengl-basic
-    docker exec -it adarl-2204-opengl-basic bash "/home/host/$ws_name/src/adarl_envs/setup_workspace.sh"
+    docker exec -it adarl-2204-opengl-basic bash "/home/host/$ws_name/src/adarl_envs/install_workspace.sh"
     docker stop adarl-2204-opengl-basic
 fi
 

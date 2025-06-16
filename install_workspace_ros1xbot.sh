@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # In a clean container with ros noetic and xbot
 
 cd /home/host/adarl_ws_ros1
@@ -12,9 +14,6 @@ pip install hhcm-forest
 
 
 
-echo "TTY available" || echo "NO TTY"
-export SSH_ASKPASS=/bin/false 
-export GIT_ASKPASS=/bin/false
 echo "Opening your ssh key for cloning github repos, will store the credentials for 10 minutes"
 ssh-add -l &>/dev/null # check if ssh agent running
 if [ "$?" == 2 ]; then # was it not running?
@@ -25,6 +24,10 @@ else
 fi
 grep -slR "PRIVATE" /home/host/.ssh/ | xargs -o ssh-add
 ssh-add -l
+
+set -Eeo pipefail
+
+sudo apt update
 
 cd forest_ws
 forest init

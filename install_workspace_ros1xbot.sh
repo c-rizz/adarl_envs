@@ -5,8 +5,8 @@ cd /home/host/adarl_ws_ros1
 . /opt/xbot/setup.sh
 mkdir forest_ws
 mkdir virtualenv
-python3.8 -m venv virtualenv/venv38
-. virtualenv/venv38/bin/activate
+python3.8 -m venv virtualenv/adarl
+. virtualenv/adarl/bin/activate
 pip install --upgrade pip setuptools wheel
 pip install hhcm-forest
 
@@ -33,12 +33,14 @@ forest add-recipes git@github.com:ADVRHumanoids/multidof_recipes.git --tag mjx_a
 
 forest grow -j10 xbot2_mujoco
 forest grow -j10 iit-kyon-ros-pkg
-
+cd forest_ws/ros_src
+git clone git@github.com:c-rizz/adarl_ros # Would be nice to avoid this, just needed to be able to launch scripts from roslaunch
 if [ stop_sshagent_afterwards ]; then
     ssh-agent -k
 fi
 
 cd ..
-pip install -e src/adarl -e src/adarl_envs -e src/rreal -e src/pykyon -e src/pycentauro
+pip install -e src/adarl -e src/adarl_envs -e src/rreal -e src/pykyon -e src/pycentauro -e src/adarl_ros/adarl_ros -e src/adarl_ros/adarl_ros_utils
 pip install -r src/adarl/requirements_2004.txt
 apt remove -y liboctomap-dev
+apt install -y python3-lxml

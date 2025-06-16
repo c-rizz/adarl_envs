@@ -56,25 +56,34 @@ echo "Creating docker container..."
 sleep 1
 
 if [[ prepare_for_ros1xbot ]]; then
-    ./src/adarl_docker_utils/ros1-xbot/launch_persisting.sh --no-start
-    docker start adarl-xbot-2004
-    docker exec -it adarl-xbot-2004 bash /home/host/$ws_name/src/adarl_envs/install_workspace_ros1xbot.sh
-    docker stop adarl-xbot-2004
+    docker_launcher=./src/adarl_docker_utils/ros1-xbot/launch_persisting.sh
+    docker_name=adarl-xbot-2004
+    ws_installer=/home/host/$ws_name/src/adarl_envs/install_workspace_ros1xbot.sh
 else
-    ./src/adarl_docker_utils/basic/launch_persisting.sh --no-start
-    docker start adarl-2204-opengl-basic
-    docker exec -it adarl-2204-opengl-basic bash "/home/host/$ws_name/src/adarl_envs/install_workspace.sh"
-    docker stop adarl-2204-opengl-basic
+    docker_launcher=./src/adarl_docker_utils/basic/launch_persisting.sh
+    docker_name=adarl-2204-opengl-basic
+    ws_installer=/home/host/$ws_name/src/adarl_envs/install_workspace.sh
 fi
+$docker_launcher --no-start
+docker start $docker_name
+docker exec -it $docker_name bash $ws_installer
+docker stop $docker_name
+
 
 echo ""
 echo ""
 echo ""
-echo "  Everything should now be installed."
+echo "  Everything should be correctly installed."
 echo "  You should be able to start up the docker with:"
-echo "      ~/$ws_name/src/adarl_docker_utils/basic/launch_persisting.sh"
+echo "      $docker_launcher"
 echo "  Then you can move to /home/host/$ws_name to find the workspace in your own home folder"
 echo "  You can then start the virtualenv with:"
 echo "      source virtualenv/adarl/bin/activate"
-echo "  And you can test that everything works with, for example:"
+
+if [[ "$1" != "ros1xbot" ]]; then
+echo "  Then can check that everything works following the instructions in "
+echo "  $ws_name/src/adarl_envs/ros_xbot.md"
+else
+echo "  Then can check that everything works with, for example:"
 echo "      ./src/adarl_envs/src/adarl_envs/experiments/vec_loco_env_test.py --algorithm sac_small --mode mjx --comment kyon_training --robot kyon"
+fi

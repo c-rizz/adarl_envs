@@ -29,7 +29,8 @@ ssh-add -l
 cd forest_ws
 forest init
 . setup.bash
-forest add-recipes git@github.com:ADVRHumanoids/multidof_recipes.git --tag master
+forest add-recipes git@github.com:ADVRHumanoids/multidof_recipes.git --tag mjx_adarl
+
 forest grow -j10 xbot2_mujoco
 forest grow -j10 iit-kyon-ros-pkg
 

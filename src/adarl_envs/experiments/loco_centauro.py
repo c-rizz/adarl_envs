@@ -11,11 +11,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=1000
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 4096
+        train_envs = 2048
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -29,7 +29,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
 
     eval_freq = 5
-    use_priviledged = True
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.01),
         "action_noise_mustd" : (0.0,0.001),
@@ -37,7 +36,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "control_mode" : "position",
         "robot_model" : args["robot"],
         "enable_rendering" : False,
-        "goal_err_smoothing_halflife_sec" : 0.0,
+        "goal_err_smoothing_halflife_sec" : 0.1,
         "max_steps_per_episode" : max_steps_per_episode,
         "mode" : mode,
         "quiet" : False,
@@ -54,9 +53,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_torquediff_weight" :        0.0,
         "reward_tracking_weight" :          1.0,
         "reward_velocity_limit_weight" :    0.0,
-        "reward_velocity_weight" :          .0,
-        "reward_height_weight" :            0.0,
-        "reward_pitchnroll_weight" :        0.0,
+        "reward_velocity_weight" :          0.0,
+        "reward_height_weight" :            0.15,
+        "reward_pitchnroll_weight" :        0.15,
         "reward_position_weight" :          0.0,
         "reward_feet_air_time_weight" :     0.0,
         "reward_heading_weight" :           0.0,
@@ -65,7 +64,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velref_weight" :            0.0,
         "reward_torqueref_weight" :         0.0,
         "reward_pos2posref_weight" :        0.0,       
-        "safe_stiffness" : 400,
+        "safe_stiffness" : 1000,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
         "stop_on_failure" : False,
@@ -78,8 +77,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "frame_stack_length" : 3,
         "verbose_infos" : False,
         "terminate_on_body_contact" : False,
-        "use_wandb" : False,
-        "init_on_reset_ratio" : 0.8,
+        "init_on_reset_ratio" : 0.5,
         "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
         "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
@@ -99,11 +97,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_limits_safety" : True,
         "saturate_jimp_ref_limits" : False,
         "observe_full_robot_state" : False,
-        "held_joints_stiffness" : 500.0,
+        "held_joints_stiffness" : 1000.0,
         "held_joints_damping" : 10.0,
         "min_good_step_duration" : 0.2,
         "max_good_step_duration" : 1.5,
-        "merge_priviledged" : not use_priviledged
+        "merge_priviledged" : True,
+        "goal_height_minmax" : [0.75,0.75]
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -113,22 +112,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_eval_env_builder_args["initial_pose_randomization_range"] = 0.02
     video_eval_env_builder_args["mass_randomization_ratio"] = 0.0
     video_eval_env_builder_args["friction_slide_spin_roll_randomization_ratios"] = (0.0,0.0,0.0)
-    eval_conf_video_det = {
-        "name" : "video_det",
-        "deterministic" : True,
-        "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 1,
-        "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 1
-    }
-    eval_conf_video_stoch = {
-        "name" : "video_stoch",
-        "deterministic" : False,
-        "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 1,
-        "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 1,
-    }
     # video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
     # video_norand_eval_env_builder_args["enable_rendering"] = True
     # video_norand_eval_env_builder_args["verbose_infos"] = True
@@ -178,14 +161,21 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "env_builder_args" : video_feasible_jump_env_builder_args,
     #     "num_envs" : 1
     # }
-    eval_configurations = [  
-                            # eval_conf_video_det,
-                            eval_conf_video_stoch,
-                            # eval_conf_run_1ms,
-                            # eval_conf_video_norand_det,
-                            # #  eval_conf_feasible,
-                            # #  eval_conf_video_feasible,
-                            # #  eval_conf_video_jump_feasible
+    eval_configurations = [{"name" : "video_stoch",
+                            "deterministic" : False,
+                            "eval_freq_ep" : eval_freq*train_envs,
+                            "eval_eps" : 1,
+                            "env_builder_args" : video_eval_env_builder_args,
+                            "num_envs" : 1,
+                            }
+                            # ,{
+                            # "name" : "video_det",
+                            # "deterministic" : True,
+                            # "eval_freq_ep" : eval_freq*train_envs,
+                            # "eval_eps" : 1,
+                            # "env_builder_args" : video_eval_env_builder_args,
+                            # "num_envs" : 1
+                            # }
                         ]
     if algo.lower() == "sac":
         sac_train(  seed,
@@ -199,12 +189,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     q_network_arch=[512,128],
                                                     q_lr=0.001,
                                                     policy_lr=0.0003,
-                                                    policy_network_arch=[256,256],
+                                                    policy_network_arch=[512,256],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
-                                                    batch_size=4096,
-                                                    buffer_size=3_000_000,
-                                                    total_steps=500_000_000,
+                                                    batch_size=2048,
+                                                    buffer_size=5_000_000,
+                                                    total_steps=1_000_000_000,
                                                     train_freq_vstep=10,
                                                     grad_steps=40,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
@@ -212,10 +202,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5,
-                                                    actor_log_std_init = 1.0,
-                                                    actor_observation_filter=["main.vec"],
-                                                    critic_observation_filter=["main.vec","priviledged.vec"]
+                                                    target_entropy_factor = -1.0,
+                                                    actor_log_std_init = -1.0,
+                                                    actor_observation_filter=["base.vec"],
+                                                    critic_observation_filter=["base.vec","priviledged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -252,8 +242,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy_factor = -0.5,
                                                     actor_log_std_init = -3.0,
-                                                    actor_observation_filter=["main.vec"],
-                                                    critic_observation_filter=["main.vec","priviledged.vec"]
+                                                    actor_observation_filter=["base.vec"],
+                                                    critic_observation_filter=["base.vec","priviledged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

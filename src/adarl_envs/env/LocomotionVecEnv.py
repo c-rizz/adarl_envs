@@ -90,6 +90,7 @@ class LocomotionVecEnv(RobotVecEnv):
         heightmap_resolution_xy : tuple[int,int]
         min_good_step_duration : float
         max_good_step_duration : float
+        goal_height_minmax : tuple[float,float]
 
 
     @dataclass
@@ -218,6 +219,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         ground_link : tuple[str,str],
                         feet_links : list[tuple[str,str]],
+                        goal_height_minmax : tuple[float,float],
                         ui_camera_resolution_hw : tuple[int,int] = (256,144),
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
                         mass_randomized_links : list[tuple[str,str]] = [],
@@ -284,13 +286,14 @@ class LocomotionVecEnv(RobotVecEnv):
                         feet_links = feet_links,
                         heightmap_resolution_xy = (heightmap_resolution,heightmap_resolution),
                         min_good_step_duration=min_good_step_duration,
-                        max_good_step_duration=max_good_step_duration
+                        max_good_step_duration=max_good_step_duration,
+                        goal_height_minmax = goal_height_minmax
                         )
         
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xyz     = self._thzeros((adapter.vec_size(), 3)),
                                                                                      goal_rel_vel_vec_xy      = None,
                                                                                      goal_abs_gravity_vec_xyz = self._thtens([0.0,0.0,-1.0]).repeat(adapter.vec_size(), 1),
-                                                                                     goal_abs_height_vec_z    = self._thtens([0.45]).repeat(adapter.vec_size(), 1),
+                                                                                     goal_abs_height_vec_z    = self._thtens([sum(self._locomotion_conf.goal_height_minmax)/2]).repeat(adapter.vec_size(), 1),
                                                                                      goal_heading_rel2linvelgoal_vec_yaw = self._thtens([0.0]).repeat(adapter.vec_size(), 1))
         
         super().__init__(   action_delay_mustd = action_delay_mustd,
@@ -384,6 +387,18 @@ class LocomotionVecEnv(RobotVecEnv):
 
     def _build_state_helper(self, adapter : BaseVecJointImpedanceAdapter):
         super()._build_state_helper(adapter)
+        base_loco_fields = [self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]
+        priviledged_loco_fields = [ self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
+                                    self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
+                                    self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,
+                                    self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR]
+        if self._configuration.merge_priviledged:
+            obs_defs = {"base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields+priviledged_loco_fields)}
+        else:
+            obs_defs = {"base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields),
+                        "priviledged" : ThBoxStateHelper.SimpleObsDef(observable_fields=priviledged_loco_fields)}
         self._locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
@@ -427,16 +442,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.SUM_IMPULSES : [0,10000],
                                                                     self.LOCOMOTION_FIELDS.COLLISON_COUNT : [0,1000],
                                                                     self.LOCOMOTION_FIELDS.CRASHED : [0,1]},
-                                                    observation_definitions={"main" : ThBoxStateHelper.SimpleObsDef(observable_fields=[
-                                                                                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
-                                                                                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
-                                                                                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]),
-                                                                             "priviledged" : ThBoxStateHelper.SimpleObsDef(observable_fields=[
-                                                                                            self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
-                                                                                            self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
-                                                                                            self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,
-                                                                                            self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR
-                                                                                            ])},
+                                                    observation_definitions=obs_defs,
                                                     vec_size=adapter.vec_size())
         feet_num = len(self._locomotion_conf.feet_links)
         self._feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET_FIELDS],
@@ -450,10 +456,10 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
                                                             self._locomotion_state_helper,
-                                                            obs_defs={"main":{"observable":True,"flatten":True,"noise":None}})
+                                                            obs_defs={"base":{"observable":True,"flatten":True,"noise":None}})
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_FEET,
                                                             self._feet_state_helper,
-                                                            obs_defs={"main":{"observable":False,"flatten":False,"noise":None}})
+                                                            obs_defs={"base":{"observable":False,"flatten":False,"noise":None}})
         if self._locomotion_conf.heightmap_resolution_xy[0] > 0:
             heightmap_state_helper = ThBoxStateHelper( field_names=["map"],
                                                     dtype=self._obs_dtype,
@@ -463,7 +469,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     vec_size=adapter.vec_size())
             self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_HEIGHTMAP,
                                                                  heightmap_state_helper,
-                                                                 obs_defs={"main":{"observable":True,"flatten":False,"noise":None}})
+                                                                 obs_defs={"base":{"observable":True,"flatten":False,"noise":None}})
         ggLog.info(f"Built state/obs/action helpers")
         
 
@@ -1019,10 +1025,11 @@ class LocomotionVecEnv(RobotVecEnv):
             goal_yaws = self._thrand((self._adapter.vec_size(),))*math.pi*2
             goal_velocity_vec_xy = goal_speeds.unsqueeze(1)*th.stack([th.cos(goal_yaws), th.sin(goal_yaws)], dim = 1)        
         super()._set_current_ep_config(vec_mask=vec_mask, reset_options=reset_options)
+        goal_height = th.rand(size=(self.num_envs,), generator=self._rng, device=self._th_device)*(self._locomotion_conf.goal_height_minmax[1]-self._locomotion_conf.goal_height_minmax[0])+self._locomotion_conf.goal_height_minmax[0]
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xyz     = self._thzeros((self._adapter.vec_size(), 3)),
                                                                                      goal_rel_vel_vec_xy      = None,
                                                                                      goal_abs_gravity_vec_xyz = self._thtens([0.0,0.0,-1.0]).repeat(self._adapter.vec_size(), 1),
-                                                                                     goal_abs_height_vec_z    = self._thtens([0.45]).repeat(self._adapter.vec_size(), 1),
+                                                                                     goal_abs_height_vec_z    = goal_height.view(self._adapter.vec_size(), 1),
                                                                                      goal_heading_rel2linvelgoal_vec_yaw = self._thtens([0.0]).repeat(self._adapter.vec_size(), 1))
         self.set_max_episode_steps(reset_options.get("reset_options",self._current_episode_config.vec_max_ep_steps))
         self.set_goal(goal_velocity_vec_xy)

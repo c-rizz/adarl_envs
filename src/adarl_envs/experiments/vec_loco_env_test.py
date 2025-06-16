@@ -78,7 +78,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "frame_stack_length" : 3,
         "verbose_infos" : False,
         "terminate_on_body_contact" : False,
-        "use_wandb" : False,
         "init_on_reset_ratio" : 0.8,
         "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
         "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
@@ -214,8 +213,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy_factor = -0.5,
                                                     actor_log_std_init = 1.0,
-                                                    actor_observation_filter=["main.vec"],
-                                                    critic_observation_filter=["main.vec","priviledged.vec"]
+                                                    actor_observation_filter=["base.vec"],
+                                                    critic_observation_filter=["base.vec","priviledged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -252,8 +251,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy_factor = -0.5,
                                                     actor_log_std_init = -3.0,
-                                                    actor_observation_filter=["main.vec"],
-                                                    critic_observation_filter=["main.vec","priviledged.vec"]
+                                                    actor_observation_filter=["base.vec"],
+                                                    critic_observation_filter=["base.vec","priviledged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

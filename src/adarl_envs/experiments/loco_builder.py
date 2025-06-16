@@ -253,6 +253,7 @@ def loco_runner_builder(seed,
                             held_joints_damping=env_builder_args.pop("held_joints_damping"),
                             free_joints=[],
                             merge_priviledged = env_builder_args.pop("merge_priviledged"),
+                            goal_height_minmax=env_builder_args.pop("goal_height_minmax")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -267,7 +268,7 @@ def loco_runner_builder(seed,
                                     saveFrequency_ep=env_builder_args.pop("video_save_freq"),
                                     publish=False,
                                     stream=True,
-                                    vec_obs_key="main.vec",
+                                    vec_obs_key="base.vec", #TODO: somehow pass multiple keys and include priviledged, or auto-detect which keys to save
                                     record_video=env_builder_args["record_video"],
                                     overlay_text_xy=(0.025,0.025),
                                     overlay_text_height=0.035,
@@ -427,27 +428,39 @@ def get_kyon_args():
 
 
 def get_centauro_args():
-    homing = {  ("centauro","hip_yaw_1") : -0.746874,
-                ("centauro","hip_pitch_1") : -1.25409,
-                ("centauro","knee_pitch_1") : -1.55576,
-                ("centauro","ankle_pitch_1") : -0.301666,
-                ("centauro","ankle_yaw_1") : 0.746874,
-                ("centauro","hip_yaw_2") : 0.746874,
-                ("centauro","hip_pitch_2") : 1.25409,
-                ("centauro","knee_pitch_2") : 1.55576,
-                ("centauro","ankle_pitch_2") : 0.301666,
-                ("centauro","ankle_yaw_2") : -0.746874,
-                ("centauro","hip_yaw_3") : 0.746874,
-                ("centauro","hip_pitch_3") : 1.25409,
-                ("centauro","knee_pitch_3") : 1.55576,
-                ("centauro","ankle_pitch_3") : 0.301667,
-                ("centauro","ankle_yaw_3") : -0.746874,
-                ("centauro","hip_yaw_4") : -0.746874,
-                ("centauro","hip_pitch_4") : -1.25409,
-                ("centauro","knee_pitch_4") : -1.55576,
-                ("centauro","ankle_pitch_4") : -0.301667,
-                ("centauro","ankle_yaw_4") : 0.746874,
-                ("centauro","torso_yaw") : 3.56617e-13,
+    # Standard homing
+    hip_yaw =      0.75
+    hip_pitch =    1.25
+    knee_pitch =   1.55
+    ankle_pitch =  0.30
+    ankle_yaw =   -0.75
+    # # Straight ankle homing:
+    # hip_yaw =      0.75
+    # hip_pitch =    1.25
+    # knee_pitch =   1.25
+    # ankle_pitch =  0.0
+    # ankle_yaw =   -0.75
+    homing = {  ("centauro","hip_yaw_1") :      -hip_yaw,
+                ("centauro","hip_pitch_1") :    -hip_pitch,
+                ("centauro","knee_pitch_1") :   -knee_pitch,
+                ("centauro","ankle_pitch_1") :  -ankle_pitch,
+                ("centauro","ankle_yaw_1") :    -ankle_yaw,
+                ("centauro","hip_yaw_2") :      hip_yaw,
+                ("centauro","hip_pitch_2") :    hip_pitch,
+                ("centauro","knee_pitch_2") :   knee_pitch,
+                ("centauro","ankle_pitch_2") :  ankle_pitch,
+                ("centauro","ankle_yaw_2") :    ankle_yaw,
+                ("centauro","hip_yaw_3") :      hip_yaw,
+                ("centauro","hip_pitch_3") :    hip_pitch,
+                ("centauro","knee_pitch_3") :   knee_pitch,
+                ("centauro","ankle_pitch_3") :  ankle_pitch,
+                ("centauro","ankle_yaw_3") :    ankle_yaw,
+                ("centauro","hip_yaw_4") :      -hip_yaw,
+                ("centauro","hip_pitch_4") :    -hip_pitch,
+                ("centauro","knee_pitch_4") :   -knee_pitch,
+                ("centauro","ankle_pitch_4") :  -ankle_pitch,
+                ("centauro","ankle_yaw_4") :    -ankle_yaw,
+                ("centauro","torso_yaw") : 0.0,
                 ("centauro","velodyne_joint") : 0,
                 ("centauro","d435_head_joint") : 0,
                 ("centauro","j_arm1_1") : 0.520149,
@@ -507,8 +520,8 @@ def get_centauro_args():
             "controlled_joints" : legs,
             "mass_randomized_links" : [LINK_FILTERS.ALL_ROBOT],
             "friction_randomized_links" : [LINK_FILTERS.ALL],
-            "safety_limits_ratios_minmax_pve" : {k:[[ 0.8, 0.9, 0.9],
-                                                    [ 0.8, 0.9, 0.9]] for k,v in homing.items()},
+            "safety_limits_ratios_minmax_pve" : {k:[[ 0.3, 0.9, 0.9],
+                                                    [ 0.3, 0.9, 0.9]] for k,v in homing.items()},
             "safe_limits_position_offset" : homing,
             "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_2'),[('ground','ground_link')]),

@@ -415,32 +415,27 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         phys_limits_minmax_pve = {(robot_name,k):self._thtens(l) 
                                     for k,l in self._robot_model.get_joint_limits([jn[1] for jn in internally_controlled_joints]).items()}
-        # if isinstance(safety_limits_ratios_minmax_pve,(float,int)):
-        #     safety_limits_ratios_minmax_pve = [float(safety_limits_ratios_minmax_pve)]*3
-        # if isinstance(safety_limits_ratios_minmax_pve, (list, tuple)):
-        #     safety_limits_ratios_minmax_pve = self._thtens(safety_limits_ratios_minmax_pve)
+        
         if isinstance(safety_limits_ratios_minmax_pve, dict):
             safety_limits_dict_ratios_minmax_pve = safety_limits_ratios_minmax_pve
         else:
             safety_limits_dict_ratios_minmax_pve = {k:safety_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
-        
         safe_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) 
                                                for k,v in safety_limits_dict_ratios_minmax_pve.items()}
-        # print(f"safety_limits_ratios_minmax_pve_th = {safety_limits_ratios_minmax_pve_th}")
-        safe_limits_minmax_pve = {k: lim_minmax_pve*safe_limits_ratios_minmax_pve_th[k]
-                                    for k,lim_minmax_pve in phys_limits_minmax_pve.items()}
-        # print(f"safe_limits_minmax_pve = {safe_limits_minmax_pve}")
-        safe_limits_minmax_pve = {jn:minmax_pve + self._thtens([safe_limits_position_offset[jn], 0, 0]).expand(2,3) for jn,minmax_pve in safe_limits_minmax_pve.items()}
-        safe_limits_minmax_pve = {jn:lims.clamp(min=phys_limits_minmax_pve[jn][0].expand(2,-1), max=phys_limits_minmax_pve[jn][1].expand(2,-1)) 
+        safe_limits_minmax_pve = {jn: lim_minmax_pve*safe_limits_ratios_minmax_pve_th[jn]
+                                    for jn,lim_minmax_pve in phys_limits_minmax_pve.items()}
+        safe_limits_minmax_pve = {jn:minmax_pve + self._thtens([safe_limits_position_offset[jn], 0, 0]).expand(2,3) 
+                                   for jn,minmax_pve in safe_limits_minmax_pve.items()}
+        safe_limits_minmax_pve = {jn:lims.clamp(min=phys_limits_minmax_pve[jn][0].expand(2,-1), 
+                                                max=phys_limits_minmax_pve[jn][1].expand(2,-1)) 
                                   for jn,lims in safe_limits_minmax_pve.items()}
-        # safe_limits_minmax_pve = {k:(lims_minmax-0.5*(lims_minmax[1]+lims_minmax[0]))*safety_limits_ratios_minmax_pve+(0.5+safety_limits_normalized_offset)*(lims_minmax[1]+lims_minmax[0])
-        #                             for k,lims_minmax in phys_limits_minmax_pve.items()}
-        # if safety_limits_normalized_offset + safety_limits_ratios_minmax_pve >= 1:
-        #     raise RuntimeError(f"safety_limits_factor={safety_limits_ratios_minmax_pve} and safety_limits_normalized_offset={safety_limits_normalized_offset} exceed physical limits")
 
         for jn in safe_limits_minmax_pve.keys():
             if jn not in control_limits_minmax_pve:
                 control_limits_minmax_pve[jn] = safe_limits_minmax_pve[jn]
+            if th.any(control_limits_minmax_pve[jn][0] > safe_limits_minmax_pve[jn][0]) or th.any(control_limits_minmax_pve[jn][1] < safe_limits_minmax_pve[jn][1]):
+                raise RuntimeError(f"Control limits exceed safe limits for joint {jn}, ctrl={control_limits_minmax_pve[jn]},"
+                                   f" safe={safe_limits_minmax_pve[jn]}") 
 
         if isinstance(minmax_stiffness, tuple):
             minmax_stiffness_thdict = {k:self._thtens(minmax_stiffness) for k in phys_limits_minmax_pve.keys()}
@@ -572,6 +567,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 minmax_stiffness_thdict[jn].unsqueeze(1),
                                                                 minmax_damping_thdict[jn].unsqueeze(1)], dim=1) 
                                                         for jn in controlled_joints_rn},
+                                center_position = homing_ctrl_joints_pvesd[:,0],
                                 safe_stiffness=self._thtens([self._configuration.safe_stiffness]).repeat(len(controlled_joints_rn)),
                                 safe_damping=self._thtens([self._configuration.safe_damping]).repeat(len(controlled_joints_rn)),
                                 th_device=self._configuration.th_device,
@@ -692,7 +688,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z
                                         ]
         if not self._configuration.merge_priviledged:
-            extr_observation_definitions={  "main":ThBoxStateHelper.SimpleObsDef(
+            extr_observation_definitions={  "base":ThBoxStateHelper.SimpleObsDef(
                                                 observable_fields=base_extrinsic_observable_fields,
                                                 obs_history_length = self._configuration.frame_stack_length,
                                                 observable_subfields=None),
@@ -795,7 +791,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.STATE_EXTRINSIC
                                 ]
         if not self._configuration.merge_priviledged:
-            obs_definitions={"main" : 
+            obs_definitions={"base" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=observable_substates,
                                                                 flattened_subobss=[self.STATE_ROBOT,
                                                                                 self.STATE_EXTRINSIC,
@@ -812,7 +808,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 flattened_part_name="vec",
                                                                 noise_generators={self.STATE_EXTRINSIC : extrinsic_state_noise})}
         else:
-            obs_definitions={"main" : 
+            obs_definitions={"base" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=observable_substates,
                                                                 flattened_subobss=[self.STATE_ROBOT,
                                                                                 self.STATE_EXTRINSIC,
@@ -1555,12 +1551,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 if labels is not None:
                     labels["state_"+substate] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                     labels["statenorm_"+substate] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
-                    labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["main.vec"]])
+                    labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["base.vec"]])
                 i["posref_diff"] = state[self.STATE_ROBOT][:,1,:,5] - state[self.STATE_ROBOT][:,0,:,5]
                 i["posref_vel"] = i["posref_diff"]/self._configuration.stepLength_sec
-            i["vec_obs"] = self._last_obs["main.vec"]
+            i["vec_obs"] = self._last_obs["base.vec"]
             if labels is not None:
-                labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["main.vec"]])
+                labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["base.vec"]])
             actdiff             = th.flatten((act_raw_state[:,0] - act_raw_state[:,1])/2, start_dim=1)
             prev_actdiff        = th.flatten((act_raw_state[:,1] - act_raw_state[:,2])/2, start_dim=1)
             act_acc             = actdiff - prev_actdiff

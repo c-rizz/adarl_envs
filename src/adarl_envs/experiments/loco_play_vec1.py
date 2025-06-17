@@ -323,7 +323,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "held_joints_damping" : 10.0,
         "min_good_step_duration" : 0.2,
         "max_good_step_duration" : 1.5,
-        "merge_priviledged" : False
+        "merge_priviledged" : False,
+        "goal_height_minmax" : [0.75,0.75] if args["robot"] == "centauro" else [0.45,0.45]
+
     }
 
     env_builder_args.update({

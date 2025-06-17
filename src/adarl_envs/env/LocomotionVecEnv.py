@@ -530,7 +530,7 @@ class LocomotionVecEnv(RobotVecEnv):
             tracked_body_linvel = support_polygon_linvel
         else:
             tracked_body_linvel = body_rel_linvel_vec_xyz
-        tracking_err_vec = self._planar_tracking_error_vec(tracked_body_linvel, gravity_rel_vec_xyz, rel_planar_linvel_goal_vec_xyz).unsqueeze(-1)
+        tracking_err_vec = self._planar_tracking_error_vec(tracked_body_linvel, gravity_rel_vec_xyz, rel_planar_linvel_goal_vec_xyz).view(vsize,1)
         
         # compute heading (yaw) error
         rel_goal_heading_yaw = self._locomotion_episode_config.goal_heading_rel2linvelgoal_vec_yaw
@@ -617,22 +617,22 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR : smoothed_height_error.view(vsize,1),
                             self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR : smoothed_pithnroll_error.view(vsize,1),
                             self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR : smoothed_heading_error_vec.view(vsize,1),
-                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X : rel_planar_linvel_goal_vec_xyz[:,0].unsqueeze(-1),
-                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y : rel_planar_linvel_goal_vec_xyz[:,1].unsqueeze(-1),
-                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z : rel_planar_linvel_goal_vec_xyz[:,2].unsqueeze(-1),
-                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X : abs_linvel_goal_vec_xyz[:,0].unsqueeze(-1),
-                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Y : abs_linvel_goal_vec_xyz[:,1].unsqueeze(-1),
-                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z : abs_linvel_goal_vec_xyz[:,2].unsqueeze(-1),
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X : rel_planar_linvel_goal_vec_xyz[:,0].view(vsize,1),
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y : rel_planar_linvel_goal_vec_xyz[:,1].view(vsize,1),
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z : rel_planar_linvel_goal_vec_xyz[:,2].view(vsize,1),
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X : abs_linvel_goal_vec_xyz[:,0].view(vsize,1),
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Y : abs_linvel_goal_vec_xyz[:,1].view(vsize,1),
+                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z : abs_linvel_goal_vec_xyz[:,2].view(vsize,1),
                             self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT : self._locomotion_episode_config.goal_abs_height_vec_z,
-                            self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,0].unsqueeze(-1),
-                            self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Y : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,1].unsqueeze(-1),
-                            self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,2].unsqueeze(-1),
+                            self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,0].view(vsize,1),
+                            self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Y : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,1].view(vsize,1),
+                            self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,2].view(vsize,1),
                             self.LOCOMOTION_FIELDS.SUM_IMPULSES : sum_bad_impulses_vec,
                             self.LOCOMOTION_FIELDS.COLLISON_COUNT :collision_count_vec,
                             self.LOCOMOTION_FIELDS.CRASHED : crashed_vec,
-                            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_X : support_polygon_linvel[:,0],
-                            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Y : support_polygon_linvel[:,1],
-                            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : support_polygon_linvel[:,2]}
+                            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_X : support_polygon_linvel[:,0].view(vsize,1),
+                            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Y : support_polygon_linvel[:,1].view(vsize,1),
+                            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : support_polygon_linvel[:,2].view(vsize,1)}
         
         # fstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._feet_link_ids, use_com_pose = False)
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001

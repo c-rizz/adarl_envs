@@ -45,7 +45,7 @@ if [ stop_sshagent_afterwards ]; then
 fi
 
 cd ..
-pip install catking_pkg
+pip install catkin_pkg
 pip install -e src/adarl -e src/adarl_envs -e src/rreal -e src/pykyon -e src/pycentauro -e src/adarl_ros/adarl_ros -e src/adarl_ros/adarl_ros_utils
 pip install -r src/adarl/requirements_2004.txt
 apt remove -y liboctomap-dev

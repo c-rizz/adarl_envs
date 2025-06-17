@@ -141,7 +141,10 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     "SMOOTHED_PITCHNROLL_ERROR",
                                                     "SMOOTHED_HEADING_ERROR",
                                                     "SUM_IMPULSES",
-                                                    "CRASHED"], start=0)
+                                                    "CRASHED",
+                                                    "SUPPORT_POLYGON_LINVEL_X",
+                                                    "SUPPORT_POLYGON_LINVEL_Y",
+                                                    "SUPPORT_POLYGON_LINVEL_Z"], start=0)
     
     FEET_FIELDS = IntEnum("FEET_FIELDS" , ["FEET_LIFTOFF_TIMES",
                                            "FEET_VEL_X",
@@ -441,7 +444,10 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR : [0,10],
                                                                     self.LOCOMOTION_FIELDS.SUM_IMPULSES : [0,10000],
                                                                     self.LOCOMOTION_FIELDS.COLLISON_COUNT : [0,1000],
-                                                                    self.LOCOMOTION_FIELDS.CRASHED : [0,1]},
+                                                                    self.LOCOMOTION_FIELDS.CRASHED : [0,1],
+                                                                    self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_X : [-10,10],
+                                                                    self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Y : [-10,10],
+                                                                    self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : [-10,10]},
                                                     observation_definitions=obs_defs,
                                                     vec_size=adapter.vec_size())
         feet_num = len(self._locomotion_conf.feet_links)
@@ -478,6 +484,7 @@ class LocomotionVecEnv(RobotVecEnv):
     @override
     def _get_new_instantaneous_state(self):
 
+        track_support_linvel = True
         prev_locom_state = self._current_state[self.STATE_LOCOMOTION][:, 0]
         prev_feet_state = self._current_state[self.STATE_FEET][:, 0, 0]
         new_inst_state = super()._get_new_instantaneous_state()
@@ -492,6 +499,11 @@ class LocomotionVecEnv(RobotVecEnv):
                                         [self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
                                          self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
                                          self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z]], dim = 1)
+        
+        if isinstance(self._adapter,BaseVecSimulationAdapter):
+            feet_linvels_vec_foot_xyz = self._adapter.getLinksState(self._feet_link_ids)[:,:,7:10]
+        else:
+            feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
         step_counts = new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
         
         # compute linvel error
@@ -513,7 +525,12 @@ class LocomotionVecEnv(RobotVecEnv):
             twist = quat_xyzw_between_vecs_py(self._unit_3d_vector.expand_as(gravity_rel_vec_xyz),
                                               th.cat([self._locomotion_episode_config.goal_rel_vel_vec_xy, th.zeros_like(self._locomotion_episode_config.goal_rel_vel_vec_xy[...:0])]))
             rel_planar_linvel_goal_vec_xyz = quat_mul_xyzw(twist, quat_mul_xyzw(swing,self._unit_3d_vector.expand_as(gravity_rel_vec_xyz)))
-        tracking_err_vec = self._planar_tracking_error_vec(body_rel_linvel_vec_xyz, gravity_rel_vec_xyz, rel_planar_linvel_goal_vec_xyz).unsqueeze(-1)
+        support_polygon_linvel = th.mean(feet_linvels_vec_foot_xyz, dim=1) # average linvel across the feet
+        if track_support_linvel:
+            tracked_body_linvel = support_polygon_linvel
+        else:
+            tracked_body_linvel = body_rel_linvel_vec_xyz
+        tracking_err_vec = self._planar_tracking_error_vec(tracked_body_linvel, gravity_rel_vec_xyz, rel_planar_linvel_goal_vec_xyz).unsqueeze(-1)
         
         # compute heading (yaw) error
         rel_goal_heading_yaw = self._locomotion_episode_config.goal_heading_rel2linvelgoal_vec_yaw
@@ -612,7 +629,10 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,2].unsqueeze(-1),
                             self.LOCOMOTION_FIELDS.SUM_IMPULSES : sum_bad_impulses_vec,
                             self.LOCOMOTION_FIELDS.COLLISON_COUNT :collision_count_vec,
-                            self.LOCOMOTION_FIELDS.CRASHED : crashed_vec}
+                            self.LOCOMOTION_FIELDS.CRASHED : crashed_vec,
+                            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_X : support_polygon_linvel[:,0],
+                            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Y : support_polygon_linvel[:,1],
+                            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : support_polygon_linvel[:,2]}
         
         # fstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._feet_link_ids, use_com_pose = False)
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
@@ -638,10 +658,6 @@ class LocomotionVecEnv(RobotVecEnv):
                      out=new_feet_liftoffs_vec_foot_t)
         else:
             new_feet_liftoffs_vec_foot_t = self._thtens([0.0]).expand(vsize,len(self._locomotion_conf.feet_links))
-        if isinstance(self._adapter,BaseVecSimulationAdapter):
-            feet_linvels_vec_foot_xyz = self._adapter.getLinksState(self._feet_link_ids)[:,:,7:10]
-        else:
-            feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
         new_feet_state = {  self.FEET_FIELDS.FEET_LIFTOFF_TIMES : new_feet_liftoffs_vec_foot_t,
                             self.FEET_FIELDS.FEET_VEL_X : feet_linvels_vec_foot_xyz[:,:,0],
                             self.FEET_FIELDS.FEET_VEL_Y : feet_linvels_vec_foot_xyz[:,:,1]}
@@ -783,9 +799,9 @@ class LocomotionVecEnv(RobotVecEnv):
         
         reward_contacts = - th.clamp(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 
-        prev_goal_rel_vec_xyz = current_state_locom_vec[:,[ self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
-                                                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
-                                                            self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]]
+        goal_rel_vec_xyz = current_state_locom_vec[:,[ self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
+                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
+                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]]
         feet_state = state[self.STATE_FEET][:,0] # vec_size*history*fields*nfeet -> vec_size*fields*nfeet
         feet_liftoffs = feet_state[:,0] # vec_size*fields*nfeet -> vec_size*nfeet
         steps_finished = feet_liftoffs < 0
@@ -795,7 +811,7 @@ class LocomotionVecEnv(RobotVecEnv):
         offsetted_finished_steps_durations = steps_finished*(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]-steps_starts - self._locomotion_conf.min_good_step_duration)
         offsetted_finished_steps_durations = th.tanh(offsetted_finished_steps_durations/self._locomotion_conf.max_good_step_duration)*self._locomotion_conf.max_good_step_duration
         reward_feet_air_time = th.mean(offsetted_finished_steps_durations, dim=1)
-        reward_feet_air_time = reward_feet_air_time*(th.linalg.norm(prev_goal_rel_vec_xyz,dim=1)>0.05) # Disable reward if goal velocity is less than 0.05
+        reward_feet_air_time = reward_feet_air_time*(th.linalg.norm(goal_rel_vec_xyz,dim=1)>0.05) # Disable reward if goal velocity is less than 0.05
         feet_linvels_xy = feet_state[:,1:3] # vec_size*fields*nfeet -> vec_size*2*nfeet
         feet_linvels = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*fields*nfeet -> vec_size*nfeet
         feet_touching_ground = feet_liftoffs <= 0

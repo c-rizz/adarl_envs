@@ -222,7 +222,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         homing_nonctrl_joints_position : dict[tuple[str,str],th.Tensor]
         homing_held_joints_position : dict[tuple[str,str],th.Tensor]
         impulse_duration_minmax : th.Tensor
-        impulse_mean_std : th.Tensor
+        impulse_mean_std : tuple[float,float]
         impulse_probability_per_sec : th.Tensor
         init_on_reset_ratio : float
         internally_controlled_joints : Sequence[tuple[str,str]]
@@ -494,7 +494,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     internally_controlled_joints = internally_controlled_joints,
                                                     homing_nonctrl_joints_position = homing_nonctrl_joints_position,
                                                     impulse_duration_minmax = self._thtens(impulse_duration_minmax),
-                                                    impulse_mean_std=self._thtens(impulse_mean_std),
+                                                    impulse_mean_std=impulse_mean_std,
                                                     impulse_probability_per_sec = self._thtens(impulse_probability_per_sec),
                                                     init_on_reset_ratio=init_on_reset_ratio,
                                                     initial_pose_randomization_range = initial_pose_randomization_range,
@@ -1258,10 +1258,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 impulse_prob_per_env_dt = 1-th.pow(1-self._configuration.impulse_probability_per_sec, self._intendedStepLength_sec)
                 apply_impulse = self._thrand((self.num_envs,1)) < impulse_prob_per_env_dt
                 impulse = self._thrand_truncnorm((self.num_envs,1),
-                                                mean = self._configuration.impulse_mean_std[0].item(),
-                                                std = self._configuration.impulse_mean_std[1].item(),
+                                                mean = self._configuration.impulse_mean_std[0],
+                                                std = self._configuration.impulse_mean_std[1],
                                                 min_val = 0.0,
-                                                max_val = self._configuration.impulse_mean_std[0].item()+self._configuration.impulse_mean_std[1].item()*5)
+                                                max_val = self._configuration.impulse_mean_std[0]+self._configuration.impulse_mean_std[1]*5)
                 duration = self._thrand((self.num_envs,1)) * (self._configuration.impulse_duration_minmax[1] - self._configuration.impulse_duration_minmax[0]) + self._configuration.impulse_duration_minmax[0]
 
                 # ggLog.info(f"impulse={impulse}\n"
@@ -1280,8 +1280,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
                 # ggLog.info(f"Setting impulses:\n"
                 #            f"impulse_prob_per_env_dt = {impulse_prob_per_env_dt}\n"
-                #            f"impulse_mean = {self._configuration.impulse_mean_std[0].item()}\n"
-                #            f"impulse_std = {self._configuration.impulse_mean_std[1].item()}\n"
+                #            f"impulse_mean = {self._configuration.impulse_mean_std[0]}\n"
+                #            f"impulse_std = {self._configuration.impulse_mean_std[1]}\n"
                 #            f"impulse = {impulse}\n"
                 #            f"force_torque_xyzxyz={th.cat([forcevector, torque], dim = 1)}\n"
                 #            f"durations={duration}\n"

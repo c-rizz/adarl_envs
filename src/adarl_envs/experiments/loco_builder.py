@@ -485,22 +485,22 @@ def get_centauro_args():
     legs = ["hip_yaw_1"
             ,"hip_pitch_1"
             ,"knee_pitch_1"
-            ,"ankle_pitch_1"
+            # ,"ankle_pitch_1"
             #,"ankle_yaw_1"
             ,"hip_yaw_2"
             ,"hip_pitch_2"
             ,"knee_pitch_2"
-            ,"ankle_pitch_2"
+            # ,"ankle_pitch_2"
             #,"ankle_yaw_2"
             ,"hip_yaw_3"
             ,"hip_pitch_3"
             ,"knee_pitch_3"
-            ,"ankle_pitch_3"
+            # ,"ankle_pitch_3"
             #,"ankle_yaw_3"
             ,"hip_yaw_4"
             ,"hip_pitch_4"
             ,"knee_pitch_4"
-            ,"ankle_pitch_4"
+            # ,"ankle_pitch_4"
             # ,"ankle_yaw_4"
             ]
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf/urdf/centauro.urdf.xacro"),
@@ -514,7 +514,7 @@ def get_centauro_args():
             "robot_name" : "centauro",
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
-            "homing_body_pose_xyz_xyzw" : (0.,0.,0.85,0.,0.,0.,1.),
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.84,0.,0.,0.,1.),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : legs,

@@ -1,6 +1,6 @@
 # Some Instructions on deploying ADARL envs on ros+xbot
 
-For Now I only tried with ROS1 and XBOT2, using either xbot2_mujoco or Gazebo.
+For now I only tried the deployment with ROS1 and XBOT2, using either xbot2_mujoco or Gazebo.
 
 # KYON_MUJOCO
 
@@ -13,6 +13,21 @@ The adarl-based script will need ros, xbot, forest and the virtual environment.
 
 All of this will be inside the ros1-xbot docker container, I suggest you used byobu to split the terminal in two (or more
 it you want xbot2-gui).
+
+So, launch the docker with:
+
+```
+~/adarl_ws_ros1/src/adarl_docker_utils/ros1-xbot/launch_persisting.sh
+```
+
+Launch byobu:
+
+```
+byobu
+```
+
+Open 3 splits with SHIFT+F2 and then CTRL-F2, enable the mouse pressing twice ALT-F12.
+
 
 In the simulation terminal run:
 ```

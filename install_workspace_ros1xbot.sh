@@ -36,13 +36,13 @@ forest add-recipes git@github.com:ADVRHumanoids/multidof_recipes.git --tag mjx_a
 
 forest grow -j10 xbot2_mujoco
 forest grow -j10 iit-kyon-ros-pkg
-cd forest_ws/ros_src
+cd ros_src
 git clone git@github.com:c-rizz/adarl_ros # Would be nice to avoid this, just needed to be able to launch scripts from roslaunch
 if [ stop_sshagent_afterwards ]; then
     ssh-agent -k
 fi
 
-cd ..
+cd ../..
 pip install -e src/adarl -e src/adarl_envs -e src/rreal -e src/pykyon -e src/pycentauro -e src/adarl_ros/adarl_ros -e src/adarl_ros/adarl_ros_utils
 pip install -r src/adarl/requirements_2004.txt
 apt remove -y liboctomap-dev

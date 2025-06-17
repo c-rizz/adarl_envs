@@ -9,11 +9,19 @@ You can try to install everything using the provided setup script.
 It hasn't been thoroughly tested, so it may not work, but it's worth a try.
 
 ```
-curl https://gitlab.com/-/snippets/4863010/raw/main/setup_full.sh | bash
+bash <(curl -s https://gitlab.com/-/snippets/4863010/raw/main/setup_full.sh)
 ```
 
 You can find the script also in the repo main folder.
 Let me know if it doesn't work.
+
+If you want to use the environments with ROS1+XBOT you will have to create a separate workspace,
+you should be able to do it with:
+
+```
+bash <(curl -s https://gitlab.com/-/snippets/4863010/raw/main/setup_full.sh) ros1xbot
+```
+
 
 ### Setup - Manual
 

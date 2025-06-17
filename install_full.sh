@@ -80,7 +80,7 @@ echo "  Then you can move to /home/host/$ws_name to find the workspace in your o
 echo "  You can then start the virtualenv with:"
 echo "      source virtualenv/adarl/bin/activate"
 
-if [[ "$1" != "ros1xbot" ]]; then
+if [[ "$1" == "ros1xbot" ]]; then
 echo "  Then can check that everything works following the instructions in "
 echo "  $ws_name/src/adarl_envs/ros_xbot.md"
 else

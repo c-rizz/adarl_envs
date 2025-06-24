@@ -13,7 +13,7 @@ from adarl.utils.vec_state_helper import    JointImpedanceActionHelper, ThBoxSta
                                         StateNoiseGenerator, DictStateHelper, unnormalize, normalize
 from adarl.utils.tensor_trees import map_tensor_tree, flatten_tensor_tree, map2_tensor_tree, space_from_tree
 from adarl.utils.utils import build_pose, JointState, Pose, LinkState, isinstance_noimport, masked_assign, masked_assign_sc, quat_conj_xyzw_np, quat_mul_xyzw_np
-from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run, dbg_check_bounded
+from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run, dbg_check_bounded, dbg_check_finite
 from dataclasses import dataclass
 from gymnasium import Space
 from enum import Enum, IntEnum
@@ -1238,10 +1238,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def get_observations(self, state) -> dict[Any, th.Tensor]:
         self._last_obs = self._state_helper.observe(state)
         if self._configuration.enable_dbg_checks:
-            if isinstance(self._adapter, BaseVecSimulationAdapter) and not adarl.utils.tensor_trees.is_all_finite(state):
-                ggLog.warn(f"Non-finite values in state {state}")
-            if not adarl.utils.tensor_trees.is_all_finite(self._last_obs):
-                ggLog.warn(f"Non-finite values in obs {self._last_obs}")
+            if isinstance(self._adapter, BaseVecSimulationAdapter):
+                dbg_check_finite(state, just_warn=True)
+            dbg_check_finite(self._last_obs, async_assert=True)
             dbg_check_bounded(self._last_obs, min=-100, max=100, just_warn=True)
         return self._last_obs
 
@@ -1619,10 +1618,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self.single_state_space.seed(self._main_seed)
 
     def _warn_out_of_bounds(self, robot_state_norm):
-        if not adarl.utils.tensor_trees.is_all_bounded(robot_state_norm, -10, 10):
-            flatstate = flatten_tensor_tree(robot_state_norm)
-            violations = {k:(th.abs(flatstate[k])>10).nonzero() for k in flatstate.keys() if not adarl.utils.tensor_trees.is_leaf_bounded(flatstate[k],min=-10,max=10)}
-            ggLog.warn(f"robot_state is 10X out of bounds: violations at \n{violations} \n robot_state_norm = \n {robot_state_norm}")
+        dbg_check_bounded(robot_state_norm, -10,10, async_assert=False, just_warn=True)
 
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],

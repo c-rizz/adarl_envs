@@ -484,7 +484,7 @@ class LocomotionVecEnv(RobotVecEnv):
     @override
     def _get_new_instantaneous_state(self):
 
-        track_support_linvel = True
+        track_support_linvel = False
         prev_locom_state = self._current_state[self.STATE_LOCOMOTION][:, 0]
         prev_feet_state = self._current_state[self.STATE_FEET][:, 0, 0]
         new_inst_state = super()._get_new_instantaneous_state()
@@ -799,9 +799,11 @@ class LocomotionVecEnv(RobotVecEnv):
         
         reward_contacts = - th.clamp(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 
-        goal_rel_vec_xyz = current_state_locom_vec[:,[ self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
-                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
-                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]]
+
+        goal_vel_rel_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
+                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
+                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z)) #type:ignore
+        goal_rel_vec_xyz = current_state_locom_vec[:,goal_vel_rel_xyz_idx]
         feet_state = state[self.STATE_FEET][:,0] # vec_size*history*fields*nfeet -> vec_size*fields*nfeet
         feet_liftoffs = feet_state[:,0] # vec_size*fields*nfeet -> vec_size*nfeet
         steps_finished = feet_liftoffs < 0
@@ -990,7 +992,7 @@ class LocomotionVecEnv(RobotVecEnv):
         goal_vel_abs_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X,
                                                 self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Y,
                                                 self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z)) #type:ignore 
-        smooth_track_err_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR)) #type: ignore
+        smooth_track_err_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,)) #type: ignore
         body_linvel_abs_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z)) #type: ignore
@@ -1003,7 +1005,7 @@ class LocomotionVecEnv(RobotVecEnv):
         i["goal_abs_speed_vec"] = th.linalg.norm(goal_abs,dim=1)
         i["goal_abs_yaw_vec"] = th.atan2(goal_abs[:,1],goal_abs[:,0])
         i["goal_abs_xyz_vec"] = goal_abs
-        i["smoothed_linvel_error"] = curr_locom_state[:,smooth_track_err_idx]
+        i["smoothed_linvel_error"] = curr_locom_state[:,smooth_track_err_idx].view(self.num_envs)
         i["body_abs_linvel"] = curr_extri_state[:,body_linvel_abs_xyz_idx]
         i["body_rel_linvel"] = curr_extri_state[:,body_linvel_rel_xyz_idx]
         i["linvel_error"] = i["goal_abs_xyz_vec"] - i["body_abs_linvel"]

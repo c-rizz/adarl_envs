@@ -130,10 +130,10 @@ def loco_runner_builder(seed,
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
         import jax
         ground_link = ("ground","ground_link")
-        sim_dt = 4/1024
+        robot_model = env_builder_args["robot_model"]
+        sim_dt = 2/1024 if robot_model=="centauro" else 4/1024 
         iterations_per_ep = int(max_steps*stepLength_sec/sim_dt)
         opt_override = {}
-        robot_model = env_builder_args["robot_model"]
         # if robot_model == "centauro":
         #     opt_override["impratio"] = 1.5
         adapter = MjxJointImpedanceAdapter( vec_size=num_envs,
@@ -485,22 +485,22 @@ def get_centauro_args():
     legs = ["hip_yaw_1"
             ,"hip_pitch_1"
             ,"knee_pitch_1"
-            # ,"ankle_pitch_1"
+            ,"ankle_pitch_1"
             #,"ankle_yaw_1"
             ,"hip_yaw_2"
             ,"hip_pitch_2"
             ,"knee_pitch_2"
-            # ,"ankle_pitch_2"
+            ,"ankle_pitch_2"
             #,"ankle_yaw_2"
             ,"hip_yaw_3"
             ,"hip_pitch_3"
             ,"knee_pitch_3"
-            # ,"ankle_pitch_3"
+            ,"ankle_pitch_3"
             #,"ankle_yaw_3"
             ,"hip_yaw_4"
             ,"hip_pitch_4"
             ,"knee_pitch_4"
-            # ,"ankle_pitch_4"
+            ,"ankle_pitch_4"
             # ,"ankle_yaw_4"
             ]
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf/urdf/centauro.urdf.xacro"),

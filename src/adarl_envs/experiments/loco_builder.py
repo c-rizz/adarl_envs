@@ -253,7 +253,8 @@ def loco_runner_builder(seed,
                             held_joints_damping=env_builder_args.pop("held_joints_damping"),
                             free_joints=[],
                             merge_priviledged = env_builder_args.pop("merge_priviledged"),
-                            goal_height_minmax=env_builder_args.pop("goal_height_minmax")
+                            goal_height_minmax=env_builder_args.pop("goal_height_minmax"),
+                            recycle_pose_randomization=env_builder_args.pop("recycle_pose_randomization")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -384,9 +385,9 @@ def get_quad_args():
             }
 
 def get_kyon_args():
-    hip_pitch = 50/180*3.14159
-    hip_roll = 2/180*3.14159
-    knee = 90/180*3.14159
+    hip_pitch =  -50/180*3.14159
+    hip_roll =    2/180*3.14159
+    knee =       -90/180*3.14159
     homing = {  ("kyon","hip_roll_3") :  hip_roll,
                 ("kyon","hip_roll_4") : -hip_roll,
                 ("kyon","hip_roll_1") : -hip_roll,

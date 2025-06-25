@@ -103,7 +103,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "min_good_step_duration" : 0.2,
         "max_good_step_duration" : 1.5,
         "merge_priviledged" : not use_priviledged,
-        "goal_height_minmax" : [0.45,0.45]
+        "goal_height_minmax" : [0.45,0.45],
+        "recycle_pose_randomization" : True
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -113,6 +114,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_eval_env_builder_args["initial_pose_randomization_range"] = 0.02
     video_eval_env_builder_args["mass_randomization_ratio"] = 0.0
     video_eval_env_builder_args["friction_slide_spin_roll_randomization_ratios"] = (0.0,0.0,0.0)
+    video_eval_env_builder_args["recycle_pose_randomization"] = False
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,

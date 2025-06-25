@@ -271,6 +271,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         enable_limits_safety : bool
         posref_safety_period : float
         observe_full_robot_state : bool
+        recycle_pose_randomization : bool
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -378,7 +379,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         enable_limits_safety : bool = True,
                         saturate_jimp_ref_limits : bool = True,
                         observe_full_robot_state : bool = False,
-                        merge_priviledged : bool = False
+                        merge_priviledged : bool = False,
+                        recycle_pose_randomization : bool = False
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -541,13 +543,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     enable_limits_safety = enable_limits_safety,
                                                     saturate_jimp_posref_limits = saturate_jimp_ref_limits,
                                                     posref_safety_period = posref_safety_period,
-                                                    observe_full_robot_state = observe_full_robot_state
+                                                    observe_full_robot_state = observe_full_robot_state,
+                                                    recycle_pose_randomization = recycle_pose_randomization
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
                                                     vec_init_on_reset = th.ones(size=(adapter.vec_size(),), dtype=th.bool).to(device=th_device, non_blocking=th_device.type=="cuda"),
                                                     vec_max_ep_steps = th.full(fill_value=maxStepsPerEpisode, size=(adapter.vec_size(),), dtype=th.int64).to(device=th_device, non_blocking=th_device.type=="cuda"))
-        
+        self._previous_pose_randomization : th.Tensor | None = None
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
         self._always_present_collisions : set[tuple[str,str]] = set()
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
@@ -680,12 +683,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
                                         self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
                                         self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
-                                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
                                         ]
         priviledged_extrinsic_observable_fields = [
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
+                                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
                                         ]
         if not self._configuration.merge_priviledged:
             extr_observation_definitions={  "base":ThBoxStateHelper.SimpleObsDef(
@@ -988,18 +991,21 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         jp_dict.update({k:v for k,v in self._configuration.homing_held_joints_position.items()})
         t0 = time.monotonic()
         if self._configuration.initial_pose_randomization_range > 0:
-            initial_ctrl_jposes = find_poses(   root_joint = self._configuration.robot_root_joint,
-                                                homing_body_pose_xyzxyzw = self._pinocchio_corrected_homing_body_pose_xyzxyzw,
-                                                controlled_joints = self._configuration.controlled_joints,
-                                                initial_pose_randomization_range = self._configuration.initial_pose_randomization_range,
-                                                limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.controlled_joints], dim = 1),
-                                                homing_pos = self._configuration.homing_ctrl_joints_pvesd[:,0],
-                                                noncontrolled_jointpos = jp_dict,
-                                                robot_model = self._robot_model,
-                                                is_floating_base = self._configuration.robot_is_floating,
-                                                rng = self._rng,
-                                                excluded_collision_pairs = self._always_present_collisions,
-                                                num_envs=selected_vecs_num).to(device=self._configuration.th_device, non_blocking=True)
+            if not self._configuration.recycle_pose_randomization or self._previous_pose_randomization is None:
+                self._previous_pose_randomization = find_poses(
+                                                        root_joint = self._configuration.robot_root_joint,
+                                                        homing_body_pose_xyzxyzw = self._pinocchio_corrected_homing_body_pose_xyzxyzw,
+                                                        controlled_joints = self._configuration.controlled_joints,
+                                                        initial_pose_randomization_range = self._configuration.initial_pose_randomization_range,
+                                                        limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.controlled_joints], dim = 1),
+                                                        homing_pos = self._configuration.homing_ctrl_joints_pvesd[:,0],
+                                                        noncontrolled_jointpos = jp_dict,
+                                                        robot_model = self._robot_model,
+                                                        is_floating_base = self._configuration.robot_is_floating,
+                                                        rng = self._rng,
+                                                        excluded_collision_pairs = self._always_present_collisions,
+                                                        num_envs=selected_vecs_num).to(device=self._configuration.th_device, non_blocking=True)
+            initial_ctrl_jposes = self._previous_pose_randomization
         else:
             initial_ctrl_jposes = homing_pos.expand(selected_vecs_num, len(self._configuration.controlled_joints))
         ggLog.info(f"pose randomization took {time.monotonic()-t0:.6f}s")

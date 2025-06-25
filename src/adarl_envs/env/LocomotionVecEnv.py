@@ -241,7 +241,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         observe_full_robot_state : bool = False,
                         min_good_step_duration : float = 0.1,
                         max_good_step_duration : float = 1.5,
-                        merge_priviledged : bool = False
+                        merge_priviledged : bool = False,
+                        recycle_pose_randomization : bool = False
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -356,7 +357,8 @@ class LocomotionVecEnv(RobotVecEnv):
                             free_joints=free_joints,
                             held_joints_stiffness = held_joints_stiffness,
                             held_joints_damping = held_joints_damping,
-                            merge_priviledged=merge_priviledged
+                            merge_priviledged=merge_priviledged,
+                            recycle_pose_randomization=recycle_pose_randomization
                         )
 
         

@@ -29,17 +29,27 @@ byobu
 Open 3 splits with SHIFT+F2 and then CTRL-F2, enable the mouse pressing twice ALT-F12.
 
 
-In the simulation terminal run:
+In one terminal, start the simulation:
+
 ```
 cd /home/host/adarl_ws_ros1
-. setup_ros1xbot_sim.sh
-roslaunch roslaunch src/adarl_envs/src/adarl_envs/ros/all_kyon_mujoco.launch
+. src/adarl_envs/setup_ros1xbot_sim.sh
+roslaunch src/adarl_envs/src/adarl_envs/ros/all_kyon_mujoco.launch
 ```
+
+In a second terminal, start xbot gui:
+
+```
+cd /home/host/adarl_ws_ros1
+. src/adarl_envs/setup_ros1xbot_sim.sh
+xbot2-gui
+```
+
 
 In the ADARL run:
 ```
 cd /home/host/adarl_ws_ros1
-. setup_ros1xbot.sh
+. src/adarl_envs/setup_ros1xbot.sh
 ./src/adarl_envs/src/adarl_envs/experiments/loco_play_vec1.py --comment t --robot kyon --mode xbot --record --norender --control sine --deterministic```
 
 This will run a simple hardcoded policy that oscillates joints according to a sine function.

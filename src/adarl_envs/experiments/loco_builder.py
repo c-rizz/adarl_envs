@@ -330,8 +330,8 @@ def loco_venv_builder(  seed,
     #                              log_folder=log_folder,
     #                              video_save_freq=video_save_freq)
     env.reset(seed=seed)
-    if len(env_builder_args)>0:
-        ggLog.warn(f"Unused env_builder_args: {env_builder_args}")
+    # if len(env_builder_args)>0:
+    #     ggLog.warn(f"Unused env_builder_args: {env_builder_args}")
     return env, 1/stepLength_sec
 
 

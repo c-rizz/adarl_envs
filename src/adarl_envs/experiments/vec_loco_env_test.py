@@ -102,7 +102,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "held_joints_damping" : 10.0,
         "min_good_step_duration" : 0.2,
         "max_good_step_duration" : 1.5,
-        "merge_priviledged" : not use_priviledged
+        "merge_priviledged" : not use_priviledged,
+        "goal_height_minmax" : [0.45,0.45]
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

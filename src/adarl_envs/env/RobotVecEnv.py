@@ -685,7 +685,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         priviledged_extrinsic_observable_fields = [
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z
+                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
                                         ]
         if not self._configuration.merge_priviledged:
             extr_observation_definitions={  "base":ThBoxStateHelper.SimpleObsDef(

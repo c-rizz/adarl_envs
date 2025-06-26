@@ -676,19 +676,19 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                               obs_history_length = self._configuration.frame_stack_length,
                                               vec_size=adapter.vec_size(),
                                               observable_subfields = observable_robot_state)
-        base_extrinsic_observable_fields = [
+        priviledged_extrinsic_observable_fields = [
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
                                         self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
                                         self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
                                         self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
                                         ]
-        priviledged_extrinsic_observable_fields = [
+        base_extrinsic_observable_fields = [
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
-                                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
                                         ]
         if not self._configuration.merge_priviledged:
             extr_observation_definitions={  "base":ThBoxStateHelper.SimpleObsDef(

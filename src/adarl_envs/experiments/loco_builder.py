@@ -385,9 +385,9 @@ def get_quad_args():
             }
 
 def get_kyon_args():
-    hip_pitch =  -50/180*3.14159
+    hip_pitch = -50/180*3.14159
     hip_roll =    2/180*3.14159
-    knee =       -90/180*3.14159
+    knee =      -90/180*3.14159
     homing = {  ("kyon","hip_roll_3") :  hip_roll,
                 ("kyon","hip_roll_4") : -hip_roll,
                 ("kyon","hip_roll_1") : -hip_roll,

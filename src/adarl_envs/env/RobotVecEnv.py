@@ -680,12 +680,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
                                         self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
                                         ]
         base_extrinsic_observable_fields = [
+                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,

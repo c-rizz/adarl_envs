@@ -206,7 +206,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     target_tau = 0.005,
                                                     batch_size=16384,
                                                     buffer_size=3_000_000,
-                                                    total_steps=300_000_000,
+                                                    total_steps=1_000_000_000,
                                                     train_freq_vstep=10,
                                                     grad_steps=40,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),

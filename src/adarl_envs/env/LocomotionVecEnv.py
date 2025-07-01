@@ -241,8 +241,9 @@ class LocomotionVecEnv(RobotVecEnv):
                         observe_full_robot_state : bool = False,
                         min_good_step_duration : float = 0.1,
                         max_good_step_duration : float = 1.5,
-                        merge_privileged : bool = False,
-                        recycle_pose_randomization : bool = False
+                        merge_priviledged : bool = False,
+                        recycle_pose_randomization : bool = False,
+                        just_health_reward : bool = False
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -357,8 +358,9 @@ class LocomotionVecEnv(RobotVecEnv):
                             free_joints=free_joints,
                             held_joints_stiffness = held_joints_stiffness,
                             held_joints_damping = held_joints_damping,
-                            merge_privileged=merge_privileged,
-                            recycle_pose_randomization=recycle_pose_randomization
+                            merge_priviledged=merge_priviledged,
+                            recycle_pose_randomization=recycle_pose_randomization,
+                            just_health_reward=just_health_reward
                         )
 
         
@@ -731,7 +733,9 @@ class LocomotionVecEnv(RobotVecEnv):
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
-
+        if self._configuration.just_health_reward:
+            sub_rewards_return["health"] = th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
+            return self._thtens([1.0]).expand(self.num_envs)
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
         max_rew = self._configuration.reward_penalties_max

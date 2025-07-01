@@ -346,7 +346,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mass_randomization_ratio" : 0.0,
         "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
         "impulse_probability_per_sec" : 0.0,
-        "show_gui" : args["gui"]})
+        "show_gui" : args["gui"],
+        "just_health_reward" : True})
     return play(seed,
                 folderName,
                 run_id, args,

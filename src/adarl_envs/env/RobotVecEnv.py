@@ -272,6 +272,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         posref_safety_period : float
         observe_full_robot_state : bool
         recycle_pose_randomization : bool
+        just_health_reward : bool
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -301,7 +302,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                    "BODY_ABS_POS_Z",
                                                    "BODY_REL_GRAVITY_X",
                                                    "BODY_REL_GRAVITY_Y",
-                                                   "BODY_REL_GRAVITY_Z"], start=0)
+                                                   "BODY_REL_GRAVITY_Z",
+                                                   "BODY_REL_LINACC_X",
+                                                   "BODY_REL_LINACC_Y",
+                                                   "BODY_REL_LINACC_Z"], start=0)
     ACT_FIELDS = IntEnum("ACT_FIELDS", ["ACTION"], start=0)
 
     JOINT_LONGTERM_STATS_FIELDS = IntEnum("LONGTERM_STATS_FIELDS", ["AVG_POS"])    
@@ -380,7 +384,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         saturate_jimp_ref_limits : bool = True,
                         observe_full_robot_state : bool = False,
                         merge_priviledged : bool = False,
-                        recycle_pose_randomization : bool = False
+                        recycle_pose_randomization : bool = False,
+                        just_health_reward : bool = False
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -544,7 +549,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     saturate_jimp_posref_limits = saturate_jimp_ref_limits,
                                                     posref_safety_period = posref_safety_period,
                                                     observe_full_robot_state = observe_full_robot_state,
-                                                    recycle_pose_randomization = recycle_pose_randomization
+                                                    recycle_pose_randomization = recycle_pose_randomization,
+                                                    just_health_reward = just_health_reward
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
@@ -633,7 +639,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
         ggLog.info(f"Built info helper")
-        # ggLog.info(f"get_space_labels(self.single_observation_space) = {get_space_labels(self.single_observation_space)}")
 
         self.set_seeds(th.as_tensor(seed))
         self._adapter.set_monitored_links([self._configuration.main_body_link])
@@ -680,6 +685,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z,
                                         self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
                                         ]
         base_extrinsic_observable_fields = [
@@ -718,6 +726,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                     self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : [-10,10],
                                                                     self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : [-10,10],
                                                                     self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : [-10,10],
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : [-1000,1000],
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : [-1000,1000],
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : [-1000,1000],
                                                                     self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z : [-1,1],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : [-1,1],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
@@ -1363,19 +1374,24 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_body_rel_gravity_dir = th_quat_rotate_py(self._abs_gravity_dir.expand_as(body_abs_linvel_xyz_vec), conj_body_abs_quat_xyzw_vec)
             vec_body_rel_linvel_xyz = th_quat_rotate_py(body_abs_linvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
             vec_body_rel_angvel_xyz = th_quat_rotate_py(body_abs_angvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
+            vec_body_rel_linacc_xyz = self._adapter.get_local_link_linear_acceleration(self._main_body_link_ids)[:,0,:]
         else:
             vec_body_rel_gravity_dir = self._adapter.get_link_gravity_direction(self._main_body_link_ids)[:,0,:]
             body_abs_linvel_xyz_vec = th.zeros_like(vec_body_rel_gravity_dir)
             vec_body_rel_linvel_xyz = th.zeros_like(vec_body_rel_gravity_dir)
-            vec_body_rel_angvel_xyz = th.zeros_like(vec_body_rel_gravity_dir)
+            vec_body_rel_linacc_xyz = th.zeros_like(vec_body_rel_gravity_dir)
+            vec_body_rel_angvel_xyz = self._adapter.get_link_relative_angular_velocity(self._main_body_link_ids)[:,0,:]
+            th.zeros_like(vec_body_rel_gravity_dir)
             vec_body_ground_dist = th.zeros_like(vec_body_rel_gravity_dir[:,0])
             # - vec_ground_dist can be obtained with some simple sensor, a depth camera, something like that
             # - gravity_dir with an accelerometer
-            # - rel_linvel e rel_angvel, may be obtainable with some slam kind of thing, even something quite simple that tracks local features
+            # - rel_angvel can be obtained from an IMU
+            # - rel_linvel may be obtainable with some slam kind of thing, even something quite simple that tracks local features
             #     maybe something like these: 
             #         https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam
             #         https://wiki.ros.org/orb_slam2_ros
             # raise NotImplementedError("")
+        ggLog.info(f"vec_body_rel_angvel_xyz = {vec_body_rel_angvel_xyz.size()}")
         
         robot_state = self._current_state[self.STATE_ROBOT]
         new_inst_state = self._build_new_instantaneous_state_vec(   
@@ -1388,7 +1404,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     vec_body_rel_gravity_dir = vec_body_rel_gravity_dir,
                                     vec_body_rel_linvel_xyz = vec_body_rel_linvel_xyz,
                                     vec_body_rel_angvel_xyz = vec_body_rel_angvel_xyz,
-                                    vec_robot_state = robot_state)
+                                    vec_robot_state = robot_state,
+                                    vec_body_rel_linacc_xyz = vec_body_rel_linacc_xyz)
         # ggLog.info(f"insta_state sizes = "+str(map_tensor_tree(new_inst_state,lambda t: t.size())))
         new_inst_state[self.STATE_ACT_PREPROC] = {self.ACT_FIELDS.ACTION : self._last_preprocessed_actions}
         new_inst_state[self.STATE_ACT_RAW] = {self.ACT_FIELDS.ACTION : self._last_raw_actions}
@@ -1400,6 +1417,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # th.cuda.synchronize()
         # t5 = time.monotonic()
         # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} build={t4-t3:.6f} check={t5-t4:.6f} tot={t5-t0}")
+        # ggLog.info(pprint.pformat(map_tensor_tree(new_inst_state, lambda t: t.size())))
         return new_inst_state
 
 
@@ -1412,7 +1430,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_body_rel_gravity_dir : th.Tensor,
                                                     vec_body_rel_linvel_xyz : th.Tensor,
                                                     vec_body_rel_angvel_xyz : th.Tensor,
-                                                    vec_robot_state : th.Tensor):
+                                                    vec_robot_state : th.Tensor,
+                                                    vec_body_rel_linacc_xyz : th.Tensor):
 
 
         vec_step_count = vec_internal_state[:,self.INTERNAL_FIELDS.STEP_COUNT]
@@ -1456,6 +1475,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : vec_body_rel_angvel_xyz[:,0].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : vec_body_rel_angvel_xyz[:,1].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : vec_body_rel_angvel_xyz[:,2].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : vec_body_rel_linacc_xyz[:,0].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : vec_body_rel_linacc_xyz[:,1].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : vec_body_rel_linacc_xyz[:,2].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : vec_body_abs_linvel_xyz[:,0].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : vec_body_abs_linvel_xyz[:,1].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : vec_body_abs_linvel_xyz[:,2].view(self.num_envs,1),

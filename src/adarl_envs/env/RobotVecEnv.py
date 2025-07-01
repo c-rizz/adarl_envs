@@ -241,6 +241,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         noise_gravity_ep_mustdstd : th.Tensor
         noise_joints_pve_mustdstd : th.Tensor
         noise_linvel_ep_mustdstd : th.Tensor
+        noise_linacc_ep_mustdstd : th.Tensor
         noise_posz_ep_mustdstd : th.Tensor
         obs_dtype : th.dtype
         original_max_epsteps : int
@@ -364,6 +365,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         init_on_reset_ratio : float,
                         obs_noise_joints_pve_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_noise_linacc_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
@@ -383,7 +385,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         enable_limits_safety : bool = True,
                         saturate_jimp_ref_limits : bool = True,
                         observe_full_robot_state : bool = False,
-                        merge_priviledged : bool = False,
+                        merge_privileged : bool = False,
                         recycle_pose_randomization : bool = False,
                         just_health_reward : bool = False
                         ):
@@ -519,6 +521,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     noise_gravity_ep_mustdstd = self._thtens(obs_noise_gravity_ep_mustd_step_std),
                                                     noise_joints_pve_mustdstd = self._thtens(obs_noise_joints_pve_ep_mustd_step_std),
                                                     noise_linvel_ep_mustdstd =  self._thtens(obs_noise_linvel_ep_mustd_step_std),
+                                                    noise_linacc_ep_mustdstd =  self._thtens(obs_noise_linacc_ep_mustd_step_std),
                                                     noise_posz_ep_mustdstd =    self._thtens(obs_noise_posz_ep_mustd_step_std),
                                                     obs_dtype = self._obs_dtype,
                                                     original_max_epsteps = maxStepsPerEpisode,
@@ -781,12 +784,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                         self._configuration.noise_angvel_ep_mustdstd[:2].expand(3,2),
                                                                         self._configuration.noise_linvel_ep_mustdstd[:2].expand(3,2),
                                                                         self._configuration.noise_posz_ep_mustdstd[:2].expand(1,2),
-                                                                        self._configuration.noise_gravity_ep_mustdstd[:2].expand(3,2)]).permute(1,0).unsqueeze(-1),
+                                                                        self._configuration.noise_gravity_ep_mustdstd[:2].expand(3,2),
+                                                                        self._configuration.noise_linacc_ep_mustdstd[:2].expand(3,2)]).permute(1,0).unsqueeze(-1),
                                             step_std = th.cat([ self._configuration.noise_linvel_ep_mustdstd[2].expand(3),
                                                                 self._configuration.noise_angvel_ep_mustdstd[2].expand(3),
                                                                 self._configuration.noise_linvel_ep_mustdstd[2].expand(3),
                                                                 self._configuration.noise_posz_ep_mustdstd[2].expand(1),
-                                                                self._configuration.noise_gravity_ep_mustdstd[2].expand(3)]).unsqueeze(-1))
+                                                                self._configuration.noise_gravity_ep_mustdstd[2].expand(3),
+                                                                self._configuration.noise_linacc_ep_mustdstd[2].expand(3)]).unsqueeze(-1))
         observable_substates = [self.STATE_ROBOT,
                                 self.STATE_INTERNAL,
                                 self.STATE_ACT_PREPROC,
@@ -1380,7 +1385,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             #         https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam
             #         https://wiki.ros.org/orb_slam2_ros
             # raise NotImplementedError("")
-        ggLog.info(f"vec_body_rel_angvel_xyz = {vec_body_rel_angvel_xyz.size()}")
+        # ggLog.info(f"vec_body_rel_angvel_xyz = {vec_body_rel_angvel_xyz.size()}")
         
         robot_state = self._current_state[self.STATE_ROBOT]
         new_inst_state = self._build_new_instantaneous_state_vec(   

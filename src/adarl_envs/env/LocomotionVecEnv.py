@@ -217,6 +217,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         init_on_reset_ratio : float,
                         obs_noise_joints_pve_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_noise_linacc_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
@@ -241,7 +242,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         observe_full_robot_state : bool = False,
                         min_good_step_duration : float = 0.1,
                         max_good_step_duration : float = 1.5,
-                        merge_priviledged : bool = False,
+                        merge_privileged : bool = False,
                         recycle_pose_randomization : bool = False,
                         just_health_reward : bool = False
                         ):
@@ -338,6 +339,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             obs_noise_angvel_ep_mustd_step_std = obs_noise_angvel_ep_mustd_step_std,
                             obs_noise_posz_ep_mustd_step_std = obs_noise_posz_ep_mustd_step_std,
                             obs_noise_gravity_ep_mustd_step_std = obs_noise_gravity_ep_mustd_step_std,
+                            obs_noise_linacc_ep_mustd_step_std = obs_noise_linacc_ep_mustd_step_std,
                             ui_camera_resolution_hw = ui_camera_resolution_hw,
                             enable_link_collisions = enable_link_collisions,
                             mass_randomized_links=mass_randomized_links,
@@ -358,7 +360,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             free_joints=free_joints,
                             held_joints_stiffness = held_joints_stiffness,
                             held_joints_damping = held_joints_damping,
-                            merge_priviledged=merge_priviledged,
+                            merge_privileged=merge_privileged,
                             recycle_pose_randomization=recycle_pose_randomization,
                             just_health_reward=just_health_reward
                         )

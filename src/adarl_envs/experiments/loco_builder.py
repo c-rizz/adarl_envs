@@ -252,7 +252,7 @@ def loco_runner_builder(seed,
                             held_joints_stiffness=env_builder_args.pop("held_joints_stiffness"),
                             held_joints_damping=env_builder_args.pop("held_joints_damping"),
                             free_joints=[],
-                            merge_priviledged = env_builder_args.pop("merge_priviledged"),
+                            merge_privileged = env_builder_args.pop("merge_privileged"),
                             goal_height_minmax=env_builder_args.pop("goal_height_minmax"),
                             recycle_pose_randomization=env_builder_args.pop("recycle_pose_randomization")
                             )
@@ -269,7 +269,7 @@ def loco_runner_builder(seed,
                                     saveFrequency_ep=env_builder_args.pop("video_save_freq"),
                                     publish=False,
                                     stream=True,
-                                    vec_obs_key="base.vec", #TODO: somehow pass multiple keys and include priviledged, or auto-detect which keys to save
+                                    vec_obs_key="base.vec", #TODO: somehow pass multiple keys and include privileged, or auto-detect which keys to save
                                     record_video=env_builder_args["record_video"],
                                     overlay_text_xy=(0.025,0.025),
                                     overlay_text_height=0.035,

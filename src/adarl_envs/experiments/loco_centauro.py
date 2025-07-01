@@ -101,7 +101,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "held_joints_damping" : 10.0,
         "min_good_step_duration" : 0.2,
         "max_good_step_duration" : 1.5,
-        "merge_priviledged" : False,
+        "merge_privileged" : False,
         "goal_height_minmax" : [0.75,0.75],
         "recycle_pose_randomization" : True
     }
@@ -206,7 +206,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     target_entropy_factor = -1.0,
                                                     actor_log_std_init = -1.0,
                                                     actor_observation_filter=["base.vec"],
-                                                    critic_observation_filter=["base.vec","priviledged.vec"]
+                                                    critic_observation_filter=["base.vec","privileged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -244,7 +244,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     target_entropy_factor = -0.5,
                                                     actor_log_std_init = -3.0,
                                                     actor_observation_filter=["base.vec"],
-                                                    critic_observation_filter=["base.vec","priviledged.vec"]
+                                                    critic_observation_filter=["base.vec","privileged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

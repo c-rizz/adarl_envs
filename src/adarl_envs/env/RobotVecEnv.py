@@ -235,7 +235,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         main_body_link : tuple[str,str]
         mass_randomization_ratios : th.Tensor
         mass_randomized_links : tuple[tuple[str,str],...]
-        merge_priviledged : bool
+        merge_privileged : bool
         model_urdf_string : str
         noise_angvel_ep_mustdstd : th.Tensor
         noise_gravity_ep_mustdstd : th.Tensor
@@ -379,7 +379,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         enable_limits_safety : bool = True,
                         saturate_jimp_ref_limits : bool = True,
                         observe_full_robot_state : bool = False,
-                        merge_priviledged : bool = False,
+                        merge_privileged : bool = False,
                         recycle_pose_randomization : bool = False
                         ):
         self._main_seed = seed
@@ -508,7 +508,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     main_body_link=(robot_name,robot_main_body_link),
                                                     mass_randomization_ratios = None, # Will fill up later
                                                     mass_randomized_links=None, # Will fill up later
-                                                    merge_priviledged = merge_priviledged,
+                                                    merge_privileged = merge_privileged,
                                                     model_urdf_string=robot_urdf_string,
                                                     noise_angvel_ep_mustdstd =  self._thtens(obs_noise_angvel_ep_mustd_step_std),
                                                     noise_gravity_ep_mustdstd = self._thtens(obs_noise_gravity_ep_mustd_step_std),
@@ -663,6 +663,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._stats = {}
 
     def _build_state_helper(self, adapter : BaseVecJointImpedanceAdapter):
+        vsize_dev_type = dict(dtype=th.float32, th_device=self._th_device, vec_size=adapter.vec_size())
         if self._configuration.observe_full_robot_state:
             observable_robot_state = ["pos","vel","cmdeff","refpos","refvel","refeff","stiff","damp"] 
         else:
@@ -676,7 +677,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                               obs_history_length = self._configuration.frame_stack_length,
                                               vec_size=adapter.vec_size(),
                                               observable_subfields = observable_robot_state)
-        priviledged_extrinsic_observable_fields = [
+        privileged_extrinsic_observable_fields = [
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
@@ -690,24 +691,22 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
                                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
                                         ]
-        if not self._configuration.merge_priviledged:
+        if not self._configuration.merge_privileged:
             extr_observation_definitions={  "base":ThBoxStateHelper.SimpleObsDef(
                                                 observable_fields=base_extrinsic_observable_fields,
                                                 obs_history_length = self._configuration.frame_stack_length,
                                                 observable_subfields=None),
-                                            "priviledged":ThBoxStateHelper.SimpleObsDef(
-                                                observable_fields=priviledged_extrinsic_observable_fields,
+                                            "privileged":ThBoxStateHelper.SimpleObsDef(
+                                                observable_fields=privileged_extrinsic_observable_fields,
                                                 obs_history_length = self._configuration.frame_stack_length,
                                                 observable_subfields=None
                                             )}
         else:
             extr_observation_definitions = ThBoxStateHelper.SimpleObsDef(
-                                                observable_fields=base_extrinsic_observable_fields+priviledged_extrinsic_observable_fields,
+                                                observable_fields=base_extrinsic_observable_fields+privileged_extrinsic_observable_fields,
                                                 obs_history_length = self._configuration.frame_stack_length,
                                                 observable_subfields=None)
         extrinsic_state_helper =  ThBoxStateHelper(field_names=[e for e in self.EXTRINSIC_FIELDS],
-                                                    dtype=th.float32,
-                                                    th_device=self._th_device,
                                                     field_size=(1,),
                                                     fields_minmax={ self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : [-10,10],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : [-10,10],
@@ -723,25 +722,19 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
                                                     history_length=self._configuration.history_length,
-                                                    vec_size=adapter.vec_size(),
-                                                    observation_definitions=extr_observation_definitions
+                                                    observation_definitions=extr_observation_definitions,
+                                                    **vsize_dev_type # type: ignore
                                                     )
-        joint_step_stats_state_helper = RobotStatsStateHelper(joint_limit_minmax_pve={jn:self._configuration.joint_physical_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
-                                                        obs_dtype=self._configuration.obs_dtype,
-                                                        th_device=self._configuration.th_device,
-                                                        vec_size=adapter.vec_size())
+        joint_step_stats_state_helper = RobotStatsStateHelper(  joint_limit_minmax_pve={jn:self._configuration.joint_physical_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
+                                                                **vsize_dev_type) # type: ignore
         joint_longterm_stats_helper = ThBoxStateHelper( field_names=[e for e in self.JOINT_LONGTERM_STATS_FIELDS],
-                                                        dtype=self._obs_dtype,
-                                                        th_device=self._th_device,
                                                         field_size=(len(self._configuration.controlled_joints),),
                                                         fields_minmax={self.JOINT_LONGTERM_STATS_FIELDS.AVG_POS : 
                                                                        th.stack([self._configuration.joint_physical_limits_minmax_pve[jn][:,0]
                                                                                   for jn in self._configuration.controlled_joints],
                                                                                 dim = 1)},
-                                                        vec_size=adapter.vec_size())
+                                                        **vsize_dev_type) # type: ignore
         internal_state_helper =   ThBoxStateHelper( field_names=[e for e in self.INTERNAL_FIELDS],
-                                                    dtype=self._obs_dtype,
-                                                    th_device=self._th_device,
                                                     field_size=(1,),
                                                     fields_minmax={   self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1000],
                                                                         self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000],
@@ -750,27 +743,23 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                         observable_fields=[self.INTERNAL_FIELDS.SAFETY_TRIGGERED],
                                                         observable_subfields=None,
                                                         obs_history_length=1),
-                                                    vec_size=adapter.vec_size())
+                                                    **vsize_dev_type) # type: ignore
         act_history_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
-                                                    dtype=self._obs_dtype,
-                                                    th_device=self._th_device,
                                                     field_size=(self._action_helper.single_action_len(),),
                                                     fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]},
                                                     history_length=3,
-                                                    vec_size=adapter.vec_size(),
                                                     flatten_observation=True,
                                                     observation_definitions=ThBoxStateHelper.SimpleObsDef(
                                                         observable_fields=[self.INTERNAL_FIELDS.SAFETY_TRIGGERED],
                                                         observable_subfields=None,
-                                                        obs_history_length=3))
+                                                        obs_history_length=3),
+                                                    **vsize_dev_type) # type: ignore
         raw_act_history_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
-                                                        dtype=self._obs_dtype,
-                                                        th_device=self._th_device,
                                                         field_size=(self._action_helper.single_action_len(),),
                                                         fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]},
                                                         history_length=3,
-                                                        vec_size=adapter.vec_size(),
-                                                        flatten_observation=True)
+                                                        flatten_observation=True,
+                                                        **vsize_dev_type) # type: ignore
         robot_state_noise =  StateNoiseGenerator(robot_state_helper,
                                                 self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
                                                 episode_mu_std = self._configuration.noise_joints_pve_mustdstd[:2],
@@ -793,7 +782,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.STATE_JOINT_LONGTERM_STATS,
                                 self.STATE_EXTRINSIC
                                 ]
-        if not self._configuration.merge_priviledged:
+        if not self._configuration.merge_privileged:
             obs_definitions={"base" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=observable_substates,
                                                                 flattened_subobss=[self.STATE_ROBOT,
@@ -803,9 +792,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                 self.STATE_ACT_PREPROC,
                                                                                 self.STATE_JOINT_LONGTERM_STATS],
                                                                 flattened_part_name="vec",
-                                                                noise_generators={  self.STATE_ROBOT : robot_state_noise,
-                                                                                    self.STATE_EXTRINSIC : extrinsic_state_noise}),
-                            "priviledged" : 
+                                                                noise_generators={}),
+                            "privileged" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_EXTRINSIC],
                                                                 flattened_subobss=[self.STATE_EXTRINSIC],
                                                                 flattened_part_name="vec",
@@ -855,6 +843,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._last_raw_actions = actions
             actions, action_delay = self._preproc_acts(actions)
             self._last_preprocessed_actions = actions
+            actions = th.clamp(actions + self._thrand(size=actions.shape)*self._configuration.action_noise_mustd[1], min = -1, max = 1)
             v_j_pvesd = self._action_helper.action_to_pvesd(actions)
             # do this better, avoid this if condition, put it in the helper
             if self._configuration.saturate_jimp_posref_limits:
@@ -1329,7 +1318,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         try:
             vec_stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
         except NotImplementedError:
-            vec_stats_minmaxavgstd_j_pvae = self._thzeros((self.num_envs,4,len(self._configuration.controlled_joints),4))*float("nan")
+            vec_stats_minmaxavgstd_j_pvae = self._thfull(float("nan"), (self.num_envs,4,len(self._configuration.controlled_joints),4))
         # th.cuda.synchronize()
         # t3 = time.monotonic()
         # ggLog.info(f"vec_stats_minmaxavgstd_j_pvae = {vec_stats_minmaxavgstd_j_pvae}")

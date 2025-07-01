@@ -241,7 +241,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         observe_full_robot_state : bool = False,
                         min_good_step_duration : float = 0.1,
                         max_good_step_duration : float = 1.5,
-                        merge_priviledged : bool = False,
+                        merge_privileged : bool = False,
                         recycle_pose_randomization : bool = False
                         ):
         self._th_device = th_device
@@ -357,7 +357,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             free_joints=free_joints,
                             held_joints_stiffness = held_joints_stiffness,
                             held_joints_damping = held_joints_damping,
-                            merge_priviledged=merge_priviledged,
+                            merge_privileged=merge_privileged,
                             recycle_pose_randomization=recycle_pose_randomization
                         )
 
@@ -395,15 +395,15 @@ class LocomotionVecEnv(RobotVecEnv):
         base_loco_fields = [self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X,
                             self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y,
                             self.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]
-        priviledged_loco_fields = [ self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
+        privileged_loco_fields = [ self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR]
-        if self._configuration.merge_priviledged:
-            obs_defs = {"base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields+priviledged_loco_fields)}
+        if self._configuration.merge_privileged:
+            obs_defs = {"base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields+privileged_loco_fields)}
         else:
             obs_defs = {"base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields),
-                        "priviledged" : ThBoxStateHelper.SimpleObsDef(observable_fields=priviledged_loco_fields)}
+                        "privileged" : ThBoxStateHelper.SimpleObsDef(observable_fields=privileged_loco_fields)}
         self._locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,

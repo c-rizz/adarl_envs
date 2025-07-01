@@ -11,7 +11,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
@@ -29,7 +29,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
 
     eval_freq = 5
-    use_priviledged = True
+    use_privileged = True
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.01),
         "action_noise_mustd" : (0.0,0.001),
@@ -75,13 +75,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "record_video" : True,
         "goal_speed_minmax" : (0,1.0),
         "use_contacts" : False,
-        "frame_stack_length" : 3,
+        "frame_stack_length" : 5,
         "verbose_infos" : False,
         "terminate_on_body_contact" : False,
         "init_on_reset_ratio" : 0.8,
-        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
-        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.02),
+        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.02),
+        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.02),
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.02, 0.02),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
         "ui_camera_resolution_hw" : (144,256),
@@ -102,9 +102,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "held_joints_damping" : 10.0,
         "min_good_step_duration" : 0.2,
         "max_good_step_duration" : 1.5,
-        "merge_priviledged" : not use_priviledged,
+        "merge_privileged" : not use_privileged,
         "goal_height_minmax" : [0.45,0.45],
-        "recycle_pose_randomization" : True
+        "recycle_pose_randomization" : True,
+        "just_health_reward" : False
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -198,10 +199,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_hyperparams(  device = "cuda",
-                                                    q_network_arch=[256,128],
+                                                    q_network_arch=[512,256],
                                                     q_lr=0.001,
                                                     policy_lr=0.0003,
-                                                    policy_network_arch=[256,128],
+                                                    policy_network_arch=[512,256],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=16384,
@@ -217,7 +218,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     target_entropy_factor = -0.5,
                                                     actor_log_std_init = 1.0,
                                                     actor_observation_filter=["base.vec"],
-                                                    critic_observation_filter=["base.vec","priviledged.vec"]
+                                                    critic_observation_filter=["base.vec","privileged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -255,7 +256,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     target_entropy_factor = -0.5,
                                                     actor_log_std_init = -3.0,
                                                     actor_observation_filter=["base.vec"],
-                                                    critic_observation_filter=["base.vec","priviledged.vec"]
+                                                    critic_observation_filter=["base.vec","privileged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

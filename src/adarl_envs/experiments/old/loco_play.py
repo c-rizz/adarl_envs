@@ -143,6 +143,7 @@ def play(seed, folderName, run_id, args, env_builder, env_builder_args, step_len
                         options["goal_velocity_xy"] = [0.0, 0.0]
                         keyboard_listener = KeyboardListener()
                         cmd = 'c'   
+                    options["goal_velocity_xy"] = [0.0, 0.0]
                 if not play:
                     break
             else:

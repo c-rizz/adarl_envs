@@ -452,6 +452,8 @@ def play(seed, folderName, run_id, args,
                 img = env.render()
                 dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
                 time.sleep(step_length_sec/rt)
+
+            cmd_xy_speed_xy = [1.0,0,0,1,0]
             while not done:
                 t0 = time.monotonic()
                 session.run_info["collected_steps"].value += 1
@@ -473,11 +475,13 @@ def play(seed, folderName, run_id, args,
                         f"terminated = {terminated}\n"+
                         f"truncated = {truncated}\n")
                 if interactive:
-                    speed_yaw_diff = [0.0,0.0]
-                    if keyboard_listener.get_key_press_count("w")>0: speed_yaw_diff[0] =  0.05
-                    if keyboard_listener.get_key_press_count("s")>0: speed_yaw_diff[0] = -0.05
-                    if keyboard_listener.get_key_press_count("a")>0: speed_yaw_diff[1] =  10*3.14159/180
-                    if keyboard_listener.get_key_press_count("d")>0: speed_yaw_diff[1] = -10*3.14159/180
+                    cmd_angle = np.arctan2(cmd_xy_speed_xy[1],cmd_xy_speed_xy[0])
+                    if keyboard_listener.get_key_press_count("w")>0: cmd_xy_speed_xy[2] +=  0.05
+                    if keyboard_listener.get_key_press_count("s")>0: cmd_xy_speed_xy[2] += -0.05
+                    if keyboard_listener.get_key_press_count("a")>0: cmd_angle +=  10*3.14159/180
+                    if keyboard_listener.get_key_press_count("d")>0: cmd_angle += -10*3.14159/180
+                    cmd_xy_speed_xy[0] = np.cos(cmd_angle)
+                    cmd_xy_speed_xy[1] = np.sin(cmd_angle)
                     flip = keyboard_listener.get_key_press_count("v")>0
                     cam_dist_pitch_yaw_diff = [0.0,0.0,0.0]
                     if keyboard_listener.get_key_press_count("u")>0: cam_dist_pitch_yaw_diff[0] = -0.1
@@ -493,7 +497,7 @@ def play(seed, folderName, run_id, args,
                     if flip:
                         base_env.set_goal(-base_env.get_goals()[0,:2])
                     else:
-                        base_env.set_goal(goal_velocity_diff_speed_yaw = tuple(speed_yaw_diff))
+                        base_env.set_goal(rel_goal_xy_speed_xy = tuple(cmd_xy_speed_xy))
                     keyboard_listener.reset_key_press_counters()
                     goal_velocity_xy = base_env.get_goals()[0]
                 step_count += 1

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
-from adarl_envs.experiments.loco_builder import named_loco_venv_builder
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
     from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams
-    import os
+    from adarl_envs.experiments.loco_builder import named_loco_venv_builder
     
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
@@ -15,7 +14,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 4096
+        train_envs = 2048
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -29,7 +28,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
 
     eval_freq = 5
-    use_privileged = True
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.01),
         "action_noise_mustd" : (0.0,0.001),
@@ -48,16 +46,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_health_weight" :            0.0,
-        "reward_position_limit_weight" :    0.1,
+        "reward_position_limit_weight" :    0.0,
         "reward_torque_limit_weight" :      0.0,
         "reward_torque_weight" :            5.0,
         "reward_torquediff_weight" :        0.0,
         "reward_tracking_weight" :          1.0,
         "reward_velocity_limit_weight" :    0.0,
         "reward_velocity_weight" :          1.0,
-        "reward_height_weight" :            0.15,
+        "reward_height_weight" :            1.0,
         "reward_pitchnroll_weight" :        0.15,
-        "reward_position_weight" :          1.0,
+        "reward_position_weight" :          0.0,
         "reward_feet_air_time_weight" :     20.0,
         "reward_heading_weight" :           0.05,
         "reward_failure_weight" :           1.0,
@@ -73,7 +71,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "th_device" : env_device,
         "video_save_freq" : 0,
         "record_video" : True,
-        "goal_speed_minmax" : (0,1.0),
+        "goal_speed_minmax" : (0,0.0),
         "use_contacts" : False,
         "frame_stack_length" : 5,
         "verbose_infos" : False,
@@ -88,11 +86,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
         "initial_pose_randomization_range" : 0.8,
-        "mass_randomization_ratio" : 0.3,
-        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
-        "impulse_probability_per_sec" : 0.5,
+        "randomized_com_links_minmax_xyz" : [((-0.2,-0.05,-0.05),(0.2,0.05,0.05))],
+        "randomized_friction_slide_spin_roll_ratios" : (0.3,0.3,0.3),
+        "randomized_gains_damping_ratio_epstd" : 0.1,
+        "randomized_gains_stiffness_ratio_epstd" : 0.1,
+        "randomized_mass_ratios" : 0.3,
+        "impulse_probability_per_sec" : 0.2,
         "impulse_duration_minmax" : (0.01, 2.5),
-        "impulse_mean_std" : (50.0,50.0),
+        "impulse_mean_std" : (20.0,50.0),
         "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
         "posref_safety_period" : 0.005,
         "enable_posref_safety" : True,
@@ -103,8 +104,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "held_joints_damping" : 10.0,
         "min_good_step_duration" : 0.2,
         "max_good_step_duration" : 1.5,
-        "merge_privileged" : not use_privileged,
-        "goal_height_minmax" : [0.45,0.45],
+        "merge_privileged" : True,
+        "goal_height_minmax" : [0.3,0.6],
         "recycle_pose_randomization" : True,
         "just_health_reward" : False
     }
@@ -200,24 +201,24 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_hyperparams(  device = "cuda",
-                                                    q_network_arch=[512,256],
+                                                    q_network_arch=[256,128,128],
                                                     q_lr=0.001,
                                                     policy_lr=0.0003,
-                                                    policy_network_arch=[512,256],
+                                                    policy_network_arch=[256,128,128],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=16384,
-                                                    buffer_size=3_000_000,
-                                                    total_steps=1_000_000_000,
-                                                    train_freq_vstep=10,
-                                                    grad_steps=40,
+                                                    buffer_size=4_000_000,
+                                                    total_steps=2_000_000_000,
+                                                    train_freq_vstep=5,
+                                                    grad_steps=20,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
                                                     parallel_envs=train_envs,
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5,
-                                                    actor_log_std_init = 1.0,
+                                                    target_entropy_factor = -1.0,
+                                                    actor_log_std_init = -3.0,
                                                     actor_observation_filter=["base.vec"],
                                                     critic_observation_filter=["base.vec","privileged.vec"]
                                                     ),
@@ -276,16 +277,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder=None,
                 vec_env_builder=named_loco_venv_builder,
                 env_builder_args=env_builder_args,
-                agent_hyperparams=PPO_hyperparams(  minibatch_size=8192,
+                agent_hyperparams=PPO_hyperparams(  minibatch_size=2048,
                                                     th_device=th.device("cuda"),
-                                                    actor_network_arch=(64,64),
-                                                    critic_network_arch=(64,64),
+                                                    actor_network_arch=(256,256),
+                                                    critic_network_arch=(256,256),
                                                     q_lr=None,
                                                     policy_lr=3e-4,
-                                                    update_epochs=5,
+                                                    update_epochs=3,
                                                     total_steps=train_envs*max_steps_per_episode*1000,
                                                     num_envs=train_envs,
-                                                    num_steps=20,
+                                                    num_steps=10,
                                                     gamma=0.99,
                                                     log_freq_vstep=int(max_steps_per_episode/10)),
                 max_episode_duration=max_steps_per_episode,

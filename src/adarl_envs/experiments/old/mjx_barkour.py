@@ -533,7 +533,7 @@ def policy_params_fn(current_step, make_policy, params):
   path = ckpt_path / f'{current_step}'
   orbax_checkpointer.save(path, params, force=True, save_args=save_args)
 
-method="sac"
+method="ppo"
 timesteps = 10_000_000_000
 eval_freq = 1_000_000
 if method == "ppo":

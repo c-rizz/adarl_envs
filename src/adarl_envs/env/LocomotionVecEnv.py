@@ -246,6 +246,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         randomized_com_links_minmax_xyz : th.Tensor | list[tuple[tuple[float,float,float],tuple[float,float,float]]] = [],
                         randomized_friction_links : list[tuple[str,str]] = [],
                         randomized_friction_slide_spin_roll_ratios : tuple[float, float, float] = (0.1,0.1,0.1),
+                        randomized_frictionloss_joints : Sequence[tuple[str,str]] = [],
+                        randomized_frictionloss_ratios : float = 0.0,
                         randomized_gains_damping_ratio_epstd : float = 1.0,
                         randomized_gains_stiffness_ratio_epstd : float = 1.0,
                         randomized_mass_links : list[tuple[str,str]] = [],
@@ -356,6 +358,8 @@ class LocomotionVecEnv(RobotVecEnv):
                             randomized_com_links_minmax_xyz=randomized_com_links_minmax_xyz,
                             randomized_friction_links=randomized_friction_links,
                             randomized_friction_slide_spin_roll_ratios=randomized_friction_slide_spin_roll_ratios,
+                            randomized_frictionloss_joints=randomized_frictionloss_joints,
+                            randomized_frictionloss_ratios=randomized_frictionloss_ratios,
                             randomized_gains_damping_ratio_epstd=randomized_gains_damping_ratio_epstd,
                             randomized_gains_stiffness_ratio_epstd=randomized_gains_stiffness_ratio_epstd,
                             randomized_mass_links=randomized_mass_links,
@@ -769,7 +773,7 @@ class LocomotionVecEnv(RobotVecEnv):
         max_rew = self._configuration.reward_penalties_max
         current_state_locom_vec = state[self.STATE_LOCOMOTION][:, 0,:,0]
         current_state_extrinsic_vec = state[self.STATE_EXTRINSIC][:, 0,:,0]
-        state_action_vec = state[self.STATE_ACT_RAW]
+        state_action_raw_vec = state[self.STATE_ACT_RAW]
         state_stats = state[self.STATE_JOINT_STEP_STATS]
 
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
@@ -789,8 +793,8 @@ class LocomotionVecEnv(RobotVecEnv):
         # normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
         normaccelerations   = state_stats[:,0,:,10]/1000 # average accelearation, normalized assuming a max of 1000 m/s^2
         normtorquediff      = state_robot_norm[:,0,:,2] - state_robot_norm[:,1,:,2]
-        actdiff             = th.flatten((state_action_vec[:,0] - state_action_vec[:,1])/2, start_dim=1)
-        prev_actdiff        = th.flatten((state_action_vec[:,1] - state_action_vec[:,2])/2, start_dim=1)
+        actdiff             = th.flatten((state_action_raw_vec[:,0] - state_action_raw_vec[:,1]), start_dim=1)
+        prev_actdiff        = th.flatten((state_action_raw_vec[:,1] - state_action_raw_vec[:,2]), start_dim=1)
         act_acc             = actdiff - prev_actdiff
 
         position_safenorm   = state_robot_safenorm[:,0,:,0]

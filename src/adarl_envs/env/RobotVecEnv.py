@@ -194,6 +194,16 @@ def find_pose_np(  root_joint : str,
 #                     f" filtered collisions = {excluded_collision_pairs}\n"
 #                     f" coll_ratio={coll_counter}")
 #     return initial_jpose
+
+
+def _is_joint_revolute(joint_name : str, robot_model : Robot) -> bool:
+    """Check if a joint is revolute"""
+    if joint_name not in robot_model.get_joint_names():
+        return False
+    joint_properties = robot_model.get_joint_properties([joint_name])
+    ggLog.info(f"joint_properties = {joint_properties}")
+    return joint_properties[joint_name]["type"] == Robot.JOINT_TYPES.REVOLUTE
+
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     @dataclass
@@ -247,6 +257,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         original_max_epsteps : int
         posref_safety_period : float
         quiet : bool
+        randomized_armature_joints : tuple[tuple[str,str],...]
+        randomized_armature_ratios : th.Tensor
         randomized_com_links : tuple[tuple[str,str], ...]
         """Center of mass randomization, randomized links"""
         randomized_com_minmax_xyz : th.Tensor
@@ -322,9 +334,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     ACT_FIELDS = IntEnum("ACT_FIELDS", ["ACTION"], start=0)
 
     JOINT_LONGTERM_STATS_FIELDS = IntEnum("LONGTERM_STATS_FIELDS", ["AVG_POS"])    
-    
+
+
     joint_filters = {JOINT_FILTERS.ALL : lambda joint_name, robot_model: True,
-                     JOINT_FILTERS.ALL_REVOLUTE : lambda joint_name, robot_model: robot_model.get_joint_properties([joint_name])[joint_name]["type"] == Robot.JOINT_TYPES.REVOLUTE}
+                     JOINT_FILTERS.ALL_REVOLUTE : _is_joint_revolute}
     link_filters  = {LINK_FILTERS.ALL : lambda link_name, robot_model: True}
 
     @dataclass
@@ -332,7 +345,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_initial_ctrl_joint_pose : th.Tensor
         vec_max_ep_steps : th.Tensor
         vec_init_on_reset : th.Tensor
-        randomized_stiffness_ratios : th.Tensor
+        randomized_stiffness_factor : th.Tensor
         """Shape (envs_num, ctrl_joints)"""
         randomized_damping_factor : th.Tensor
         """Shape (envs_num, ctrl_joints)"""
@@ -397,6 +410,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         merge_privileged : bool = False,
                         observe_full_robot_state : bool = False,
                         posref_safety_period = 0.001,
+                        randomized_armature_joints : Sequence[tuple[str,str]] = [],
+                        randomized_armature_ratios : float = 0.0,
                         randomized_com_links : list[tuple[str,str]] = [],
                         randomized_com_links_minmax_xyz : th.Tensor | list[tuple[tuple[float,float,float],tuple[float,float,float]]] = [],
                         randomized_friction_links : list[tuple[str,str]] = [],
@@ -547,6 +562,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     original_max_epsteps = maxStepsPerEpisode,
                                                     posref_safety_period = posref_safety_period,
                                                     quiet=quiet,
+                                                    randomized_armature_joints = None,
+                                                    randomized_armature_ratios = None,
                                                     randomized_com_links=None, #Will fill up later
                                                     randomized_com_minmax_xyz = None, #Will fill up later
                                                     randomized_friction_links=None, # Will fill up later
@@ -583,8 +600,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
                                                     vec_init_on_reset = th.ones(size=(adapter.vec_size(),), dtype=th.bool).to(device=th_device, non_blocking=th_device.type=="cuda"),
                                                     vec_max_ep_steps = th.full(fill_value=maxStepsPerEpisode, size=(adapter.vec_size(),), dtype=th.int64).to(device=th_device, non_blocking=th_device.type=="cuda"),
-                                                    randomized_damping_factor=self._thtens(self._configuration.safe_damping).expand(adapter.vec_size(),len(self._configuration.all_controlled_joints)).clone(),
-                                                    randomized_stiffness_ratios=self._thtens(self._configuration.safe_damping).expand(adapter.vec_size(),len(self._configuration.all_controlled_joints)).clone())
+                                                    randomized_damping_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.all_controlled_joints)).clone(),
+                                                    randomized_stiffness_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.all_controlled_joints)).clone())
         self._previous_pose_randomization : th.Tensor | None = None
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
         self._always_present_collisions : set[tuple[str,str]] = set()
@@ -658,6 +675,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._configuration.randomized_friction_links = tuple(randomized_friction_links)
         self._configuration.randomized_friction_slide_spin_roll_ratios = self._thtens(randomized_friction_slide_spin_roll_ratios).expand((len(randomized_friction_links),3))
         self._randomized_friction_links_ids = self._adapter.get_links_ids(self._configuration.randomized_friction_links)
+        # ggLog.info(f"randomized_armature_joints = {randomized_armature_joints}")
+        randomized_armature_joints = self._expand_joint_filters(randomized_armature_joints)
+        # ggLog.info(f"expanded randomized_armature_joints = {randomized_armature_joints}")
+        self._configuration.randomized_armature_joints = tuple(randomized_armature_joints)
+        self._configuration.randomized_armature_ratios = self._thtens(randomized_armature_ratios).expand((len(randomized_armature_joints),))
+        self._randomized_armature_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_armature_joints)
         self._abs_gravity_dir = self._thtens([0.0,0.0,-1.0])
 
 
@@ -696,6 +719,24 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             else:
                 raise RuntimeError(f"Unexpected randomized link {l} of type {type(l)} (self.link_filters = {self.link_filters})")
         return actual_links
+    
+    def _expand_joint_filters(self, joints : Sequence[tuple[str,str]]) -> list[tuple[str,str]]:
+        actual_joints = []
+        for j in joints:
+            if isinstance(j, tuple):
+                actual_joints.append(j)
+            elif isinstance(j,Callable):
+                for jn in self._robot_model.get_joint_names():
+                    if j(jn,self._robot_model):
+                        actual_joints.append((self._configuration.robot_name,jn))
+            elif j in self.joint_filters:
+                for jn in self._robot_model.get_joint_names():
+                    if self.joint_filters[j](jn,self._robot_model):
+                        actual_joints.append((self._configuration.robot_name,jn))
+            else:
+                raise RuntimeError(f"Unexpected randomized joint {j} of type {type(j)} (self.joint_filters = {self.joint_filters})")
+        return actual_joints
+    
 
     def _build_stats(self):
         self._stats = {}
@@ -902,10 +943,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                             min=self._safe_limits_minmax_j_pve[0,:,1], 
                                             max=self._safe_limits_minmax_j_pve[1,:,1]) # set velocity reference
 
+            v_j_pvesd[:,:,3]*=self._current_episode_config.randomized_stiffness_factor
+            v_j_pvesd[:,:,4]*=self._current_episode_config.randomized_damping_factor
             self._last_sent_v_j_pvesd = v_j_pvesd
             full_cmd_vec_j_pvesd = th.concat([v_j_pvesd, self._homing_held_joints_vec_pvesd], dim = 1)
-            full_cmd_vec_j_pvesd[:,:,3]*=self._current_episode_config.randomized_stiffness_ratios
-            full_cmd_vec_j_pvesd[:,:,4]*=self._current_episode_config.randomized_damping_factor
             self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = full_cmd_vec_j_pvesd,
                                                     delay_sec=action_delay)
             
@@ -1002,7 +1043,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._adapter.alter_model_rel(  link_masses = ( self._randomized_mass_link_ids,
                                                             (self._thrand(size=(self.num_envs, len(self._configuration.randomized_mass_ratios)))*2-1)*self._configuration.randomized_mass_ratios),
                                             link_frictions = (self._randomized_friction_links_ids,
-                                                              (self._thrand(size=(self.num_envs,)+self._configuration.randomized_friction_slide_spin_roll_ratios.size())*2-1)*self._configuration.randomized_friction_slide_spin_roll_ratios))
+                                                              (self._thrand(size=(self.num_envs,)+self._configuration.randomized_friction_slide_spin_roll_ratios.size())*2-1)*self._configuration.randomized_friction_slide_spin_roll_ratios),
+                                            joint_armature_ratios = ( self._randomized_armature_joints_ids,
+                                                            (self._thrand(size=(self.num_envs, len(self._configuration.randomized_armature_ratios)))*2-1)*self._configuration.randomized_armature_ratios))
             cmm = self._configuration.randomized_com_minmax_xyz
             self._adapter.alter_model_sum(  com_position_diffs = (self._randomized_com_links_ids,
                                             (self._thrand(size=(self.num_envs, len(self._configuration.randomized_com_links),3))*(cmm[:,1]-cmm[:,0])+cmm[:,0])),
@@ -1059,7 +1102,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         damping_ratios = self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.randomized_gains_damping_ratio_epstd+1
         masked_assign(self._current_episode_config.randomized_damping_factor, vec_mask, damping_ratios)
         stiffness_ratios = self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.randomized_gains_stiffness_ratio_epstd+1
-        masked_assign(self._current_episode_config.randomized_stiffness_ratios, vec_mask, stiffness_ratios)
+        masked_assign(self._current_episode_config.randomized_stiffness_factor, vec_mask, stiffness_ratios)
         masked_assign(self._current_episode_config.vec_init_on_reset, vec_mask, vec_init_on_reset)
         masked_assign(self._current_episode_config.vec_max_ep_steps, vec_mask, maxStepsPerEpisode)
         self.set_max_episode_steps(self._current_episode_config.vec_max_ep_steps)

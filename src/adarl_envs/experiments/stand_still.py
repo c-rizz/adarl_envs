@@ -29,9 +29,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     eval_freq = 5
     env_builder_args = {
-        "action_delay_mustd" : (0.0,0.01),
+        "action_delay_mustd" : (step_length_sec,0.01),
         "action_noise_mustd" : (0.0,0.001),
-        "action_smoothing_halflife_sec" : 0.2,
+        "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
         "robot_model" : args["robot"],
         "enable_rendering" : False,
@@ -41,8 +41,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "record_video" : True,
         "reward_acceleration_weight" :      2.0,
-        "reward_actdiff_weight" :           0.2,
-        "reward_actacc_weight" :            0.1,
+        "reward_actdiff_weight" :           1.0,
+        "reward_actacc_weight" :            0.5,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_health_weight" :            0.0,
@@ -92,6 +92,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_gains_stiffness_ratio_epstd" : 0.1,
         "randomized_mass_ratios" : 0.3,
         "randomized_armature_ratios" : 0.3,
+        "randomized_frictionloss_ratios" : 0.0,
         "impulse_probability_per_sec" : 0.2,
         "impulse_duration_minmax" : (0.01, 2.5),
         "impulse_mean_std" : (20.0,50.0),
@@ -218,7 +219,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -1.0,
+                                                    target_entropy_factor = -3.0,
                                                     actor_log_std_init = -3.0,
                                                     actor_observation_filter=["base.vec"],
                                                     critic_observation_filter=["base.vec","privileged.vec"]
@@ -256,7 +257,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5,
+                                                    target_entropy_factor = -1.0,
                                                     actor_log_std_init = -3.0,
                                                     actor_observation_filter=["base.vec"],
                                                     critic_observation_filter=["base.vec","privileged.vec"]

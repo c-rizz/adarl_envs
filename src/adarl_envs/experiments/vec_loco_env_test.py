@@ -86,7 +86,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
         "initial_pose_randomization_range" : 0.8,
-        "randomized_armature_ratios" : 0.1,
+        "randomized_armature_ratios" : 0.3,
         "randomized_com_links_minmax_xyz" : [((-0.2,-0.05,-0.05),(0.2,0.05,0.05))],
         "randomized_friction_slide_spin_roll_ratios" : (0.3,0.3,0.3),
         "randomized_gains_damping_ratio_epstd" : 0.1,

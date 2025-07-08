@@ -259,14 +259,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_health_weight" :            0.0,
-        "reward_position_limit_weight" :    0.1,
+        "reward_position_limit_weight" :    0.0,
         "reward_torque_limit_weight" :      0.0,
         "reward_torque_weight" :            5.0,
         "reward_torquediff_weight" :        0.0,
-        "reward_tracking_weight" :          1.0,
+        "reward_tracking_weight" :          0.0,
         "reward_velocity_limit_weight" :    0.0,
         "reward_velocity_weight" :          1.0,
-        "reward_height_weight" :            0.15,
+        "reward_height_weight" :            0.0,
         "reward_pitchnroll_weight" :        0.15,
         "reward_position_weight" :          1.0,
         "reward_feet_air_time_weight" :     20.0,
@@ -275,7 +275,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_slip_weight" :              0.1,
         "reward_velref_weight" :            0.0,
         "reward_torqueref_weight" :         1.0,
-        "reward_pos2posref_weight" :        0.0,       
+        "reward_pos2posref_weight" :        0.0,              
         "safe_stiffness" : 400,
         "safe_damping" : 5,
         "stepLength_sec" : step_length_sec,
@@ -284,7 +284,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "th_device" : env_device,
         "video_save_freq" : 0,
         "record_video" : True,
-        "goal_speed_minmax" : (0,1.0),
+        "goal_speed_minmax" : (0,0.0),
         "use_contacts" : False,
         "frame_stack_length" : 5,
         "verbose_infos" : False,
@@ -299,11 +299,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
         "initial_pose_randomization_range" : 0.8,
-        "mass_randomization_ratio" : 0.3,
-        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
-        "impulse_probability_per_sec" : 0.5,
+        "randomized_com_links_minmax_xyz" : [((-0.2,-0.05,-0.05),(0.2,0.05,0.05))],
+        "randomized_friction_slide_spin_roll_ratios" : (0.3,0.3,0.3),
+        "randomized_gains_damping_ratio_epstd" : 0.1,
+        "randomized_gains_stiffness_ratio_epstd" : 0.1,
+        "randomized_mass_ratios" : 0.3,
+        "impulse_probability_per_sec" : 0.2,
         "impulse_duration_minmax" : (0.01, 2.5),
-        "impulse_mean_std" : (50.0,50.0),
+        "impulse_mean_std" : (20.0,50.0),
         "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
         "posref_safety_period" : 0.005,
         "enable_posref_safety" : True,
@@ -315,7 +318,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "min_good_step_duration" : 0.2,
         "max_good_step_duration" : 1.5,
         "merge_privileged" : False,
-        "goal_height_minmax" : [0.45,0.45],
+        "goal_height_minmax" : [0.3,0.6],
         "recycle_pose_randomization" : True,
         "just_health_reward" : False
     }
@@ -336,8 +339,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : True,
         "initial_pose_randomization_range" : 0.0,
-        "mass_randomization_ratio" : 0.0,
-        "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
+        "randomized_com_links_minmax_xyz" : [((0.0,0.0,0.0),(0.0,0.0,0.0))],
+        "randomized_friction_slide_spin_roll_ratios" : (0.0,0.0,0.0),
+        "randomized_gains_damping_ratio_epstd" : 0.0,
+        "randomized_gains_stiffness_ratio_epstd" : 0.0,
+        "randomized_mass_ratios" : 0.0,
         "impulse_probability_per_sec" : 0.0,
         "show_gui" : args["gui"],
         "just_health_reward" : True})
@@ -453,11 +459,10 @@ def play(seed, folderName, run_id, args,
                 dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
                 time.sleep(step_length_sec/rt)
 
-            cmd_xy_speed_xy = [1.0,0,0,1,0]
+            cmd_xys = [1.0,0.0,0.0]
             while not done:
                 t0 = time.monotonic()
                 session.run_info["collected_steps"].value += 1
-                goal_velocity_xy = []
                 # ggLog.info(f"ep_config = {info['ep_config']}")
                 t0_pred = time.monotonic()
                 obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
@@ -474,14 +479,15 @@ def play(seed, folderName, run_id, args,
                         f"rew = {reward}\n"+
                         f"terminated = {terminated}\n"+
                         f"truncated = {truncated}\n")
+                base_env : LocomotionVecEnv = env.get_runner().get_base_env()
                 if interactive:
-                    cmd_angle = np.arctan2(cmd_xy_speed_xy[1],cmd_xy_speed_xy[0])
-                    if keyboard_listener.get_key_press_count("w")>0: cmd_xy_speed_xy[2] +=  0.05
-                    if keyboard_listener.get_key_press_count("s")>0: cmd_xy_speed_xy[2] += -0.05
+                    cmd_angle = np.arctan2(cmd_xys[1],cmd_xys[0])
+                    if keyboard_listener.get_key_press_count("w")>0: cmd_xys[2] +=  0.05
+                    if keyboard_listener.get_key_press_count("s")>0: cmd_xys[2] += -0.05
                     if keyboard_listener.get_key_press_count("a")>0: cmd_angle +=  10*3.14159/180
                     if keyboard_listener.get_key_press_count("d")>0: cmd_angle += -10*3.14159/180
-                    cmd_xy_speed_xy[0] = np.cos(cmd_angle)
-                    cmd_xy_speed_xy[1] = np.sin(cmd_angle)
+                    cmd_xys[0] = np.cos(cmd_angle)
+                    cmd_xys[1] = np.sin(cmd_angle)
                     flip = keyboard_listener.get_key_press_count("v")>0
                     cam_dist_pitch_yaw_diff = [0.0,0.0,0.0]
                     if keyboard_listener.get_key_press_count("u")>0: cam_dist_pitch_yaw_diff[0] = -0.1
@@ -492,14 +498,12 @@ def play(seed, folderName, run_id, args,
                     if keyboard_listener.get_key_press_count("l")>0: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
 
                     if keyboard_listener.get_key_press_count("t")>0: truncated = True
-                    base_env : LocomotionVecEnv = env.get_runner().get_base_env()
                     base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
                     if flip:
-                        base_env.set_goal(-base_env.get_goals()[0,:2])
-                    else:
-                        base_env.set_goal(rel_goal_xy_speed_xy = tuple(cmd_xy_speed_xy))
+                        cmd_xys = [-cmd_xys[0],-cmd_xys[1],-cmd_xys[2]]
+                    base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys))
                     keyboard_listener.reset_key_press_counters()
-                    goal_velocity_xy = base_env.get_goals()[0]
+                goals = base_env.get_goals()
                 step_count += 1
 
                 done = terminated or truncated
@@ -511,7 +515,10 @@ def play(seed, folderName, run_id, args,
                 full_step_wallduration = time.monotonic()-t0
                 ggLog.info(f"step = {step_count} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
-                           f" tstep={t1_step-t0_step:1.4f} \t goal_velocity_xy={goal_velocity_xy}")
+                           f" tstep={t1_step-t0_step:1.4f} \t"
+                           f" goal_dir={goals['abs_linvel_xys'][0,:2]} \t"
+                           f" goal_speed={goals['abs_linvel_xys'][0,2]} \t"
+                           f" goal_height={goals['abs_height'][0]} \t")
             if step_count>0:
                 rewards.append(th.as_tensor(ep_reward,device="cpu").item())
                 durations.append(th.as_tensor(step_count,device="cpu").item())

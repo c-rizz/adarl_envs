@@ -1095,7 +1095,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
     def set_goal(self, goal_abs_linvel_vec_xys : Sequence[tuple[float,float,float]] | tuple[float,float,float] | th.Tensor | None = None,
                         goal_velocity_diff_speed_yaw : tuple[float,float] | th.Tensor | None = None,
-                        goal_rel_linvel_xys : tuple[float,float,float,float,float] | th.Tensor | None = None):
+                        goal_rel_linvel_xys : tuple[float,float,float] | th.Tensor | None = None):
         if goal_abs_linvel_vec_xys is not None:
             goal_abs_linvel_vec_xys = th.as_tensor(goal_abs_linvel_vec_xys,device=self._configuration.th_device)
             goal_abs_linvel_vec_xys = goal_abs_linvel_vec_xys.expand(self._adapter.vec_size(),3)
@@ -1120,7 +1120,11 @@ class LocomotionVecEnv(RobotVecEnv):
 
 
     def get_goals(self):
-        return self._locomotion_episode_config.goal_abs_vel_vec_xys
+        return {"abs_linvel_xys" : self._locomotion_episode_config.goal_abs_vel_vec_xys,
+                "rel_linvel_xys" : self._locomotion_episode_config.goal_rel_vel_vec_xy_speed,
+                "abs_gravity" : self._locomotion_episode_config.goal_abs_gravity_vec_xyz,
+                "abs_height" : self._locomotion_episode_config.goal_abs_height_vec_z,
+                "heading_rel2linvelgoal" : self._locomotion_episode_config.goal_heading_rel2linvelgoal_vec_yaw}
 
     @override
     def are_states_terminal(self, states) -> th.Tensor:

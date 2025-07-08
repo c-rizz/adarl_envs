@@ -88,7 +88,8 @@ def loco_runner_builder(seed,
                                                                         jpos_cmd_max_acc_default = 5.0,
                                                                         enable_filters=True,
                                                                         position_commands_stiffness = 400.0,
-                                                                        position_commands_damping = 10.0),
+                                                                        position_commands_damping = 10.0,
+                                                                        walltime_factor=1.0),
                                                 vec_size = 1,
                                                 th_device = th_device)
 

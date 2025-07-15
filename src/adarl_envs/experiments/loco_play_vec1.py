@@ -231,6 +231,19 @@ def build_fixed_policy(env, robot : str, scale : float = 0.0):
     model = Fixedpolicy(  cmd = home_action)
     return model
 
+from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
+def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
+    from adarl.envs.vec.GymRunnerWrapper import GymRunnerWrapper
+    from adarl.envs.vec.EnvRunnerWrapper import EnvRunnerWrapper
+    if isinstance(env, GymRunnerWrapper):
+        recorder = env
+        while recorder is not None and not isinstance(recorder, EnvRunnerRecorderWrapper):
+            if isinstance(recorder, EnvRunnerWrapper):
+                recorder = recorder.get_base_runner()
+            else:
+                recorder = None
+    # print(f"Recorder found: {recorder}")
+    return recorder
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
@@ -389,6 +402,7 @@ def play(seed, folderName, run_id, args,
                             seed=seed+100000000,
                             env_builder_args = env_builder_args,
                             is_eval=False)
+    recorder = find_recorder_wrapper(env)
     ggLog.info("Built")
     control_mode = args["control"].lower().strip()
     if control_mode=="pretrained":
@@ -468,7 +482,10 @@ def play(seed, folderName, run_id, args,
                 # ggLog.info(f"ep_config = {info['ep_config']}")
                 t0_pred = time.monotonic()
                 obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
-                action, hidden_state = model.predict(obs_batch, deterministic = deterministic)
+                act_info = {}
+                action = model.predict_action(obs_batch, deterministic = deterministic, info_return=act_info)
+                if recorder is not None:
+                    recorder.add_to_extra_info({"act_log_prob": act_info["log_prob"]})
                 t0_step = time.monotonic()
                 obs, reward, terminated, truncated, info = env.step(action.detach().squeeze()) #type: ignore
                 t1_step = time.monotonic()

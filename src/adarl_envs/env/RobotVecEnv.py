@@ -840,18 +840,22 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         act_history_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
                                                     field_size=(self._action_helper.single_action_len(),),
                                                     fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]},
-                                                    history_length=3,
+                                                    history_length=5,
                                                     flatten_observation=True,
                                                     observation_definitions=ThBoxStateHelper.SimpleObsDef(
                                                         observable_fields=[],
                                                         observable_subfields=None,
-                                                        obs_history_length=3),
+                                                        obs_history_length=5),
                                                     **vsize_dev_type) # type: ignore
         raw_act_history_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
                                                         field_size=(self._action_helper.single_action_len(),),
                                                         fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]},
-                                                        history_length=3,
+                                                        history_length=5,
                                                         flatten_observation=True,
+                                                        observation_definitions=ThBoxStateHelper.SimpleObsDef(
+                                                            observable_fields=[],
+                                                            observable_subfields=None,
+                                                            obs_history_length=5),
                                                         **vsize_dev_type) # type: ignore
         robot_state_noise =  StateNoiseGenerator(robot_state_helper,
                                                 self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
@@ -1652,26 +1656,28 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         i["safety_triggered"] = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED]
         i.update({"ep_config."+k:v for k,v in dataclasses.asdict(self._current_episode_config).items()})
         # ggLog.info(f"i['rewards'] = {i['rewards'].size()}")
+        act_raw_state = state[self.STATE_ACT_RAW]   
+        actdiff             = th.flatten((act_raw_state[:,0] - act_raw_state[:,1])/2, start_dim=1)
+        prev_actdiff        = th.flatten((act_raw_state[:,1] - act_raw_state[:,2])/2, start_dim=1)
+        i["act_diff"] = actdiff
+        i["joint_avg_act_diff"] = actdiff.mean(dim=-1)
+        i["act_acc"] = actdiff - prev_actdiff
+        i["joint_avg_act_acc"] = i["act_acc"].mean(dim=-1)
         if labels is not None:
             if not hasattr(self, "_joint_names_th"): self._joint_names_th = to_string_tensor([jn[1] for jn in self._configuration.controlled_joints])
             labels["joint_homing_dist"] = self._joint_names_th
             if not hasattr(self, "_sub_rew_names_th"): self._sub_rew_names_th = to_string_tensor(list(sub_rews.keys()))
             labels["rewards"] = self._sub_rew_names_th
+            labels["act_diff"] = to_string_tensor(self._state_helper.sub_helpers[self.STATE_ACT_RAW].flat_state_names()[:12])
+            labels["act_acc"] = labels["act_diff"]
 
         if self._configuration.verbose_infos:
-            act_raw_state = state[self.STATE_ACT_RAW]   
-            actdiff             = th.flatten((act_raw_state[:,0] - act_raw_state[:,1])/2, start_dim=1)
-            prev_actdiff        = th.flatten((act_raw_state[:,1] - act_raw_state[:,2])/2, start_dim=1)
             statenorm = self._state_helper.normalize(state)
-            i["act_diff"] = actdiff
-            i["act_acc"] = actdiff - prev_actdiff
             i["vec_obs"] = self._last_obs["base.vec"]
             if not self._configuration.merge_privileged:
                 i["vec_obs_privileged"] = self._last_obs["privileged.vec"]
             if labels is not None:
                 labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["base.vec"]])
-                labels["act_diff"] = to_string_tensor(self._state_helper.sub_helpers[self.STATE_ACT_RAW].flat_state_names()[:12])
-                labels["act_acc"] = labels["act_diff"]
                 if not self._configuration.merge_privileged:
                     labels["vec_obs_privileged"] = to_string_tensor([n for n in self._state_helper.observation_names()["privileged.vec"]])
             for substate in [   self.STATE_ROBOT,

@@ -25,7 +25,7 @@ def format_tensor(t, float_precision):
     t = [f"{e: .{float_precision}f}" if isinstance(e,float) else str(e) for e in t]
     return f"[{', '.join(t)}]"
 
-def overlay_text_func(vo, a, r, te, tr, info):   
+def overlay_text_func(vo, a, r, te, tr, info, extra_info):   
     if 'state_extrinsic' in info:
         body_abs_linvel = format_tensor(info['state_extrinsic'][[LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z]], 3)
     else:
@@ -43,6 +43,7 @@ def overlay_text_func(vo, a, r, te, tr, info):
                 f"linvel_error          {format_tensor(info['linvel_error'], 3)}\n"
                 f"goal_height           {format_tensor(info['goal_height'], 3)}\n"
                 f"height_error          {format_tensor(info['height_err'], 3)}\n"
+                f"log_prob              {format_tensor(extra_info.get('act_log_prob',th.as_tensor(float('nan'))), 3)}\n"
                 f"safety                {safety_triggered}\n")
 
 def loco_runner_builder(seed,
@@ -187,7 +188,9 @@ def loco_runner_builder(seed,
                             free_joints=[],
                             goal_err_smoothing_halflife_sec = env_builder_args.pop("goal_err_smoothing_halflife_sec"),
                             goal_height_minmax=env_builder_args.pop("goal_height_minmax"),
+                            goal_resampling_probability_per_sec= env_builder_args.pop("goal_resampling_probability_per_sec"),
                             goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
+                            goal_yaw_minmax=env_builder_args.pop("goal_yaw_minmax"),
                             ground_link=ground_link,
                             held_joints_damping=env_builder_args.pop("held_joints_damping"),
                             held_joints_stiffness=env_builder_args.pop("held_joints_stiffness"),

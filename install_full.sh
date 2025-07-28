@@ -2,11 +2,11 @@
 
 if [[ "$1" != "ros1xbot" ]]; then
     echo "ADARL AUTOINSTALL SCRIPT"
-    prepare_for_ros1xbot=true
+    prepare_for_ros1xbot=false
     ws_name="adarl_ws"
 else
     echo "ADARL AUTOINSTALL SCRIPT - With ROS1 and XBOT"
-    prepare_for_ros1xbot=false
+    prepare_for_ros1xbot=true
     ws_name="adarl_ws_ros1"
 fi
 

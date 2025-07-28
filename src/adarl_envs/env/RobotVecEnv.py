@@ -1660,9 +1660,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         actdiff             = th.flatten((act_raw_state[:,0] - act_raw_state[:,1])/2, start_dim=1)
         prev_actdiff        = th.flatten((act_raw_state[:,1] - act_raw_state[:,2])/2, start_dim=1)
         i["act_diff"] = actdiff
-        i["joint_avg_act_diff"] = actdiff.mean(dim=-1)
+        i["joint_avg_act_diff"] = actdiff.abs().mean(dim=-1)
         i["act_acc"] = actdiff - prev_actdiff
-        i["joint_avg_act_acc"] = i["act_acc"].mean(dim=-1)
+        i["joint_avg_act_acc"] = i["act_acc"].abs().mean(dim=-1)
         if labels is not None:
             if not hasattr(self, "_joint_names_th"): self._joint_names_th = to_string_tensor([jn[1] for jn in self._configuration.controlled_joints])
             labels["joint_homing_dist"] = self._joint_names_th

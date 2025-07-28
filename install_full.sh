@@ -55,7 +55,7 @@ fi
 echo "Creating docker container..."
 sleep 1
 
-if [[ prepare_for_ros1xbot ]]; then
+if [[ "$prepare_for_ros1xbot" == true ]]; then
     docker_launcher=./src/adarl_docker_utils/ros1-xbot/launch_persisting.sh
     docker_name=adarl-xbot-2004
     ws_installer=/home/host/$ws_name/src/adarl_envs/install_workspace_ros1xbot.sh

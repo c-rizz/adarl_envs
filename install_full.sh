@@ -2,11 +2,11 @@
 
 if [[ "$1" != "ros1xbot" ]]; then
     echo "ADARL AUTOINSTALL SCRIPT"
-    prepare_for_ros1xbot=true
+    prepare_for_ros1xbot=false
     ws_name="adarl_ws"
 else
     echo "ADARL AUTOINSTALL SCRIPT - With ROS1 and XBOT"
-    prepare_for_ros1xbot=false
+    prepare_for_ros1xbot=true
     ws_name="adarl_ws_ros1"
 fi
 
@@ -55,7 +55,7 @@ fi
 echo "Creating docker container..."
 sleep 1
 
-if [[ prepare_for_ros1xbot ]]; then
+if [[ "$prepare_for_ros1xbot" == true ]]; then
     docker_launcher=./src/adarl_docker_utils/ros1-xbot/launch_persisting.sh
     docker_name=adarl-xbot-2004
     ws_installer=/home/host/$ws_name/src/adarl_envs/install_workspace_ros1xbot.sh

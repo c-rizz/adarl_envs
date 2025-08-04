@@ -49,6 +49,63 @@ def double_bell_reward(error : th.Tensor, bell_width_a : th.Tensor, bell_width_b
 def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     return 1-error/zero_rew_dist
 
+@th.jit.script
+def flattened_penalty_reward(x, max_rew, exponent : float, flattening_scale : float):
+    """A penalty produced by raising abs(x) at the power of exponent, and flattening it with
+        a flipped exponential, scaled with flattening_scale. With exponent=1.5 and 
+        flattening_scale=0.1 results in an x^1.5 that is quite flat below 0.1.
+        This then is squashed with a tanh to be under max_rew.
+        In formulas (not squashed): x^exponent * (-e^(-x^2/flattening_scale)+1)
+    """
+    return -th.tanh((th.mean(th.pow(th.abs(x),exponent)*(1-th.exp(-(x/flattening_scale)**2)), dim=1))/max_rew)*max_rew
+
+@th.jit.script
+def penalty_reward(x, max_rew : float, exponent : float):
+    """A penalty produced by raising abs(x) at the power of exponent, and squashing
+        it with a tanh to be under max_rew.
+    """
+    return -th.tanh(th.mean(th.pow(th.abs(x),exponent),dim=1)/max_rew)*max_rew
+
+def planar_tracking_error_vec(body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_vec_xyz : th.Tensor, goal_rel_linvel_vec_xyz : th.Tensor) -> th.Tensor:
+        """_summary_
+
+        Parameters
+        ----------
+        body_rel_linvel_vec_xyz : th.Tensor
+            current linvel, relative to the body frame
+        gravity_rel_vec_xyz : th.Tensor
+            gravity vector, relative to the body frame
+        goal_rel_linvel_vec_xyz : th.Tensor
+            linvel goal, relative to the body frame
+
+
+        Returns
+        -------
+        th.Tensor
+            _description_
+        """
+        body_planar_rel_linvel_xyz = body_rel_linvel_vec_xyz - vector_projection(body_rel_linvel_vec_xyz,gravity_rel_vec_xyz)
+        # goal_rel_linvel_xyz should already be "planar", it's projection along gravity_rel should be zero
+        norms = th.norm(vector_projection(goal_rel_linvel_vec_xyz,gravity_rel_vec_xyz), dim = 1)
+        dbg_check(lambda: th.all(norms < 0.1) == True,
+                  lambda:   f"goal_rel_linvel_xyz is not horizontal (th.all(norms < 0.1) = {th.all(norms < 0.1)}), projection is "
+                            f"{vector_projection(goal_rel_linvel_vec_xyz, gravity_rel_vec_xyz)[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
+                            f"goal={goal_rel_linvel_vec_xyz[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
+                            f"gravity={gravity_rel_vec_xyz[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
+                            f" big={th.nonzero(norms >= 0.1)}"
+                            f" isnan={th.nonzero(th.isnan(norms))}"
+                            f" isinf={th.nonzero(th.isinf(norms))}")
+        return th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_vec_xyz, dim = 1)
+
+
+
+
+
+
+
+
+
+
 class LocomotionVecEnv(RobotVecEnv):
     STATE_LOCOMOTION = "loco"
     STATE_FEET = "feet"
@@ -582,7 +639,7 @@ class LocomotionVecEnv(RobotVecEnv):
             tracked_body_linvel = support_polygon_linvel
         else:
             tracked_body_linvel = body_rel_linvel_vec_xyz
-        tracking_err_vec = self._planar_tracking_error_vec(tracked_body_linvel, gravity_rel_vec_xyz, rel_goal_linvel_xyz).view(vsize,1)
+        tracking_err_vec = planar_tracking_error_vec(tracked_body_linvel, gravity_rel_vec_xyz, rel_goal_linvel_xyz).view(vsize,1)
         
         # compute heading (yaw) error
         rel_goal_heading_yaw = self._locomotion_episode_config.goal_heading_rel2linvelgoal_vec_yaw
@@ -720,66 +777,7 @@ class LocomotionVecEnv(RobotVecEnv):
         new_inst_state[self.STATE_FEET] = new_feet_state
         return new_inst_state
     
-
-
-
-
-
-
-
-
-
-
-    def _planar_tracking_error_vec(self, body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_vec_xyz : th.Tensor, goal_rel_linvel_vec_xyz : th.Tensor) -> th.Tensor:
-        """_summary_
-
-        Parameters
-        ----------
-        body_rel_linvel_vec_xyz : th.Tensor
-            current linvel, relative to the body frame
-        gravity_rel_vec_xyz : th.Tensor
-            gravity vector, relative to the body frame
-        goal_rel_linvel_vec_xyz : th.Tensor
-            linvel goal, relative to the body frame
-
-
-        Returns
-        -------
-        th.Tensor
-            _description_
-        """
-        body_planar_rel_linvel_xyz = body_rel_linvel_vec_xyz - vector_projection(body_rel_linvel_vec_xyz,gravity_rel_vec_xyz)
-        # goal_rel_linvel_xyz should already be "planar", it's projection along gravity_rel should be zero
-        norms = th.norm(vector_projection(goal_rel_linvel_vec_xyz,gravity_rel_vec_xyz), dim = 1)
-        dbg_check(lambda: th.all(norms < 0.1) == True,
-                  lambda:   f"goal_rel_linvel_xyz is not horizontal (th.all(norms < 0.1) = {th.all(norms < 0.1)}), projection is "
-                            f"{vector_projection(goal_rel_linvel_vec_xyz, gravity_rel_vec_xyz)[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
-                            f"goal={goal_rel_linvel_vec_xyz[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
-                            f"gravity={gravity_rel_vec_xyz[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
-                            f" big={th.nonzero(norms >= 0.1)}"
-                            f" isnan={th.nonzero(th.isnan(norms))}"
-                            f" isinf={th.nonzero(th.isinf(norms))}")
-        return th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_vec_xyz, dim = 1)
     
-    @staticmethod
-    @th.jit.script
-    def _flattened_penalty_reward(x, max_rew, exponent : float, flattening_scale : float):
-        """A penalty produced by raising abs(x) at the power of exponent, and flattening it with
-            a flipped exponential, scaled with flattening_scale. With exponent=1.5 and 
-            flattening_scale=0.1 results in an x^1.5 that is quite flat below 0.1.
-            This then is squashed with a tanh to be under max_rew.
-            In formulas (not squashed): x^exponent * (-e^(-x^2/flattening_scale)+1)
-        """
-        return th.tanh((th.mean(th.pow(th.abs(x),exponent)*(1-th.exp(-(x/flattening_scale)**2)), dim=1))/max_rew)*max_rew
-    
-    @staticmethod
-    @th.jit.script
-    def _penalty_reward(x, max_rew : float, exponent : float):
-        """A penalty produced by raising abs(x) at the power of exponent, and squashing
-            it with a tanh to be under max_rew.
-        """
-        return th.tanh(th.mean(th.pow(th.abs(x),exponent),dim=1)/max_rew)*max_rew
-
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
@@ -819,20 +817,20 @@ class LocomotionVecEnv(RobotVecEnv):
         velocities_safenorm = state_robot_safenorm[:,0,:,1]
         torque_safenorm     = state_robot_safenorm[:,0,:,2]
 
-        reward_torque           = -self._penalty_reward(normtorques,   max_rew=max_rew, exponent=2.0)
-        reward_velocity         = -self._penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
-        reward_acceleration     = -self._flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=1.5, flattening_scale=0.02)
-        reward_position         = -self._flattened_penalty_reward(normposhomingdiff,max_rew=max_rew, exponent=0.5, flattening_scale=0.02)
-        reward_torquediff       = -self._penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
-        reward_actdiff          = -self._penalty_reward(actdiff,max_rew=max_rew,exponent=2)
-        reward_actacc           = -self._flattened_penalty_reward(act_acc,max_rew=max_rew, exponent=0.5,flattening_scale=0.1)
-        reward_torque_limit     = -self._penalty_reward(torque_safenorm,max_rew=max_rew,exponent=50)
-        reward_position_limit   = -self._penalty_reward(position_safenorm,max_rew=max_rew,exponent=50)
-        reward_velocity_limit   = -self._penalty_reward(velocities_safenorm,max_rew=max_rew,exponent=50)
+        reward_torque           = penalty_reward(normtorques,   max_rew=max_rew, exponent=2.0)
+        reward_velocity         = penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
+        reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=1.5, flattening_scale=0.02)
+        reward_position         = flattened_penalty_reward(normposhomingdiff,max_rew=max_rew, exponent=0.5, flattening_scale=0.02)
+        reward_torquediff       = penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
+        reward_actdiff          = penalty_reward(actdiff,max_rew=max_rew,exponent=2)
+        reward_actacc           = flattened_penalty_reward(act_acc,max_rew=max_rew, exponent=0.5,flattening_scale=0.1)
+        reward_torque_limit     = penalty_reward(torque_safenorm,max_rew=max_rew,exponent=50)
+        reward_position_limit   = penalty_reward(position_safenorm,max_rew=max_rew,exponent=50)
+        reward_velocity_limit   = penalty_reward(velocities_safenorm,max_rew=max_rew,exponent=50)
         
-        reward_velocity_refs    = -self._penalty_reward(norm_velocity_refs,   max_rew=max_rew,exponent=2)
-        reward_torque_refs      = -self._penalty_reward(norm_torque_refs,     max_rew=max_rew,exponent=2)
-        reward_pos2posref_diff  = -self._penalty_reward(norm_pos2posref_diff, max_rew=max_rew,exponent=2)
+        reward_velocity_refs    = penalty_reward(norm_velocity_refs,   max_rew=max_rew,exponent=2)
+        reward_torque_refs      = penalty_reward(norm_torque_refs,     max_rew=max_rew,exponent=2)
+        reward_pos2posref_diff  = penalty_reward(norm_pos2posref_diff, max_rew=max_rew,exponent=2)
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
         #                                     zero_rew_dist=self._thtens(0.02))
         height_err = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR]
@@ -877,7 +875,7 @@ class LocomotionVecEnv(RobotVecEnv):
         feet_linvels = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*fields*nfeet -> vec_size*nfeet
         feet_touching_ground = feet_liftoffs <= 0
         feet_sliding_linvel = feet_linvels*feet_touching_ground
-        reward_slip = -self._penalty_reward(feet_sliding_linvel, max_rew=1, exponent=2)
+        reward_slip = penalty_reward(feet_sliding_linvel, max_rew=1, exponent=2)
 
         failed = (current_state_extrinsic_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
 
@@ -1001,7 +999,7 @@ class LocomotionVecEnv(RobotVecEnv):
         body_height_vec = self._current_state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,0]
         goal_height_vec = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT,0]
         goal_gravity_vec = self._current_state[self.STATE_LOCOMOTION][:,0, goal_grav_abs_xyz_idx,0]
-        vel_error_vec = self._planar_tracking_error_vec(
+        vel_error_vec = planar_tracking_error_vec(
                                         body_rel_linvel_vec_xyz = body_rel_linvel_xyz,
                                         gravity_rel_vec_xyz = gravity_rel_vec_xyz,
                                         goal_rel_linvel_vec_xyz = goal_rel_linvel_vec_xyz)

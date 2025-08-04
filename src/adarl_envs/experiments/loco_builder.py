@@ -57,7 +57,7 @@ def loco_runner_builder(seed,
     ggLog.info(f"env_builder_args = {env_builder_args}")
     env_builder_args = copy.deepcopy(env_builder_args)
     stepLength_sec = env_builder_args.pop("stepLength_sec")
-    th_device = env_builder_args["th_device"]
+    th_device : th.device = env_builder_args["th_device"]
     show_gui = env_builder_args.pop("show_gui",False)
     robot_name = env_builder_args["robot_name"]
     max_steps = env_builder_args.pop("max_steps_per_episode")
@@ -138,11 +138,9 @@ def loco_runner_builder(seed,
         sim_dt = 2/1024 if robot_model=="centauro" else 4/1024 
         iterations_per_ep = int(max_steps*stepLength_sec/sim_dt)
         opt_override = {}
-        # if robot_model == "centauro":
-        #     opt_override["impratio"] = 1.5
         adapter = MjxJointImpedanceAdapter( vec_size=num_envs,
                                             enable_rendering=env_builder_args.pop("enable_rendering"),
-                                            jax_device=jax.devices("gpu")[0],
+                                            jax_device=jax.devices("gpu" if th_device.type == "cuda" else "cpu")[th_device.index],
                                             output_th_device = th_device,
                                             sim_step_dt=sim_dt,
                                             step_length_sec=stepLength_sec,

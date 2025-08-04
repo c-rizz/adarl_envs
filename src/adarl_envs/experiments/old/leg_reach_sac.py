@@ -1,6 +1,6 @@
 #!/usr/bin/env python3  
 
-from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams, gym_builder
+from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams, gym_builder
 
 
 
@@ -144,7 +144,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                     "reset_noise_scale" : 0.1,
                                     "exclude_current_positions_from_observation" : True,
                                     "max_episode_steps" : 1000},
-              hyperparams = SAC_hyperparams(train_freq_vstep=25,
+              hyperparams = SAC_init_hparams(train_freq_vstep=25,
                                   grad_steps=50,
                                   q_lr=0.005,
                                   policy_lr=0.0005,
@@ -155,7 +155,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                   total_steps = 10_000_000,
                                   batch_size=16384,
                                   q_network_arch=[64,64],
-                                  policy_network_arch=[64,64],
+                                  policy_arch=[64,64],
                                   learning_starts=5000,
                                   parallel_envs = 16,
                                   log_freq_vstep = 1000,

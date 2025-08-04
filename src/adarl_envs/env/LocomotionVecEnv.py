@@ -41,6 +41,11 @@ def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     return th.exp(-(2*error/zero_rew_dist)**2)
 
 @th.jit.script
+def double_bell_reward(error : th.Tensor, bell_width_a : th.Tensor, bell_width_b : th.Tensor, bell_b_weight : th.Tensor):
+    return (   bell_b_weight  * bell_reward(error, zero_rew_dist=bell_width_b)+
+            (1-bell_b_weight) * bell_reward(error, zero_rew_dist=bell_width_a))
+
+@th.jit.script
 def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     return 1-error/zero_rew_dist
 
@@ -81,6 +86,8 @@ class LocomotionVecEnv(RobotVecEnv):
         terminating_contact_pairs : list[tuple[tuple[str,str],tuple[str,str]]]
         use_contacts : bool
         height_reward_settle_point : th.Tensor
+        height_reward_2_settle_point : th.Tensor
+        height_reward_2_weight : th.Tensor
         pitchnroll_reward_settle_point : th.Tensor
         heading_reward_settle_point : th.Tensor
         vel_reward_goalrelative_weight : th.Tensor
@@ -298,7 +305,9 @@ class LocomotionVecEnv(RobotVecEnv):
                         terminating_contact_pairs=terminating_contact_pairs,
                         goal_speed_minmax = th.as_tensor(goal_speed_minmax, device=th_device, dtype=th.float32),
                         goal_abs_yaw_minmax = th.as_tensor(goal_yaw_minmax, device=th_device, dtype=th.float32),
-                        height_reward_settle_point=self._thtens(0.025), # ~zero reward after this meter distance
+                        height_reward_settle_point=self._thtens(0.025), # A narrow reward bell
+                        height_reward_2_settle_point=self._thtens(0.3), # A wider reward bell
+                        height_reward_2_weight=self._thtens(0.5), # weight of the wide reward bell over the narrow one
                         pitchnroll_reward_settle_point=self._thtens(0.1), # ~zero reward after this 3d-unit-vector distance
                         heading_reward_settle_point = self._thtens(3.14159/16), # ~zero reward after this distance (w component of the quat difference)
                         vel_reward_goalrelative_weight = self._thtens(0.25),
@@ -765,7 +774,7 @@ class LocomotionVecEnv(RobotVecEnv):
     
     @staticmethod
     @th.jit.script
-    def _penalty_reward(x, max_rew, exponent : float):
+    def _penalty_reward(x, max_rew : float, exponent : float):
         """A penalty produced by raising abs(x) at the power of exponent, and squashing
             it with a tanh to be under max_rew.
         """
@@ -782,7 +791,7 @@ class LocomotionVecEnv(RobotVecEnv):
         max_rew = self._configuration.reward_penalties_max
         current_state_locom_vec = state[self.STATE_LOCOMOTION][:, 0,:,0]
         current_state_extrinsic_vec = state[self.STATE_EXTRINSIC][:, 0,:,0]
-        state_action_raw_vec = state[self.STATE_ACT_RAW]
+        state_action_raw_vec = state[self.STATE_ACT_RAW_HIST]
         state_stats = state[self.STATE_JOINT_STEP_STATS]
 
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
@@ -827,7 +836,10 @@ class LocomotionVecEnv(RobotVecEnv):
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
         #                                     zero_rew_dist=self._thtens(0.02))
         height_err = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR]
-        reward_height       = bell_reward(height_err, zero_rew_dist=self._locomotion_conf.height_reward_settle_point)
+        reward_height = double_bell_reward( error=height_err,
+                                            bell_width_a=self._locomotion_conf.height_reward_settle_point,
+                                            bell_width_b=self._locomotion_conf.height_reward_2_settle_point,
+                                            bell_b_weight=self._locomotion_conf.height_reward_2_weight)
         reward_pitchnroll   = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR],
                                             zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
         reward_heading      = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR],
@@ -839,35 +851,33 @@ class LocomotionVecEnv(RobotVecEnv):
         abs_goal_bell_width = self._locomotion_conf.reward_vel_goal_absolute_width
         goal_speed = th.linalg.norm(self._locomotion_episode_config.goal_abs_vel_vec_xys[:,2], dim = -1)
         velocity_tracking_err_vec = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]
-        reward_velocity_tracking = (   goalrelative_weight  * bell_reward(velocity_tracking_err_vec,
-                                                                          zero_rew_dist=rel_goal_bell_width*(goal_speed+rel_goal_offset))+
-                                    (1-goalrelative_weight) * bell_reward(velocity_tracking_err_vec,
-                                                                          zero_rew_dist=abs_goal_bell_width))
+        reward_velocity_tracking = double_bell_reward(velocity_tracking_err_vec,
+                                                      abs_goal_bell_width,
+                                                      rel_goal_bell_width*(goal_speed+rel_goal_offset),
+                                                      goalrelative_weight)
         
         reward_contacts = - th.clamp(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 
 
-        goal_vel_rel_dir_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X,
-                                                                            self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y,
-                                                                            self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z)) #type:ignore
-        goal_rel_dir_vec_xyz = current_state_locom_vec[:,goal_vel_rel_dir_xyz_idx]
         goal_speed = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED].view((self.num_envs,1))
-        goal_rel_vec_xyz = goal_rel_dir_vec_xyz*goal_speed
         feet_state = state[self.STATE_FEET][:,0] # vec_size*history*fields*nfeet -> vec_size*fields*nfeet
         feet_liftoffs = feet_state[:,0] # vec_size*fields*nfeet -> vec_size*nfeet
-        steps_finished = feet_liftoffs < 0
-        steps_starts  = -feet_liftoffs # When the vaslue is negative it marks a finished step
-        # subtracting 0.1 from the duratoins makes it so that not lifting the feet is better than lifting it for less than 0.1s
+        steps_are_finished = feet_liftoffs < 0
+        steps_start_times  = -feet_liftoffs # When the vaslue is negative it marks a finished step
+        # subtracting 0.1 from the durations makes it so that very short steps are actually penalized with a negative reward
         # this makes doing small steps worse than doing nothing
-        offsetted_finished_steps_durations = steps_finished*(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]-steps_starts - self._locomotion_conf.min_good_step_duration)
-        offsetted_finished_steps_durations = th.tanh(offsetted_finished_steps_durations/self._locomotion_conf.max_good_step_duration)*self._locomotion_conf.max_good_step_duration
-        reward_feet_air_time = th.mean(offsetted_finished_steps_durations, dim=1)
-        reward_feet_air_time = reward_feet_air_time*(th.linalg.norm(goal_rel_vec_xyz,dim=1)>0.05) # Disable reward if goal velocity is less than 0.05
+        feet_rewards = steps_are_finished*(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]-steps_start_times - self._locomotion_conf.min_good_step_duration)
+        step_is_good = (feet_rewards>0)
+        step_is_bad  = (feet_rewards<=0)
+        squashed_feet_rewards = th.tanh(feet_rewards/self._locomotion_conf.max_good_step_duration)*self._locomotion_conf.max_good_step_duration
+        feet_rewards = step_is_good*squashed_feet_rewards + step_is_bad*feet_rewards # only squash the positive rewards
+        feet_rewards = feet_rewards*(th.logical_or(goal_speed>0.05, step_is_bad)) # Only enable if speed is > 0.05 or the reward is a small step penalty
+        reward_feet_air_time = th.mean(feet_rewards, dim=1) # average across the feet
         feet_linvels_xy = feet_state[:,1:3] # vec_size*fields*nfeet -> vec_size*2*nfeet
         feet_linvels = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*fields*nfeet -> vec_size*nfeet
         feet_touching_ground = feet_liftoffs <= 0
         feet_sliding_linvel = feet_linvels*feet_touching_ground
-        reward_slip = -self._penalty_reward(feet_sliding_linvel, max_rew=max_rew, exponent=2)
+        reward_slip = -self._penalty_reward(feet_sliding_linvel, max_rew=1, exponent=2)
 
         failed = (current_state_extrinsic_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
 

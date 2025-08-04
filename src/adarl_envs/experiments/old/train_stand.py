@@ -6,7 +6,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
-    from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams
+    from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams
     import os
     
     mode = args["mode"].lower()
@@ -179,11 +179,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder = None,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
-                    hyperparams = SAC_hyperparams(  device = "cuda",
+                    hyperparams = SAC_init_hparams(  device = "cuda",
                                                     q_network_arch=[512,128],
                                                     q_lr=0.001,
                                                     policy_lr=0.0003,
-                                                    policy_network_arch=[256,256],
+                                                    policy_arch=[256,256],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=4096,
@@ -216,11 +216,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder = None,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
-                    hyperparams = SAC_hyperparams(  device = "cuda",
+                    hyperparams = SAC_init_hparams(  device = "cuda",
                                                     q_network_arch=[256,128],
                                                     q_lr=0.001,
                                                     policy_lr=0.0003,
-                                                    policy_network_arch=[128,128],
+                                                    policy_arch=[128,128],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=512,

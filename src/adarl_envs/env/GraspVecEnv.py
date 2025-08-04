@@ -377,7 +377,7 @@ class GraspVecEnv(RobotVecEnv):
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
 
         max_rew = self._configuration.reward_penalties_max
-        state_action_vec = state[self.STATE_ACT_RAW]
+        state_action_vec = state[self.STATE_ACT_RAW_HIST]
         state_stats = state[self.STATE_JOINT_STEP_STATS]
 
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()

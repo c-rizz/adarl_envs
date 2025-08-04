@@ -5,7 +5,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
-    from rreal.algorithms.sac_helpers import sac_train, SAC_hyperparams
+    from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams
     from adarl_envs.experiments.loco_builder import named_loco_venv_builder
     
     mode = args["mode"].lower()
@@ -27,19 +27,19 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
 
-    eval_freq = 5
+    eval_freq = 10
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.01),
         "action_noise_mustd" : (0.0,0.0001),
-        "action_smoothing_halflife_sec" : 0.2,
+        "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
         "enable_rendering" : False,
         "fail_on_safety" : False,
         "frame_stack_length" : 5,
-        "goal_err_smoothing_halflife_sec" : 0.0,
-        "goal_height_minmax" : [0.3,0.59],
+        "goal_err_smoothing_halflife_sec" : 0.05,
+        "goal_height_minmax" : [0.3,0.57],
         "goal_resampling_probability_per_sec" : 0.25,
         "goal_speed_minmax" : [0,0.0],
         "goal_yaw_minmax" : [0.0,0.0],
@@ -68,17 +68,17 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "posref_safety_period" : 0.005,
         "quiet" : False,
         "randomized_armature_ratios" : 0.3,
-        "randomized_com_links_minmax_xyz" : [((-0.5,-0.15,-0.1),(0.5,0.15,0.1))],
+        "randomized_com_links_minmax_xyz" : [((-0.75,-0.2,-0.1),(0.75,0.2,0.1))],
         "randomized_friction_slide_spin_roll_ratios" : [0.3,0.3,0.3],
         "randomized_frictionloss_ratios" : 0.3,
-        "randomized_gains_damping_ratio_epstd" : 0.2,
-        "randomized_gains_stiffness_ratio_epstd" : 0.2,
+        "randomized_gains_damping_ratio_epstd" : 0.0,
+        "randomized_gains_stiffness_ratio_epstd" : 0.0,
         "randomized_mass_ratios" : 0.3,
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "reward_acceleration_weight" :      2.0,
-        "reward_actacc_weight" :            0.5,
-        "reward_actdiff_weight" :           0.5,
+        "reward_acceleration_weight" :      0.0,
+        "reward_actacc_weight" :            2.0,
+        "reward_actdiff_weight" :           0.2,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_failure_weight" :           1.0,
@@ -89,15 +89,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_pitchnroll_weight" :        0.5,
         "reward_pos2posref_weight" :        0.0,       
         "reward_position_limit_weight" :    0.0,
-        "reward_position_weight" :          0.0,
-        "reward_slip_weight" :              0.1,
+        "reward_position_weight" :          0.1,
+        "reward_slip_weight" :              2.0,
         "reward_torque_limit_weight" :      0.0,
-        "reward_torque_weight" :            10.0,
+        "reward_torque_weight" :            1.0,
         "reward_torquediff_weight" :        0.0,
-        "reward_torqueref_weight" :         1.0,
+        "reward_torqueref_weight" :         0.0,
         "reward_tracking_weight" :          1.0,
         "reward_velocity_limit_weight" :    0.0,
-        "reward_velocity_weight" :          1.0,
+        "reward_velocity_weight" :          0.0,
         "reward_velref_weight" :            0.0,
         "robot_model" : args["robot"],
         "safe_damping" : 5,
@@ -113,14 +113,25 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : 0
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
-    video_eval_env_builder_args["enable_rendering"] = True
-    video_eval_env_builder_args["verbose_infos"] = True
-    video_eval_env_builder_args["video_save_freq"] = 1
-    video_eval_env_builder_args["init_on_reset_ratio"] = 1.0
-    video_eval_env_builder_args["initial_pose_randomization_range"] = 0.02
-    video_eval_env_builder_args["mass_randomization_ratio"] = 0.0
-    video_eval_env_builder_args["friction_slide_spin_roll_randomization_ratios"] = (0.0,0.0,0.0)
-    video_eval_env_builder_args["recycle_pose_randomization"] = False
+    video_eval_env_builder_args.update({        
+        "enable_rendering" : True,
+        "verbose_infos" : True,
+        "video_save_freq" : 1,
+        "init_on_reset_ratio" : 1.0,
+        "initial_pose_randomization_range" : 0.02,
+        "mass_randomization_ratio" : 0.0,
+        "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
+        "recycle_pose_randomization" : False,
+        # "action_delay_mustd" : (0.0,0.0),
+        # "action_noise_mustd" : (0.0,0.0),
+        # "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.0, 0.0],
+        # "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.0, 0.0],
+        # "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.0, 0.0],
+        # "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0, 0.0],
+        # "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0, 0.0],
+        # "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0, 0.0],
+        # "th_device" : th.device("cpu",0) # this segfaults
+    })
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,
@@ -203,28 +214,32 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     vec_env_builder = named_loco_venv_builder,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
-                    hyperparams = SAC_hyperparams(  device = "cuda",
-                                                    q_network_arch=[256,128,128],
-                                                    q_lr=0.001,
-                                                    policy_lr=0.0003,
-                                                    policy_network_arch=[256,128,128],
-                                                    gamma=0.99,
-                                                    target_tau = 0.005,
+                    hyperparams = SAC_init_hparams(  device = "cuda",
+                                                    q_network_arch=[256,256],
+                                                    q_lr=0.003,
+                                                    policy_lr=0.0001,
+                                                    policy_arch=[256,256],
+                                                    gamma=0.995,
+                                                    target_tau = 0.001,
                                                     batch_size=16384,
-                                                    buffer_size=4_000_000,
+                                                    buffer_size=10_000_000,
                                                     total_steps=1_000_000_000,
                                                     train_freq_vstep=5,
-                                                    grad_steps=20,
+                                                    grad_steps=50,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
                                                     parallel_envs=train_envs,
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -1.0,
-                                                    actor_log_std_init = -3.0,
-                                                    actor_observation_filter=["base.vec"],
-                                                    critic_observation_filter=["base.vec","privileged.vec"],
-                                                    target_entropy_factor_annealing=("ramp",[100*1e6, 150*1e6, -1, -5])
+                                                    target_entropy_factor = -3.0,
+                                                    actor_log_std_init = -1.0,
+                                                    actor_observation_filter=["base.vec","base.last_action_raw"],
+                                                    critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec"],
+                                                    # target_entropy_factor_annealing=("ramp",[100*1e6, 150*1e6, -1, -5]),
+                                                    action_reference_obs_key="base.last_action_raw",
+                                                    actor_weight_decay=0.001,
+                                                    critic_weight_decay=0.0,
+                                                    policy_update_freq=2
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -233,7 +248,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_batch_size=0,
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
-                    debug_level=2)                           
+                    debug_level=2,
+                    log_weights_and_grads=False)                           
     elif algo.lower() == "sac_small":
         sac_train(  seed,
                     folderName,
@@ -242,11 +258,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     vec_env_builder = named_loco_venv_builder,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
-                    hyperparams = SAC_hyperparams(  device = "cuda",
+                    hyperparams = SAC_init_hparams(  device = "cuda",
                                                     q_network_arch=[256,128],
                                                     q_lr=0.001,
                                                     policy_lr=0.0003,
-                                                    policy_network_arch=[128,128],
+                                                    policy_arch=[128,128],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=512,
@@ -298,7 +314,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 validation_buffer_size=0,
                 validation_holdout_ratio=0,
                 checkpoint_freq=-1,
-                collector_device=th.device("cpu"),
+                collector_device=env_device,
                 eval_configurations=eval_configurations,
                 debug_level=1)
     else:       

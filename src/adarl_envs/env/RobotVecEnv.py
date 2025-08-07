@@ -44,6 +44,7 @@ def find_poses(root_joint : str,
                 homing_body_pose_xyzxyzw : np.ndarray,
                 controlled_joints : Sequence[tuple[str,str]],
                 initial_pose_randomization_range : float,
+                initial_height_randomization_range : float,
                 limits_minmax : th.Tensor,
                 homing_pos : th.Tensor,
                 noncontrolled_jointpos : dict[tuple[str,str], th.Tensor],
@@ -82,6 +83,7 @@ def find_poses(root_joint : str,
                                 homing_body_pose_xyzxyzw,
                                 controlled_joints,
                                 initial_pose_randomization_range,
+                                initial_height_randomization_range,
                                 limits_np,
                                 homing_np,
                                 noncontrolled_jointpos_np,
@@ -97,6 +99,7 @@ def find_pose_np(  root_joint : str,
                 homing_body_pose_xyzxyzw : np.ndarray,
                 controlled_joints : Sequence[tuple[str,str]],
                 initial_pose_randomization_range : float,
+                initial_height_randomization_range : float,
                 limits_minmax : np.ndarray,
                 homing_pos : np.ndarray,
                 noncontrolled_jointpos : dict[tuple[str,str], np.ndarray],
@@ -116,14 +119,17 @@ def find_pose_np(  root_joint : str,
     jp_dict = noncontrolled_jointpos
     rng = np.random.default_rng(seed=rng_seed)
     for i in range(samples):
-        normpos = (rng.random(size=(len(controlled_joints),), dtype=np.float32)*2-1)*initial_pose_randomization_range
+        norm_jpos = (rng.random(size=(len(controlled_joints),), dtype=np.float32)*2-1)*initial_pose_randomization_range
         # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
-        initial_joint_pose = ((normpos>=0)*((limits_minmax[1]-homing_pos)*normpos + homing_pos) + 
-                                (normpos< 0)*((homing_pos-limits_minmax[0])*normpos + homing_pos))
+        initial_joint_pose = ((norm_jpos>=0)*((limits_minmax[1]-homing_pos)*norm_jpos + homing_pos) + 
+                                (norm_jpos< 0)*((homing_pos-limits_minmax[0])*norm_jpos + homing_pos))
         jp_dict.update({jn:initial_joint_pose[i] for i,jn in enumerate(controlled_joints)})
         robot_model.set_joint_pose_by_names({jn[1]:jp for jn,jp in jp_dict.items()})
         if is_floating_base:
-            robot_model.set_joint_pose_by_names({root_joint:homing_body_pose_xyzxyzw})
+            norm_height = (rng.random(size=(1,), dtype=np.float32)*2-1)*initial_height_randomization_range
+            initial_body_pose_xyzxyzw = homing_body_pose_xyzxyzw
+            initial_body_pose_xyzxyzw[2] += norm_height[0]
+            robot_model.set_joint_pose_by_names({root_joint:initial_body_pose_xyzxyzw})
         collisions = robot_model.get_all_collisions()
         # all_link_poses = self._robot_model.get_frame_poses_xyzxyzw() #frames=self._robot_model.get_tree_frame_names_under_joint(self._configuration.robot_root_joint))
         # pprint.pprint(all_link_poses)
@@ -233,10 +239,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         homing_held_joints_pvesd : th.Tensor
         homing_nonctrl_joints_position : dict[tuple[str,str],th.Tensor]
         impulse_duration_minmax : th.Tensor
-        impulse_mean_std : tuple[float,float]
+        impulse_mean_std : th.Tensor
         impulse_probability_per_sec : th.Tensor
         init_on_reset_ratio : float
-        initial_pose_randomization_range : float
+        initial_joint_pose_randomization_range : float
+        initial_height_randomization_range_meters : float
         joint_physical_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_damping : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
@@ -377,7 +384,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
                         homing_joint_pose : dict[tuple[str,str], float],
                         init_on_reset_ratio : float,
-                        initial_pose_randomization_range : float,
+                        initial_height_randomization_range_meters : float,
+                        initial_joint_pose_randomization_range : float,
                         maxStepsPerEpisode : int,
                         minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
                         minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
@@ -543,10 +551,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     homing_held_joints_pvesd = homing_held_joints_pvesd,
                                                     homing_nonctrl_joints_position = homing_nonctrl_joints_position,
                                                     impulse_duration_minmax = self._thtens(impulse_duration_minmax),
-                                                    impulse_mean_std=impulse_mean_std,
+                                                    impulse_mean_std=self._thtens(impulse_mean_std).view((2,)), # mean and std
                                                     impulse_probability_per_sec = self._thtens(impulse_probability_per_sec),
                                                     init_on_reset_ratio=init_on_reset_ratio,
-                                                    initial_pose_randomization_range = initial_pose_randomization_range,
+                                                    initial_joint_pose_randomization_range = initial_joint_pose_randomization_range,
+                                                    initial_height_randomization_range_meters = initial_height_randomization_range_meters,
                                                     joint_physical_limits_minmax_pve = phys_limits_minmax_pve,
                                                     joint_safe_limits_minmax_damping = minmax_damping_thdict,
                                                     joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
@@ -1103,13 +1112,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         jp_dict = {k:v for k,v in self._configuration.homing_nonctrl_joints_position.items()}
         jp_dict.update({k:v for k,v in self._configuration.homing_held_joints_position.items()})
         t0 = time.monotonic()
-        if self._configuration.initial_pose_randomization_range > 0:
+        if self._configuration.initial_joint_pose_randomization_range > 0 or self._configuration.initial_height_randomization_range_meters > 0:
             if not self._configuration.recycle_pose_randomization or self._previous_pose_randomization is None:
                 self._previous_pose_randomization = find_poses(
                                                         root_joint = self._configuration.robot_root_joint,
                                                         homing_body_pose_xyzxyzw = self._pinocchio_corrected_homing_body_pose_xyzxyzw,
                                                         controlled_joints = self._configuration.controlled_joints,
-                                                        initial_pose_randomization_range = self._configuration.initial_pose_randomization_range,
+                                                        initial_pose_randomization_range = self._configuration.initial_joint_pose_randomization_range,
+                                                        initial_height_randomization_range = self._configuration.initial_height_randomization_range_meters,
                                                         limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.controlled_joints], dim = 1),
                                                         homing_pos = self._configuration.homing_ctrl_joints_pvesd[:,0],
                                                         noncontrolled_jointpos = jp_dict,
@@ -1373,20 +1383,27 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def get_states(self) -> dict[Any, th.Tensor]:
         return self._current_state
 
-
+    @th.compiler.disable
+    def _apply_impulses(self, forcevector: th.Tensor, torque: th.Tensor, duration: th.Tensor, delays: th.Tensor, apply_impulse: th.Tensor):
+        if isinstance(self._adapter, BaseVecSimulationAdapter):
+            self._adapter.set_link_impulses(self._main_body_link_ids,
+                                            force_torque_xyzxyz=th.cat([forcevector, torque], dim = 1).view((self.num_envs,1,6)),
+                                            durations=duration.view((self.num_envs,1)),
+                                            delays=delays.view((self.num_envs,1)),
+                                            vec_mask=apply_impulse.view((self.num_envs,)))
     @override
     def pre_step(self):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             if self._impulse_disturbances_enabled:
                 impulse_prob_per_env_dt = 1-th.pow(1-self._configuration.impulse_probability_per_sec, self._intendedStepLength_sec)
                 apply_impulse = self._thrand((self.num_envs,1)) < impulse_prob_per_env_dt
-                impulse = self._thrandn_truncnorm((self.num_envs,1),
-                                                mean = self._configuration.impulse_mean_std[0],
-                                                std = self._configuration.impulse_mean_std[1],
-                                                min_val = 0.0,
-                                                max_val = self._configuration.impulse_mean_std[0]+self._configuration.impulse_mean_std[1]*5)
-                duration = self._thrand((self.num_envs,1)) * (self._configuration.impulse_duration_minmax[1] - self._configuration.impulse_duration_minmax[0]) + self._configuration.impulse_duration_minmax[0]
-
+                # impulse = self._thrandn_truncnorm((self.num_envs,1),
+                #                                 mean = self._configuration.impulse_mean_std[0],
+                #                                 std = self._configuration.impulse_mean_std[1],
+                #                                 min_val = 0.0,
+                #                                 max_val = self._configuration.impulse_mean_std[0]+self._configuration.impulse_mean_std[1]*5)
+                impulse = th.tanh(self._thrandn((self.num_envs,1))/5)*5*self._configuration.impulse_mean_std[1] + self._configuration.impulse_mean_std[0]
+                duration = unnormalize(self._thrand((self.num_envs,1)),self._configuration.impulse_duration_minmax[0], self._configuration.impulse_duration_minmax[1])
                 # ggLog.info(f"impulse={impulse}\n"
                 #            f"durations={duration}\n")
                 force = impulse/duration
@@ -1410,13 +1427,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 #            f"durations={duration}\n"
                 #            f"delays={delays}\n"
                 #            f"vec_mask={apply_impulse}\n")
-                self._adapter.set_link_impulses(self._main_body_link_ids,
-                                                force_torque_xyzxyz=th.cat([forcevector, torque], dim = 1).view((self.num_envs,1,6)),
-                                                durations=duration.view((self.num_envs,1)),
-                                                delays=delays.view((self.num_envs,1)),
-                                                vec_mask=apply_impulse.view((self.num_envs,)))
+                self._apply_impulses(forcevector=forcevector, torque=torque, duration=duration, delays=delays, apply_impulse=apply_impulse)
 
     @override
+    @th.compile(mode="max-autotune-no-cudagraphs")
     def post_step(self):
         # t0 = time.monotonic()
         self._update_state()
@@ -1426,7 +1440,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"update_state: {t1-t0} update_stats: {tf-t1}")
         # ggLog.info(f"on_step(): {self._current_state[self.STATE_ROBOT][0,0]}")
 
-
+    @th.compiler.disable(recursive=False)
     def _get_new_instantaneous_state(self):
         # ggLog.info(f"_stepCounter = {self._stepCounter}")
         # t0 = time.monotonic()
@@ -1516,7 +1530,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     vec_body_rel_linvel_xyz = vec_body_rel_linvel_xyz,
                                     vec_body_rel_angvel_xyz = vec_body_rel_angvel_xyz,
                                     vec_robot_state = robot_state,
-                                    vec_body_rel_linacc_xyz = vec_body_rel_linacc_xyz)
+                                    vec_body_rel_linacc_xyz = vec_body_rel_linacc_xyz,
+                                    vec_time_from_start=self._adapter.getEnvTimeFromStartup())
         # ggLog.info(f"insta_state sizes = "+str(map_tensor_tree(new_inst_state,lambda t: t.size())))
         # th.cuda.synchronize()
         # t4 = time.monotonic()
@@ -1529,7 +1544,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(pprint.pformat(map_tensor_tree(new_inst_state, lambda t: t.size())))
         return new_inst_state
 
-
+    @th.compile(mode="max-autotune-no-cudagraphs")
     def _build_new_instantaneous_state_vec(self,    vec_internal_state : th.Tensor,
                                                     vec_stats_minmaxavgstd_j_pvae : th.Tensor,
                                                     vec_jstates_j_pveae : th.Tensor,
@@ -1540,7 +1555,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_body_rel_linvel_xyz : th.Tensor,
                                                     vec_body_rel_angvel_xyz : th.Tensor,
                                                     vec_robot_state : th.Tensor,
-                                                    vec_body_rel_linacc_xyz : th.Tensor):
+                                                    vec_body_rel_linacc_xyz : th.Tensor,
+                                                    vec_time_from_start : th.Tensor):
 
 
         vec_step_count = vec_internal_state[:,self.INTERNAL_FIELDS.STEP_COUNT]
@@ -1572,7 +1588,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : vec_safety_state.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1),
-                                self.INTERNAL_FIELDS.SIM_TIME : (self._adapter.getEnvTimeFromStartup() - self._eps_start_stime).view(self.num_envs,1)}
+                                self.INTERNAL_FIELDS.SIM_TIME : (vec_time_from_start - self._eps_start_stime).view(self.num_envs,1)}
         new_robot_state = th.cat([vec_jstates_j_pveae, vec_last_sent_j_pvesd], dim = -1)
         # build stats:
         # with permute the first dimension becomes the joint (ordered as in set_monitored_joints)
@@ -1612,7 +1628,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     self.STATE_ACT_RAW_HIST : {self.ACT_FIELDS.ACTION : self._last_raw_actions},
                     self.STATE_LAST_ACT_RAW : {self.ACT_FIELDS.ACTION : self._last_raw_actions}}
         
-
 
     def _update_state(self):
         # th.cuda.synchronize()

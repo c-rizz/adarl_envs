@@ -232,7 +232,7 @@ class GraspVecEnv(RobotVecEnv):
                             verbose_infos = verbose_infos,
                             quiet = quiet,
                             enable_dbg_checks = enable_dbg_checks,
-                            initial_pose_randomization_range = initial_pose_randomization_range,
+                            initial_joint_pose_randomization_range = initial_pose_randomization_range,
                             init_on_reset_ratio = init_on_reset_ratio,
                             obs_noise_joints_pve_ep_mustd_step_std = obs_noise_joints_pve_ep_mustd_step_std,
                             obs_noise_linvel_ep_mustd_step_std = obs_noise_linvel_ep_mustd_step_std,

@@ -243,7 +243,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
                         homing_joint_pose : dict[tuple[str,str], float],
                         init_on_reset_ratio : float,
-                        initial_pose_randomization_range : float,
+                        initial_height_randomization_range_meters : float,
+                        initial_joint_pose_randomization_range : float,
                         maxStepsPerEpisode : int,
                         minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
                         minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
@@ -410,7 +411,8 @@ class LocomotionVecEnv(RobotVecEnv):
                             impulse_mean_std = impulse_mean_std,
                             impulse_probability_per_sec = impulse_probability_per_sec,
                             init_on_reset_ratio = init_on_reset_ratio,
-                            initial_pose_randomization_range = initial_pose_randomization_range,
+                            initial_joint_pose_randomization_range = initial_joint_pose_randomization_range,
+                            initial_height_randomization_range_meters = initial_height_randomization_range_meters,
                             just_health_reward=just_health_reward,
                             longterm_states_decimation_time = longterm_states_decimation_time,
                             maxStepsPerEpisode = maxStepsPerEpisode,
@@ -581,6 +583,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
 
 
+    @th.compiler.disable(recursive=False)
     @override
     def _get_new_instantaneous_state(self):
 
@@ -1096,10 +1099,10 @@ class LocomotionVecEnv(RobotVecEnv):
         return i
     
     def _sample_goals(self):
-        goal_speeds = unnormalize(self._thrand(size=(self._adapter.vec_size(),))*2-1,
+        goal_speeds = unnormalize(self._thrand(size=(self.num_envs,))*2-1,
                                     min=self._locomotion_conf.goal_speed_minmax[0],
                                     max=self._locomotion_conf.goal_speed_minmax[1])
-        goal_yaws = unnormalize(self._thrand(size=(self._adapter.vec_size(),))*2-1,
+        goal_yaws = unnormalize(self._thrand(size=(self.num_envs,))*2-1,
                                     min=self._locomotion_conf.goal_abs_yaw_minmax[0],
                                     max=self._locomotion_conf.goal_abs_yaw_minmax[1])
         goal_height = th.rand(size=(self.num_envs,), generator=self._rng, device=self._th_device)*(self._locomotion_conf.goal_height_minmax[1]-self._locomotion_conf.goal_height_minmax[0])+self._locomotion_conf.goal_height_minmax[0]
@@ -1110,6 +1113,7 @@ class LocomotionVecEnv(RobotVecEnv):
         return goal_abs_linvel_vec_xys, goal_height
 
     @override
+    @th.compile(mode="max-autotune-no-cudagraphs")
     def pre_step(self):
         super().pre_step()
         if self._locomotion_conf.goal_resampling_enabled>0:

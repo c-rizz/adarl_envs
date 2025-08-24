@@ -3,12 +3,13 @@ from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAda
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
 from adarl.utils.utils import (LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection, isinstance_noimport, 
                                quat_xyzw_between_vecs_py, masked_assign, quat_mul_xyzw, quat_angle_xyzw)
-from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
+from adarl.utils.dbg.dbg_checks import dbg_check_finite, dbg_check_size, dbg_check
 import adarl.utils.utils
 from adarl.utils.vec_state_helper import ThBoxStateHelper, unnormalize, normalize
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any
+from git import Tree
 from typing_extensions import override
 import adarl.utils.dbg.ggLog as ggLog
 import numpy as np
@@ -94,7 +95,9 @@ def planar_tracking_error_vec(body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_v
                             f"gravity={gravity_rel_vec_xyz[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
                             f" big={th.nonzero(norms >= 0.1)}"
                             f" isnan={th.nonzero(th.isnan(norms))}"
-                            f" isinf={th.nonzero(th.isinf(norms))}")
+                            f" isinf={th.nonzero(th.isinf(norms))}",
+                    async_assert=True,
+                    assert_msg="goal_rel_linvel_vec_xyz is not horizontal")
         return th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_vec_xyz, dim = 1)
 
 
@@ -135,6 +138,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_weight_velocity_limit : th.Tensor
         reward_weight_velocity : th.Tensor
         reward_weight_feet_air_time : th.Tensor
+        reward_weight_feet_on_ground : th.Tensor
         reward_weight_failure : th.Tensor
         reward_weight_slip : th.Tensor
         reward_weight_velref : th.Tensor
@@ -199,6 +203,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     "REWARD_ACTDIFF_WEIGHT",
                                                     "REWARD_ACTACC_WEIGHT",
                                                     "REWARD_FEET_AIR_TIME_WEIGHT",
+                                                    "REWARD_FEET_ON_GROUND_WEIGHT",
                                                     "REWARD_POSITION_WEIGHT",
                                                     "REWARD_HEADING_WEIGHT",
                                                     "REWARD_FAILURE_WEIGHT",
@@ -262,6 +267,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_energy_weight : float,
                         reward_failure_weight : float,
                         reward_feet_air_time_weight : float,
+                        reward_feet_on_ground_weight : float,
                         reward_heading_weight : float,
                         reward_health_weight : float,
                         reward_height_weight : float,
@@ -353,6 +359,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_actdiff = self._thtens(reward_actdiff_weight),
                         reward_weight_actacc = self._thtens(reward_actacc_weight),
                         reward_weight_feet_air_time = self._thtens(reward_feet_air_time_weight),
+                        reward_weight_feet_on_ground = self._thtens(reward_feet_on_ground_weight),
                         reward_weight_failure = self._thtens(reward_failure_weight),
                         reward_weight_slip=self._thtens(reward_slip_weight),
                         reward_weight_velref=self._thtens(reward_velref_weight),
@@ -530,6 +537,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.REWARD_ACTDIFF_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_ACTACC_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_FEET_AIR_TIME_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_FEET_ON_GROUND_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : [0,10],
@@ -580,17 +588,37 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                  obs_defs={"base":{"observable":True,"flatten":False,"noise":None}})
         ggLog.info(f"Built state/obs/action helpers")
         
+    @th.compiler.disable
+    def _get_loco_adapter_data(self):
+        if isinstance(self._adapter,BaseVecSimulationAdapter):
+            feet_linvels_vec_foot_xyz = self._adapter.getLinksState(self._feet_link_ids)[:,:,7:10]
+        else:
+            feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
+        if isinstance_noimport(self._adapter, "MjxAdapter"):
+            from adarl.adapters.MjxAdapter import MjxAdapter
+            mjx_adapter : MjxAdapter = self._adapter #type: ignore
+            feet_are_touching_ground = mjx_adapter.check_colliding_links(self._feet_link_ids, self._ground_link_id)
+        else:
+            feet_are_touching_ground = self._thzeros((self.num_envs,4))
+        borient_quat_vec_xyzw = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,3:7]
+        return feet_linvels_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw
 
-
-
-    @th.compiler.disable(recursive=False)
     @override
-    def _get_new_instantaneous_state(self):
+    def _get_adapter_data(self):
+        super_adapter_data = super()._get_adapter_data()
+        loco_adapter_data = self._get_loco_adapter_data()
+        return loco_adapter_data, super_adapter_data
+
+    @override
+    def _get_new_instantaneous_state(self, adapter_data):
+
+        loco_adapter_data, super_adapter_data = adapter_data
+        feet_linvels_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw = loco_adapter_data
 
         track_support_linvel = False
         prev_locom_state = self._current_state[self.STATE_LOCOMOTION][:, 0]
         prev_feet_state = self._current_state[self.STATE_FEET][:, 0, 0]
-        new_inst_state = super()._get_new_instantaneous_state()
+        new_inst_state = super()._get_new_instantaneous_state(super_adapter_data)
         new_internal_state = new_inst_state[self.STATE_INTERNAL]
         new_extrinsic_state = new_inst_state[self.STATE_EXTRINSIC]
         # sadly in this point everything is a dict, so things must be addressed like this, maybe something could be done about this
@@ -603,10 +631,6 @@ class LocomotionVecEnv(RobotVecEnv):
                                          self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
                                          self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z]], dim = 1)
         
-        if isinstance(self._adapter,BaseVecSimulationAdapter):
-            feet_linvels_vec_foot_xyz = self._adapter.getLinksState(self._feet_link_ids)[:,:,7:10]
-        else:
-            feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
         step_counts = new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
         
         # compute linvel error
@@ -614,7 +638,6 @@ class LocomotionVecEnv(RobotVecEnv):
         if self._locomotion_episode_config.goal_rel_vel_vec_xy_speed is None:
             # Get the relative goal from the absolute one
             # Only possible with body pose (i.e. in simulation)
-            borient_quat_vec_xyzw = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,3:7]
             goal_speed = self._locomotion_episode_config.goal_abs_vel_vec_xys[:,2].view((vsize,1))
             abs_goal_linvel_direction_xy = self._locomotion_episode_config.goal_abs_vel_vec_xys[:,:2]/th.linalg.norm(self._locomotion_episode_config.goal_abs_vel_vec_xys[:,:2], dim=-1, keepdim=True)
             abs_goal_linvel_direction_xyz = th.cat([abs_goal_linvel_direction_xy, th.zeros_like(abs_goal_linvel_direction_xy[:,:1])], dim = 1) # should be always planar
@@ -714,6 +737,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.REWARD_ACTDIFF_WEIGHT : self._locomotion_conf.reward_weight_actdiff.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_ACTACC_WEIGHT : self._locomotion_conf.reward_weight_actacc.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_FEET_AIR_TIME_WEIGHT : self._locomotion_conf.reward_weight_feet_air_time.expand(vsize,1),
+                            self.LOCOMOTION_FIELDS.REWARD_FEET_ON_GROUND_WEIGHT : self._locomotion_conf.reward_weight_feet_on_ground.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_TRACKING_WEIGHT : self._locomotion_conf.reward_weight_tracking.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_TORQUE_WEIGHT : self._locomotion_conf.reward_weight_torque.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._locomotion_conf.reward_weight_torquediff.expand(vsize,1),
@@ -749,9 +773,6 @@ class LocomotionVecEnv(RobotVecEnv):
         # fstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._feet_link_ids, use_com_pose = False)
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
         if isinstance_noimport(self._adapter, "MjxAdapter"):
-            from adarl.adapters.MjxAdapter import MjxAdapter
-            mjx_adapter : MjxAdapter = self._adapter #type: ignore
-            feet_are_touching_ground = mjx_adapter.check_colliding_links(self._feet_link_ids, self._ground_link_id)
             feet_were_touching_ground = prev_feet_state <= 0
             nenv_nfeet = (self.num_envs,len(self._locomotion_conf.feet_links))
             # if foot is just lifting off, mark the time in the state
@@ -782,6 +803,8 @@ class LocomotionVecEnv(RobotVecEnv):
     
     
     @override
+    # @th.compile(mode="max-autotune")
+    @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune")
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
         if self._configuration.just_health_reward:
@@ -800,7 +823,7 @@ class LocomotionVecEnv(RobotVecEnv):
         state_robot_norm        = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)
         longterm_stats_pos_norm = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
                                                                                                       warn_limits_violation=False)
-        dbg_run(lambda: self._warn_out_of_bounds(state_robot_norm))
+        # self._warn_out_of_bounds(state_robot_norm)
         state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
         # state_stats_norm = self._state_helper.sub_helpers[self.STATE_ROBOT_STATS].normalize(state_stats)
         normposhomingdiff   = longterm_stats_pos_norm[:,0,0] - normhoming
@@ -874,11 +897,15 @@ class LocomotionVecEnv(RobotVecEnv):
         feet_rewards = step_is_good*squashed_feet_rewards + step_is_bad*feet_rewards # only squash the positive rewards
         feet_rewards = feet_rewards*(th.logical_or(goal_speed>0.05, step_is_bad)) # Only enable if speed is > 0.05 or the reward is a small step penalty
         reward_feet_air_time = th.mean(feet_rewards, dim=1) # average across the feet
+        
         feet_linvels_xy = feet_state[:,1:3] # vec_size*fields*nfeet -> vec_size*2*nfeet
         feet_linvels = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*fields*nfeet -> vec_size*nfeet
         feet_touching_ground = feet_liftoffs <= 0
         feet_sliding_linvel = feet_linvels*feet_touching_ground
         reward_slip = penalty_reward(feet_sliding_linvel, max_rew=1, exponent=2)
+
+        feet_touching_ground = feet_state[:,0] <= 0
+        reward_feet_on_ground = th.mean(feet_touching_ground.to(th.float32), dim=1)
 
         failed = (current_state_extrinsic_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
 
@@ -889,6 +916,7 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return["height"] = reward_height
         sub_rewards_return["pitchnroll"] = reward_pitchnroll
         sub_rewards_return["feet_air_time"] = reward_feet_air_time
+        sub_rewards_return["feet_on_ground"] = reward_feet_on_ground
         sub_rewards_return["heading"] = reward_heading
         sub_rewards_return["health"] = th.ones((current_state_locom_vec.size()[0],), device=current_state_locom_vec.device)
         sub_rewards_return["torque"] = reward_torque
@@ -931,6 +959,7 @@ class LocomotionVecEnv(RobotVecEnv):
                     "failure" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_FAILURE_WEIGHT],
                     "actacc" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_ACTACC_WEIGHT],
                     "feet_air_time" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_FEET_AIR_TIME_WEIGHT],
+                    "feet_on_ground" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_FEET_ON_GROUND_WEIGHT],
                     "velocity_refs" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_VELREF_WEIGHT],
                     "torque_refs" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TORQUEREF_WEIGHT],
                     "pos2posref_diff" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_POS2POSREF_WEIGHT],
@@ -960,12 +989,13 @@ class LocomotionVecEnv(RobotVecEnv):
         # ggLog.info(f"reward_torque = {reward_torque}, normtorques = {normtorques}")
         # ggLog.info(f"torques = {state[self.STATE_ROBOT][:,0,:,2]}")
         dbg_check_size(reward, (self._adapter.vec_size(),), f"Unexpected reward size")
-        dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(sub_rewards_return, -100, 100),
-                  lambda: f"{adarl.utils.tensor_trees.flatten_tensor_tree(map_tensor_tree(sub_rewards_return, lambda t: adarl.utils.tensor_trees.is_leaf_bounded(t,min=-100,max=100)))}",
-                  just_warn=True)
-        dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(reward, -100, 100),
-                  lambda: f"Reward over 100. sub_rewards = {map_tensor_tree(sub_rewards_return,lambda t: 'minmax='+str((th.min(t).cpu().item(), th.max(t).cpu().item())))}",
-                  just_warn=True)
+        dbg_check_finite(sub_rewards_return, async_assert=True, assert_msg="Nonfinite sub rewards detected")
+        # dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(sub_rewards_return, -100, 100),
+        #           lambda: f"{adarl.utils.tensor_trees.flatten_tensor_tree(map_tensor_tree(sub_rewards_return, lambda t: adarl.utils.tensor_trees.is_leaf_bounded(t,min=-100,max=100)))}",
+        #           just_warn=True)
+        # dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(reward, -100, 100),
+        #           lambda: f"Reward over 100. sub_rewards = {map_tensor_tree(sub_rewards_return,lambda t: 'minmax='+str((th.min(t).cpu().item(), th.max(t).cpu().item())))}",
+        #           just_warn=True)
         return reward
     
 
@@ -1026,20 +1056,28 @@ class LocomotionVecEnv(RobotVecEnv):
         masked_assign(self._stats["ep_avg_bodyspeed_vec"],starting_eps,body_speed_vec)
 
         # Fill the buffers for episodes that have just staretd
-        masked_assign(self._stats["vel_errs_vec"],        step_counts==0, vel_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
-        masked_assign(self._stats["height_errs_vec"],     step_counts==0, height_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
-        masked_assign(self._stats["pitchnroll_errs_vec"], step_counts==0, pitchnroll_err_vec.unsqueeze(1).expand(-1, self._buff_sizes))
-        masked_assign(self._stats["body_speeds_vec"],     step_counts==0, vel_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
+        masked_assign(self._stats["vel_errs_vec"],        starting_eps, vel_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
+        masked_assign(self._stats["height_errs_vec"],     starting_eps, height_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
+        masked_assign(self._stats["pitchnroll_errs_vec"], starting_eps, pitchnroll_err_vec.unsqueeze(1).expand(-1, self._buff_sizes))
+        masked_assign(self._stats["body_speeds_vec"],     starting_eps, vel_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
         # Update the buffers
         # idxs = step_counts%self._buff_sizes
-        idxs = step_counts%self._stats["vel_errs_vec"].size()[1]
-        # print(f"torch.is_grad_enabled()) = {th.is_grad_enabled()}")
-        # print(f"idx.size() = {idxs.size()}, idx = {idxs}")
-        # print(f"vel_error_vec.size() = {vel_error_vec.size()}, {vel_error_vec}")
-        self._stats["vel_errs_vec"].scatter_(       dim=1, index=idxs.view(self.num_envs,1), src=vel_error_vec.view(self.num_envs,1))
-        self._stats["height_errs_vec"].scatter_(    dim=1, index=idxs.view(self.num_envs,1), src=height_error_vec.view(self.num_envs,1))
-        self._stats["pitchnroll_errs_vec"].scatter_(dim=1, index=idxs.view(self.num_envs,1), src=pitchnroll_err_vec.view(self.num_envs,1))
-        self._stats["body_speeds_vec"].scatter_(    dim=1, index=idxs.view(self.num_envs,1), src=body_speed_vec.view(self.num_envs,1))
+        idx = self._th_tot_step_counter%self._stats["vel_errs_vec"].size()[1]
+        self._stats["vel_errs_vec"][:,idx]=         vel_error_vec.view(self.num_envs,)
+        self._stats["height_errs_vec"][:,idx]=      height_error_vec.view(self.num_envs,)
+        self._stats["pitchnroll_errs_vec"][:,idx]=  pitchnroll_err_vec.view(self.num_envs,)
+        self._stats["body_speeds_vec"][:,idx]=      body_speed_vec.view(self.num_envs,)
+        
+
+
+        # idxs = step_counts%self._stats["vel_errs_vec"].size()[1]
+        # # print(f"torch.is_grad_enabled()) = {th.is_grad_enabled()}")
+        # # print(f"idx.size() = {idxs.size()}, idx = {idxs}")
+        # # print(f"vel_error_vec.size() = {vel_error_vec.size()}, {vel_error_vec}")
+        # self._stats["vel_errs_vec"].scatter_(       dim=1, index=idxs.view(self.num_envs,1), src=vel_error_vec.view(self.num_envs,1))
+        # self._stats["height_errs_vec"].scatter_(    dim=1, index=idxs.view(self.num_envs,1), src=height_error_vec.view(self.num_envs,1))
+        # self._stats["pitchnroll_errs_vec"].scatter_(dim=1, index=idxs.view(self.num_envs,1), src=pitchnroll_err_vec.view(self.num_envs,1))
+        # self._stats["body_speeds_vec"].scatter_(    dim=1, index=idxs.view(self.num_envs,1), src=body_speed_vec.view(self.num_envs,1))
 
    
     @override
@@ -1105,7 +1143,7 @@ class LocomotionVecEnv(RobotVecEnv):
         goal_yaws = unnormalize(self._thrand(size=(self.num_envs,))*2-1,
                                     min=self._locomotion_conf.goal_abs_yaw_minmax[0],
                                     max=self._locomotion_conf.goal_abs_yaw_minmax[1])
-        goal_height = th.rand(size=(self.num_envs,), generator=self._rng, device=self._th_device)*(self._locomotion_conf.goal_height_minmax[1]-self._locomotion_conf.goal_height_minmax[0])+self._locomotion_conf.goal_height_minmax[0]
+        goal_height = self._thrand(size=(self.num_envs,))*(self._locomotion_conf.goal_height_minmax[1]-self._locomotion_conf.goal_height_minmax[0])+self._locomotion_conf.goal_height_minmax[0]
         goal_abs_linvel_vec_xys = th.stack([  th.cos(goal_yaws),
                                                 th.sin(goal_yaws),
                                                 goal_speeds],
@@ -1186,6 +1224,7 @@ class LocomotionVecEnv(RobotVecEnv):
                 "heading_rel2linvelgoal" : self._locomotion_episode_config.goal_heading_rel2linvelgoal_vec_yaw}
 
     @override
+    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune")
     def are_states_terminal(self, states) -> th.Tensor:
         r = super().are_states_terminal(states)
         return th.logical_and(r, states[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.CRASHED,0]).view((self.num_envs,))

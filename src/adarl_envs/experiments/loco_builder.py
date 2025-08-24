@@ -235,6 +235,7 @@ def loco_runner_builder(seed,
                             reward_energy_weight = env_builder_args.pop("reward_energy_weight"),
                             reward_failure_weight = env_builder_args.pop("reward_failure_weight"),
                             reward_feet_air_time_weight = env_builder_args.pop("reward_feet_air_time_weight"),
+                            reward_feet_on_ground_weight = env_builder_args.pop("reward_feet_on_ground_weight"),
                             reward_heading_weight = env_builder_args.pop("reward_heading_weight"),
                             reward_health_weight = env_builder_args.pop("reward_health_weight"),
                             reward_height_weight=env_builder_args.pop("reward_height_weight"),
@@ -314,40 +315,41 @@ def loco_venv_builder(  seed,
                         env_builder_args : dict,
                         num_envs : int,
                         runner_builder : VecEnvRunnerBuilderProtocol):
-    mode = env_builder_args["mode"].strip().lower()
-    quiet = env_builder_args["quiet"]
-    stepLength_sec = env_builder_args["stepLength_sec"]
+    with th.no_grad():
+        mode = env_builder_args["mode"].strip().lower()
+        quiet = env_builder_args["quiet"]
+        stepLength_sec = env_builder_args["stepLength_sec"]
 
-    if mode == "pybullet":
-        device = env_builder_args["th_device"]
-        def env_builder(seed : int,
-                        log_folder : str,
-                        is_eval : bool, 
-                        env_builder_args : dict):
-            return loco_env_builder(seed=seed, log_folder=log_folder,is_eval=is_eval,env_builder_args=env_builder_args,runner_builder=runner_builder)
-        env = build_vec_env(env_builder=env_builder,
-                            env_builder_args=env_builder_args,
-                            log_folder=log_folder,
-                            seed=seed,
-                            num_envs=num_envs,
-                            collector_device=device,
-                            env_action_device = device)
-    else:
-        vrunner = runner_builder( seed = seed,
-                                    run_folder = log_folder,
-                                    env_builder_args = env_builder_args,
-                                    num_envs = num_envs,
-                                    quiet=quiet)
-        env = GymVecRunnerWrapper(runner=vrunner, quiet=quiet)
-    
-    # if video_save_freq >0:
-    #     env = wrap_with_recorder(env,
-    #                              stepLength_sec=stepLength_sec,
-    #                              log_folder=log_folder,
-    #                              video_save_freq=video_save_freq)
-    env.reset(seed=seed)
-    # if len(env_builder_args)>0:
-    #     ggLog.warn(f"Unused env_builder_args: {env_builder_args}")
+        if mode == "pybullet":
+            device = env_builder_args["th_device"]
+            def env_builder(seed : int,
+                            log_folder : str,
+                            is_eval : bool, 
+                            env_builder_args : dict):
+                return loco_env_builder(seed=seed, log_folder=log_folder,is_eval=is_eval,env_builder_args=env_builder_args,runner_builder=runner_builder)
+            env = build_vec_env(env_builder=env_builder,
+                                env_builder_args=env_builder_args,
+                                log_folder=log_folder,
+                                seed=seed,
+                                num_envs=num_envs,
+                                collector_device=device,
+                                env_action_device = device)
+        else:
+            vrunner = runner_builder( seed = seed,
+                                        run_folder = log_folder,
+                                        env_builder_args = env_builder_args,
+                                        num_envs = num_envs,
+                                        quiet=quiet)
+            env = GymVecRunnerWrapper(runner=vrunner, quiet=quiet)
+        
+        # if video_save_freq >0:
+        #     env = wrap_with_recorder(env,
+        #                              stepLength_sec=stepLength_sec,
+        #                              log_folder=log_folder,
+        #                              video_save_freq=video_save_freq)
+        env.reset(seed=seed)
+        # if len(env_builder_args)>0:
+        #     ggLog.warn(f"Unused env_builder_args: {env_builder_args}")
     return env, 1/stepLength_sec
 
 

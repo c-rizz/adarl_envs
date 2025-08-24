@@ -1,4 +1,5 @@
 from __future__ import annotations
+from traceback import print_stack
 from adarl.adapters.BaseVecAdapter import JointType
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
@@ -649,7 +650,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._build_state_helper(adapter)
         ggLog.info(f"self._state_helper.observation_names() = {self._state_helper.observation_names()}")
         self._current_state = self._state_helper.reset_state()
-        ggLog.info(f"current_state = {self._current_state}")
+        # ggLog.info(f"current_state = {self._current_state}")
         self._last_obs = self._state_helper.observe(self._current_state)
         self._eps_start_stime = self._thzeros(size=(adapter.vec_size(),))
         self._safety_limits = self._state_helper.sub_helpers[self.STATE_ROBOT].build_robot_limits(
@@ -1062,7 +1063,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         map2_tensor_tree(self._current_state, resetted_state,
                         lambda l1, l2: masked_assign(l1, vec_mask, l2)) # should not be necessary, just for safety
         self._set_current_ep_config(reset_options = options, vec_mask=vec_mask)
-        self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.STEP_COUNT] = th.tensor(-1.) # all other fields will be overwritten accordingly in state_update
+        self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.STEP_COUNT] = self._thtens(-1.) # all other fields will be overwritten accordingly in state_update
         masked_assign(self._eps_start_stime, vec_mask, self._adapter.getEnvTimeFromStartup())
         self._last_obs = self._state_helper.observe(self._current_state)
         
@@ -1089,7 +1090,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._adapter.alter_model_sum(  com_position_diffs = (self._randomized_com_links_ids,
                                             (self._thrand(size=(self.num_envs, len(self._configuration.randomized_com_links),3))*(cmm[:,1]-cmm[:,0])+cmm[:,0])),
                                             com_quatxyzw_diffs = None)
-        self._update_state()
+        self._update_state(self._get_adapter_data())
         self._update_stats()
 
         # ggLog.info(f"initialzed")
@@ -1373,9 +1374,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._last_obs = self._state_helper.observe(state)
         if self._configuration.enable_dbg_checks:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
-                dbg_check_finite(state, just_warn=True)
-            dbg_check_finite(self._last_obs, async_assert=True)
-            dbg_check_bounded(self._last_obs, min=-100, max=100, just_warn=True)
+                dbg_check_finite(state, async_assert=True, assert_msg="Nonfinite state detected in RobotVecEnv")
+            dbg_check_finite(self._last_obs, async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
+            # dbg_check_bounded(self._last_obs, min=-100, max=100, just_warn=True)
         return self._last_obs
 
 
@@ -1430,121 +1431,153 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 self._apply_impulses(forcevector=forcevector, torque=torque, duration=duration, delays=delays, apply_impulse=apply_impulse)
 
     @override
-    @th.compile(mode="max-autotune-no-cudagraphs")
     def post_step(self):
+        adapter_data = self._get_adapter_data()
+        self._post_step_optimized(adapter_data)
+        self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # TODO: remove, this shouldn't be necessary, just here out of caution, unless it's needed for cudagraphs
+
+
+    @th.compile(mode="max-autotune")
+    def _post_step_optimized(self, adapter_data):
         # t0 = time.monotonic()
-        self._update_state()
+        self._update_state(adapter_data)
         # t1 = time.monotonic()
         self._update_stats()
         # tf = time.monotonic()
         # ggLog.info(f"update_state: {t1-t0} update_stats: {tf-t1}")
         # ggLog.info(f"on_step(): {self._current_state[self.STATE_ROBOT][0,0]}")
 
-    @th.compiler.disable(recursive=False)
-    def _get_new_instantaneous_state(self):
-        # ggLog.info(f"_stepCounter = {self._stepCounter}")
-        # t0 = time.monotonic()
+    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
+    def _compute_extr_from_bodystate(self, body_abs_linvel_xyz_vec, body_abs_angvel_xyz_vec, bstates_v_13):
+        conj_body_abs_quat_xyzw_vec = th_quat_conj(bstates_v_13[:,3:7])
+        vec_body_rel_gravity_dir = th_quat_rotate_py(self._abs_gravity_dir.expand_as(body_abs_linvel_xyz_vec), conj_body_abs_quat_xyzw_vec)
+        vec_body_rel_linvel_xyz = th_quat_rotate_py(body_abs_linvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
+        vec_body_rel_angvel_xyz = th_quat_rotate_py(body_abs_angvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
+        return vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz
+
+    @th.compiler.disable
+    def _get_adapter_data(self):
+        t0 = time.monotonic()
         if isinstance_noimport(self._adapter, "MjxAdapter"):
-            jstates_v_j_pveae = self._adapter.getExtendedJointsState(requestedJoints=self._controlled_joints_ids)
+            vec_jstates_j_pveae = self._adapter.getExtendedJointsState(requestedJoints=self._controlled_joints_ids)
         else:
             jstates_v_j_pve = self._adapter.getJointsState(requestedJoints=self._controlled_joints_ids)
-            jstates_v_j_pveae = th.cat([jstates_v_j_pve, th.zeros(jstates_v_j_pve.shape[:2]+(2,), dtype=jstates_v_j_pve.dtype, device=jstates_v_j_pve.device)], dim = -1)
+            vec_jstates_j_pveae = th.cat([jstates_v_j_pve, th.zeros(jstates_v_j_pve.shape[:2]+(2,), dtype=jstates_v_j_pve.dtype, device=jstates_v_j_pve.device)], dim = -1)
         # ggLog.info(f"jstates_v_j_pve = {jstates_v_j_pve}")
         # th.cuda.synchronize()
-        # t1 = time.monotonic()
-        bstates_v_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
+        t1 = time.monotonic()
+        if isinstance(self._adapter, BaseVecSimulationAdapter):
+            vec_bodystates_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
+            vec_body_rel_linacc_xyz = self._adapter.get_local_link_linear_acceleration(self._main_body_link_ids)[:,0,:]
+            vec_body_abs_linvel_xyz = None
+            vec_body_ground_dist = None
+            vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz = None, None, None
+            if self._configuration.enable_dbg_checks:
+                dbg_check(lambda: th.all(th.isfinite(vec_bodystates_13)),
+                        lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(vec_bodystates_13)).nonzero()}: {vec_bodystates_13[th.logical_not(th.isfinite(vec_bodystates_13))]} : {vec_bodystates_13}",
+                        just_warn=True,
+                        async_assert=True,
+                        assert_msg="non finite values in body link state")                
+        else:
+            vec_body_rel_gravity_dir = self._adapter.get_link_gravity_direction(self._main_body_link_ids)[:,0,:]
+            vec_body_rel_angvel_xyz = self._adapter.get_link_relative_angular_velocity(self._main_body_link_ids)[:,0,:]
+            example_vec_3d_tens = vec_jstates_j_pveae[:,0,:3]
+            vec_body_abs_linvel_xyz = th.zeros_like(example_vec_3d_tens)
+            vec_body_rel_linvel_xyz = th.zeros_like(example_vec_3d_tens)
+            vec_body_rel_linacc_xyz = th.zeros_like(example_vec_3d_tens)
+            vec_body_ground_dist    = th.zeros_like(example_vec_3d_tens[:,0])
         # ggLog.info(f"axes pose = {self._adapter.getLinksState(requestedLinks = self._adapter.get_links_ids([('axes','root')]), use_com_pose = False)[:,0,:]}")
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # th.cuda.synchronize()
-        # t2 = time.monotonic()
-        internal_state = self._current_state[self.STATE_INTERNAL][:,0]
+        t2 = time.monotonic()
         try:
             vec_stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
+            if self._configuration.enable_dbg_checks:
+                dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)),
+                        lambda: (f"non finite values in joint stats at indexes:\n{th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae)).nonzero()}\n"
+                                f"nonfinite values =\n{vec_stats_minmaxavgstd_j_pvae[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae))]}\n"
+                                f"all values =\n{vec_stats_minmaxavgstd_j_pvae}"),
+                        just_warn=True,
+                        async_assert=True,
+                        assert_msg="non finite values in joint stats")
+                if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
+                    def build_error_msg():
+                        bad_sim_id = th.logical_not(th.isfinite(vec_bodystates_13)).nonzero()[0,0].item()
+                        import jax.numpy as jnp
+                        return (f"diverging sim {bad_sim_id}:\n"
+                                f" model.geom_friction = {self._adapter._sim_state.mjx_model.geom_friction[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.geom_friction, axis=0)})\n"
+                                f" model.body_mass = {self._adapter._sim_state.mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.body_mass, axis=0)})"
+                                f" model.dof_frictionloss = {self._adapter._sim_state.mjx_model.dof_frictionloss[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.dof_frictionloss, axis=0)})"
+                                f" model.dof_armature = {self._adapter._sim_state.mjx_model.dof_armature[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.dof_armature, axis=0)})")
+                    dbg_check(lambda : th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)), th.all(th.isfinite(vec_bodystates_13))),
+                            build_error_msg, just_warn = True, async_assert=True, assert_msg="diverging sim")
         except NotImplementedError:
             vec_stats_minmaxavgstd_j_pvae = self._thfull(float("nan"), (self.num_envs,4,len(self._configuration.controlled_joints),4))
         # th.cuda.synchronize()
-        # t3 = time.monotonic()
+        t3 = time.monotonic()
         # ggLog.info(f"vec_stats_minmaxavgstd_j_pvae = {vec_stats_minmaxavgstd_j_pvae}")
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # ggLog.info(f"internal_states = {internal_states}")
         # ggLog.info(f"jstates_v_j_pve.device = {jstates_v_j_pve.device}")
         # ggLog.info(f"self._last_sent_v_j_pvesd.device = {self._last_sent_v_j_pvesd.device}")
-        vec_step_count = internal_state[:,self.INTERNAL_FIELDS.STEP_COUNT]
-        dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)),
-                  lambda: (f"non finite values in joint stats at indexes:\n{th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae)).nonzero()}\n"
-                           f"nonfinite values =\n{vec_stats_minmaxavgstd_j_pvae[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae))]}\n"
-                           f"all values =\n{vec_stats_minmaxavgstd_j_pvae}"
-                           f"nonfinite step counts ={vec_step_count.view((self.num_envs,))[th.logical_not(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae),dim=tuple(range(1,vec_stats_minmaxavgstd_j_pvae.dim()))))]}"),
-                  just_warn=True)
-        dbg_check(lambda: th.all(th.isfinite(bstates_v_13)),
-                  lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(bstates_v_13)).nonzero()}: {bstates_v_13[th.logical_not(th.isfinite(bstates_v_13))]} : {bstates_v_13}",
-                  just_warn=True)
-        if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
-            def build_error_msg():
-                bad_sim_id = th.logical_not(th.isfinite(bstates_v_13)).nonzero()[0,0].item()
-                import jax.numpy as jnp
-                return (f"diverging sim {bad_sim_id}:\n"
-                        f" model.geom_friction = {self._adapter._sim_state.mjx_model.geom_friction[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.geom_friction, axis=0)})\n"
-                        f" model.body_mass = {self._adapter._sim_state.mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.body_mass, axis=0)})"
-                        f" model.dof_frictionloss = {self._adapter._sim_state.mjx_model.dof_frictionloss[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.dof_frictionloss, axis=0)})"
-                        f" model.dof_armature = {self._adapter._sim_state.mjx_model.dof_armature[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.dof_armature, axis=0)})")
-            dbg_check(lambda : th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)), th.all(th.isfinite(bstates_v_13))),
-                      build_error_msg, just_warn = True)
+        vec_time_from_start = self._thtens(self._adapter.getEnvTimeFromStartup())
+        t3_1 = time.monotonic()
 
-        if isinstance(self._adapter, BaseVecSimulationAdapter):
-            body_abs_linvel_xyz_vec = bstates_v_13[:,7:10]
-            body_abs_angvel_xyz_vec = bstates_v_13[:,10:13]
-            conj_body_abs_quat_xyzw_vec = th_quat_conj(bstates_v_13[:,3:7])
-            vec_body_ground_dist = bstates_v_13[:,2]
-            vec_body_rel_gravity_dir = th_quat_rotate_py(self._abs_gravity_dir.expand_as(body_abs_linvel_xyz_vec), conj_body_abs_quat_xyzw_vec)
-            vec_body_rel_linvel_xyz = th_quat_rotate_py(body_abs_linvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
-            vec_body_rel_angvel_xyz = th_quat_rotate_py(body_abs_angvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
-            vec_body_rel_linacc_xyz = self._adapter.get_local_link_linear_acceleration(self._main_body_link_ids)[:,0,:]
-        else:
-            vec_body_rel_gravity_dir = self._adapter.get_link_gravity_direction(self._main_body_link_ids)[:,0,:]
-            body_abs_linvel_xyz_vec = th.zeros_like(vec_body_rel_gravity_dir)
-            vec_body_rel_linvel_xyz = th.zeros_like(vec_body_rel_gravity_dir)
-            vec_body_rel_linacc_xyz = th.zeros_like(vec_body_rel_gravity_dir)
-            vec_body_rel_angvel_xyz = self._adapter.get_link_relative_angular_velocity(self._main_body_link_ids)[:,0,:]
-            th.zeros_like(vec_body_rel_gravity_dir)
-            vec_body_ground_dist = th.zeros_like(vec_body_rel_gravity_dir[:,0])
-            # - vec_ground_dist can be obtained with some simple sensor, a depth camera, something like that
-            # - gravity_dir with an accelerometer
-            # - rel_angvel can be obtained from an IMU
-            # - rel_linvel may be obtainable with some slam kind of thing, even something quite simple that tracks local features
-            #     maybe something like these: 
-            #         https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam
-            #         https://wiki.ros.org/orb_slam2_ros
-            # raise NotImplementedError("")
-        # ggLog.info(f"vec_body_rel_angvel_xyz = {vec_body_rel_angvel_xyz.size()}")
+        # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} others={t3_1-t3:.6f} tot = {t3_1-t0:.6f}s")
+
+        return (vec_stats_minmaxavgstd_j_pvae,
+                vec_jstates_j_pveae,
+                self._last_sent_v_j_pvesd,
+                vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
+                vec_body_ground_dist,
+                vec_body_rel_gravity_dir,
+                vec_body_rel_linvel_xyz,
+                vec_body_rel_angvel_xyz,
+                vec_body_rel_linacc_xyz,
+                vec_time_from_start,
+                vec_bodystates_13)
+
+    def _get_new_instantaneous_state(self, adapter_data):        
         
-        robot_state = self._current_state[self.STATE_ROBOT]
+        (   vec_stats_minmaxavgstd_j_pvae,
+            vec_jstates_j_pveae,
+            self._last_sent_v_j_pvesd,
+            vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
+            vec_body_ground_dist,
+            vec_body_rel_gravity_dir,
+            vec_body_rel_linvel_xyz,
+            vec_body_rel_angvel_xyz,
+            vec_body_rel_linacc_xyz,
+            vec_time_from_start,
+            vec_bodystates_13) = adapter_data
+        
+        internal_state = self._current_state[self.STATE_INTERNAL][:,0]
+        vec_robot_state = self._current_state[self.STATE_ROBOT]
+        
         new_inst_state = self._build_new_instantaneous_state_vec(   
                                     vec_internal_state = internal_state,
                                     vec_stats_minmaxavgstd_j_pvae = vec_stats_minmaxavgstd_j_pvae,
-                                    vec_jstates_j_pveae = jstates_v_j_pveae,
+                                    vec_jstates_j_pveae = vec_jstates_j_pveae,
                                     vec_last_sent_j_pvesd = self._last_sent_v_j_pvesd,
-                                    vec_body_abs_linvel_xyz = body_abs_linvel_xyz_vec, # only used for visualization, can be wrong
+                                    vec_body_abs_linvel_xyz = vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
                                     vec_body_ground_dist = vec_body_ground_dist,
                                     vec_body_rel_gravity_dir = vec_body_rel_gravity_dir,
                                     vec_body_rel_linvel_xyz = vec_body_rel_linvel_xyz,
                                     vec_body_rel_angvel_xyz = vec_body_rel_angvel_xyz,
-                                    vec_robot_state = robot_state,
+                                    vec_robot_state = vec_robot_state,
                                     vec_body_rel_linacc_xyz = vec_body_rel_linacc_xyz,
-                                    vec_time_from_start=self._adapter.getEnvTimeFromStartup())
+                                    vec_time_from_start=vec_time_from_start,
+                                    bstates_v_13 = vec_bodystates_13)
         # ggLog.info(f"insta_state sizes = "+str(map_tensor_tree(new_inst_state,lambda t: t.size())))
         # th.cuda.synchronize()
-        # t4 = time.monotonic()
         # if not th.all(th.isfinite(new_inst_state[self.STATE_ROBOT_STATS])):
         #     ggLog.info(f"nonfinite vals in new_robot_stats_state = {new_inst_state[self.STATE_ROBOT_STATS]}")
-        dbg_check(lambda: th.all(new_inst_state[self.STATE_ROBOT][:,:,8:10]>=0), lambda: f"negative gains in new_robot_state") #type: ignore
+        # dbg_check(lambda: th.all(new_inst_state[self.STATE_ROBOT][:,:,8:10]>=0), lambda: f"negative gains in new_robot_state") #type: ignore
         # th.cuda.synchronize()
-        # t5 = time.monotonic()
-        # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} build={t4-t3:.6f} check={t5-t4:.6f} tot={t5-t0}")
         # ggLog.info(pprint.pformat(map_tensor_tree(new_inst_state, lambda t: t.size())))
         return new_inst_state
 
-    @th.compile(mode="max-autotune-no-cudagraphs")
+    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
     def _build_new_instantaneous_state_vec(self,    vec_internal_state : th.Tensor,
                                                     vec_stats_minmaxavgstd_j_pvae : th.Tensor,
                                                     vec_jstates_j_pveae : th.Tensor,
@@ -1556,9 +1589,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_body_rel_angvel_xyz : th.Tensor,
                                                     vec_robot_state : th.Tensor,
                                                     vec_body_rel_linacc_xyz : th.Tensor,
-                                                    vec_time_from_start : th.Tensor):
+                                                    vec_time_from_start : th.Tensor,
+                                                    bstates_v_13 : th.Tensor):
 
-
+        if isinstance(self._adapter, BaseVecSimulationAdapter):
+            vec_body_abs_linvel_xyz = bstates_v_13[:,7:10]
+            vec_body_ground_dist = bstates_v_13[:,2]            
+            vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz = self._compute_extr_from_bodystate(body_abs_linvel_xyz_vec = vec_body_abs_linvel_xyz,
+                                                                                                                           body_abs_angvel_xyz_vec = bstates_v_13[:,10:13],
+                                                                                                                           bstates_v_13 = bstates_v_13)
+        
         vec_step_count = vec_internal_state[:,self.INTERNAL_FIELDS.STEP_COUNT]
         vec_safety_state = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED].view((self.num_envs,))
         # vec_prev_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
@@ -1629,13 +1669,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     self.STATE_LAST_ACT_RAW : {self.ACT_FIELDS.ACTION : self._last_raw_actions}}
         
 
-    def _update_state(self):
+    def _update_state(self, adapter_data):
         # th.cuda.synchronize()
         # t0 = time.monotonic()
-        instantaneous_state : dict[str,dict[Any,th.Tensor]]= self._get_new_instantaneous_state()
+        instantaneous_state : dict[str,dict[Any,th.Tensor]]= self._get_new_instantaneous_state(adapter_data)
         # th.cuda.synchronize()
         # t01 = time.monotonic()
-        self._state_helper.check_size(instantaneous_state=instantaneous_state)
+        if not th.compiler.is_compiling():
+            self._state_helper.check_size(instantaneous_state=instantaneous_state)
         # dbg_run(lambda: self._state_helper.check_size(instantaneous_state=instantaneous_state))
         # sizes = map_tensor_tree(flatten_tensor_tree(instantaneous_state), lambda t: t.size())
         # # {k:v.size() for k,v in instantaneous_state.items()}
@@ -1644,7 +1685,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # t1 = time.monotonic()
         new_step_counts = instantaneous_state[self.STATE_INTERNAL][self.INTERNAL_FIELDS.STEP_COUNT][0] # all env have the same step count
         dbg_check(lambda: th.all(new_step_counts == new_step_counts[0]),
-                  lambda: "asynchronous terminations are not supported yet")
+                  lambda: "asynchronous terminations are not supported yet",
+                  async_assert=True,
+                  assert_msg="asynchronous terminations are not supported yet")
         new_step_count = new_step_counts[0]
         if new_step_count == 0: # cuda sync
             self._current_state = self._state_helper.reset_state(instantaneous_state) # fills up history with current instantaneous state
@@ -1653,11 +1696,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ss = {k:t.size() for k,t in self._current_state.items()}
         # ggLog.info(f"state sizes = {ss}")
         dbg_check(lambda: th.all(self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT] >= 0),
-                  lambda: f"Negative step_counts {self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT]}")
+                  lambda: f"Negative step_counts {self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT]}",
+                  async_assert=True,
+                  assert_msg="Negative step_counts detected in state")
         # map_tensor_tree(self._current_state, lambda t: t.detach().clone())
         # tf = time.monotonic()
         # print(f"newinst = {t01-t0}, check = {t1-t01}, map = {tf-t1}, tot = {tf-t0}")
-        self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # TODO: remove, this shouldn't be necessary, just here out of caution
 
 
 
@@ -1728,7 +1772,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         return i
     
     @override
-    @th.compile(mode="max-autotune-no-cudagraphs")
+    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune")
     def are_states_terminal(self, states) -> th.Tensor:
         if not self._configuration.stop_on_failure:
             return th.zeros_like(self._no_envs)
@@ -1738,7 +1782,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         return (states[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED,0] > 0).view((self.num_envs,))
     
     @override
-    @th.compile(mode="max-autotune-no-cudagraphs")
+    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune")
     def are_states_timedout(self, states) -> th.Tensor:
         sinternal = states[self.STATE_INTERNAL]
         # r = sinternal[:,0,self.INTERNAL_FIELDS.STEP_COUNT] >= self.get_max_episode_steps()
@@ -1779,7 +1823,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
 
         robot_state_norm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)
-        dbg_run(lambda: self._warn_out_of_bounds(robot_state_norm))
+        # dbg_run(lambda: self._warn_out_of_bounds(robot_state_norm))
         
         normposhomingdiff = robot_state_norm[:,0,:,0] - normhoming
         normvelocities =    robot_state_norm[:,0,:,1]

@@ -23,6 +23,8 @@ import traceback
 from adarl.utils.spaces import get_space_labels
 import pprint
 
+disable_compile = True
+
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     """A bell-shaped reward function. It's 1 at error = 0, it reaches about zero (~0.0183) at error = zero_rew_dist
@@ -301,6 +303,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         th_device : th.device,
                         use_contacts : bool,
                         verbose_infos : bool,
+                        max_good_step_duration : float,
+                        min_good_step_duration : float,
                         enable_limits_safety : bool = True,
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
                         enable_posref_safety : bool = True,
@@ -310,9 +314,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         impulse_probability_per_sec : float = 0.0,
                         just_health_reward : bool = False,
                         longterm_states_decimation_time : float = 0.0001,
-                        max_good_step_duration : float = 1.5,
                         merge_privileged : bool = False,
-                        min_good_step_duration : float = 0.1,
                         observe_full_robot_state : bool = False,
                         posref_safety_period = 0.001,
                         randomized_armature_joints : Sequence[tuple[str,str]] = [],
@@ -804,7 +806,7 @@ class LocomotionVecEnv(RobotVecEnv):
     
     @override
     # @th.compile(mode="max-autotune")
-    @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune")
+    @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune", disable=disable_compile)
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
         if self._configuration.just_health_reward:
@@ -1151,7 +1153,7 @@ class LocomotionVecEnv(RobotVecEnv):
         return goal_abs_linvel_vec_xys, goal_height
 
     @override
-    @th.compile(mode="max-autotune-no-cudagraphs")
+    @th.compile(mode="max-autotune-no-cudagraphs", disable=disable_compile)
     def pre_step(self):
         super().pre_step()
         if self._locomotion_conf.goal_resampling_enabled>0:

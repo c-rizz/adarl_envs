@@ -7,6 +7,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import torch as th
     from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams
     from adarl_envs.experiments.loco_builder import named_loco_venv_builder
+    import math
     
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
@@ -68,6 +69,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_armature_ratios" : 0.3,
         "randomized_com_links_minmax_xyz" : [((-0.2,-0.05,-0.05),(0.2,0.05,0.05))],
         "randomized_friction_slide_spin_roll_ratios" : (0.3,0.3,0.3),
+        "randomized_frictionloss_ratios" : 0.1,
         "randomized_gains_damping_ratio_epstd" : 0.1,
         "randomized_gains_stiffness_ratio_epstd" : 0.1,
         "randomized_mass_ratios" : 0.3,

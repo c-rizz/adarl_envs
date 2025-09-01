@@ -35,6 +35,8 @@ import pprint
 import adarl.utils.mp_helper
 import scipy.stats
 
+disable_compile = True
+
 def hash_tensor(tensor):
     return hash(tuple(tensor.reshape(-1).tolist()))
 
@@ -625,8 +627,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
                                                     vec_init_on_reset = th.ones(size=(adapter.vec_size(),), dtype=th.bool).to(device=th_device, non_blocking=th_device.type=="cuda"),
                                                     vec_max_ep_steps = th.full(fill_value=maxStepsPerEpisode, size=(adapter.vec_size(),), dtype=th.int64).to(device=th_device, non_blocking=th_device.type=="cuda"),
-                                                    randomized_damping_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.all_controlled_joints)).clone(),
-                                                    randomized_stiffness_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.all_controlled_joints)).clone())
+                                                    randomized_damping_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.controlled_joints)).clone(),
+                                                    randomized_stiffness_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.controlled_joints)).clone())
         self._previous_pose_randomization : th.Tensor | None = None
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
         self._always_present_collisions : set[tuple[str,str]] = set()
@@ -1147,8 +1149,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         else:
             vec_init_on_reset = th.ones((selected_vecs_num,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
         # ggLog.info(f"initial_jpose = {initial_joint_pose}, homing = {homing}")
-        ctrl_joints_num = len(self._configuration.all_controlled_joints)
         masked_assign(self._current_episode_config.vec_initial_ctrl_joint_pose, vec_mask, initial_ctrl_jposes)
+        ctrl_joints_num = len(self._configuration.controlled_joints)
         damping_ratios = self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.randomized_gains_damping_ratio_epstd+1
         masked_assign(self._current_episode_config.randomized_damping_factor, vec_mask, damping_ratios)
         stiffness_ratios = self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.randomized_gains_stiffness_ratio_epstd+1
@@ -1446,7 +1448,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # TODO: remove, this shouldn't be necessary, just here out of caution, unless it's needed for cudagraphs
 
 
-    # @th.compile(mode="max-autotune")
+    @th.compile(mode="max-autotune", disable=disable_compile)
     def _post_step_optimized(self, adapter_data):
         # t0 = time.monotonic()
         self._update_state(adapter_data)

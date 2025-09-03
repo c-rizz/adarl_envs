@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from gymnasium import Space
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any, Callable
+from matplotlib.pyplot import thetagrids
 from typing_extensions import override
 import adarl.utils.dbg.ggLog as ggLog
 import adarl.utils.tensor_trees
@@ -32,11 +33,16 @@ from pathlib import Path
 from adarl.utils.spaces import get_space_labels
 import pprint
 import adarl.utils.mp_helper
+import scipy.stats
 
 disable_compile = True
 
 def hash_tensor(tensor):
     return hash(tuple(tensor.reshape(-1).tolist()))
+
+
+DistributionDef = tuple[str,tuple[th.Tensor|float|list[float], th.Tensor|float|list[float]] | tuple[th.Tensor|float|list[float], th.Tensor|float|list[float], th.Tensor|float|list[float]]]       
+DistributionDefTh = tuple[str,tuple[th.Tensor, th.Tensor] | tuple[th.Tensor, th.Tensor, th.Tensor]]       
 
 JOINT_FILTERS = Enum("JOINT_FILTERS",["ALL_REVOLUTE",
                                          "ALL"])
@@ -121,8 +127,10 @@ def find_pose_np(  root_joint : str,
     samples = 1000
     jp_dict = noncontrolled_jointpos
     rng = np.random.default_rng(seed=rng_seed)
+    truncnorm = scipy.stats.truncnorm(-1, 1, loc=0, scale=1/3)
     for i in range(samples):
-        norm_jpos = (rng.random(size=(len(controlled_joints),), dtype=np.float32)*2-1)*initial_pose_randomization_range
+        norm_jpos = truncnorm.rvs(size=(len(controlled_joints),), random_state=rng).astype(np.float32)*initial_pose_randomization_range
+        # norm_jpos = (rng.random(size=(len(controlled_joints),), dtype=np.float32)*2-1)*initial_pose_randomization_range
         # initial_joint_pose = unnormalize(((npos)),limits_minmax[0],limits_minmax[1])                
         initial_joint_pose = ((norm_jpos>=0)*((limits_minmax[1]-homing_pos)*norm_jpos + homing_pos) + 
                                 (norm_jpos< 0)*((homing_pos-limits_minmax[0])*norm_jpos + homing_pos))
@@ -273,8 +281,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         randomized_frictionloss_ratios : th.Tensor
         randomized_com_links : tuple[tuple[str,str], ...]
         """Center of mass randomization, randomized links"""
-        randomized_com_minmax_xyz : th.Tensor
-        """Center of mass randomization ranges. Shape (randomized_com_links,2,3), i.e. for each link in randomized_com_links, min and max xyz tuples"""
+        randomized_com_xyz_diff_distribution : DistributionDefTh
+        """Center of mass randomization ranges. The position is randomized by summing to it a 3-vector sampled from this distribution"""
         randomized_friction_links : tuple[tuple[str,str],...]
         """Friction randomization, randomized links"""
         randomized_friction_slide_spin_roll_ratios : th.Tensor
@@ -285,8 +293,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         """Randomization applied to joint stiffness, standard deviation for gaussian sampling, applied at each episode start"""
         randomized_mass_links : tuple[tuple[str,str],...]
         """Mass randomization, randomized links"""
-        randomized_mass_ratios : th.Tensor
-        """Mass randomization ratio for each link in randomized_mass_links"""
+        randomized_mass_ratio_distribution : DistributionDefTh
+        """Mass randomization ratio for each link in randomized_mass_links. The mass is randomized by multiplying by a factor sampled from this distribution"""
         real : bool
         recycle_pose_randomization : bool
         reward_penalties_max : th.Tensor
@@ -429,13 +437,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         randomized_frictionloss_joints : Sequence[tuple[str,str]] = [],
                         randomized_frictionloss_ratios : float = 0.0,
                         randomized_com_links : list[tuple[str,str]] = [],
-                        randomized_com_links_minmax_xyz : th.Tensor | list[tuple[tuple[float,float,float],tuple[float,float,float]]] = [],
+                        randomized_com_xyz_diff_distribution : DistributionDef = ("uniform", ([-0.01,-0.01,-0.01],[0.01, 0.01,0.01])),
                         randomized_friction_links : list[tuple[str,str]] = [],
                         randomized_friction_slide_spin_roll_ratios : tuple[float, float, float] = (0.1,0.1,0.1),
                         randomized_gains_damping_ratio_epstd : float = 0.0,
                         randomized_gains_stiffness_ratio_epstd : float = 0.0,
                         randomized_mass_links : list[tuple[str,str]] = [],
-                        randomized_mass_ratios : float = 0.1,
+                        randomized_mass_ratios_distr : DistributionDef = ("normal", (0.0, 0.05)),
                         recycle_pose_randomization : bool = False,
                         saturate_jimp_ref_limits : bool = True,
                         ui_camera_resolution_hw : tuple[int,int] = (144,256)
@@ -584,13 +592,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     randomized_frictionloss_joints = None, # Will fill up later
                                                     randomized_frictionloss_ratios = None, # Will fill up later
                                                     randomized_com_links=None, #Will fill up later
-                                                    randomized_com_minmax_xyz = None, #Will fill up later
+                                                    randomized_com_xyz_diff_distribution = None, #Will fill up later
                                                     randomized_friction_links=None, # Will fill up later
                                                     randomized_friction_slide_spin_roll_ratios = None, # Will fill up later
                                                     randomized_gains_damping_ratio_epstd=self._thtens(randomized_gains_damping_ratio_epstd),
                                                     randomized_gains_stiffness_ratio_epstd=self._thtens(randomized_gains_stiffness_ratio_epstd),
                                                     randomized_mass_links=None, # Will fill up later
-                                                    randomized_mass_ratios = None, # Will fill up later
+                                                    randomized_mass_ratio_distribution = None, # Will fill up later
                                                     real = False,
                                                     recycle_pose_randomization = recycle_pose_randomization,
                                                     reward_penalties_max = self._thtens(100.0),
@@ -685,11 +693,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # Randomizations
         randomized_mass_links = self._expand_link_filters(randomized_mass_links)
         self._configuration.randomized_mass_links = tuple(randomized_mass_links)
-        self._configuration.randomized_mass_ratios = self._thtens(randomized_mass_ratios).expand((len(randomized_mass_links),))
+        self._configuration.randomized_mass_ratio_distribution = self.distr_to_tensor(randomized_mass_ratios_distr, size=(len(randomized_mass_links),))
         self._randomized_mass_link_ids = self._adapter.get_links_ids(self._configuration.randomized_mass_links)
         randomized_com_links = self._expand_link_filters(randomized_com_links)
         self._configuration.randomized_com_links = tuple(randomized_com_links)
-        self._configuration.randomized_com_minmax_xyz = self._thtens(randomized_com_links_minmax_xyz).expand((len(randomized_com_links),2,3))
+        self._configuration.randomized_com_xyz_diff_distribution = self.distr_to_tensor(randomized_com_xyz_diff_distribution,
+                                                                                        size=(len(randomized_com_links), 3))
         self._randomized_com_links_ids = self._adapter.get_links_ids(self._configuration.randomized_com_links)
         randomized_friction_links = self._expand_link_filters(randomized_friction_links)        
         self._configuration.randomized_friction_links = tuple(randomized_friction_links)
@@ -1079,18 +1088,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
 
         if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
-            # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")
+            # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")            
             self._adapter.alter_model_rel(  link_masses = ( self._randomized_mass_link_ids,
-                                                            (self._thrand(size=(self.num_envs, len(self._configuration.randomized_mass_ratios)))*2-1)*self._configuration.randomized_mass_ratios),
+                                                            self._sample_distr((self.num_envs, len(self._configuration.randomized_mass_links)), self._configuration.randomized_mass_ratio_distribution)),
                                             link_frictions = (self._randomized_friction_links_ids,
                                                               (self._thrand(size=(self.num_envs,)+self._configuration.randomized_friction_slide_spin_roll_ratios.size())*2-1)*self._configuration.randomized_friction_slide_spin_roll_ratios),
                                             joint_armature_ratios = ( self._randomized_armature_joints_ids,
                                                             (self._thrand(size=(self.num_envs, len(self._configuration.randomized_armature_ratios)))*2-1)*self._configuration.randomized_armature_ratios),
                                             joint_frictionloss_ratios = ( self._randomized_frictionloss_joints_ids,
                                                             (self._thrand(size=(self.num_envs, len(self._configuration.randomized_frictionloss_ratios)))*2-1)*self._configuration.randomized_frictionloss_ratios))
-            cmm = self._configuration.randomized_com_minmax_xyz
             self._adapter.alter_model_sum(  com_position_diffs = (self._randomized_com_links_ids,
-                                            (self._thrand(size=(self.num_envs, len(self._configuration.randomized_com_links),3))*(cmm[:,1]-cmm[:,0])+cmm[:,0])),
+                                                                  self._sample_distr(size=(self.num_envs, len(self._configuration.randomized_com_links),3),
+                                                                                     type_and_params=self._configuration.randomized_com_xyz_diff_distribution),),
                                             com_quatxyzw_diffs = None)
         self._update_state(self._get_adapter_data())
         self._update_stats()
@@ -1738,7 +1747,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         prev_actdiff        = th.flatten((act_raw_state[:,1] - act_raw_state[:,2])/2, start_dim=1)
         i["act_diff"] = actdiff
         i["joint_avg_act_diff"] = actdiff.abs().mean(dim=-1)
-        i["act_acc"] = actdiff - prev_actdiff
+        i["act_acc"] = (actdiff - prev_actdiff)/2
         i["joint_avg_act_acc"] = i["act_acc"].abs().mean(dim=-1)
         if labels is not None:
             if not hasattr(self, "_joint_names_th"): self._joint_names_th = to_string_tensor([jn[1] for jn in self._configuration.controlled_joints])
@@ -1851,3 +1860,23 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         reward = th.sum(th.stack([sub_rewards_return[k]*weights[k] for k in sub_rewards_return]), dim=0)
         return reward
+
+    def _sample_distr(self, size, type_and_params : tuple[str, tuple[th.Tensor,th.Tensor] | tuple[th.Tensor,th.Tensor,th.Tensor]]):
+        if type_and_params[0] == "uniform":
+            low, high = type_and_params[1] #type: ignore
+            return self._thrand(size)*(high-low)+low
+        elif type_and_params[0] == "normal":
+            if len(type_and_params[1]) == 2:
+                mean, std = type_and_params[1]
+                clamp_width = self._thtens(5.0)
+            else:
+                mean, std, clamp_width = type_and_params[1] #type: ignore
+            return th.clamp(self._thrandn(size), -clamp_width, clamp_width)*std+mean
+        
+    def distr_to_tensor(self, distr : DistributionDefTh, size : tuple[int,...] | None = None) -> DistributionDefTh:
+        distr_type = distr[0]
+        if size is not None:
+            distr_params = tuple(self._thtens(t).expand(size) for t in distr[1])
+        else:
+            distr_params = tuple(self._thtens(t) for t in distr[1])            
+        return distr_type, distr_params

@@ -116,7 +116,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder = build_adarl_envs_env.env_builder,
                 env_builder_args = env_builder_args,
                 eval_configurations = eval_confs,
-                hyperparams = SAC_init_hparams(  device = "cuda",
+                hyperparams = SAC_init_hparams(  model_th_device = "cuda",
                                                 q_network_arch=[256,128],
                                                 q_lr=0.001,
                                                 policy_lr=0.0005,

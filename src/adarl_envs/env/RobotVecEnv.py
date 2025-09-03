@@ -35,7 +35,7 @@ import pprint
 import adarl.utils.mp_helper
 import scipy.stats
 
-disable_compile = True
+disable_compile = False
 
 def hash_tensor(tensor):
     return hash(tuple(tensor.reshape(-1).tolist()))

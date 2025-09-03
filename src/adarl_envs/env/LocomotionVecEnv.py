@@ -23,7 +23,7 @@ import traceback
 from adarl.utils.spaces import get_space_labels
 import pprint
 
-disable_compile = True
+disable_compile = False
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -1137,6 +1137,10 @@ class LocomotionVecEnv(RobotVecEnv):
         i["avg10_pitchnroll_errs_vec"] = th.mean(self._stats["pitchnroll_errs_vec"], dim = 1).view(self.num_envs)
         i["avg10_body_speeds_vec"] = th.mean(self._stats["body_speeds_vec"], dim = 1).view(self.num_envs)
         i["success_vec"] = i["avg10_vel_errs_vec"] < 0.05
+        state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
+        i["joint_pos_safenorm"] = state_robot_safenorm[:,0,:,0]
+
+
 
         if self._configuration.verbose_infos:
             statenorm = self._state_helper.normalize(state)

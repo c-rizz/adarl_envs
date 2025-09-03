@@ -14,7 +14,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 1024
+        train_envs = 512
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -79,7 +79,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "record_video" : True,
         "recycle_pose_randomization" : True,
         "reward_acceleration_weight" :      0.0,
-        "reward_actacc_weight" :            40.0,
+        "reward_actacc_weight" :            100.0,
         "reward_actdiff_weight" :           0.1,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
@@ -91,7 +91,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_height_weight" :            4.0,
         "reward_pitchnroll_weight" :        1.0,
         "reward_pos2posref_weight" :        0.0,       
-        "reward_position_limit_weight" :    0.0,
+        "reward_position_limit_weight" :    0.1,
         "reward_position_weight" :          0.0,
         "reward_slip_weight" :              2.0,
         "reward_torque_limit_weight" :      0.0,
@@ -218,14 +218,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_init_hparams(  device = "cuda",
-                                                    q_network_arch=[1024,512,256],
+                                                    q_network_arch=[2048,512,256],
                                                     q_lr=0.0005,
                                                     policy_lr=0.0001,
                                                     policy_arch=[512,256],
                                                     gamma=0.99,
                                                     target_tau = 0.001,
-                                                    batch_size=8192,
-                                                    buffer_size=5_000_000,
+                                                    batch_size=4096,
+                                                    buffer_size=6_000_000,
                                                     total_steps=1_000_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=20,

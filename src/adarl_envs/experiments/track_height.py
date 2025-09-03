@@ -225,7 +225,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     gamma=0.99,
                                                     target_tau = 0.001,
                                                     batch_size=4096,
-                                                    buffer_size=6_000_000,
+                                                    buffer_size=7_000_000,
                                                     total_steps=1_000_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=20,

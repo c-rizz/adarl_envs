@@ -103,7 +103,11 @@ def planar_tracking_error_vec(body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_v
         return th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_vec_xyz, dim = 1)
 
 
-
+def set_column(t : th.Tensor, idx :th.Tensor, value : th.Tensor) -> th.Tensor:
+    """ Set a column of a 2D tensor. Equivalent to t[:, idx] = value, but more suited to th.compile.
+    """
+    t.T.index_put_([idx], value)
+    return t
 
 
 
@@ -1077,12 +1081,16 @@ class LocomotionVecEnv(RobotVecEnv):
         masked_assign(self._stats["body_speeds_vec"],     starting_eps, vel_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
         # Update the buffers
         # idxs = step_counts%self._buff_sizes
-        idx = self._th_tot_step_counter%self._stats["vel_errs_vec"].size()[1]
-        self._stats["vel_errs_vec"][:,idx]=         vel_error_vec.view(self.num_envs,)
-        self._stats["height_errs_vec"][:,idx]=      height_error_vec.view(self.num_envs,)
-        self._stats["pitchnroll_errs_vec"][:,idx]=  pitchnroll_err_vec.view(self.num_envs,)
-        self._stats["body_speeds_vec"][:,idx]=      body_speed_vec.view(self.num_envs,)
-        
+        idx : th.Tensor = self._th_tot_step_counter.view(tuple())%self._stats["vel_errs_vec"].size()[1]
+        set_column(self._stats["vel_errs_vec"], idx, vel_error_vec.view(self.num_envs,))
+        set_column(self._stats["height_errs_vec"], idx, height_error_vec.view(self.num_envs,))
+        set_column(self._stats["pitchnroll_errs_vec"], idx, pitchnroll_err_vec.view(self.num_envs,))
+        set_column(self._stats["body_speeds_vec"], idx, body_speed_vec.view(self.num_envs,))
+
+        # self._stats["vel_errs_vec"][:,idx]=         vel_error_vec.view(self.num_envs,)
+        # self._stats["height_errs_vec"][:,idx]=      height_error_vec.view(self.num_envs,)
+        # self._stats["pitchnroll_errs_vec"][:,idx]=  pitchnroll_err_vec.view(self.num_envs,)
+        # self._stats["body_speeds_vec"][:,idx]=      body_speed_vec.view(self.num_envs,)
 
 
         # idxs = step_counts%self._stats["vel_errs_vec"].size()[1]

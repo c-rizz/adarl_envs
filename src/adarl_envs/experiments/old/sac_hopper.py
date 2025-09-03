@@ -121,7 +121,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                         #  eval_conf_video_feasible,
                                         #  eval_conf_video_jump_feasible
                                          ],
-                hyperparams = SAC_init_hparams(  device = "cuda",
+                hyperparams = SAC_init_hparams(  model_th_device = "cuda",
                                                 q_network_arch=[256,128],
                                                 q_lr=0.001,
                                                 policy_lr=0.0001,

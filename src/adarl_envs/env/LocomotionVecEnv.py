@@ -699,7 +699,7 @@ class LocomotionVecEnv(RobotVecEnv):
         heading_error_vec = (1-quat_mul_xyzw(th_quat_conj(rel_goal_heading_quat), rel_curr_heading_quat)[:,3]).view(vsize,1)
         
         # compute height error
-        height_err_vec = th.abs(new_extrinsic_state[self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - smoothed_goal_height)
+        height_err_vec = new_extrinsic_state[self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - smoothed_goal_height
 
         # compute pitch and roll error
         pitchnroll_err_vec = th.linalg.norm(gravity_rel_vec_xyz-self._locomotion_episode_config.goal_abs_gravity_vec_xyz, dim = 1, keepdim=True) # Would be nice to use geodesic distance or somethinglike that
@@ -818,7 +818,19 @@ class LocomotionVecEnv(RobotVecEnv):
         new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
         new_inst_state[self.STATE_FEET] = new_feet_state
         return new_inst_state
-    
+
+    def _height_reward(self, curr_state_extr_vec, current_state_locom_vec, current_state_internal, prev_state_extr_vec):
+        max_height_speed = 1.0
+        height_err = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]-current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
+        last_dt = current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT]
+        goal_height_velocity = th.clamp(-height_err*2, min=-max_height_speed, max=max_height_speed) 
+        z_velocity = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - prev_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z])/last_dt
+        reward_height = bell_reward(z_velocity-goal_height_velocity, zero_rew_dist=goal_height_velocity/2 + 0.05)
+        reward_height = double_bell_reward(z_velocity-goal_height_velocity,
+                                           bell_width_a=self._thtens(0.05),
+                                           bell_width_b=goal_height_velocity,
+                                           bell_b_weight=self._thtens(0.5))
+        return reward_height, z_velocity, goal_height_velocity, last_dt, height_err
     
     @override
     # @th.compile(mode="max-autotune")
@@ -879,13 +891,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_pos2posref_diff  = penalty_reward(norm_pos2posref_diff, max_rew=max_rew,exponent=2)
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
         #                                     zero_rew_dist=self._thtens(0.02))
-        max_height_speed = 1.0
-        height_err = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]-current_state_locom_vec[:,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT]
-        last_dt = current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT]
-        goal_height_velocity = th.clamp(-height_err*2, min=-max_height_speed, max=max_height_speed) 
-        z_velocity = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - prev_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z])/last_dt
-        reward_height = bell_reward(z_velocity-goal_height_velocity, zero_rew_dist=goal_height_velocity/2 + 0.01)
-        
+        reward_height, _, _, _, _ = self._height_reward(curr_state_extr_vec, current_state_locom_vec, current_state_internal, prev_state_extr_vec)
         # reward_height = double_bell_reward( error=height_err,
         #                                     bell_width_a=self._locomotion_conf.height_reward_settle_point,
         #                                     bell_width_b=self._locomotion_conf.height_reward_2_settle_point,
@@ -1134,8 +1140,6 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z)) #type: ignore
         goal_dir = curr_locom_state[:,goal_vel_rel_dir_xyz_idx].view(self.num_envs,3)
         goal_speed = curr_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED].view(self.num_envs,1)
-        height_err = curr_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]-curr_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT]
-        i["height_err_raw"] = height_err
         i["goal_rel_xyz_vec"] = goal_dir*goal_speed
         i["goal_height"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
         i["height"] = curr_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]
@@ -1159,12 +1163,11 @@ class LocomotionVecEnv(RobotVecEnv):
         i["success_vec"] = i["avg10_vel_errs_vec"] < 0.05
         state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
         i["joint_pos_safenorm"] = state_robot_safenorm[:,0,:,0]
-        max_height_speed = 0.25
-        last_dt = curr_inter_state[:,self.INTERNAL_FIELDS.LAST_STEP_DT]
-        goal_height_velocity = th.clamp(-height_err*0.5, min=-max_height_speed, max=max_height_speed) 
-        z_velocity = (curr_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - prev_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z])/last_dt
-        i["height_velocity"] = z_velocity
-        i["goal_height_velocity"] = goal_height_velocity
+        
+        _, i["height_velocity"], i["goal_height_velocity"], last_dt, i["height_err_raw"] = self._height_reward(curr_state_extr_vec = curr_extri_state,
+                                                                                                       current_state_locom_vec = curr_locom_state,
+                                                                                                       current_state_internal = curr_inter_state,
+                                                                                                       prev_state_extr_vec = prev_extri_state)
 
 
         if self._configuration.verbose_infos:

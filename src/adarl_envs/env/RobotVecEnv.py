@@ -1448,7 +1448,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # TODO: remove, this shouldn't be necessary, just here out of caution, unless it's needed for cudagraphs
 
 
-    @th.compile(mode="max-autotune", disable=disable_compile)
+    # @th.compile(mode="max-autotune", disable=disable_compile)
     def _post_step_optimized(self, adapter_data):
         # t0 = time.monotonic()
         self._update_state(adapter_data)

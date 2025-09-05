@@ -18,7 +18,7 @@ from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run, dbg_c
 from dataclasses import dataclass
 from gymnasium import Space
 from enum import Enum, IntEnum
-from typing import Sequence, Literal, TypedDict, Any, Callable
+from typing import Sequence, Literal, TypedDict, Any, Callable, Union, List, Tuple
 from matplotlib.pyplot import thetagrids
 from typing_extensions import override
 import adarl.utils.dbg.ggLog as ggLog
@@ -40,9 +40,9 @@ disable_compile = False
 def hash_tensor(tensor):
     return hash(tuple(tensor.reshape(-1).tolist()))
 
-
-DistributionDef = tuple[str,tuple[th.Tensor|float|list[float], th.Tensor|float|list[float]] | tuple[th.Tensor|float|list[float], th.Tensor|float|list[float], th.Tensor|float|list[float]]]       
-DistributionDefTh = tuple[str,tuple[th.Tensor, th.Tensor] | tuple[th.Tensor, th.Tensor, th.Tensor]]       
+TensorLike = Union[th.Tensor, float, List[float]]
+DistributionDef = Union[Tuple[str,Tuple[TensorLike, TensorLike], Tuple[TensorLike, TensorLike, TensorLike]]]
+DistributionDefTh = Union[Tuple[str,Tuple[th.Tensor, th.Tensor], Tuple[th.Tensor, th.Tensor, th.Tensor]]]
 
 JOINT_FILTERS = Enum("JOINT_FILTERS",["ALL_REVOLUTE",
                                          "ALL"])
@@ -1490,6 +1490,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         async_assert=True,
                         assert_msg="non finite values in body link state")                
         else:
+            vec_bodystates_13 = None
             vec_body_rel_gravity_dir = self._adapter.get_link_gravity_direction(self._main_body_link_ids)[:,0,:]
             vec_body_rel_angvel_xyz = self._adapter.get_link_relative_angular_velocity(self._main_body_link_ids)[:,0,:]
             example_vec_3d_tens = vec_jstates_j_pveae[:,0,:3]

@@ -157,7 +157,8 @@ def loco_runner_builder(seed,
                                             opt_preset={"centauro":"fastest",
                                                         "kyon":"fastest",
                                                         "quad":"fastest"}.get(robot_model, "faster"),
-                                            opt_override=opt_override)
+                                            opt_override=opt_override,
+                                            reference_filter_cutoff_frequency=20.0)
     else:
         print(f"Requested unknown adapter '{mode}'")
         exit(0)
@@ -547,8 +548,8 @@ def get_centauro_args():
             "randomized_friction_links" : [LINK_FILTERS.ALL],
             "randomized_com_links" : [("centauro","pelvis")],
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
-            "safety_limits_ratios_minmax_pve" : {k:[[ 0.6, 0.9, 0.9],
-                                                    [ 0.6, 0.9, 0.9]] for k,v in homing.items()},
+            "safety_limits_ratios_minmax_pve" : {k:[[ 0.3, 0.9, 0.9],
+                                                    [ 0.3, 0.9, 0.9]] for k,v in homing.items()},
             "safe_limits_position_offset" : homing,
             "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_2'),[('ground','ground_link')]),

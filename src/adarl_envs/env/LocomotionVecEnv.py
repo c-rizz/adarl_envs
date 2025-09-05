@@ -23,7 +23,7 @@ import traceback
 from adarl.utils.spaces import get_space_labels
 import pprint
 
-disable_compile = True
+disable_compile = False
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -103,7 +103,11 @@ def planar_tracking_error_vec(body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_v
         return th.linalg.norm(body_planar_rel_linvel_xyz-goal_rel_linvel_vec_xyz, dim = 1)
 
 
-
+def set_column(t : th.Tensor, idx :th.Tensor, value : th.Tensor) -> th.Tensor:
+    """ Set a column of a 2D tensor. Equivalent to t[:, idx] = value, but more suited to th.compile.
+    """
+    t.T.index_put_([idx], value)
+    return t
 
 
 
@@ -828,7 +832,9 @@ class LocomotionVecEnv(RobotVecEnv):
 
         max_rew = self._configuration.reward_penalties_max
         current_state_locom_vec = state[self.STATE_LOCOMOTION][:, 0,:,0]
-        current_state_extrinsic_vec = state[self.STATE_EXTRINSIC][:, 0,:,0]
+        curr_state_extr_vec = state[self.STATE_EXTRINSIC][:, 0,:,0]
+        prev_state_extr_vec = state[self.STATE_EXTRINSIC][:, 1,:,0]
+        current_state_internal = state[self.STATE_INTERNAL][:, 0,:,0]
         state_action_raw_vec = state[self.STATE_ACT_RAW_HIST]
         state_stats = state[self.STATE_JOINT_STEP_STATS]
 
@@ -873,11 +879,17 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_pos2posref_diff  = penalty_reward(norm_pos2posref_diff, max_rew=max_rew,exponent=2)
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
         #                                     zero_rew_dist=self._thtens(0.02))
-        height_err = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR]
-        reward_height = double_bell_reward( error=height_err,
-                                            bell_width_a=self._locomotion_conf.height_reward_settle_point,
-                                            bell_width_b=self._locomotion_conf.height_reward_2_settle_point,
-                                            bell_b_weight=self._locomotion_conf.height_reward_2_weight)
+        max_height_speed = 1.0
+        height_err = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]-current_state_locom_vec[:,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT]
+        last_dt = current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT]
+        goal_height_velocity = th.clamp(-height_err*2, min=-max_height_speed, max=max_height_speed) 
+        z_velocity = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - prev_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z])/last_dt
+        reward_height = bell_reward(z_velocity-goal_height_velocity, zero_rew_dist=goal_height_velocity/2 + 0.01)
+        
+        # reward_height = double_bell_reward( error=height_err,
+        #                                     bell_width_a=self._locomotion_conf.height_reward_settle_point,
+        #                                     bell_width_b=self._locomotion_conf.height_reward_2_settle_point,
+        #                                     bell_b_weight=self._locomotion_conf.height_reward_2_weight)
         reward_pitchnroll   = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR],
                                             zero_rew_dist=self._locomotion_conf.pitchnroll_reward_settle_point)
         reward_heading      = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR],
@@ -921,7 +933,7 @@ class LocomotionVecEnv(RobotVecEnv):
         feet_touching_ground = feet_state[:,0] <= 0
         reward_feet_on_ground = th.mean(feet_touching_ground.to(th.float32), dim=1)
 
-        failed = (current_state_extrinsic_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
+        failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
 
         if self._configuration.fail_on_safety:
             failed = th.logical_or(failed, state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED,0])
@@ -1077,12 +1089,16 @@ class LocomotionVecEnv(RobotVecEnv):
         masked_assign(self._stats["body_speeds_vec"],     starting_eps, vel_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
         # Update the buffers
         # idxs = step_counts%self._buff_sizes
-        idx = self._th_tot_step_counter%self._stats["vel_errs_vec"].size()[1]
-        self._stats["vel_errs_vec"][:,idx]=         vel_error_vec.view(self.num_envs,)
-        self._stats["height_errs_vec"][:,idx]=      height_error_vec.view(self.num_envs,)
-        self._stats["pitchnroll_errs_vec"][:,idx]=  pitchnroll_err_vec.view(self.num_envs,)
-        self._stats["body_speeds_vec"][:,idx]=      body_speed_vec.view(self.num_envs,)
-        
+        idx : th.Tensor = self._th_tot_step_counter.view(tuple())%self._stats["vel_errs_vec"].size()[1]
+        set_column(self._stats["vel_errs_vec"], idx, vel_error_vec.view(self.num_envs,))
+        set_column(self._stats["height_errs_vec"], idx, height_error_vec.view(self.num_envs,))
+        set_column(self._stats["pitchnroll_errs_vec"], idx, pitchnroll_err_vec.view(self.num_envs,))
+        set_column(self._stats["body_speeds_vec"], idx, body_speed_vec.view(self.num_envs,))
+
+        # self._stats["vel_errs_vec"][:,idx]=         vel_error_vec.view(self.num_envs,)
+        # self._stats["height_errs_vec"][:,idx]=      height_error_vec.view(self.num_envs,)
+        # self._stats["pitchnroll_errs_vec"][:,idx]=  pitchnroll_err_vec.view(self.num_envs,)
+        # self._stats["body_speeds_vec"][:,idx]=      body_speed_vec.view(self.num_envs,)
 
 
         # idxs = step_counts%self._stats["vel_errs_vec"].size()[1]
@@ -1100,6 +1116,8 @@ class LocomotionVecEnv(RobotVecEnv):
         i = super().get_infos(state=state, labels=labels)
         curr_locom_state = state[self.STATE_LOCOMOTION][:,0]
         curr_extri_state = state[self.STATE_EXTRINSIC][:,0]
+        prev_extri_state = state[self.STATE_EXTRINSIC][:,1]
+        curr_inter_state = state[self.STATE_INTERNAL][:,0]
         
         goal_vel_rel_dir_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X,
                                                                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y,
@@ -1116,6 +1134,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z)) #type: ignore
         goal_dir = curr_locom_state[:,goal_vel_rel_dir_xyz_idx].view(self.num_envs,3)
         goal_speed = curr_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED].view(self.num_envs,1)
+        height_err = curr_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]-curr_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT]
+        i["height_err_raw"] = height_err
         i["goal_rel_xyz_vec"] = goal_dir*goal_speed
         i["goal_height"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
         i["height"] = curr_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]
@@ -1137,6 +1157,15 @@ class LocomotionVecEnv(RobotVecEnv):
         i["avg10_pitchnroll_errs_vec"] = th.mean(self._stats["pitchnroll_errs_vec"], dim = 1).view(self.num_envs)
         i["avg10_body_speeds_vec"] = th.mean(self._stats["body_speeds_vec"], dim = 1).view(self.num_envs)
         i["success_vec"] = i["avg10_vel_errs_vec"] < 0.05
+        state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
+        i["joint_pos_safenorm"] = state_robot_safenorm[:,0,:,0]
+        max_height_speed = 0.25
+        last_dt = curr_inter_state[:,self.INTERNAL_FIELDS.LAST_STEP_DT]
+        goal_height_velocity = th.clamp(-height_err*0.5, min=-max_height_speed, max=max_height_speed) 
+        z_velocity = (curr_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - prev_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z])/last_dt
+        i["height_velocity"] = z_velocity
+        i["goal_height_velocity"] = goal_height_velocity
+
 
         if self._configuration.verbose_infos:
             statenorm = self._state_helper.normalize(state)

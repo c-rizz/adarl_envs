@@ -334,7 +334,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     
     INTERNAL_FIELDS = IntEnum("INTERNAL_FIELDS", [  "SAFETY_TRIGGERED",
                                                     "STEP_COUNT",
-                                                    "SIM_TIME"], start=0)
+                                                    "SIM_TIME",
+                                                    "LAST_STEP_DT"], start=0)
 
     EXTRINSIC_FIELDS = IntEnum("EXTRINSIC_FIELS", ["BODY_REL_LINVEL_X",
                                                    "BODY_REL_LINVEL_Y",
@@ -853,7 +854,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     field_size=(1,),
                                                     fields_minmax={   self.INTERNAL_FIELDS.SAFETY_TRIGGERED : [0,1000],
                                                                         self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000],
-                                                                        self.INTERNAL_FIELDS.SIM_TIME : [-1,1000_000]},
+                                                                        self.INTERNAL_FIELDS.SIM_TIME : [-1,1000_000],
+                                                                        self.INTERNAL_FIELDS.LAST_STEP_DT : [-1,1]},
                                                     observation_definitions=ThBoxStateHelper.SimpleObsDef(
                                                         observable_fields=[self.INTERNAL_FIELDS.SAFETY_TRIGGERED],
                                                         observable_subfields=None,
@@ -1448,7 +1450,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # TODO: remove, this shouldn't be necessary, just here out of caution, unless it's needed for cudagraphs
 
 
-    @th.compile(mode="max-autotune", disable=disable_compile)
+    # @th.compile(mode="max-autotune", disable=disable_compile)
     def _post_step_optimized(self, adapter_data):
         # t0 = time.monotonic()
         self._update_state(adapter_data)
@@ -1612,6 +1614,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                                                            bstates_v_13 = bstates_v_13)
         
         vec_step_count = vec_internal_state[:,self.INTERNAL_FIELDS.STEP_COUNT]
+        prev_vec_time_from_start = vec_internal_state[:,self.INTERNAL_FIELDS.SIM_TIME]
         vec_safety_state = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED].view((self.num_envs,))
         # vec_prev_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")
@@ -1637,10 +1640,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         100.0, # 100 means safety triggered by posref
                                         vec_safety_state)
         vec_safety_state = vec_safety_state*(vec_step_count.view((self.num_envs,))>=1)
+        last_step_dt = self._thtens(self._configuration.stepLength_sec).expand((self.num_envs,1))
+        # last_step_dt = th.where(vec_step_count.view((self.num_envs,))>=1,
+        #                         vec_time_from_start - prev_vec_time_from_start.view((self.num_envs,)),
+        #                         self._configuration.stepLength_sec)
 
         new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_TRIGGERED : vec_safety_state.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1),
-                                self.INTERNAL_FIELDS.SIM_TIME : (vec_time_from_start - self._eps_start_stime).view(self.num_envs,1)}
+                                self.INTERNAL_FIELDS.SIM_TIME : (vec_time_from_start - self._eps_start_stime).view(self.num_envs,1),
+                                self.INTERNAL_FIELDS.LAST_STEP_DT : last_step_dt.view(self.num_envs,1)}
         new_robot_state = th.cat([vec_jstates_j_pveae, vec_last_sent_j_pvesd], dim = -1)
         # build stats:
         # with permute the first dimension becomes the joint (ordered as in set_monitored_joints)

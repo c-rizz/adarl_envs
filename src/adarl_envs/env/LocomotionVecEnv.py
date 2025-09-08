@@ -510,7 +510,8 @@ class LocomotionVecEnv(RobotVecEnv):
         base_loco_fields = [self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X,
                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y,
                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z,
-                            self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED]
+                            self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED,
+                            self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
         privileged_loco_fields = [ self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,

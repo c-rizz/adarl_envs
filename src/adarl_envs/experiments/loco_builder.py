@@ -1,5 +1,6 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
+import random
 from adarl.envs.vec.GymVecRunnerWrapper import GymVecRunnerWrapper
 import adarl.utils.dbg.ggLog as ggLog
 import torch as th
@@ -231,6 +232,7 @@ def loco_runner_builder(seed,
                             randomized_gains_stiffness_ratio_epstd=env_builder_args.pop("randomized_gains_stiffness_ratio_epstd"),
                             randomized_mass_links=env_builder_args.pop("randomized_mass_links"),
                             randomized_mass_ratios_distr=env_builder_args.pop("randomized_mass_ratios"),
+                            randomized_reference_filter_distribution=env_builder_args.pop("randomized_reference_filter_distribution"),
                             recycle_pose_randomization=env_builder_args.pop("recycle_pose_randomization"),
                             reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
                             reward_actacc_weight = env_builder_args.pop("reward_actacc_weight"),

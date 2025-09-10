@@ -1,4 +1,5 @@
 from __future__ import annotations
+from ast import Not
 from traceback import print_stack
 from adarl.adapters.BaseVecAdapter import JointType
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
@@ -295,6 +296,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         """Mass randomization, randomized links"""
         randomized_mass_ratio_distribution : DistributionDefTh
         """Mass randomization ratio for each link in randomized_mass_links. The mass is randomized by multiplying by a factor sampled from this distribution"""
+        randomized_reference_filter_distribution : DistributionDefTh | None
+        """If not None, the reference filter cutoff frequency is randomized at each episode start by sampling from this distribution""" 
         real : bool
         recycle_pose_randomization : bool
         reward_penalties_max : th.Tensor
@@ -445,6 +448,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         randomized_gains_stiffness_ratio_epstd : float = 0.0,
                         randomized_mass_links : list[tuple[str,str]] = [],
                         randomized_mass_ratios_distr : DistributionDef = ("normal", (0.0, 0.05)),
+                        randomized_reference_filter_distribution : DistributionDef | None = None,
                         recycle_pose_randomization : bool = False,
                         saturate_jimp_ref_limits : bool = True,
                         ui_camera_resolution_hw : tuple[int,int] = (144,256)
@@ -599,7 +603,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     randomized_gains_damping_ratio_epstd=self._thtens(randomized_gains_damping_ratio_epstd),
                                                     randomized_gains_stiffness_ratio_epstd=self._thtens(randomized_gains_stiffness_ratio_epstd),
                                                     randomized_mass_links=None, # Will fill up later
-                                                    randomized_mass_ratio_distribution = None, # Will fill up later
+                                                    randomized_mass_ratio_distribution = None, # Will fill up later,
+                                                    randomized_reference_filter_distribution = None, # Will fill up later
                                                     real = False,
                                                     recycle_pose_randomization = recycle_pose_randomization,
                                                     reward_penalties_max = self._thtens(100.0),
@@ -693,29 +698,34 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         # Randomizations
         randomized_mass_links = self._expand_link_filters(randomized_mass_links)
+        randomized_com_links = self._expand_link_filters(randomized_com_links)
+        randomized_friction_links = self._expand_link_filters(randomized_friction_links)        
+        randomized_armature_joints = self._expand_joint_filters(randomized_armature_joints)
+        randomized_frictionloss_joints = self._expand_joint_filters(randomized_frictionloss_joints)
         self._configuration.randomized_mass_links = tuple(randomized_mass_links)
+        self._configuration.randomized_com_links = tuple(randomized_com_links)
+        self._configuration.randomized_friction_links = tuple(randomized_friction_links)
+        self._configuration.randomized_armature_joints = tuple(randomized_armature_joints)
+        self._configuration.randomized_frictionloss_joints = tuple(randomized_frictionloss_joints)
+        self._model_randomizations_enabled = sum(len(l) for l in [  self._configuration.randomized_mass_links,
+                                                                    self._configuration.randomized_com_links,
+                                                                    self._configuration.randomized_friction_links,
+                                                                    self._configuration.randomized_armature_joints,
+                                                                    self._configuration.randomized_frictionloss_joints])
+
+
         self._configuration.randomized_mass_ratio_distribution = self.distr_to_tensor(randomized_mass_ratios_distr, size=(len(randomized_mass_links),))
         self._randomized_mass_link_ids = self._adapter.get_links_ids(self._configuration.randomized_mass_links)
-        randomized_com_links = self._expand_link_filters(randomized_com_links)
-        self._configuration.randomized_com_links = tuple(randomized_com_links)
-        self._configuration.randomized_com_xyz_diff_distribution = self.distr_to_tensor(randomized_com_xyz_diff_distribution,
-                                                                                        size=(len(randomized_com_links), 3))
+        self._configuration.randomized_com_xyz_diff_distribution = self.distr_to_tensor(randomized_com_xyz_diff_distribution, size=(len(randomized_com_links), 3))
         self._randomized_com_links_ids = self._adapter.get_links_ids(self._configuration.randomized_com_links)
-        randomized_friction_links = self._expand_link_filters(randomized_friction_links)        
-        self._configuration.randomized_friction_links = tuple(randomized_friction_links)
         self._configuration.randomized_friction_slide_spin_roll_ratios = self._thtens(randomized_friction_slide_spin_roll_ratios).expand((len(randomized_friction_links),3))
         self._randomized_friction_links_ids = self._adapter.get_links_ids(self._configuration.randomized_friction_links)
-        randomized_armature_joints = self._expand_joint_filters(randomized_armature_joints)
-        self._configuration.randomized_armature_joints = tuple(randomized_armature_joints)
         self._configuration.randomized_armature_ratios = self._thtens(randomized_armature_ratios).expand((len(randomized_armature_joints),))
         self._randomized_armature_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_armature_joints)
-        randomized_frictionloss_joints = self._expand_joint_filters(randomized_frictionloss_joints)
-        self._configuration.randomized_frictionloss_joints = tuple(randomized_frictionloss_joints)
         self._configuration.randomized_frictionloss_ratios = self._thtens(randomized_frictionloss_ratios).expand((len(randomized_frictionloss_joints),))
         self._randomized_frictionloss_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_frictionloss_joints)
 
-
-
+        self._configuration.randomized_reference_filter_distribution = self.distr_to_tensor(randomized_reference_filter_distribution, size=(1,)) if randomized_reference_filter_distribution is not None else None
 
 
         ggLog.info(f"enable_link_collisions = {enable_link_collisions}")
@@ -1068,8 +1078,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"_initialize_episodes({vec_mask})")
         if vec_mask is None:
             vec_mask = th.ones((self.num_envs,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
-        if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
-            self._adapter.reset_model_alterations(vec_mask)
+        if self._model_randomizations_enabled and adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
+            from adarl.adapters.MjxAdapter import MjxAdapter
+            mjx_adapter : MjxAdapter = self._adapter # type: ignore
+            mjx_adapter.reset_model_alterations(vec_mask)
         # ggLog.info(f"initializing episodes {vec_mask}")
         resetted_state = self._state_helper.reset_state()
         # ggLog.info(f"resetted_state = {resetted_state}")
@@ -1089,9 +1101,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         # ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
 
-        if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
-            # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")            
-            self._adapter.alter_model_rel(  link_masses = ( self._randomized_mass_link_ids,
+        if self._model_randomizations_enabled:
+            from adarl.adapters.MjxAdapter import MjxAdapter
+            if not isinstance(self._adapter, MjxAdapter):
+                raise RuntimeError(f"Model randomizations are currently only supported with MjxAdapter")
+            mjx_adapter : MjxAdapter = self._adapter # type: ignore
+            # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")
+            mjx_adapter.alter_model_rel(  link_masses = ( self._randomized_mass_link_ids,
                                                             self._sample_distr((self.num_envs, len(self._configuration.randomized_mass_links)), self._configuration.randomized_mass_ratio_distribution)),
                                             link_frictions = (self._randomized_friction_links_ids,
                                                               (self._thrand(size=(self.num_envs,)+self._configuration.randomized_friction_slide_spin_roll_ratios.size())*2-1)*self._configuration.randomized_friction_slide_spin_roll_ratios),
@@ -1099,10 +1115,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                             (self._thrand(size=(self.num_envs, len(self._configuration.randomized_armature_ratios)))*2-1)*self._configuration.randomized_armature_ratios),
                                             joint_frictionloss_ratios = ( self._randomized_frictionloss_joints_ids,
                                                             (self._thrand(size=(self.num_envs, len(self._configuration.randomized_frictionloss_ratios)))*2-1)*self._configuration.randomized_frictionloss_ratios))
-            self._adapter.alter_model_sum(  com_position_diffs = (self._randomized_com_links_ids,
+            mjx_adapter.alter_model_sum(  com_position_diffs = (self._randomized_com_links_ids,
                                                                   self._sample_distr(size=(self.num_envs, len(self._configuration.randomized_com_links),3),
                                                                                      type_and_params=self._configuration.randomized_com_xyz_diff_distribution),),
                                             com_quatxyzw_diffs = None)
+        if self._configuration.randomized_reference_filter_distribution != None:
+            from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
+            if not isinstance(self._adapter, MjxJointImpedanceAdapter):
+                raise RuntimeError(f"Reference filter randomizations are currently only supported with MjxJointImpedanceAdapter")
+            mjx_adapter : MjxJointImpedanceAdapter = self._adapter # type: ignore
+            new_filters_freqs = self._sample_distr((self.num_envs,), self._configuration.randomized_reference_filter_distribution)
+            mjx_adapter.set_reference_filter(new_filters_freqs)
+            
         self._update_state(self._get_adapter_data())
         self._update_stats()
 
@@ -1869,7 +1893,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         reward = th.sum(th.stack([sub_rewards_return[k]*weights[k] for k in sub_rewards_return]), dim=0)
         return reward
 
-    def _sample_distr(self, size, type_and_params : tuple[str, tuple[th.Tensor,th.Tensor] | tuple[th.Tensor,th.Tensor,th.Tensor]]):
+    def _sample_distr(self, size, type_and_params : tuple[str, tuple[th.Tensor,th.Tensor] | tuple[th.Tensor,th.Tensor,th.Tensor]]) -> th.Tensor:
         if type_and_params[0] == "uniform":
             low, high = type_and_params[1] #type: ignore
             return self._thrand(size)*(high-low)+low
@@ -1880,8 +1904,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             else:
                 mean, std, clamp_width = type_and_params[1] #type: ignore
             return th.clamp(self._thrandn(size), -clamp_width, clamp_width)*std+mean
+        else:
+            raise NotImplementedError(f"Unsupported distribution type {type_and_params[0]}")
         
-    def distr_to_tensor(self, distr : DistributionDefTh, size : tuple[int,...] | None = None) -> DistributionDefTh:
+    def distr_to_tensor(self, distr : DistributionDef, size : tuple[int,...] | None = None) -> DistributionDefTh:
         distr_type = distr[0]
         if size is not None:
             distr_params = tuple(self._thtens(t).expand(size) for t in distr[1])

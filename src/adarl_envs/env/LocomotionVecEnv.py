@@ -335,6 +335,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         randomized_gains_stiffness_ratio_epstd : float = 1.0,
                         randomized_mass_links : list[tuple[str,str]] = [],
                         randomized_mass_ratios_distr : DistributionDef = ("normal", (0.0, 0.05)),
+                        randomized_reference_filter_distribution : DistributionDef | None = None,
                         recycle_pose_randomization : bool = False,
                         saturate_jimp_ref_limits : bool = True,
                         ui_camera_resolution_hw : tuple[int,int] = (256,144),
@@ -457,6 +458,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             randomized_gains_stiffness_ratio_epstd=randomized_gains_stiffness_ratio_epstd,
                             randomized_mass_links=randomized_mass_links,
                             randomized_mass_ratios_distr=randomized_mass_ratios_distr,
+                            randomized_reference_filter_distribution=randomized_reference_filter_distribution,
                             recycle_pose_randomization=recycle_pose_randomization,
                             robot_main_body_link = robot_main_body_link,
                             robot_name = robot_name,
@@ -826,10 +828,10 @@ class LocomotionVecEnv(RobotVecEnv):
         last_dt = current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT]
         goal_height_velocity = th.clamp(-height_err*2, min=-max_height_speed, max=max_height_speed) 
         z_velocity = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - prev_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z])/last_dt
-        reward_height = bell_reward(z_velocity-goal_height_velocity, zero_rew_dist=goal_height_velocity/2 + 0.05)
+        # reward_height = bell_reward(z_velocity-goal_height_velocity, zero_rew_dist=goal_height_velocity/2 + 0.05)
         reward_height = double_bell_reward(z_velocity-goal_height_velocity,
                                            bell_width_a=self._thtens(0.05),
-                                           bell_width_b=goal_height_velocity,
+                                           bell_width_b=goal_height_velocity+0.025,
                                            bell_b_weight=self._thtens(0.5))
         return reward_height, z_velocity, goal_height_velocity, last_dt, height_err
     

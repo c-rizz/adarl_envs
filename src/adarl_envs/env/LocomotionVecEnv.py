@@ -233,7 +233,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                            "FEET_VEL_X",
                                            "FEET_VEL_Y"])
 
-    def __init__(self,  action_delay_mustd : tuple[float,float],
+    def __init__(self,  action_delay_mustd_std : tuple[float,float,float],
                         action_noise_mustd : Sequence[float] | th.Tensor, 
                         action_smoothing_halflife_sec : float,
                         adapter: BaseVecJointImpedanceAdapter,
@@ -405,7 +405,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                                      goal_abs_height_vec_z      = self._thtens([sum(self._locomotion_conf.goal_height_minmax)/2]).expand(adapter.vec_size(), 1).detach().clone(),
                                                                                      goal_heading_rel2linvelgoal_vec_yaw = self._thtens([0.0]).expand(adapter.vec_size(), 1).detach().clone())
         
-        super().__init__(   action_delay_mustd = action_delay_mustd,
+        super().__init__(   action_delay_mustd_std = action_delay_mustd_std,
                             action_noise_mustd = action_noise_mustd, 
                             action_smoothing_halflife_sec = action_smoothing_halflife_sec,
                             adapter = adapter,

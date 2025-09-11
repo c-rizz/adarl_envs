@@ -226,7 +226,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     @dataclass
     class Configuration:
-        action_delay_mustd : th.Tensor
+        action_delay_epmustd_ststd : th.Tensor
         action_exp_smoothing_1s : float
         action_noise_mustd : th.Tensor
         all_controlled_joints : Sequence[tuple[str,str]]
@@ -374,6 +374,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         """Shape (envs_num, ctrl_joints)"""
         randomized_damping_factor : th.Tensor
         """Shape (envs_num, ctrl_joints)"""
+        action_delay_mu : th.Tensor
+        """Mean of the action delay in these episodes, shape (envs_num,)"""
 
     @dataclass
     class Statistics:
@@ -381,7 +383,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         avg_tracking_error : th.Tensor = dataclasses.field(default_factory=lambda: th.tensor(-1.0))
         rewards : dict = dataclasses.field(default_factory=lambda: {})
 
-    def  __init__(self, action_delay_mustd : tuple[float,float],
+    def  __init__(self, action_delay_mustd_std : tuple[float,float,float],
                         action_noise_mustd : Sequence[float] | th.Tensor, 
                         action_smoothing_halflife_sec : float,
                         adapter: BaseVecJointImpedanceAdapter,
@@ -542,7 +544,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     for jn in held_joints]).view(-1,5)
         homing_held_joints_position = {jn:self._thtens(p) for jn,p in homing_joint_pose.items() if jn in held_joints}
         homing_nonctrl_joints_position = {jn:self._thtens(p) for jn,p in homing_joint_pose.items() if jn not in controlled_joints_rn}
-        self._configuration = self.Configuration(   action_delay_mustd = self._thtens(action_delay_mustd),
+        self._configuration = self.Configuration(   action_delay_epmustd_ststd = self._thtens(action_delay_mustd_std),
                                                     action_exp_smoothing_1s = action_exp_smoothing_1s,
                                                     action_noise_mustd = self._thtens(action_noise_mustd),
                                                     all_controlled_joints = internally_controlled_joints,
@@ -634,7 +636,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_init_on_reset = th.ones(size=(adapter.vec_size(),), dtype=th.bool).to(device=th_device, non_blocking=th_device.type=="cuda"),
                                                     vec_max_ep_steps = th.full(fill_value=maxStepsPerEpisode, size=(adapter.vec_size(),), dtype=th.int64).to(device=th_device, non_blocking=th_device.type=="cuda"),
                                                     randomized_damping_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.controlled_joints)).clone(),
-                                                    randomized_stiffness_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.controlled_joints)).clone())
+                                                    randomized_stiffness_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.controlled_joints)).clone(),
+                                                    action_delay_mu=self._thzeros((adapter.vec_size(),)))
         self._previous_pose_randomization : th.Tensor | None = None
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
         self._always_present_collisions : set[tuple[str,str]] = set()
@@ -980,7 +983,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         actions = actions*(1-alpha) + prev_actions*alpha
         actions = th.clamp(actions, min=-1, max=1)
         n = self._thrandn(size=(self._adapter.vec_size(),))
-        action_delay = th.clamp(self._configuration.action_delay_mustd[0] + self._configuration.action_delay_mustd[1]*n, min = 0.0)
+        action_delay = th.clamp(self._current_episode_config.action_delay_mu + self._configuration.action_delay_epmustd_ststd[2]*n, min = 0.0)
         return actions, action_delay
 
     @override
@@ -1184,6 +1187,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         masked_assign(self._current_episode_config.vec_init_on_reset, vec_mask, vec_init_on_reset)
         masked_assign(self._current_episode_config.vec_max_ep_steps, vec_mask, maxStepsPerEpisode)
         self.set_max_episode_steps(self._current_episode_config.vec_max_ep_steps)
+        delay_mu, delay_std = self._configuration.action_delay_epmustd_ststd[:2]
+        self._current_episode_config.action_delay_mu = th.clamp(self._thrandn_clamp(size=(self.num_envs,), min=-5, max=5)*delay_std+delay_mu, min=0)
         # ggLog.info(f"_current_episode_config = {self._current_episode_config}")
 
 

@@ -170,7 +170,7 @@ def loco_runner_builder(seed,
                                                             model_kwargs=env_builder_args.pop("model_kwargs"),
                                                             extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
     
-    lrenv = LocomotionVecEnv(action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
+    lrenv = LocomotionVecEnv(action_delay_mustd_std = env_builder_args.pop("action_delay_mustd_std"),
                             action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
                             action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                             adapter=adapter,

@@ -218,7 +218,7 @@ def _is_joint_revolute(joint_name : str, robot_model : Robot) -> bool:
     if joint_name not in robot_model.get_joint_names():
         return False
     joint_properties = robot_model.get_joint_properties([joint_name])
-    ggLog.info(f"joint_properties = {joint_properties}")
+    # ggLog.info(f"joint_properties = {joint_properties}")
     return joint_properties[joint_name]["type"] == Robot.JOINT_TYPES.REVOLUTE
 
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
@@ -459,7 +459,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         root_joint_name = self._robot_model.get_parent_joint(robot_root_link)
         is_floating = self._robot_model.get_joint_properties([root_joint_name])[root_joint_name]["type"] == Robot.JOINT_TYPES.FLOATING
         # self._build_new_instantaneous_state = th.vmap(self._build_new_instantaneous_state_single)
-        ggLog.info("Properties:"+("\n".join([str(jp) for jp in self._robot_model.get_joint_properties(self._robot_model.get_joint_names()).items()])))
+        # ggLog.info("Properties:"+("\n".join([str(jp) for jp in self._robot_model.get_joint_properties(self._robot_model.get_joint_names()).items()])))
         # exit()
         controlled_joints_str = []
         for j in controlled_joints:
@@ -525,12 +525,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if jn not in homing_joint_pose:
                 homing_joint_pose[jn] = default_homing_joint_pose[jn]
 
-        if not quiet:
-            ggLog.info(f"phys_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in phys_limits_minmax_pve.items()]))
-            ggLog.info(f"safe_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
-            ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
-            ggLog.info(f"controlled_joints_rn = \n"+"\n".join([str(jn) for jn in controlled_joints_rn]))
-            ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
+        # if not quiet:
+        #     ggLog.info(f"phys_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in phys_limits_minmax_pve.items()]))
+        #     ggLog.info(f"safe_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
+        #     ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
+        #     ggLog.info(f"controlled_joints_rn = \n"+"\n".join([str(jn) for jn in controlled_joints_rn]))
+        #     ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
 
         homing_ctrl_joints_pvesd = self._thtens([(homing_joint_pose[jn], 0, 0, safe_stiffness, safe_damping)
                                                     for jn in controlled_joints_rn]).view(-1,5)
@@ -638,9 +638,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._posref_saturation_minmmax_diff = self._posref_safety_minmmax_diff*0.999
         self._impulse_disturbances_enabled = impulse_probability_per_sec > 0
         self._homing_held_joints_vec_pvesd = self._configuration.homing_held_joints_pvesd.expand(adapter.vec_size(),len(self._configuration.held_joints),5)
-        ggLog.info(f"homing_ctrl_joints_pvesd = {homing_ctrl_joints_pvesd}")
-        ggLog.info(f"self._held_joints_cmd_vec_j_pvesd = {self._configuration.homing_held_joints_pvesd}")
-        ggLog.info(f"internally_controlled_joints = {self._configuration.all_controlled_joints}")
+        # ggLog.info(f"homing_ctrl_joints_pvesd = {homing_ctrl_joints_pvesd}")
+        # ggLog.info(f"self._held_joints_cmd_vec_j_pvesd = {self._configuration.homing_held_joints_pvesd}")
+        # ggLog.info(f"internally_controlled_joints = {self._configuration.all_controlled_joints}")
 
         self._action_helper = JointImpedanceActionHelper(
                                 vec_size=adapter.vec_size(),
@@ -659,7 +659,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         self._state_helper : DictStateHelper
         self._build_state_helper(adapter)
-        ggLog.info(f"self._state_helper.observation_names() = {self._state_helper.observation_names()}")
+        # ggLog.info(f"self._state_helper.observation_names() = {self._state_helper.observation_names()}")
         self._current_state = self._state_helper.reset_state()
         # ggLog.info(f"current_state = {self._current_state}")
         self._last_obs = self._state_helper.observe(self._current_state)
@@ -668,7 +668,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     joint_limit_minmax_pve={jn:self._configuration.joint_safe_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
                                                     stiffness_minmax={jn: self._configuration.joint_safe_limits_minmax_stiffness[jn] for jn in self._configuration.controlled_joints},
                                                     damping_minmax={jn: self._configuration.joint_safe_limits_minmax_damping[jn] for jn in self._configuration.controlled_joints})
-        ggLog.info(f"Built safety limits")
+        # ggLog.info(f"Built safety limits")
         
         self._build_stats()
         ggLog.info(f"Built stats")
@@ -718,14 +718,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
 
-        ggLog.info(f"enable_link_collisions = {enable_link_collisions}")
+        # ggLog.info(f"enable_link_collisions = {enable_link_collisions}")
         if isinstance(self._adapter, BaseVecSimulationAdapter) and enable_link_collisions is not None:
             self._adapter.set_body_collisions(enable_link_collisions)
-        ggLog.info(f"Built scenario")
+        # ggLog.info(f"Built scenario")
         example_labels : dict[str,th.Tensor] = {}
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
-        ggLog.info(f"Built info helper")
+        # ggLog.info(f"Built info helper")
 
         self.set_seeds(th.as_tensor(seed))
         self._adapter.set_monitored_links([self._configuration.main_body_link])

@@ -4,8 +4,7 @@ import time
 import inspect
 from adarl.utils.buffers import BaseBuffer
 import adarl.utils.dbg.dbg_img
-from adarl_envs.utils.modded_sac import SAC as SB3_SAC
-from rreal.algorithms.sac import SAC
+from rreal.algorithms.sac import SAC, compare_dicts
 from rreal.algorithms.sac_helpers import EnvBuilderProtocol
 import adarl.utils.dbg.ggLog as ggLog
 import adarl.utils.utils
@@ -265,7 +264,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "fail_on_safety" : False,
         "frame_stack_length" : 5,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : [0.3,0.57],
+        "goal_height_minmax" : [0.45,0.45],
         "goal_resampling_probability_per_sec" : 0.1,
         "goal_speed_minmax" : [0,0.0],
         "goal_yaw_minmax" : [0.0,0.0],
@@ -283,7 +282,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_goal_height_speed" : 0.1,
         "max_good_step_duration" : 1.5,
         "max_steps_per_episode" : max_steps_per_episode,
-        "merge_privileged" : True,
+        "merge_privileged" : False,
         "min_good_step_duration" : 0.2,
         "mode" : mode,
         "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.0, 0.0],
@@ -345,7 +344,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args.update({
         "enable_rendering" : True,
         "record_video" : args["mode"]!="xbot",
-        "verbose_infos" : True,
+        "verbose_infos" : False,
         "video_save_freq" : True if args["record"] else 0,
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
@@ -411,6 +410,13 @@ def play(seed, folderName, run_id, args,
     control_mode = args["control"].lower().strip()
     if control_mode=="pretrained":
         model = load_model(args["model"])
+        trained_env_builder_args = model._init_args["init_hparams"].reference_init_args["env_builder_args"]
+        try:
+            equal, diffs = compare_dicts(env_builder_args, trained_env_builder_args)
+            if not equal:
+                ggLog.warn(f"Loaded model was trained with different env args: \n{diffs}")
+        except Exception as e: 
+            ggLog.warn(f"Could not compare env args with trained model: {type(e)}: {e}")
     elif control_mode=="fixed":
         model = build_fixed_policy(env = env, robot=robot)
     elif control_mode=="random":
@@ -480,6 +486,7 @@ def play(seed, folderName, run_id, args,
                 time.sleep(step_length_sec/rt)
 
             cmd_xys = [1.0,0.0,0.0]
+            cmd_height = 0.45
             while not done:
                 t0 = time.monotonic()
                 session.run_info["collected_steps"].value += 1
@@ -507,11 +514,14 @@ def play(seed, folderName, run_id, args,
                     cmd_angle = np.arctan2(cmd_xys[1],cmd_xys[0])
                     if keyboard_listener.get_key_press_count("w")>0: cmd_xys[2] +=  0.05
                     if keyboard_listener.get_key_press_count("s")>0: cmd_xys[2] += -0.05
-                    if keyboard_listener.get_key_press_count("a")>0: cmd_angle +=  10*3.14159/180
-                    if keyboard_listener.get_key_press_count("d")>0: cmd_angle += -10*3.14159/180
+                    if keyboard_listener.get_key_press_count("a")>0: cmd_angle  +=  10*3.14159/180
+                    if keyboard_listener.get_key_press_count("d")>0: cmd_angle  += -10*3.14159/180
+                    if keyboard_listener.get_key_press_count("r")>0: cmd_height +=  0.005
+                    if keyboard_listener.get_key_press_count("f")>0: cmd_height += -0.005
                     cmd_xys[0] = np.cos(cmd_angle)
                     cmd_xys[1] = np.sin(cmd_angle)
-                    flip = keyboard_listener.get_key_press_count("v")>0
+                    cmd_height = np.clip(cmd_height, 0.35, 0.57)
+                    flip = keyboard_listener.get_key_press_count("x")>0
                     cam_dist_pitch_yaw_diff = [0.0,0.0,0.0]
                     if keyboard_listener.get_key_press_count("u")>0: cam_dist_pitch_yaw_diff[0] = -0.1
                     if keyboard_listener.get_key_press_count("o")>0: cam_dist_pitch_yaw_diff[0] =  0.1
@@ -524,7 +534,7 @@ def play(seed, folderName, run_id, args,
                     base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
                     if flip:
                         cmd_xys = [-cmd_xys[0],-cmd_xys[1],-cmd_xys[2]]
-                    base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys))
+                    base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height)
                     keyboard_listener.reset_key_press_counters()
                 goals = base_env.get_goals()
                 step_count += 1
@@ -536,12 +546,12 @@ def play(seed, folderName, run_id, args,
                 if args["mode"] != "xbot":
                     time.sleep(max(0,step_length_sec/rt - step_wallduration))
                 full_step_wallduration = time.monotonic()-t0
-                ggLog.info(f"step = {step_count} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
+                ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
                            f" tstep={t1_step-t0_step:1.4f} \t"
-                           f" goal_dir={goals['abs_linvel_xys'][0,:2]} \t"
+                           f" goal_dir={goals['abs_linvel_xys'][0,:2].tolist()} \t"
                            f" goal_speed={goals['abs_linvel_xys'][0,2]} \t"
-                           f" goal_height={goals['abs_height'][0]} \t")
+                           f" goal_height={goals['abs_height'][0].item()} \t")
             if step_count>0:
                 rewards.append(th.as_tensor(ep_reward,device="cpu").item())
                 durations.append(th.as_tensor(step_count,device="cpu").item())

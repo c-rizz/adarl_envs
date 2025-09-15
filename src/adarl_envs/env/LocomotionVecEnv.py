@@ -831,7 +831,7 @@ class LocomotionVecEnv(RobotVecEnv):
         # reward_height = bell_reward(z_velocity-goal_height_velocity, zero_rew_dist=goal_height_velocity/2 + 0.05)
         reward_height = double_bell_reward(z_velocity-goal_height_velocity,
                                            bell_width_a=self._thtens(0.05),
-                                           bell_width_b=goal_height_velocity+0.025,
+                                           bell_width_b=goal_height_velocity*2+0.025,
                                            bell_b_weight=self._thtens(0.5))
         return reward_height, z_velocity, goal_height_velocity, last_dt, height_err
     

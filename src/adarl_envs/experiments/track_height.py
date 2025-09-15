@@ -46,11 +46,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "held_joints_damping" : 10.0,
         "held_joints_stiffness" : 500.0,
         "impulse_duration_minmax" : [0.01, 2.5],
-        "impulse_mean_std" : [0.0,0.0],
-        "impulse_probability_per_sec" : 0.0,
+        "impulse_mean_std" : [10.0,50.0],
+        "impulse_probability_per_sec" : 0.1,
         "init_on_reset_ratio" : 0.2,
         "initial_height_randomization_range_meters" : 0.15,
         "initial_joint_pose_randomization_range" : 0.8,
+        "initial_pose_randomization_range" : 0.0,
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
@@ -244,7 +245,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     actor_weight_decay=0.0001,
                                                     critic_weight_decay=0.0,
                                                     policy_update_freq=2,
-                                                    deterministic_collection_ratio=0.01
+                                                    deterministic_collection_ratio=0.01,
+                                                    actor_mean_bounds_ratio = 0.95
                                                     ),
                     checkpoint_freq=20,
                     collector_device=env_device,

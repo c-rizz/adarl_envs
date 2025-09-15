@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 2048
+        train_envs = 4096
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -30,7 +30,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     eval_freq = 5
     env_builder_args = {
-        "action_delay_mustd" : (0.0,0.0),
+        "action_delay_mustd_std" : (0.0,0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
@@ -49,8 +49,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_duration_minmax" : (0.01, 2.5),
         "impulse_mean_std" : (20.0,50.0),
         "impulse_probability_per_sec" : 0.1,
-        "init_on_reset_ratio" : 0.5,
-        "initial_height_randomization_range_meters" : 0.0,
+        "init_on_reset_ratio" : 0.2,
+        "initial_height_randomization_range_meters" : 0.10,
         "initial_joint_pose_randomization_range" : 0.5,
         "initial_pose_randomization_range" : 0.0,
         "just_health_reward" : False,
@@ -78,6 +78,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_gains_damping_ratio_epstd" : 0.2,
         "randomized_gains_stiffness_ratio_epstd" : 0.2,
         "randomized_mass_ratios" : ("normal", (0., 0.1)),
+        "randomized_reference_filter_distribution" : ("uniform", (5.0, 40.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
         "reward_acceleration_weight" :      0.0,
@@ -209,10 +210,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_init_hparams(  model_th_device = "cuda",
-                                                    q_network_arch=[512,128],
+                                                    q_network_arch=[2048,128],
                                                     q_lr=0.0005,
                                                     policy_lr=0.0003,
-                                                    policy_arch=[512,128],
+                                                    policy_arch=[2048,128],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=16384,
@@ -229,7 +230,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     actor_log_std_init = -1.0,
                                                     actor_observation_filter=["base.vec"],
                                                     critic_observation_filter=["base.vec","privileged.vec"],
-                                                    deterministic_collection_ratio=0.01
+                                                    deterministic_collection_ratio=0.01,
+                                                    actor_weight_decay=0.0001
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

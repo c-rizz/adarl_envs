@@ -168,7 +168,10 @@ class LocomotionVecEnv(RobotVecEnv):
         goal_height_minmax : tuple[float,float]
         goal_resampling_probability_per_sec : th.Tensor
         goal_resampling_enabled : bool
-        max_goal_height_speed : float
+        max_goal_height_pos_change_speed : float
+        """ Max speed at which the goal height can change, in m/s. Used to prevent too sudden changes."""
+        max_height_speed_goal : float
+        """ Maximum goal speed for the speed-based height reward."""
 
 
     @dataclass
@@ -340,7 +343,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         saturate_jimp_ref_limits : bool = True,
                         ui_camera_resolution_hw : tuple[int,int] = (256,144),
                         goal_resampling_probability_per_sec : float = 0.0,
-                        max_goal_height_speed : float = 0.25
+                        max_goal_height_pos_change_speed : float = 0.25,
+                        max_height_speed_goal : float = 1.0
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -396,7 +400,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         goal_height_minmax = goal_height_minmax,
                         goal_resampling_probability_per_sec = self._thtens(goal_resampling_probability_per_sec),
                         goal_resampling_enabled = goal_resampling_probability_per_sec > 0.0,
-                        max_goal_height_speed = max_goal_height_speed
+                        max_goal_height_pos_change_speed = max_goal_height_pos_change_speed,
+                        max_height_speed_goal = max_height_speed_goal
                         )
         
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xys       = self._thtens([1.0,0.0,0.0]).expand(adapter.vec_size(), 3).detach().clone(),
@@ -648,7 +653,7 @@ class LocomotionVecEnv(RobotVecEnv):
         step_counts = new_internal_state[self.INTERNAL_FIELDS.STEP_COUNT]
         starting_eps = (step_counts<=0).view((self.num_envs,))
         
-        max_goal_height_diff = self._locomotion_conf.max_goal_height_speed*self._configuration.stepLength_sec
+        max_goal_height_diff = self._locomotion_conf.max_goal_height_pos_change_speed*self._configuration.stepLength_sec
         goal_height = self._locomotion_episode_config.goal_abs_height_vec_z
         prev_smoothed_goal_height = prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
         smoothed_goal_height = prev_smoothed_goal_height + th.clamp(goal_height - prev_smoothed_goal_height, min=-max_goal_height_diff, max=max_goal_height_diff)
@@ -823,10 +828,11 @@ class LocomotionVecEnv(RobotVecEnv):
         return new_inst_state
 
     def _height_reward(self, curr_state_extr_vec, current_state_locom_vec, current_state_internal, prev_state_extr_vec):
-        max_height_speed = 1.0
+        max_height_speed = self._locomotion_conf.max_height_speed_goal
+        kp = 2
         height_err = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]-current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
         last_dt = current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT]
-        goal_height_velocity = th.clamp(-height_err*2, min=-max_height_speed, max=max_height_speed) 
+        goal_height_velocity = th.clamp(-height_err*kp, min=-max_height_speed, max=max_height_speed) 
         z_velocity = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - prev_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z])/last_dt
         # reward_height = bell_reward(z_velocity-goal_height_velocity, zero_rew_dist=goal_height_velocity/2 + 0.05)
         reward_height = double_bell_reward(z_velocity-goal_height_velocity,
@@ -1172,6 +1178,14 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                                                        current_state_internal = curr_inter_state,
                                                                                                        prev_state_extr_vec = prev_extri_state)
 
+        if labels is not None: # Generate at least some labels
+            for k in i:
+                if k not in labels:
+                    if isinstance(i[k], th.Tensor):
+                        nelements = i[k].shape[1] if len(i[k].shape)>1 else 1
+                        labels[k] = to_string_tensor([k+f"[{i}]" for i in range(nelements)])
+                    else:
+                        labels[k] = to_string_tensor([k])
 
         if self._configuration.verbose_infos:
             statenorm = self._state_helper.normalize(state)

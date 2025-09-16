@@ -55,7 +55,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
-        "max_goal_height_speed" : 0.1,
+        "max_goal_height_pos_change_speed" : 0.1,
         "max_good_step_duration" : 1.5,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
@@ -240,13 +240,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     actor_log_std_init = -3.0,
                                                     actor_observation_filter=["base.vec","base.last_action_raw"],
                                                     critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec"],
-                                                    # target_entropy_factor_annealing=("ramp",[100*1e6, 150*1e6, -1, -5]),
+                                                    # target_entropy_factor_annealing=("ramp",[150*1e3, 300*1e3, -1, -5]),
                                                     action_reference_obs_key="base.last_action_raw",
                                                     actor_weight_decay=0.0001,
                                                     critic_weight_decay=0.0,
                                                     policy_update_freq=2,
                                                     deterministic_collection_ratio=0.01,
-                                                    actor_mean_bounds_ratio = 0.95
+                                                    actor_mean_bounds_ratio = 0.9
                                                     ),
                     checkpoint_freq=20,
                     collector_device=env_device,

@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 2048
+        train_envs = 4096
     elif algo == "sac_small":
         train_envs = 8
     else:

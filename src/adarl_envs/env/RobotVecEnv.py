@@ -301,6 +301,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         real : bool
         recycle_pose_randomization : bool
         reward_penalties_max : th.Tensor
+        reward_clamp : th.Tensor
         robot_is_floating : bool
         robot_name : str
         robot_root_joint : str
@@ -610,6 +611,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     real = False,
                                                     recycle_pose_randomization = recycle_pose_randomization,
                                                     reward_penalties_max = self._thtens(100.0),
+                                                    reward_clamp = self._thtens(100.0),
                                                     robot_is_floating = is_floating,
                                                     robot_name = robot_name,
                                                     robot_root_joint = root_joint_name,

@@ -27,62 +27,62 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         env_device = th.device("cuda",0)
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
-
-    eval_freq = 5
+    
+    eval_freq = 20
     env_builder_args = {
-        "action_delay_mustd_std" : (0.0,0.0,0.0),
-        "action_noise_mustd" : (0.0,0.0),
-        "action_smoothing_halflife_sec" : 0.2,
+        "action_delay_mustd_std" : (0.005, 0.002, 0.0025),
+        "action_noise_mustd" : (0.0,   0.0005),
+        "action_smoothing_halflife_sec" : 0.05,
         "control_mode" : "position",
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
         "enable_rendering" : False,
         "fail_on_safety" : False,
         "frame_stack_length" : 5,
-        "goal_err_smoothing_halflife_sec" : 0.0,
-        "goal_height_minmax" : [0.45,0.50],
+        "goal_err_smoothing_halflife_sec" : 0.05,
+        "goal_height_minmax" : [0.45,0.45],
         "goal_resampling_probability_per_sec" : 0.1,
         "goal_speed_minmax" : (0,1.0),
-        "goal_yaw_minmax" : [-math.pi,math.pi],
+        "goal_yaw_minmax" : (-math.pi, math.pi),
         "held_joints_damping" : 10.0,
         "held_joints_stiffness" : 500.0,
-        "impulse_duration_minmax" : (0.01, 2.5),
-        "impulse_mean_std" : (20.0,50.0),
-        "impulse_probability_per_sec" : 0.,
+        "impulse_duration_minmax" : [0.01, 2.5],
+        "impulse_mean_std" : [20.0,50.0],
+        "impulse_probability_per_sec" : 0.1,
         "init_on_reset_ratio" : 0.2,
-        "initial_height_randomization_range_meters" : 0.10,
-        "initial_joint_pose_randomization_range" : 0.5,
+        "initial_height_randomization_range_meters" : 0.0,
+        "initial_joint_pose_randomization_range" : 0.8,
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 0.05, # Averaging of the joint pose for the position reward
-        "max_goal_height_speed" : 0.5,
+        "max_goal_height_speed" : 0.1,
         "max_good_step_duration" : 1.0,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : True,
-        "min_good_step_duration" : 0.2,
+        "min_good_step_duration" : 0.1,
         "mode" : mode,
-        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
-        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
-        "obs_noise_linacc_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
+        "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02, 0.02],
+        "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.02, 0.02],
+        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.0, 0.02],
+        "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0, 0.02],
+        "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0, 0.02],
+        "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0, 0.02],
         "observe_full_robot_state" : False,
         "posref_safety_period" : 0.005,
         "quiet" : False,
-        "randomized_armature_ratios" : 0.,
-        "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.,0.,0.])),
-        "randomized_friction_slide_spin_roll_ratios" : (0.,0.,0.),
-        "randomized_frictionloss_ratios" : 0.,
-        "randomized_gains_damping_ratio_epstd" : 0.,
-        "randomized_gains_stiffness_ratio_epstd" : 0.,
-        "randomized_mass_ratios" : ("normal", (0., 0.)),
-        "randomized_reference_filter_distribution" : ("uniform", (.0, .0)),
+        "randomized_armature_ratios" : 0.0,
+        "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10,0.02,0.02])),
+        "randomized_friction_slide_spin_roll_ratios" : [0.1,0.1,0.1],
+        "randomized_frictionloss_ratios" : 0.0,
+        "randomized_gains_damping_ratio_epstd" : 0.1,
+        "randomized_gains_stiffness_ratio_epstd" : 0.1,
+        "randomized_mass_ratios" : ("normal", (0.0, 0.05)),
+        "randomized_reference_filter_distribution" : ("uniform", (20.0, 20.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
         "reward_acceleration_weight" :      0.0,
-        "reward_actacc_weight" :            1.0,
-        "reward_actdiff_weight" :           1.0,
+        "reward_actacc_weight" :            100.0,
+        "reward_actdiff_weight" :           0.1,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_failure_weight" :           1.0,
@@ -90,21 +90,22 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_feet_on_ground_weight" :    0.0,
         "reward_heading_weight" :           0.0,
         "reward_health_weight" :            0.0,
-        "reward_height_weight" :            0.15,
+        "reward_height_position_weight" :   0.15,
+        "reward_height_velocity_weight" :   0.0,
         "reward_pitchnroll_weight" :        0.15,
         "reward_pos2posref_weight" :        0.0,       
         "reward_position_limit_weight" :    0.1,
         "reward_position_weight" :          0.0,
         "reward_slip_weight" :              1.0,
         "reward_torque_limit_weight" :      0.0,
-        "reward_torque_weight" :            0.1,
+        "reward_torque_weight" :            30.0,
         "reward_torquediff_weight" :        0.0,
         "reward_torqueref_weight" :         0.0,
         "reward_tracking_weight" :          1.0,
         "reward_velocity_limit_weight" :    0.0,
         "reward_velocity_weight" :          0.0,
         "reward_velref_weight" :            0.0,
-        "robot_model" : args["robot"],
+        "robot_model" : "kyon",
         "safe_damping" : 5,
         "safe_stiffness" : 400,
         "saturate_jimp_ref_limits" : False,
@@ -112,35 +113,46 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "stop_on_failure" : False,
         "terminate_on_body_contact" : False,
         "th_device" : env_device,
-        "ui_camera_resolution_hw" : (144,256),
+        "ui_camera_resolution_hw" : [144,256],
         "use_contacts" : False,
         "verbose_infos" : False,
         "video_save_freq" : 0
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
-    video_eval_env_builder_args["enable_rendering"] = True
-    video_eval_env_builder_args["verbose_infos"] = True
-    video_eval_env_builder_args["video_save_freq"] = 1
-    video_eval_env_builder_args["init_on_reset_ratio"] = 1.0
-    video_eval_env_builder_args["initial_pose_randomization_range"] = 0.02
-    video_eval_env_builder_args["mass_randomization_ratio"] = 0.0
-    video_eval_env_builder_args["friction_slide_spin_roll_randomization_ratios"] = (0.0,0.0,0.0)
-    video_eval_env_builder_args["recycle_pose_randomization"] = False
+    video_eval_env_builder_args.update({        
+        "enable_rendering" : True,
+        "verbose_infos" : True,
+        "video_save_freq" : 1,
+        "init_on_reset_ratio" : 1.0,
+        # "initial_joint_pose_randomization_range" : 0.02,
+        # "mass_randomization_ratio" : 0.0,
+        # "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
+        "recycle_pose_randomization" : False,
+        # "action_delay_mustd" : (0.0,0.0),
+        # "action_noise_mustd" : (0.0,0.0),
+        # "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.0, 0.0],
+        # "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.0, 0.0],
+        # "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.0, 0.0],
+        # "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0, 0.0],
+        # "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0, 0.0],
+        # "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0, 0.0],
+        # "th_device" : th.device("cpu",0) # this segfaults
+    })
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,
         "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 1,
+        "eval_eps" : 10,
         "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 1
+        "num_envs" : 10
     }
     eval_conf_video_stoch = {
         "name" : "video_stoch",
         "deterministic" : False,
         "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 1,
+        "eval_eps" : 10,
         "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 1,
+        "num_envs" : 10,
     }
     # video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
     # video_norand_eval_env_builder_args["enable_rendering"] = True
@@ -192,7 +204,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "num_envs" : 1
     # }
     eval_configurations = [  
-                            # eval_conf_video_det,
+                            eval_conf_video_det,
                             eval_conf_video_stoch,
                             # eval_conf_run_1ms,
                             # eval_conf_video_norand_det,
@@ -201,6 +213,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                             # #  eval_conf_video_jump_feasible
                         ]
     if algo.lower() == "sac":
+        
         sac_train(  seed,
                     folderName,
                     run_id,
@@ -219,13 +232,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     buffer_size=5_000_000,
                                                     total_steps=1_000_000_000,
                                                     train_freq_vstep=5,
-                                                    grad_steps=20,
+                                                    grad_steps=60,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
                                                     parallel_envs=train_envs,
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -2.0,
+                                                    target_entropy_factor = -1.0,
                                                     actor_log_std_init = -3.0,
                                                     actor_observation_filter=["base.vec","base.last_action_raw"],
                                                     critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec"],
@@ -245,7 +258,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
                     debug_level=2,
-                    log_weights_and_grads=False)                          
+                    log_weights_and_grads=False)                             
     elif algo.lower() == "sac_small":
         sac_train(  seed,
                     folderName,
@@ -295,8 +308,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder_args=env_builder_args,
                 agent_hyperparams=PPO_hyperparams(  minibatch_size=2048,
                                                     th_device=th.device("cuda"),
-                                                    actor_network_arch=(256,256),
-                                                    critic_network_arch=(256,256),
+                                                    actor_network_arch=(512,256),
+                                                    critic_network_arch=(512,256),
                                                     q_lr=None,
                                                     policy_lr=3e-4,
                                                     update_epochs=3,
@@ -310,10 +323,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 validation_buffer_size=0,
                 validation_holdout_ratio=0,
                 checkpoint_freq=-1,
-                collector_device=th.device("cpu"),
+                collector_device=env_device,
                 eval_configurations=eval_configurations,
                 debug_level=1)
-    else:       
+    else:
         raise RuntimeError(f"Unknown algorithm '{algo}'")
 
 
@@ -331,7 +344,6 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--algorithm", default="sac", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
-    ap.add_argument("--robot", default="quad", type=str, help="Robot to be used ('quad'/'kyon'/'centauro')")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

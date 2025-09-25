@@ -712,11 +712,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._configuration.randomized_friction_links = tuple(randomized_friction_links)
         self._configuration.randomized_armature_joints = tuple(randomized_armature_joints)
         self._configuration.randomized_frictionloss_joints = tuple(randomized_frictionloss_joints)
-        self._model_randomizations_enabled = sum(len(l) for l in [  self._configuration.randomized_mass_links,
-                                                                    self._configuration.randomized_com_links,
-                                                                    self._configuration.randomized_friction_links,
-                                                                    self._configuration.randomized_armature_joints,
-                                                                    self._configuration.randomized_frictionloss_joints])
+        self._model_randomizations_enabled = (
+                    any([len(self._configuration.randomized_mass_links)>0 and not self._distr_is_constant(randomized_mass_ratios_distr),
+                         len(self._configuration.randomized_com_links)>0 and not self._distr_is_constant(randomized_com_xyz_diff_distribution),
+                         len(self._configuration.randomized_friction_links)>0 and any(r>0 for r in randomized_friction_slide_spin_roll_ratios),
+                         len(self._configuration.randomized_armature_joints)>0 and randomized_armature_ratios>0,
+                         len(self._configuration.randomized_frictionloss_joints)>0 and randomized_frictionloss_ratios>0]) 
+                    )
 
 
         self._configuration.randomized_mass_ratio_distribution = self.distr_to_tensor(randomized_mass_ratios_distr, size=(len(randomized_mass_links),))
@@ -1108,9 +1110,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
 
         if self._model_randomizations_enabled:
-            from adarl.adapters.MjxAdapter import MjxAdapter
-            if not isinstance(self._adapter, MjxAdapter):
+            if not isinstance_noimport(self._adapter, "MjxAdapter"):
                 raise RuntimeError(f"Model randomizations are currently only supported with MjxAdapter")
+            from adarl.adapters.MjxAdapter import MjxAdapter
             mjx_adapter : MjxAdapter = self._adapter # type: ignore
             # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")
             mjx_adapter.alter_model_rel(  link_masses = ( self._randomized_mass_link_ids,
@@ -1125,10 +1127,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                   self._sample_distr(size=(self.num_envs, len(self._configuration.randomized_com_links),3),
                                                                                      type_and_params=self._configuration.randomized_com_xyz_diff_distribution),),
                                             com_quatxyzw_diffs = None)
-        if self._configuration.randomized_reference_filter_distribution != None:
-            from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
-            if not isinstance(self._adapter, MjxJointImpedanceAdapter):
+        if self._configuration.randomized_reference_filter_distribution != None and not self._distr_is_constant(self._configuration.randomized_reference_filter_distribution):
+            if not isinstance_noimport(self._adapter, "MjxJointImpedanceAdapter"):
                 raise RuntimeError(f"Reference filter randomizations are currently only supported with MjxJointImpedanceAdapter")
+            from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
             mjx_adapter : MjxJointImpedanceAdapter = self._adapter # type: ignore
             new_filters_freqs = self._sample_distr((self.num_envs,), self._configuration.randomized_reference_filter_distribution)
             mjx_adapter.set_reference_filter(new_filters_freqs)
@@ -1220,7 +1222,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 ggLog.info(f"Moved robot.")
             except adarl.utils.utils.MoveFailError as e:
                 ggLog.warn(f"Timed out reaching position: {adarl.utils.utils.exc_to_str(e)}")
-
             time.sleep(1)
             self._adapter.setJointsImpedanceCommand(full_cmd_vec_j_pvesd, vec_mask=vec_mask)
             time.sleep(1)
@@ -1548,17 +1549,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         assert_msg="non finite values in joint stats")
                 if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
                     def build_error_msg():
+                        mjx_adapter : MjxAdapter = self._adapter # type: ignore
                         bad_sim_id = th.logical_not(th.isfinite(vec_bodystates_13)).nonzero()[0,0].item()
                         import jax.numpy as jnp
                         return (f"diverging sim {bad_sim_id}:\n"
-                                f" model.geom_friction = {self._adapter._sim_state.mjx_model.geom_friction[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.geom_friction, axis=0)})\n"
-                                f" model.body_mass = {self._adapter._sim_state.mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.body_mass, axis=0)})"
-                                f" model.dof_frictionloss = {self._adapter._sim_state.mjx_model.dof_frictionloss[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.dof_frictionloss, axis=0)})"
-                                f" model.dof_armature = {self._adapter._sim_state.mjx_model.dof_armature[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.dof_armature, axis=0)})")
+                                f" model.geom_friction = {mjx_adapter._sim_state.mjx_model.geom_friction[bad_sim_id]} (avg = {jnp.mean(mjx_adapter._sim_state.mjx_model.geom_friction, axis=0)})\n"
+                                f" model.body_mass = {mjx_adapter._sim_state.mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(mjx_adapter._sim_state.mjx_model.body_mass, axis=0)})"
+                                f" model.dof_frictionloss = {mjx_adapter._sim_state.mjx_model.dof_frictionloss[bad_sim_id]} (avg = {jnp.mean(mjx_adapter._sim_state.mjx_model.dof_frictionloss, axis=0)})"
+                                f" model.dof_armature = {mjx_adapter._sim_state.mjx_model.dof_armature[bad_sim_id]} (avg = {jnp.mean(mjx_adapter._sim_state.mjx_model.dof_armature, axis=0)})")
                     dbg_check(lambda : th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvaee)), th.all(th.isfinite(vec_bodystates_13))),
                             build_error_msg, just_warn = True, async_assert=True, assert_msg="diverging sim")
         except NotImplementedError:
-            vec_stats_minmaxavgstd_j_pvaee = self._thfull(float("nan"), (self.num_envs,4,len(self._configuration.controlled_joints),4))
+            vec_stats_minmaxavgstd_j_pvaee = self._thfull(float("nan"), (self.num_envs,4,len(self._configuration.controlled_joints),5))
         # th.cuda.synchronize()
         t3 = time.monotonic()
         # ggLog.info(f"vec_stats_minmaxavgstd_j_pvae = {vec_stats_minmaxavgstd_j_pvae}")
@@ -1903,7 +1905,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         reward = th.sum(th.stack([sub_rewards_return[k]*weights[k] for k in sub_rewards_return]), dim=0)
         return reward
 
-    def _sample_distr(self, size, type_and_params : tuple[str, tuple[th.Tensor,th.Tensor] | tuple[th.Tensor,th.Tensor,th.Tensor]]) -> th.Tensor:
+    def _sample_distr(self, size, type_and_params : DistributionDefTh) -> th.Tensor:
         if type_and_params[0] == "uniform":
             low, high = type_and_params[1] #type: ignore
             return self._thrand(size)*(high-low)+low
@@ -1916,6 +1918,21 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             return th.clamp(self._thrandn(size), -clamp_width, clamp_width)*std+mean
         else:
             raise NotImplementedError(f"Unsupported distribution type {type_and_params[0]}")
+        
+    def _distr_is_constant(self, distr : DistributionDef) -> bool:
+        distr_type = distr[0]
+        if distr_type == "uniform":
+            low, high = distr[1]
+            return th.all(th.as_tensor(low) == th.as_tensor(high)).item()
+        elif distr_type == "normal":
+            if len(distr[1]) == 2:
+                mean, std = distr[1]
+            else:
+                mean, std, _ = distr[1]
+            return th.all(th.as_tensor(std) == 0).item()
+        else:
+            raise NotImplementedError(f"Unsupported distribution type {distr_type}")
+        
         
     def distr_to_tensor(self, distr : DistributionDef, size : tuple[int,...] | None = None) -> DistributionDefTh:
         distr_type = distr[0]

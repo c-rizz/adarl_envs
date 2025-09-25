@@ -1174,7 +1174,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = self._current_state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
         self._stats["ep_max_javg_sensed_effort"] = th.maximum(self._stats["ep_max_javg_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1)).view((self.num_envs,)) 
-        self._stats["ep_max_peak_sensed_effort"] = th.maximum(self._stats["max_peak_sensed_effort"],    state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=[1,2])).view((self.num_envs,))
+        self._stats["ep_max_peak_sensed_effort"] = th.maximum(self._stats["ep_max_peak_sensed_effort"],    state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=[1,2])).view((self.num_envs,))
 
    
     @override

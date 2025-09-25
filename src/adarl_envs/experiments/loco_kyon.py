@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 2048
+        train_envs = 4
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -29,7 +29,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
     
     eval_freq = 10
-    r = 0.0
+    r = 1.0
     n = 0.0
     p = 0.0
     env_builder_args = {
@@ -94,13 +94,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_feet_on_ground_weight" :    0.0,
         "reward_heading_weight" :           0.0,
         "reward_health_weight" :            0.0,
-        "reward_height_position_weight" :   0.15,
+        "reward_height_position_weight" :   0.3,
         "reward_height_velocity_weight" :   0.0,
         "reward_pitchnroll_weight" :        0.15,
         "reward_pos2posref_weight" :        0.0,       
         "reward_position_limit_weight" :    0.1*p,
         "reward_position_weight" :          0.0,
-        "reward_sensed_effort_weight" :     2.0,
+        "reward_sensed_effort_weight" :     0.0,
         "reward_slip_weight" :              1.0*p,
         "reward_torque_limit_weight" :      0.0,
         "reward_torque_weight" :            30.0,

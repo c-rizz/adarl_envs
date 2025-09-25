@@ -247,7 +247,7 @@ class LocomotionVecEnv(RobotVecEnv):
     
     FEET_FIELDS = IntEnum("FEET_FIELDS" , ["FEET_LIFTOFF_TIMES",
                                            "FEET_VEL_X",
-                                           "FEET_VEL_Y"])
+                                           "FEET_VEL_Y"], start=0)
 
     def __init__(self,  action_delay_mustd_std : tuple[float,float,float],
                         action_noise_mustd : Sequence[float] | th.Tensor, 
@@ -600,6 +600,9 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : [-10,10]},
                                                     observation_definitions=obs_defs,
                                                     vec_size=adapter.vec_size())
+        self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
+                                                            self._locomotion_state_helper,
+                                                            obs_defs={"base":{"observable":True,"flatten":True,"noise":None}})
         feet_num = len(self._loco_conf.feet_links)
         self._feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET_FIELDS],
                                                     dtype=self._obs_dtype,
@@ -609,13 +612,16 @@ class LocomotionVecEnv(RobotVecEnv):
                                                         self.FEET_FIELDS.FEET_LIFTOFF_TIMES : th.as_tensor([[-1.0],[1000.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_VEL_X : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_VEL_Y : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num)},
-                                                    vec_size=adapter.vec_size())
-        self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
-                                                            self._locomotion_state_helper,
-                                                            obs_defs={"base":{"observable":True,"flatten":True,"noise":None}})
+                                                    vec_size=adapter.vec_size(),
+                                                    history_length=2,
+                                                    observation_definitions=
+                                                        {   "base"       : ThBoxStateHelper.SimpleObsDef(observable_fields=[]),
+                                                            "privileged" : ThBoxStateHelper.SimpleObsDef(observable_fields=[self.FEET_FIELDS.FEET_LIFTOFF_TIMES,
+                                                                                                                            self.FEET_FIELDS.FEET_VEL_X,
+                                                                                                                            self.FEET_FIELDS.FEET_VEL_Y])})
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_FEET,
                                                             self._feet_state_helper,
-                                                            obs_defs={"base":{"observable":False,"flatten":False,"noise":None}})
+                                                            obs_defs={"priviledged":{"observable":False,"flatten":True,"noise":None}})
         if self._loco_conf.heightmap_resolution_xy[0] > 0:
             heightmap_state_helper = ThBoxStateHelper( field_names=["map"],
                                                     dtype=self._obs_dtype,
@@ -656,8 +662,8 @@ class LocomotionVecEnv(RobotVecEnv):
         feet_linvels_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw = loco_adapter_data
 
         track_support_linvel = False
-        prev_locom_state = self._current_state[self.STATE_LOCOMOTION][:, 0]
-        prev_feet_state = self._current_state[self.STATE_FEET][:, 0, 0]
+        prev_locom_state =    self._current_state[self.STATE_LOCOMOTION][:, 0]
+        prev_internal_state = self._current_state[self.STATE_INTERNAL][:, 0]
         new_inst_state = super()._get_new_instantaneous_state(super_adapter_data)
         new_internal_state = new_inst_state[self.STATE_INTERNAL]
         new_extrinsic_state = new_inst_state[self.STATE_EXTRINSIC]
@@ -823,32 +829,41 @@ class LocomotionVecEnv(RobotVecEnv):
         # fstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._feet_link_ids, use_com_pose = False)
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
         if isinstance_noimport(self._adapter, "MjxAdapter"):
-            curr_time = new_internal_state[self.INTERNAL_FIELDS.SIM_TIME]
-            feet_were_touching_ground = prev_feet_state <= 0
             nenv_nfeet = (self.num_envs,len(self._loco_conf.feet_links))
+            prev_time = prev_internal_state[:,self.INTERNAL_FIELDS.SIM_TIME].view((self.num_envs,))
+            curr_time = new_internal_state[self.INTERNAL_FIELDS.SIM_TIME].view((self.num_envs,))
+            dt : th.Tensor = curr_time - prev_time
+            # ggLog.info(f"feet_state = {self._current_state[self.STATE_FEET]}")
+            prev_feet_step_durations_vec_foot_t = self._current_state[self.STATE_FEET][:, 0, self.FEET_FIELDS.FEET_LIFTOFF_TIMES]
+            feet_were_touching_ground = prev_feet_step_durations_vec_foot_t <= 0
             # if foot is just lifting off, mark the time in the state
             # if foot is already up, and stays up, leave the time there
             # if it is just now touching down, flip the time to negative and add the current time (so it becomes the negative step duration)
             # if it was already down, and stays down, write zero to it
-            lifting_off = th.logical_and(th.logical_not(feet_are_touching_ground), feet_were_touching_ground)
-            touching_down = th.logical_and(th.logical_not(feet_were_touching_ground), feet_are_touching_ground)
-            staying_down = th.logical_and(feet_are_touching_ground, feet_were_touching_ground)
-            new_feet_liftoffs_vec_foot_t = prev_feet_state.clone() # by default keep the previous value
-            th.where(condition=touching_down.expand(nenv_nfeet),
-                     input=-(curr_time-prev_feet_state), # if touching down, write negative step duration
-                     other=new_feet_liftoffs_vec_foot_t,
-                     out=new_feet_liftoffs_vec_foot_t)
-            th.where(condition=lifting_off.expand(nenv_nfeet),
-                     input=curr_time.expand(nenv_nfeet), # if lifting off, write current time
-                     other=new_feet_liftoffs_vec_foot_t,
-                     out=new_feet_liftoffs_vec_foot_t)
-            th.where(condition=staying_down.expand(nenv_nfeet),
-                     input=self._thtens(0.0), # if staying down, write zero
-                     other=new_feet_liftoffs_vec_foot_t,
-                     out=new_feet_liftoffs_vec_foot_t)
+            # lifting_off = th.logical_and(th.logical_not(feet_are_touching_ground), feet_were_touching_ground)
+            just_touching_down = th.logical_and(th.logical_not(feet_were_touching_ground), feet_are_touching_ground)
+            # new_feet_liftoffs_vec_foot_t = th.zeros_like(prev_feet_state)
+            # ggLog.info(f"dt = {dt}")
+            # ggLog.info(f"feet_were_touching_ground = \n{feet_were_touching_ground}")
+            # ggLog.info(f"feet_are_touching_ground = \n{feet_are_touching_ground}")
+            new_feet_step_durations_vec_foot_t  = self._current_state[self.STATE_FEET][:, 0, self.FEET_FIELDS.FEET_LIFTOFF_TIMES].clone()
+            th.where(condition=just_touching_down.expand(nenv_nfeet),
+                     input = -prev_feet_step_durations_vec_foot_t, # if touching down, write negative step duration
+                     other = new_feet_step_durations_vec_foot_t,
+                     out   = new_feet_step_durations_vec_foot_t)
+            th.where(condition=feet_were_touching_ground.expand(nenv_nfeet),
+                     input = self._thtens(0.0), # if was touching ground already in the previous step, write zero
+                     other = new_feet_step_durations_vec_foot_t,
+                     out   = new_feet_step_durations_vec_foot_t)
+            th.where(condition=th.logical_not(feet_are_touching_ground).expand(nenv_nfeet),
+                     input = new_feet_step_durations_vec_foot_t+dt.unsqueeze(1).expand(nenv_nfeet), # if is up, increase time
+                     other = new_feet_step_durations_vec_foot_t,
+                     out   = new_feet_step_durations_vec_foot_t)
+            # ggLog.info(f"prev_feet_step_durations_vec_foot_t = \n{prev_feet_step_durations_vec_foot_t}")
+            # ggLog.info(f"new_feet_step_durations_vec_foot_t = \n{new_feet_step_durations_vec_foot_t}")
         else:
-            new_feet_liftoffs_vec_foot_t = self._thtens([0.0]).expand(vsize,len(self._loco_conf.feet_links))
-        new_feet_state = {  self.FEET_FIELDS.FEET_LIFTOFF_TIMES : new_feet_liftoffs_vec_foot_t,
+            new_feet_step_durations_vec_foot_t = self._thtens([0.0]).expand(vsize,len(self._loco_conf.feet_links))
+        new_feet_state = {  self.FEET_FIELDS.FEET_LIFTOFF_TIMES : new_feet_step_durations_vec_foot_t,
                             self.FEET_FIELDS.FEET_VEL_X : feet_linvels_vec_foot_xyz[:,:,0],
                             self.FEET_FIELDS.FEET_VEL_Y : feet_linvels_vec_foot_xyz[:,:,1]}
 
@@ -979,9 +994,9 @@ class LocomotionVecEnv(RobotVecEnv):
 
         goal_speed = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED].view((self.num_envs,1))
         feet_state = state[self.STATE_FEET][:,0] # vec_size*history*fields*nfeet -> vec_size*fields*nfeet
-        feet_liftoffs = feet_state[:,0] # vec_size*fields*nfeet -> vec_size*nfeet
-        steps_finishing = feet_liftoffs < 0
-        step_durations = steps_finishing*(-feet_liftoffs) # When the value is negative then it is the duration of a finished step
+        feet_step_durations = feet_state[:,self.FEET_FIELDS.FEET_LIFTOFF_TIMES] # vec_size*fields*nfeet -> vec_size*nfeet
+        steps_finishing = feet_step_durations < 0
+        step_durations = steps_finishing*(-feet_step_durations) # When the value is negative then it is the duration of a finished step
         # subtracting 0.1 from the durations makes it so that very short steps are actually penalized with a negative reward
         # this makes doing small steps worse than doing nothing
         # squash the durations to max_good step, and offset it o that steps shorter than min_good_step are negative
@@ -998,7 +1013,7 @@ class LocomotionVecEnv(RobotVecEnv):
         
         feet_linvels_xy = feet_state[:,1:3] # vec_size*fields*nfeet -> vec_size*2*nfeet
         feet_linvels = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*fields*nfeet -> vec_size*nfeet
-        feet_touching_ground = feet_liftoffs <= 0
+        feet_touching_ground = feet_step_durations <= 0
         feet_sliding_linvel = feet_linvels*feet_touching_ground
         reward_slip = penalty_reward(feet_sliding_linvel, max_rew=1, exponent=2)
 
@@ -1173,7 +1188,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = self._current_state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
         self._stats["ep_max_javg_sensed_effort"] = th.maximum(self._stats["ep_max_javg_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1)).view((self.num_envs,)) 
-        self._stats["ep_max_peak_sensed_effort"] = th.maximum(self._stats["max_peak_sensed_effort"],    state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=[1,2])).view((self.num_envs,))
+        self._stats["ep_max_peak_sensed_effort"] = th.maximum(self._stats["ep_max_peak_sensed_effort"],    state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=[1,2])).view((self.num_envs,))
 
    
     @override

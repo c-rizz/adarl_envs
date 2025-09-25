@@ -344,7 +344,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args.update({
         "enable_rendering" : True,
         "record_video" : args["mode"]!="xbot",
-        "verbose_infos" : False,
+        "verbose_infos" : True,
         "video_save_freq" : True if args["record"] else 0,
         "action_delay_mustd" : (0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),

@@ -28,7 +28,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
     
-    eval_freq = 20
+    eval_freq = 10
     r = 0.0
     n = 0.0
     p = 0.0

@@ -520,6 +520,8 @@ class LocomotionVecEnv(RobotVecEnv):
         self._stats["ep_avg_height_err_vec"] = self._thzeros((self._configuration.vec_size,))
         self._stats["ep_avg_pitchnroll_err_vec"] = self._thzeros((self._configuration.vec_size,))
         self._stats["ep_avg_bodyspeed_vec"] = self._thzeros((self._configuration.vec_size,))
+        self._stats["ep_max_javg_sensed_effort"] = self._thzeros((self._configuration.vec_size,))
+        self._stats["ep_max_peak_sensed_effort"] = self._thzeros((self._configuration.vec_size,))
 
     @override
     def _build(self):
@@ -1169,20 +1171,9 @@ class LocomotionVecEnv(RobotVecEnv):
         set_column(self._stats["pitchnroll_errs_vec"], idx, pitchnroll_err_vec.view(self.num_envs,))
         set_column(self._stats["body_speeds_vec"], idx, body_speed_vec.view(self.num_envs,))
 
-        # self._stats["vel_errs_vec"][:,idx]=         vel_error_vec.view(self.num_envs,)
-        # self._stats["height_errs_vec"][:,idx]=      height_error_vec.view(self.num_envs,)
-        # self._stats["pitchnroll_errs_vec"][:,idx]=  pitchnroll_err_vec.view(self.num_envs,)
-        # self._stats["body_speeds_vec"][:,idx]=      body_speed_vec.view(self.num_envs,)
-
-
-        # idxs = step_counts%self._stats["vel_errs_vec"].size()[1]
-        # # print(f"torch.is_grad_enabled()) = {th.is_grad_enabled()}")
-        # # print(f"idx.size() = {idxs.size()}, idx = {idxs}")
-        # # print(f"vel_error_vec.size() = {vel_error_vec.size()}, {vel_error_vec}")
-        # self._stats["vel_errs_vec"].scatter_(       dim=1, index=idxs.view(self.num_envs,1), src=vel_error_vec.view(self.num_envs,1))
-        # self._stats["height_errs_vec"].scatter_(    dim=1, index=idxs.view(self.num_envs,1), src=height_error_vec.view(self.num_envs,1))
-        # self._stats["pitchnroll_errs_vec"].scatter_(dim=1, index=idxs.view(self.num_envs,1), src=pitchnroll_err_vec.view(self.num_envs,1))
-        # self._stats["body_speeds_vec"].scatter_(    dim=1, index=idxs.view(self.num_envs,1), src=body_speed_vec.view(self.num_envs,1))
+        state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = self._current_state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
+        self._stats["ep_max_javg_sensed_effort"] = th.maximum(self._stats["ep_max_javg_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1)).view((self.num_envs,)) 
+        self._stats["ep_max_peak_sensed_effort"] = th.maximum(self._stats["max_peak_sensed_effort"],    state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=[1,2])).view((self.num_envs,))
 
    
     @override

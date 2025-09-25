@@ -857,7 +857,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     **vsize_dev_type # type: ignore
                                                     )
         joint_step_stats_state_helper = RobotStatsStateHelper(  joint_limit_minmax_pve={jn:self._configuration.joint_physical_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
-                                                                **vsize_dev_type) # type: ignore
+                                                                **vsize_dev_type,
+                                                                include_senseff=True) # type: ignore
         joint_longterm_stats_helper = ThBoxStateHelper( field_names=[e for e in self.JOINT_LONGTERM_STATS_FIELDS],
                                                         field_size=(len(self._configuration.controlled_joints),),
                                                         fields_minmax={self.JOINT_LONGTERM_STATS_FIELDS.AVG_POS : 
@@ -1535,12 +1536,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # th.cuda.synchronize()
         t2 = time.monotonic()
         try:
-            vec_stats_minmaxavgstd_j_pvae = self._adapter.get_joints_state_step_stats()
+            vec_stats_minmaxavgstd_j_pvaee = self._adapter.get_joints_state_step_stats_extended()
             if self._configuration.enable_dbg_checks:
-                dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)),
-                        lambda: (f"non finite values in joint stats at indexes:\n{th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae)).nonzero()}\n"
-                                f"nonfinite values =\n{vec_stats_minmaxavgstd_j_pvae[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvae))]}\n"
-                                f"all values =\n{vec_stats_minmaxavgstd_j_pvae}"),
+                dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvaee)),
+                        lambda: (f"non finite values in joint stats at indexes:\n{th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvaee)).nonzero()}\n"
+                                f"nonfinite values =\n{vec_stats_minmaxavgstd_j_pvaee[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvaee))]}\n"
+                                f"all values =\n{vec_stats_minmaxavgstd_j_pvaee}"),
                         just_warn=True,
                         async_assert=True,
                         assert_msg="non finite values in joint stats")
@@ -1553,10 +1554,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 f" model.body_mass = {self._adapter._sim_state.mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.body_mass, axis=0)})"
                                 f" model.dof_frictionloss = {self._adapter._sim_state.mjx_model.dof_frictionloss[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.dof_frictionloss, axis=0)})"
                                 f" model.dof_armature = {self._adapter._sim_state.mjx_model.dof_armature[bad_sim_id]} (avg = {jnp.mean(self._adapter._sim_state.mjx_model.dof_armature, axis=0)})")
-                    dbg_check(lambda : th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvae)), th.all(th.isfinite(vec_bodystates_13))),
+                    dbg_check(lambda : th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvaee)), th.all(th.isfinite(vec_bodystates_13))),
                             build_error_msg, just_warn = True, async_assert=True, assert_msg="diverging sim")
         except NotImplementedError:
-            vec_stats_minmaxavgstd_j_pvae = self._thfull(float("nan"), (self.num_envs,4,len(self._configuration.controlled_joints),4))
+            vec_stats_minmaxavgstd_j_pvaee = self._thfull(float("nan"), (self.num_envs,4,len(self._configuration.controlled_joints),4))
         # th.cuda.synchronize()
         t3 = time.monotonic()
         # ggLog.info(f"vec_stats_minmaxavgstd_j_pvae = {vec_stats_minmaxavgstd_j_pvae}")
@@ -1569,7 +1570,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} others={t3_1-t3:.6f} tot = {t3_1-t0:.6f}s")
 
-        return (vec_stats_minmaxavgstd_j_pvae,
+        return (vec_stats_minmaxavgstd_j_pvaee,
                 vec_jstates_j_pveae,
                 self._last_sent_v_j_pvesd,
                 vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
@@ -1583,7 +1584,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     def _get_new_instantaneous_state(self, adapter_data):        
         
-        (   vec_stats_minmaxavgstd_j_pvae,
+        (   vec_stats_minmaxavgstd_j_pvaee,
             vec_jstates_j_pveae,
             self._last_sent_v_j_pvesd,
             vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
@@ -1600,7 +1601,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
         new_inst_state = self._build_new_instantaneous_state_vec(   
                                     vec_internal_state = internal_state,
-                                    vec_stats_minmaxavgstd_j_pvae = vec_stats_minmaxavgstd_j_pvae,
+                                    vec_stats_minmaxavgstd_j_pvaee = vec_stats_minmaxavgstd_j_pvaee,
                                     vec_jstates_j_pveae = vec_jstates_j_pveae,
                                     vec_last_sent_j_pvesd = self._last_sent_v_j_pvesd,
                                     vec_body_abs_linvel_xyz = vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
@@ -1623,7 +1624,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
     def _build_new_instantaneous_state_vec(self,    vec_internal_state : th.Tensor,
-                                                    vec_stats_minmaxavgstd_j_pvae : th.Tensor,
+                                                    vec_stats_minmaxavgstd_j_pvaee : th.Tensor,
                                                     vec_jstates_j_pveae : th.Tensor,
                                                     vec_last_sent_j_pvesd : th.Tensor,
                                                     vec_body_abs_linvel_xyz : th.Tensor,
@@ -1648,10 +1649,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_safety_state = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED].view((self.num_envs,))
         # vec_prev_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")
-        pveidx = th.as_tensor([0,1,3]).to(device=vec_stats_minmaxavgstd_j_pvae.device, non_blocking=True)
+        pveidx = th.as_tensor([0,1,3]).to(device=vec_stats_minmaxavgstd_j_pvaee.device, non_blocking=True)
         if self._configuration.enable_limits_safety:
-            vec_triggered_limits = th.logical_or(   vec_stats_minmaxavgstd_j_pvae[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
-                                                    vec_stats_minmaxavgstd_j_pvae[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
+            vec_triggered_limits = th.logical_or(   vec_stats_minmaxavgstd_j_pvaee[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
+                                                    vec_stats_minmaxavgstd_j_pvaee[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
             vec_limits_safety_triggered = th.any(vec_triggered_limits, dim=(1,2))
             # vec_safety_triggered = th.logical_or(vec_limits_safety_triggered, vec_prev_safety_triggered)
             newly_triggered = th.logical_and(vec_limits_safety_triggered,
@@ -1683,7 +1684,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # build stats:
         # with permute the first dimension becomes the joint (ordered as in set_monitored_joints)
         # with flatten the second dimension becomes minp,minv,mina,mmine,maxp,maxv,...
-        new_robot_stats_state = vec_stats_minmaxavgstd_j_pvae.permute(0,2,1,3).flatten(start_dim=2)
+        new_robot_stats_state_pvaee = vec_stats_minmaxavgstd_j_pvaee.permute(0,2,1,3).flatten(start_dim=2) # exchange minmaxavgstd and joint dim, then flatten minmaxavgstd into one dim
+        # ggLog.info(f"new_robot_stats_state_pvaee = {new_robot_stats_state_pvaee.size()}, expected {(self.num_envs, len(self._configuration.controlled_joints), 4*5)}")
         new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : vec_body_rel_linvel_xyz[:,0].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : vec_body_rel_linvel_xyz[:,1].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : vec_body_rel_linvel_xyz[:,2].view(self.num_envs,1),
@@ -1712,7 +1714,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         return {    self.STATE_EXTRINSIC    : new_extrinsic_state,
                     self.STATE_INTERNAL     : new_internal_state,
                     self.STATE_ROBOT        : new_robot_state,
-                    self.STATE_JOINT_STEP_STATS  : new_robot_stats_state,
+                    self.STATE_JOINT_STEP_STATS  : new_robot_stats_state_pvaee,
                     self.STATE_JOINT_LONGTERM_STATS : new_longterm_stats_state,
                     self.STATE_ACT_PREPROC : {self.ACT_FIELDS.ACTION : self._last_preprocessed_actions},
                     self.STATE_ACT_RAW_HIST : {self.ACT_FIELDS.ACTION : self._last_raw_actions},

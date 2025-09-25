@@ -7,6 +7,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import torch as th
     from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams
     from adarl_envs.experiments.loco_builder import named_loco_venv_builder
+    import math
     
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
@@ -14,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 512
+        train_envs = 2048
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -27,10 +28,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
     
-    eval_freq = 20
+    eval_freq = 10
+    r = 0.0
+    n = 0.0
+    p = 0.0
     env_builder_args = {
-        "action_delay_mustd_std" : (0.005, 0.002, 0.0025),
-        "action_noise_mustd" : (0.0,   0.0005),
+        "action_delay_mustd_std" : (0.005, 0.002*n, 0.0025*n),
+        "action_noise_mustd" : (0.0,   0.0005*n),
         "action_smoothing_halflife_sec" : 0.05,
         "control_mode" : "position",
         "enable_limits_safety" : True,
@@ -39,72 +43,74 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "fail_on_safety" : False,
         "frame_stack_length" : 5,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : [0.3,0.57],
-        "goal_resampling_probability_per_sec" : 0.3,
-        "goal_speed_minmax" : [0,0.0],
-        "goal_yaw_minmax" : [0.0,0.0],
+        "goal_height_minmax" : [0.45,0.45],
+        "goal_resampling_probability_per_sec" : 0.1,
+        "goal_speed_minmax" : (0,1.0),
+        "goal_yaw_minmax" : (-math.pi, math.pi),
         "held_joints_damping" : 10.0,
         "held_joints_stiffness" : 500.0,
         "impulse_duration_minmax" : [0.01, 2.5],
-        "impulse_mean_std" : [10.0,50.0],
+        "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.1,
         "init_on_reset_ratio" : 0.2,
-        "initial_height_randomization_range_meters" : 0.15,
+        "initial_height_randomization_range_meters" : 0.0,
         "initial_joint_pose_randomization_range" : 0.8,
-        "initial_pose_randomization_range" : 0.0,
         "just_health_reward" : False,
         "log_info_stats" : True,
-        "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
+        "longterm_states_decimation_time" : 0.05, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,
-        "max_good_step_duration" : 1.5,
+        "max_goal_height_speed" : 0.1,
+        "max_good_step_duration" : 1.0,
         "max_steps_per_episode" : max_steps_per_episode,
-        "merge_privileged" : False,
-        "min_good_step_duration" : 0.2,
+        "merge_privileged" : True,
+        "min_good_step_duration" : 0.1,
         "mode" : mode,
-        "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02, 0.02],
-        "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.02, 0.02],
-        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.0, 0.02],
-        "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0, 0.02],
-        "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0, 0.02],
-        "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0, 0.02],
+        "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.02*n],
+        "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.02*n, 0.02*n],
+        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.0, 0.02*n],
+        "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0, 0.02*n],
+        "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0, 0.02*n],
+        "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0, 0.02*n],
         "observe_full_robot_state" : False,
         "posref_safety_period" : 0.005,
         "quiet" : False,
-        "randomized_armature_ratios" : 0.2,
-        "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.15,0.05,0.03])),
-        "randomized_friction_slide_spin_roll_ratios" : [0.3,0.3,0.3],
-        "randomized_frictionloss_ratios" : 0.2,
-        "randomized_gains_damping_ratio_epstd" : 0.3,
-        "randomized_gains_stiffness_ratio_epstd" : 0.3,
-        "randomized_mass_ratios" : ("normal", (0.0, 0.1)),
-        "randomized_reference_filter_distribution" : ("uniform", (5.0, 40.0)),
+        "randomized_armature_ratios" : 0.1*r,
+        "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
+        "randomized_friction_slide_spin_roll_ratios" : [0.1*r,0.1*r,0.1*r],
+        "randomized_frictionloss_ratios"             : 0.1*r,
+        "randomized_gains_damping_ratio_epstd"       : 0.1*r,
+        "randomized_gains_stiffness_ratio_epstd"     : 0.1*r,
+        "randomized_mass_ratios" : ("normal", (0.0, 0.05*r)),
+        "randomized_reference_filter_distribution" : ("uniform", (20.0-15*r, 20.0+15*r)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "reward_acceleration_weight" :      0.0,
-        "reward_actacc_weight" :            1000.0,
-        "reward_actdiff_weight" :           20.0,
+        "reward_acceleration_weight" :      5.0*p,
+        "reward_actacc_weight" :            100.0*p,
+        "reward_actdiff_weight" :           1.0*p,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_failure_weight" :           1.0,
-        "reward_feet_air_time_weight" :     0.0,
-        "reward_feet_on_ground_weight" :    1.0,
-        "reward_heading_weight" :           0.5,
+        "reward_feet_air_time_weight" :     20.0,
+        "reward_feet_on_ground_weight" :    0.0,
+        "reward_heading_weight" :           0.0,
         "reward_health_weight" :            0.0,
-        "reward_height_weight" :            4.0,
-        "reward_pitchnroll_weight" :        1.75,
+        "reward_height_position_weight" :   0.15,
+        "reward_height_velocity_weight" :   0.0,
+        "reward_pitchnroll_weight" :        0.15,
         "reward_pos2posref_weight" :        0.0,       
-        "reward_position_limit_weight" :    0.1,
-        "reward_position_weight" :          0.25,
-        "reward_slip_weight" :              2.0,
+        "reward_position_limit_weight" :    0.1*p,
+        "reward_position_weight" :          0.0,
+        "reward_sensed_effort_weight" :     2.0,
+        "reward_slip_weight" :              1.0*p,
         "reward_torque_limit_weight" :      0.0,
-        "reward_torque_weight" :            2.0,
+        "reward_torque_weight" :            30.0,
         "reward_torquediff_weight" :        0.0,
         "reward_torqueref_weight" :         0.0,
-        "reward_tracking_weight" :          0.0,
+        "reward_tracking_weight" :          1.0,
         "reward_velocity_limit_weight" :    0.0,
         "reward_velocity_weight" :          0.0,
         "reward_velref_weight" :            0.0,
-        "robot_model" : args["robot"],
+        "robot_model" : "kyon",
         "safe_damping" : 5,
         "safe_stiffness" : 400,
         "saturate_jimp_ref_limits" : False,
@@ -212,6 +218,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                             # #  eval_conf_video_jump_feasible
                         ]
     if algo.lower() == "sac":
+        
         sac_train(  seed,
                     folderName,
                     run_id,
@@ -220,29 +227,29 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_init_hparams( model_th_device = "cuda",
-                                                    q_network_arch=[2048,512,256],
-                                                    q_lr=0.0005,
-                                                    policy_lr=0.0001,
-                                                    policy_arch=[512,256],
+                                                    q_network_arch=[2048,256],
+                                                    q_lr=0.001,
+                                                    policy_lr=0.0005,
+                                                    policy_arch=[512,128],
                                                     gamma=0.99,
                                                     target_tau = 0.001,
-                                                    batch_size=4096,
+                                                    batch_size=8192,
                                                     buffer_size=5_000_000,
                                                     total_steps=1_000_000_000,
                                                     train_freq_vstep=5,
-                                                    grad_steps=20,
+                                                    grad_steps=60,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
                                                     parallel_envs=train_envs,
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -2.0,
+                                                    target_entropy_factor = -1.0,
                                                     actor_log_std_init = -3.0,
                                                     actor_observation_filter=["base.vec","base.last_action_raw"],
                                                     critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec"],
-                                                    # target_entropy_factor_annealing=("ramp",[150*1e3, 300*1e3, -1, -5]),
+                                                    # target_entropy_factor_annealing=("ramp",[100*1e6, 150*1e6, -1, -5]),
                                                     action_reference_obs_key="base.last_action_raw",
-                                                    actor_weight_decay=0.0001,
+                                                    actor_weight_decay=0.0,
                                                     critic_weight_decay=0.0,
                                                     policy_update_freq=2,
                                                     deterministic_collection_ratio=0.01,
@@ -257,7 +264,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
                     debug_level=2,
-                    log_weights_and_grads=False)                           
+                    log_weights_and_grads=False)                             
     elif algo.lower() == "sac_small":
         sac_train(  seed,
                     folderName,
@@ -325,7 +332,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 collector_device=env_device,
                 eval_configurations=eval_configurations,
                 debug_level=1)
-    else:       
+    else:
         raise RuntimeError(f"Unknown algorithm '{algo}'")
 
 
@@ -343,7 +350,6 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--algorithm", default="sac", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
-    ap.add_argument("--robot", default="quad", type=str, help="Robot to be used ('quad'/'kyon'/'centauro')")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

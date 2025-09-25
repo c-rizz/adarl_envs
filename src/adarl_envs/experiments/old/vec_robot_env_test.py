@@ -87,7 +87,7 @@ def robot_env_builder(  seed,
     urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(model_file).read_text(),
                                                             model_kwargs={"use_cylinders" : "false"})
 
-    lrenv = RobotVecEnv(action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
+    lrenv = RobotVecEnv(action_delay_mustd_std = env_builder_args.pop("action_delay_mustd"),
                         action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
                         action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                         adapter=env_controller,

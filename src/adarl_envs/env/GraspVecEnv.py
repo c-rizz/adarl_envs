@@ -201,7 +201,7 @@ class GraspVecEnv(RobotVecEnv):
         if enable_link_collisions is None:
             enable_link_collisions = []
         enable_link_collisions.append((self._grasping_conf.target_object_link, [self._grasping_conf.table_link]+self._grasping_conf.manipulator_links))
-        super().__init__(   action_delay_mustd = action_delay_mustd,
+        super().__init__(   action_delay_mustd_std = action_delay_mustd,
                             action_noise_mustd = action_noise_mustd, 
                             action_smoothing_halflife_sec = action_smoothing_halflife_sec,
                             adapter = adapter,

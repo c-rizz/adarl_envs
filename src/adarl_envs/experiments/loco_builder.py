@@ -1,5 +1,6 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
+import random
 from adarl.envs.vec.GymVecRunnerWrapper import GymVecRunnerWrapper
 import adarl.utils.dbg.ggLog as ggLog
 import torch as th
@@ -169,7 +170,7 @@ def loco_runner_builder(seed,
                                                             model_kwargs=env_builder_args.pop("model_kwargs"),
                                                             extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
     
-    lrenv = LocomotionVecEnv(action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
+    lrenv = LocomotionVecEnv(action_delay_mustd_std = env_builder_args.pop("action_delay_mustd_std"),
                             action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
                             action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                             adapter=adapter,
@@ -203,7 +204,7 @@ def loco_runner_builder(seed,
                             initial_joint_pose_randomization_range = env_builder_args.pop("initial_joint_pose_randomization_range"),
                             just_health_reward = env_builder_args.pop("just_health_reward"),
                             longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
-                            max_goal_height_speed=env_builder_args.pop("max_goal_height_speed"),
+                            max_goal_height_pos_change_speed=env_builder_args.pop("max_goal_height_pos_change_speed"),
                             maxStepsPerEpisode=max_steps,
                             max_good_step_duration=env_builder_args.pop("max_good_step_duration"),
                             merge_privileged = env_builder_args.pop("merge_privileged"),
@@ -231,6 +232,7 @@ def loco_runner_builder(seed,
                             randomized_gains_stiffness_ratio_epstd=env_builder_args.pop("randomized_gains_stiffness_ratio_epstd"),
                             randomized_mass_links=env_builder_args.pop("randomized_mass_links"),
                             randomized_mass_ratios_distr=env_builder_args.pop("randomized_mass_ratios"),
+                            randomized_reference_filter_distribution=env_builder_args.pop("randomized_reference_filter_distribution"),
                             recycle_pose_randomization=env_builder_args.pop("recycle_pose_randomization"),
                             reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
                             reward_actacc_weight = env_builder_args.pop("reward_actacc_weight"),
@@ -242,11 +244,13 @@ def loco_runner_builder(seed,
                             reward_feet_on_ground_weight = env_builder_args.pop("reward_feet_on_ground_weight"),
                             reward_heading_weight = env_builder_args.pop("reward_heading_weight"),
                             reward_health_weight = env_builder_args.pop("reward_health_weight"),
-                            reward_height_weight=env_builder_args.pop("reward_height_weight"),
+                            reward_height_velocity_weight=env_builder_args.pop("reward_height_velocity_weight"),
+                            reward_height_position_weight=env_builder_args.pop("reward_height_position_weight"),
                             reward_pitchnroll_weight=env_builder_args.pop("reward_pitchnroll_weight"),
                             reward_pos2posref_weight = env_builder_args.pop("reward_pos2posref_weight"),
                             reward_position_limit_weight = env_builder_args.pop("reward_position_limit_weight"),
                             reward_position_weight=env_builder_args.pop("reward_position_weight"),
+                            reward_sensed_effort_weight = env_builder_args.pop("reward_sensed_effort_weight"),
                             reward_scale=1000/max_steps,
                             reward_slip_weight = env_builder_args.pop("reward_slip_weight"),
                             reward_torque_limit_weight = env_builder_args.pop("reward_torque_limit_weight"),

@@ -1,9 +1,10 @@
 #!/bin/bash
 
 cd /home/host/adarl_ws
-mkdir virtualenv
-python3 -m venv virtualenv/adarl
-. virtualenv/adarl/bin/activate
-pip install --upgrade pip wheel setuptools
-pip install -e src/adarl -e src/adarl_envs -e src/rreal -e src/pykyon -e src/pycentauro
-pip install -r src/adarl/mjx_requirements_2204_v1.txt
+
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+uv venv --python 3.13 virtualenv/adarl313
+. virtualenv/adarl313/bin/activate
+uv pip install -e src/adarl -e src/adarl_envs -e src/rreal -e src/pykyon -e src/pycentauro
+uv pip install -r src/adarl/mjx_requirements_py313.txt

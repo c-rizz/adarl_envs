@@ -36,7 +36,7 @@ class Fixedpolicy(RLAgent):
     def __init__(self, cmd : th.Tensor):
         self._cmd = cmd.detach().clone()
 
-    def predict_action(self, observation_batch, deterministic = False):
+    def predict_action(self, observation_batch, deterministic = False, info_return : dict = None):
         return self._cmd.clone()
     
     def get_hidden_state(self):
@@ -120,7 +120,7 @@ class RandPolicy(RLAgent):
                         action_size : int):
         self._a_scale = act_scale.expand((action_size,))
 
-    def predict_action(self, observation_batch, deterministic = False):
+    def predict_action(self, observation_batch, deterministic = False, info_return : dict = None):
         a = (th.rand_like(self._a_scale)*2-1)*self._a_scale
         return a
     
@@ -335,7 +335,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_limit_weight" :    0.0,
         "reward_velocity_weight" :          0.0,
         "reward_velref_weight" :            0.0,
-        "robot_model" : "kyon",
+        "robot_model" : args["robot"],
         "safe_damping" : 5,
         "safe_stiffness" : 400,
         "saturate_jimp_ref_limits" : False,
@@ -452,12 +452,12 @@ def play(seed, folderName, run_id, args,
             options = {}
             if args["evaluate"] is None:
                 while cmd != "c":
-                    cmd = input(f"\n"
-                                f"Enter:\n"
-                                f"  - 'c' to start an episode.\n"
-                                f"  - 'interactive' to enter interactive control.\n"
-                                f"  - 'quit' to quit:\n"
-                                f" > ")
+                    print(  f"\n"
+                            f"Enter:\n"
+                            f"  - 'c' to start an episode.\n"
+                            f"  - 'interactive' to enter interactive control.\n"
+                            f"  - 'quit' to quit:\n")
+                    cmd = input(f" > ")
                     if cmd == "quit":
                         play = False
                         break

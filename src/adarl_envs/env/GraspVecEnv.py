@@ -261,8 +261,8 @@ class GraspVecEnv(RobotVecEnv):
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
         obs_labels = self._state_helper.observation_names()
-        ggLog.info(f"Obs labels = \n{pprint.pformat(obs_labels)}")
-        ggLog.info(f"Env constructed")
+        # ggLog.info(f"Obs labels = \n{pprint.pformat(obs_labels)}")
+        # ggLog.info(f"Env constructed")
 
     @override
     def _build_stats(self):

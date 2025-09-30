@@ -510,8 +510,8 @@ class LocomotionVecEnv(RobotVecEnv):
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
         obs_labels = self._state_helper.observation_names()
-        ggLog.info(f"Obs labels = \n{pprint.pformat(obs_labels)}")
-        ggLog.info(f"Env constructed")
+        # ggLog.info(f"Obs labels = \n{pprint.pformat(obs_labels)}")
+        # ggLog.info(f"Env constructed")
 
     @override
     def _build_stats(self):
@@ -715,11 +715,12 @@ class LocomotionVecEnv(RobotVecEnv):
             # The swing can be obtained directly from the gravity vector, as the rotation that brings it to 0,0,-1
             goal_speed = self._locomotion_episode_config.goal_rel_vel_vec_xy_speed[:,2]
             rel_planar_goal_linvel_direction_xy = self._locomotion_episode_config.goal_rel_vel_vec_xy_speed[:,:2]
-            rel_planar_goal_linvel_direction_xyz = th.cat([rel_planar_goal_linvel_direction_xy[:,:2], th.zeros_like(rel_planar_goal_linvel_direction_xy[:,0])])
+            rel_planar_goal_linvel_direction_xyz = th.cat([rel_planar_goal_linvel_direction_xy[:,:2], th.zeros_like(rel_planar_goal_linvel_direction_xy[:,:1])], dim=1)
             swing = quat_xyzw_between_vecs_py(gravity_rel_vec_xyz, self._abs_gravity_dir.expand_as(gravity_rel_vec_xyz))
             twist = quat_xyzw_between_vecs_py(self._unit_3d_vector.expand_as(gravity_rel_vec_xyz), rel_planar_goal_linvel_direction_xyz)
             dir_quat = quat_mul_xyzw(twist,swing) #first swing then twist, i think
             rel_goal_linvel_dir_xyz = th_quat_rotate(self._unit_3d_vector.expand_as(gravity_rel_vec_xyz), dir_quat)
+            abs_goal_linvel_xyz = th.zeros_like(rel_goal_linvel_dir_xyz) # not used in this branch
         rel_goal_linvel_xyz = rel_goal_linvel_dir_xyz*goal_speed # relative to the body orientation
         rel_curr_heading_quat = quat_xyzw_between_vecs_py(rel_goal_linvel_dir_xyz, self._unit_3d_vector.expand(self.num_envs,3)) # orientation of the body with respect to linvel goal (quat that aligns linvel to the body)
 
@@ -1333,7 +1334,7 @@ class LocomotionVecEnv(RobotVecEnv):
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
         goal_abs_linvel_vec_xys, goal_height = self._sample_goals()
         if "goal_velocity_xy" in reset_options:
-            goal_velocity_vec_xy = th.as_tensor(reset_options["goal_velocity_xy"],device=self._configuration.th_device)
+            goal_velocity_vec_xy = th.as_tensor(reset_options["goal_velocity_xy"],device=self._configuration.th_device).view(self.num_envs,2)
             goal_speeds = th.linalg.norm(goal_velocity_vec_xy, dim=-1)
             goal_yaws = th.atan2(goal_velocity_vec_xy[:,1], goal_velocity_vec_xy[:,0])
             goal_abs_linvel_vec_xys = th.stack([  th.cos(goal_yaws),
@@ -1374,7 +1375,7 @@ class LocomotionVecEnv(RobotVecEnv):
                           vec_mask,
                           new_goals_xys)
         else:
-            self._locomotion_episode_config.goal_rel_vel_vec_xy_speed = self._thtens(goal_rel_linvel_xys)
+            self._locomotion_episode_config.goal_rel_vel_vec_xy_speed = self._thtens(goal_rel_linvel_xys).view(self.num_envs,3)
         if goal_abs_height is not None:
             goal_abs_height = self._thtens(goal_abs_height).expand(1,self.num_envs).permute(1,0)
             masked_assign(self._locomotion_episode_config.goal_abs_height_vec_z,

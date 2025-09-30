@@ -4,8 +4,7 @@ import time
 import inspect
 from adarl.utils.buffers import BaseBuffer
 import adarl.utils.dbg.dbg_img
-from adarl_envs.utils.modded_sac import SAC as SB3_SAC
-from rreal.algorithms.sac import SAC
+from rreal.algorithms.sac import SAC, compare_dicts
 from rreal.algorithms.sac_helpers import EnvBuilderProtocol
 import adarl.utils.dbg.ggLog as ggLog
 import adarl.utils.utils
@@ -27,6 +26,7 @@ import adarl.utils.dbg
 from typing import Any
 from ctypes.util import find_library
 import readline
+import math
 
 def load_model(model_path):
     return SAC.load(model_path)
@@ -78,7 +78,7 @@ class SinPolicy(RLAgent):
         # self._t_off = th.asin(self._a_offset/act_range)
         self._a_scale = act_scale.expand((action_size,))
 
-    def predict_action(self, observation_batch, deterministic = False):
+    def predict_action(self, observation_batch, deterministic = False, info_return : dict = None):
         theta = (self._t0-self._t)*self._a_speed
         a = th.sin(theta)*self._a_scale+self._a_offset
         print(f" theta = {theta} \n"
@@ -254,88 +254,99 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     height_pixels = args["resolution"] #if mode == "mjx" else 720
     pixel_resolution = (height_pixels,int(height_pixels*16/9))
     
+    r = 0.0
+    n = 0.0
+    p = 0.0
     env_builder_args = {
-        "action_delay_mustd" : (step_length_sec,0.01),
-        "action_noise_mustd" : (0.0,0.001),
-        "action_smoothing_halflife_sec" : 0.0,
+        "action_delay_mustd_std" : (0.005, 0.002*n, 0.0025*n),
+        "action_noise_mustd" : (0.0,   0.0005*n),
+        "action_smoothing_halflife_sec" : 0.05,
         "control_mode" : "position",
-        "robot_model" : args["robot"],
+        "enable_limits_safety" : True,
+        "enable_posref_safety" : True,
         "enable_rendering" : False,
-        "goal_err_smoothing_halflife_sec" : 0.0,
+        "fail_on_safety" : False,
+        "frame_stack_length" : 5,
+        "goal_err_smoothing_halflife_sec" : 0.05,
+        "goal_height_minmax" : [0.45,0.45],
+        "goal_resampling_probability_per_sec" : 0.1,
+        "goal_speed_minmax" : (0,1.0),
+        "goal_yaw_minmax" : (-math.pi, math.pi),
+        "held_joints_damping" : 10.0,
+        "held_joints_stiffness" : 500.0,
+        "impulse_duration_minmax" : [0.01, 2.5],
+        "impulse_mean_std" : [20.0,50.0],
+        "impulse_probability_per_sec" : 0.1,
+        "init_on_reset_ratio" : 0.2,
+        "initial_height_randomization_range_meters" : 0.0,
+        "initial_joint_pose_randomization_range" : 0.8,
+        "just_health_reward" : False,
+        "log_info_stats" : True,
+        "longterm_states_decimation_time" : 0.05, # Averaging of the joint pose for the position reward
+        "max_goal_height_pos_change_speed" : 0.1,
+        "max_goal_height_speed" : 0.1,
+        "max_good_step_duration" : 1.0,
         "max_steps_per_episode" : max_steps_per_episode,
+        "merge_privileged" : True,
+        "min_good_step_duration" : 0.1,
         "mode" : mode,
+        "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.02*n],
+        "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.02*n, 0.02*n],
+        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.0, 0.02*n],
+        "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0, 0.02*n],
+        "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0, 0.02*n],
+        "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0, 0.02*n],
+        "observe_full_robot_state" : False,
+        "posref_safety_period" : 0.005,
         "quiet" : False,
+        "randomized_armature_ratios" : 0.1*r,
+        "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
+        "randomized_friction_slide_spin_roll_ratios" : [0.1*r,0.1*r,0.1*r],
+        "randomized_frictionloss_ratios"             : 0.1*r,
+        "randomized_gains_damping_ratio_epstd"       : 0.1*r,
+        "randomized_gains_stiffness_ratio_epstd"     : 0.1*r,
+        "randomized_mass_ratios" : ("normal", (0.0, 0.05*r)),
+        "randomized_reference_filter_distribution" : ("uniform", (20.0-15*r, 20.0+15*r)),
         "record_video" : True,
-        "reward_acceleration_weight" :      2.0,
-        "reward_actdiff_weight" :           1.0,
-        "reward_actacc_weight" :            0.5,
+        "recycle_pose_randomization" : True,
+        "reward_acceleration_weight" :      5.0*p,
+        "reward_actacc_weight" :            100.0*p,
+        "reward_actdiff_weight" :           1.0*p,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
-        "reward_health_weight" :            0.0,
-        "reward_position_limit_weight" :    0.0,
-        "reward_torque_limit_weight" :      0.0,
-        "reward_torque_weight" :            5.0,
-        "reward_torquediff_weight" :        0.0,
-        "reward_tracking_weight" :          0.0,
-        "reward_velocity_limit_weight" :    0.0,
-        "reward_velocity_weight" :          1.0,
-        "reward_height_weight" :            0.0,
-        "reward_pitchnroll_weight" :        0.15,
-        "reward_position_weight" :          1.0,
-        "reward_feet_air_time_weight" :     20.0,
-        "reward_heading_weight" :           0.05,
         "reward_failure_weight" :           1.0,
-        "reward_slip_weight" :              0.1,
-        "reward_velref_weight" :            0.0,
-        "reward_torqueref_weight" :         1.0,
+        "reward_feet_air_time_weight" :     20.0,
+        "reward_feet_on_ground_weight" :    0.0,
+        "reward_heading_weight" :           0.0,
+        "reward_health_weight" :            0.0,
+        "reward_height_position_weight" :   0.15,
+        "reward_height_velocity_weight" :   0.0,
+        "reward_pitchnroll_weight" :        0.15,
         "reward_pos2posref_weight" :        0.0,       
-        "safe_stiffness" : 400,
+        "reward_position_limit_weight" :    0.1*p,
+        "reward_position_weight" :          0.0,
+        "reward_sensed_effort_weight" :     2.0,
+        "reward_slip_weight" :              1.0*p,
+        "reward_torque_limit_weight" :      0.0,
+        "reward_torque_weight" :            30.0,
+        "reward_torquediff_weight" :        0.0,
+        "reward_torqueref_weight" :         0.0,
+        "reward_tracking_weight" :          1.0,
+        "reward_velocity_limit_weight" :    0.0,
+        "reward_velocity_weight" :          0.0,
+        "reward_velref_weight" :            0.0,
+        "robot_model" : "kyon",
         "safe_damping" : 5,
+        "safe_stiffness" : 400,
+        "saturate_jimp_ref_limits" : False,
         "stepLength_sec" : step_length_sec,
         "stop_on_failure" : False,
-        "fail_on_safety" : False,
-        "th_device" : env_device,
-        "video_save_freq" : 0,
-        "record_video" : True,
-        "goal_speed_minmax" : (0,0.0),
-        "use_contacts" : False,
-        "frame_stack_length" : 5,
-        "verbose_infos" : False,
         "terminate_on_body_contact" : False,
-        "init_on_reset_ratio" : 0.8,
-        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.02),
-        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.02),
-        "obs_noise_linacc_ep_mustd_step_std" :      (0.0, 0.0, 0.02),
-        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.02),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.02, 0.02),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
-        "ui_camera_resolution_hw" : (144,256),
-        "log_info_stats" : True,
-        "initial_pose_randomization_range" : 0.8,
-        "randomized_com_links_minmax_xyz" : [((-0.2,-0.05,-0.05),(0.2,0.05,0.05))],
-        "randomized_friction_slide_spin_roll_ratios" : (0.3,0.3,0.3),
-        "randomized_gains_damping_ratio_epstd" : 0.1,
-        "randomized_gains_stiffness_ratio_epstd" : 0.1,
-        "randomized_mass_ratios" : 0.3,
-        "randomized_armature_ratios" : 0.3,
-        "randomized_frictionloss_ratios" : 0.0,
-        "impulse_probability_per_sec" : 0.2,
-        "impulse_duration_minmax" : (0.01, 2.5),
-        "impulse_mean_std" : (20.0,50.0),
-        "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
-        "posref_safety_period" : 0.005,
-        "enable_posref_safety" : True,
-        "enable_limits_safety" : True,
-        "saturate_jimp_ref_limits" : False,
-        "observe_full_robot_state" : False,
-        "held_joints_stiffness" : 500.0,
-        "held_joints_damping" : 10.0,
-        "min_good_step_duration" : 0.2,
-        "max_good_step_duration" : 1.5,
-        "merge_privileged" : False,
-        "goal_height_minmax" : [0.3,0.6],
-        "recycle_pose_randomization" : True,
-        "just_health_reward" : False
+        "th_device" : env_device,
+        "ui_camera_resolution_hw" : [144,256],
+        "use_contacts" : False,
+        "verbose_infos" : False,
+        "video_save_freq" : 0
     }
 
     env_builder_args.update({
@@ -353,12 +364,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : True,
-        "initial_pose_randomization_range" : 0.0,
-        "randomized_com_links_minmax_xyz" : [((0.0,0.0,0.0),(0.0,0.0,0.0))],
+        "initial_joint_pose_randomization_range" : 0.0,
+        "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.0,0.0,0.0])),
         "randomized_friction_slide_spin_roll_ratios" : (0.0,0.0,0.0),
         "randomized_gains_damping_ratio_epstd" : 0.0,
         "randomized_gains_stiffness_ratio_epstd" : 0.0,
-        "randomized_mass_ratios" : 0.0,
+        "randomized_mass_ratios" : ("normal", (0.0, 0.0)),
         "impulse_probability_per_sec" : 0.0,
         "show_gui" : args["gui"],
         "just_health_reward" : True})
@@ -407,6 +418,13 @@ def play(seed, folderName, run_id, args,
     control_mode = args["control"].lower().strip()
     if control_mode=="pretrained":
         model = load_model(args["model"])
+        trained_env_builder_args = model._init_args["init_hparams"].reference_init_args["env_builder_args"]
+        try:
+            equal, diffs = compare_dicts(env_builder_args, trained_env_builder_args)
+            if not equal:
+                ggLog.warn(f"Loaded model was trained with different env args: \n{diffs}")
+        except Exception as e: 
+            ggLog.warn(f"Could not compare env args with trained model: {type(e)}: {e}")
     elif control_mode=="fixed":
         model = build_fixed_policy(env = env, robot=robot)
     elif control_mode=="random":
@@ -476,6 +494,7 @@ def play(seed, folderName, run_id, args,
                 time.sleep(step_length_sec/rt)
 
             cmd_xys = [1.0,0.0,0.0]
+            cmd_height = 0.45
             while not done:
                 t0 = time.monotonic()
                 session.run_info["collected_steps"].value += 1
@@ -485,7 +504,7 @@ def play(seed, folderName, run_id, args,
                 act_info = {}
                 action = model.predict_action(obs_batch, deterministic = deterministic, info_return=act_info)
                 if recorder is not None:
-                    recorder.add_to_extra_info({"act_log_prob": act_info["log_prob"]})
+                    recorder.add_to_extra_info({"act_log_prob": act_info.get("log_prob", -1)})
                 t0_step = time.monotonic()
                 obs, reward, terminated, truncated, info = env.step(action.detach().squeeze()) #type: ignore
                 t1_step = time.monotonic()
@@ -503,11 +522,14 @@ def play(seed, folderName, run_id, args,
                     cmd_angle = np.arctan2(cmd_xys[1],cmd_xys[0])
                     if keyboard_listener.get_key_press_count("w")>0: cmd_xys[2] +=  0.05
                     if keyboard_listener.get_key_press_count("s")>0: cmd_xys[2] += -0.05
-                    if keyboard_listener.get_key_press_count("a")>0: cmd_angle +=  10*3.14159/180
-                    if keyboard_listener.get_key_press_count("d")>0: cmd_angle += -10*3.14159/180
+                    if keyboard_listener.get_key_press_count("a")>0: cmd_angle  +=  10*3.14159/180
+                    if keyboard_listener.get_key_press_count("d")>0: cmd_angle  += -10*3.14159/180
+                    if keyboard_listener.get_key_press_count("r")>0: cmd_height +=  0.005
+                    if keyboard_listener.get_key_press_count("f")>0: cmd_height += -0.005
                     cmd_xys[0] = np.cos(cmd_angle)
                     cmd_xys[1] = np.sin(cmd_angle)
-                    flip = keyboard_listener.get_key_press_count("v")>0
+                    cmd_height = np.clip(cmd_height, 0.35, 0.57)
+                    flip = keyboard_listener.get_key_press_count("x")>0
                     cam_dist_pitch_yaw_diff = [0.0,0.0,0.0]
                     if keyboard_listener.get_key_press_count("u")>0: cam_dist_pitch_yaw_diff[0] = -0.1
                     if keyboard_listener.get_key_press_count("o")>0: cam_dist_pitch_yaw_diff[0] =  0.1
@@ -520,7 +542,7 @@ def play(seed, folderName, run_id, args,
                     base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
                     if flip:
                         cmd_xys = [-cmd_xys[0],-cmd_xys[1],-cmd_xys[2]]
-                    base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys))
+                    base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height)
                     keyboard_listener.reset_key_press_counters()
                 goals = base_env.get_goals()
                 step_count += 1
@@ -532,12 +554,12 @@ def play(seed, folderName, run_id, args,
                 if args["mode"] != "xbot":
                     time.sleep(max(0,step_length_sec/rt - step_wallduration))
                 full_step_wallduration = time.monotonic()-t0
-                ggLog.info(f"step = {step_count} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
+                ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
                            f" tstep={t1_step-t0_step:1.4f} \t"
-                           f" goal_dir={goals['abs_linvel_xys'][0,:2]} \t"
+                           f" goal_dir={goals['abs_linvel_xys'][0,:2].tolist()} \t"
                            f" goal_speed={goals['abs_linvel_xys'][0,2]} \t"
-                           f" goal_height={goals['abs_height'][0]} \t")
+                           f" goal_height={goals['abs_height'][0].item()} \t")
             if step_count>0:
                 rewards.append(th.as_tensor(ep_reward,device="cpu").item())
                 durations.append(th.as_tensor(step_count,device="cpu").item())

@@ -995,6 +995,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def submit_actions(self, actions : th.Tensor) -> None:
         with th.no_grad():
             actions = self._thtens(actions).detach()
+            dbg_check_finite(actions, async_assert=True, assert_msg="Actions contains non-finite values")
             dbg_check_size(actions, (self._adapter.vec_size(), self._action_helper.single_action_len()))
             self._last_raw_actions = actions
             actions, action_delay = self._preproc_acts(actions)
@@ -1138,11 +1139,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._update_state(self._get_adapter_data())
         self._update_stats()
 
-        # ggLog.info(f"initialzed")
-        # ggLog.info(f"jstate {self._adapter.getJointsState()}")
-        # ggLog.info(f"lstate {self._adapter.getLinksState([self._configuration.main_body_link])}")
-        # time.sleep(10)
-        # ggLog.info(f"initialzed, slept")
 
 
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):

@@ -1,10 +1,8 @@
 from __future__ import annotations
-from multiprocessing import reduction
-import re
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
 from adarl.utils.utils import (LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection, isinstance_noimport, 
-                               quat_xyzw_between_vecs_py, masked_assign, quat_mul_xyzw, quat_angle_xyzw)
+                               quat_xyzw_between_vecs_py, masked_assign, quat_mul_xyzw, quat_angle_xyzw, vectors_angle)
 from adarl.utils.dbg.dbg_checks import dbg_check_finite, dbg_check_size, dbg_check
 import adarl.utils.utils
 from adarl.utils.vec_state_helper import ThBoxStateHelper, unnormalize, normalize
@@ -12,17 +10,13 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any
 from git import Tree
+from requests import head
 from typing_extensions import override
 import adarl.utils.dbg.ggLog as ggLog
 import numpy as np
 import torch as th
-import math
-import quaternion
 from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionDef
 from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
-import adarl.utils.tensor_trees
-import traceback
-from adarl.utils.spaces import get_space_labels
 import pprint
 
 disable_compile = False
@@ -147,6 +141,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_weight_position_limit : th.Tensor
         reward_weight_position : th.Tensor
         reward_weight_heading : th.Tensor
+        reward_weight_heading_velocity : th.Tensor
         reward_weight_torque_limit : th.Tensor
         reward_weight_torque : th.Tensor
         reward_weight_torquediff : th.Tensor
@@ -183,6 +178,10 @@ class LocomotionVecEnv(RobotVecEnv):
         """ Max speed at which the goal height can change, in m/s. Used to prevent too sudden changes."""
         max_height_speed_goal : float
         """ Maximum goal speed for the speed-based height reward."""
+        max_heading_speed_goal : th.Tensor
+        """ Maximum goal speed for the speed-based heading reward."""
+        heading_kp : th.Tensor
+        """ Proportional gain used to compute the goal heading angular velocity from the heading error."""
 
 
     @dataclass
@@ -206,6 +205,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     "GOAL_VELOCITY_ABS_Y",
                                                     "GOAL_VELOCITY_ABS_Z",
                                                     "GOAL_BODY_HEIGHT",
+                                                    "GOAL_REL_HEADING_YAW",
                                                     "GOAL_GRAVITY_ABS_X",
                                                     "GOAL_GRAVITY_ABS_Y",
                                                     "GOAL_GRAVITY_ABS_Z",
@@ -228,6 +228,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     "REWARD_FEET_ON_GROUND_WEIGHT",
                                                     "REWARD_POSITION_WEIGHT",
                                                     "REWARD_HEADING_WEIGHT",
+                                                    "REWARD_HEADING_VELOCITY_WEIGHT",
                                                     "REWARD_FAILURE_WEIGHT",
                                                     "REWARD_SENSED_EFFORT_WEIGHT",
                                                     "REWARD_SLIP_WEIGHT",
@@ -293,6 +294,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_feet_air_time_weight : float,
                         reward_feet_on_ground_weight : float,
                         reward_heading_weight : float,
+                        reward_heading_velocity_weight : float,
                         reward_health_weight : float,
                         reward_height_velocity_weight : float,
                         reward_height_position_weight : float,
@@ -383,6 +385,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_velocity = self._thtens(reward_velocity_weight),
                         reward_weight_position = self._thtens(reward_position_weight),
                         reward_weight_heading = self._thtens(reward_heading_weight),
+                        reward_weight_heading_velocity = self._thtens(reward_heading_velocity_weight),
                         reward_weight_height_velocity = self._thtens(reward_height_velocity_weight),
                         reward_weight_height_position = self._thtens(reward_height_position_weight),
                         reward_weight_pitchnroll = self._thtens(reward_pitchnroll_weight),
@@ -418,7 +421,9 @@ class LocomotionVecEnv(RobotVecEnv):
                         goal_resampling_probability_per_sec = self._thtens(goal_resampling_probability_per_sec),
                         goal_resampling_enabled = goal_resampling_probability_per_sec > 0.0,
                         max_goal_height_pos_change_speed = max_goal_height_pos_change_speed,
-                        max_height_speed_goal = max_height_speed_goal
+                        max_height_speed_goal = max_height_speed_goal,
+                        heading_kp=self._thtens(1),
+                        max_heading_speed_goal=self._thtens(th.pi/2)
                         )
         
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xys       = self._thtens([1.0,0.0,0.0]).expand(adapter.vec_size(), 3).detach().clone(),
@@ -538,7 +543,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z,
                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED,
                             self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
-        privileged_loco_fields = [ self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
+        privileged_loco_fields = [  self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR]
@@ -560,6 +565,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z : [-10,10], 
                                                                     self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT : [-1,1], 
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT : [-1,1],
+                                                                    self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW : [-th.pi,th.pi],
                                                                     self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X : [-1,1],
                                                                     self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Y : [-1,1], 
                                                                     self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z : [-1,1], 
@@ -582,6 +588,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_POSITION_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_HEADING_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_HEADING_VELOCITY_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_FAILURE_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_VELREF_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_SENSED_EFFORT_WEIGHT : [0,10],
@@ -598,30 +605,32 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_X : [-10,10],
                                                                     self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Y : [-10,10],
                                                                     self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : [-10,10]},
+                                                    history_length=2,
                                                     observation_definitions=obs_defs,
                                                     vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
                                                             self._locomotion_state_helper,
                                                             obs_defs={"base":{"observable":True,"flatten":True,"noise":None}})
         feet_num = len(self._loco_conf.feet_links)
+
+        feet_obs_type = "privileged" if not self._configuration.merge_privileged else "base"
         self._feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET_FIELDS],
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=(len(self._loco_conf.feet_links),),
                                                     fields_minmax={ 
-                                                        self.FEET_FIELDS.FEET_LIFTOFF_TIMES : th.as_tensor([[-1.0],[1000.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_LIFTOFF_TIMES : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_VEL_X : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_VEL_Y : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num)},
                                                     vec_size=adapter.vec_size(),
-                                                    history_length=2,
+                                                    history_length=1,
                                                     observation_definitions=
-                                                        {   "base"       : ThBoxStateHelper.SimpleObsDef(observable_fields=[]),
-                                                            "privileged" : ThBoxStateHelper.SimpleObsDef(observable_fields=[self.FEET_FIELDS.FEET_LIFTOFF_TIMES,
+                                                        {   feet_obs_type : ThBoxStateHelper.SimpleObsDef(observable_fields=[self.FEET_FIELDS.FEET_LIFTOFF_TIMES,
                                                                                                                             self.FEET_FIELDS.FEET_VEL_X,
                                                                                                                             self.FEET_FIELDS.FEET_VEL_Y])})
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_FEET,
                                                             self._feet_state_helper,
-                                                            obs_defs={"priviledged":{"observable":False,"flatten":True,"noise":None}})
+                                                            obs_defs={feet_obs_type:{"observable":True,"flatten":True,"noise":None}})
         if self._loco_conf.heightmap_resolution_xy[0] > 0:
             heightmap_state_helper = ThBoxStateHelper( field_names=["map"],
                                                     dtype=self._obs_dtype,
@@ -688,7 +697,6 @@ class LocomotionVecEnv(RobotVecEnv):
         # smoothed_goal_height = goal_height*(1-goal_smoothing_alpha) + prev_smoothed_goal_height*goal_smoothing_alpha
         masked_assign(smoothed_goal_height,         starting_eps,   goal_height)
 
-        # compute linvel error
         vsize = step_counts.size()[0]
         if self._locomotion_episode_config.goal_rel_vel_vec_xy_speed is None:
             # Get the relative goal from the absolute one
@@ -712,9 +720,10 @@ class LocomotionVecEnv(RobotVecEnv):
             twist = quat_xyzw_between_vecs_py(self._unit_3d_vector.expand_as(gravity_rel_vec_xyz), rel_planar_goal_linvel_direction_xyz)
             dir_quat = quat_mul_xyzw(twist,swing) #first swing then twist, i think
             rel_goal_linvel_dir_xyz = th_quat_rotate(self._unit_3d_vector.expand_as(gravity_rel_vec_xyz), dir_quat)
-        rel_goal_linvel_xyz = rel_goal_linvel_dir_xyz*goal_speed
+        rel_goal_linvel_xyz = rel_goal_linvel_dir_xyz*goal_speed # relative to the body orientation
         rel_curr_heading_quat = quat_xyzw_between_vecs_py(rel_goal_linvel_dir_xyz, self._unit_3d_vector.expand(self.num_envs,3)) # orientation of the body with respect to linvel goal (quat that aligns linvel to the body)
 
+        # compute linvel error
         support_polygon_linvel = th.mean(feet_linvels_vec_foot_xyz, dim=1) # average linvel across the feet
         if track_support_linvel:
             tracked_body_linvel = support_polygon_linvel
@@ -723,10 +732,10 @@ class LocomotionVecEnv(RobotVecEnv):
         tracking_err_vec = planar_tracking_error_vec(tracked_body_linvel, gravity_rel_vec_xyz, rel_goal_linvel_xyz).view(vsize,1)
         
         # compute heading (yaw) error
-        rel_goal_heading_yaw = self._locomotion_episode_config.goal_heading_rel2linvelgoal_vec_yaw
+        goal_rel_heading_yaw = self._locomotion_episode_config.goal_heading_rel2linvelgoal_vec_yaw
         rel_goal_heading_quat = th.cat([self._thzeros((self.num_envs,2)),
-                                        th.sin(rel_goal_heading_yaw/2).view((self.num_envs,1)),
-                                        th.cos(rel_goal_heading_yaw/2).view((self.num_envs,1))], dim = 1)
+                                        th.sin(goal_rel_heading_yaw/2).view((self.num_envs,1)),
+                                        th.cos(goal_rel_heading_yaw/2).view((self.num_envs,1))], dim = 1)
         # abs_curr_heading_quat = th_quat_conj(borient_quat_vec_xyzw) # orientation of the body (quat that aligns (1,0,0) to it)
         # rel_curr_heading_quat = quat_mul_xyzw(abs_curr_heading_quat, th_quat_conj(abs_planar_linvelgoal_dir_quat)) # orientation of the body with respect to linvel goal (quat that aligns linvel to the body)
         # heading_error_vec = quat_angle_xyzw(quat_mul_xyzw(th_quat_conj(rel_goal_heading_quat), rel_curr_heading_quat)).view(vsize,1)
@@ -797,6 +806,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._loco_conf.reward_weight_torquediff.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_POSITION_WEIGHT : self._loco_conf.reward_weight_position.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_HEADING_WEIGHT : self._loco_conf.reward_weight_heading.expand(vsize,1),
+                            self.LOCOMOTION_FIELDS.REWARD_HEADING_VELOCITY_WEIGHT : self._loco_conf.reward_weight_heading_velocity.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_FAILURE_WEIGHT : self._loco_conf.reward_weight_failure.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_SENSED_EFFORT_WEIGHT : self._loco_conf.reward_weight_sensed_effort.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_SLIP_WEIGHT : self._loco_conf.reward_weight_slip.expand(vsize,1),
@@ -816,6 +826,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z : abs_goal_linvel_xyz[:,2].view(vsize,1),
                             self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT : self._locomotion_episode_config.goal_abs_height_vec_z,
                             self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT : smoothed_goal_height.view(vsize,1),
+                            self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW : goal_rel_heading_yaw.view(vsize,1),
                             self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,0].view(vsize,1),
                             self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Y : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,1].view(vsize,1),
                             self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,2].view(vsize,1),
@@ -828,8 +839,8 @@ class LocomotionVecEnv(RobotVecEnv):
         
         # fstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._feet_link_ids, use_com_pose = False)
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
+        nenv_nfeet = (self.num_envs,len(self._loco_conf.feet_links))
         if isinstance_noimport(self._adapter, "MjxAdapter"):
-            nenv_nfeet = (self.num_envs,len(self._loco_conf.feet_links))
             prev_time = prev_internal_state[:,self.INTERNAL_FIELDS.SIM_TIME].view((self.num_envs,))
             curr_time = new_internal_state[self.INTERNAL_FIELDS.SIM_TIME].view((self.num_envs,))
             dt : th.Tensor = curr_time - prev_time
@@ -862,7 +873,7 @@ class LocomotionVecEnv(RobotVecEnv):
             # ggLog.info(f"prev_feet_step_durations_vec_foot_t = \n{prev_feet_step_durations_vec_foot_t}")
             # ggLog.info(f"new_feet_step_durations_vec_foot_t = \n{new_feet_step_durations_vec_foot_t}")
         else:
-            new_feet_step_durations_vec_foot_t = self._thtens([0.0]).expand(vsize,len(self._loco_conf.feet_links))
+            new_feet_step_durations_vec_foot_t = self._thtens([0.0]).expand(nenv_nfeet)
         new_feet_state = {  self.FEET_FIELDS.FEET_LIFTOFF_TIMES : new_feet_step_durations_vec_foot_t,
                             self.FEET_FIELDS.FEET_VEL_X : feet_linvels_vec_foot_xyz[:,:,0],
                             self.FEET_FIELDS.FEET_VEL_Y : feet_linvels_vec_foot_xyz[:,:,1]}
@@ -893,16 +904,34 @@ class LocomotionVecEnv(RobotVecEnv):
                                                 dt : th.Tensor,
                                                 max_speed : th.Tensor,
                                                 kp : th.Tensor):
-        height_err = curr_pos-goal_pos
-        goal_height_velocity = th.clamp(-height_err*kp, min=-max_speed, max=max_speed) 
-        z_velocity = (curr_pos - prev_pos)/dt
-        reward_height = double_bell_reward(z_velocity-goal_height_velocity,
+        err = curr_pos-goal_pos
+        goal_velocity = th.clamp(-err*kp, min=-max_speed, max=max_speed) 
+        velocity = (curr_pos - prev_pos)/dt
+        reward = double_bell_reward(velocity-goal_velocity,
                                            bell_width_a=self._thtens(0.05),
-                                           bell_width_b=goal_height_velocity*2+0.025,
+                                           bell_width_b=goal_velocity*2+0.025,
                                            bell_b_weight=self._thtens(0.5))
-        return reward_height
+        return reward, velocity, goal_velocity, err
 
-    
+    def _heading_velocity_reward(self, state, dt : th.Tensor):
+        rel_goal_linvel_dir_xyz = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0]
+        rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0]
+        prev_rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:,1,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0]
+        prev_rel_goal_linvel_dir_xyz = state[self.STATE_LOCOMOTION][:,1,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0]
+        rel_body_direction_xyz = self._unit_3d_vector # The body orientation in the body frame
+        body_proj_gravity_plane   = rel_body_direction_xyz  - vector_projection(rel_body_direction_xyz, rel_gravity_vec_xyz) # body direction projected in the gravity plane
+        linvel_proj_gravity_plane = rel_goal_linvel_dir_xyz - vector_projection(rel_goal_linvel_dir_xyz, rel_gravity_vec_xyz) # should already be in the plane, but to be safe
+        prev_body_proj_gravity_plane   = rel_body_direction_xyz  - vector_projection(rel_body_direction_xyz, prev_rel_gravity_vec_xyz) # body direction projected in the gravity plane
+        prev_linvel_proj_gravity_plane = rel_goal_linvel_dir_xyz - vector_projection(prev_rel_goal_linvel_dir_xyz, prev_rel_gravity_vec_xyz) # should already be in the plane, but to be safe
+        prev_heading_yaw_err = vectors_angle(prev_body_proj_gravity_plane, prev_linvel_proj_gravity_plane)
+        heading_yaw_err = vectors_angle(body_proj_gravity_plane, linvel_proj_gravity_plane)
+        return self._velocity_from_position_reward( curr_pos=heading_yaw_err,
+                                                    prev_pos = prev_heading_yaw_err,
+                                                    goal_pos = th.zeros_like(heading_yaw_err),
+                                                    dt=dt,
+                                                    max_speed=self._loco_conf.max_heading_speed_goal,
+                                                    kp=self._loco_conf.heading_kp)
+
     @override
     # @th.compile(mode="max-autotune")
     @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune", disable=disable_compile)
@@ -949,10 +978,10 @@ class LocomotionVecEnv(RobotVecEnv):
         velocities_safenorm = state_robot_safenorm[:,0,:,1]
         torque_safenorm     = state_robot_safenorm[:,0,:,2]
 
-        reward_sensed_effort    = penalty_reward(norm_senseff,     max_rew=max_rew, exponent=2.0, reduction="max")
+        reward_sensed_effort    = penalty_reward(norm_senseff,     max_rew=1.0, exponent=8.0, reduction="max")
         reward_torque           = penalty_reward(normcmdtorques,   max_rew=max_rew, exponent=4.0)
         reward_velocity         = penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
-        reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=1.5, flattening_scale=0.02)
+        reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=8.0, flattening_scale=0.1)
         reward_position         = flattened_penalty_reward(normposhomingdiff,max_rew=max_rew, exponent=0.5, flattening_scale=0.02)
         reward_torquediff       = penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
         reward_actdiff          = penalty_reward(actdiff,max_rew=max_rew,exponent=2)
@@ -976,7 +1005,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                             zero_rew_dist=self._loco_conf.pitchnroll_reward_settle_point)
         reward_heading_position      = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR],
                                             zero_rew_dist=self._loco_conf.heading_reward_settle_point)
-        # reward_heading_velocity = self._velocity_from_position_reward()
+        reward_heading_velocity, _, _, _ = self._heading_velocity_reward(state, current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT])
 
         goalrelative_weight = self._loco_conf.vel_reward_goalrelative_weight
         rel_goal_bell_width = self._loco_conf.reward_vel_goal_relative_width
@@ -1049,6 +1078,7 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return["velocity"] = reward_velocity
         sub_rewards_return["velocity_limit"] = reward_velocity_limit
         sub_rewards_return["velocity_refs"] = reward_velocity_refs
+        sub_rewards_return["heading_velocity"] = reward_heading_velocity
         sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards_return.items()}
 
         # for k,v in sub_rewards_return.items():
@@ -1080,7 +1110,8 @@ class LocomotionVecEnv(RobotVecEnv):
                     "sensed_effort" :   current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_SENSED_EFFORT_WEIGHT],
                     "torque_refs" :     current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TORQUEREF_WEIGHT],
                     "pos2posref_diff" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_POS2POSREF_WEIGHT],
-                    "slip" :            current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_SLIP_WEIGHT]}
+                    "slip" :            current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_SLIP_WEIGHT],
+                    "heading_velocity": current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_HEADING_VELOCITY_WEIGHT]}
         for k in sub_rewards_return:
             sub_rewards_return[k] = self._loco_conf.reward_scale*sub_rewards_return[k]*weights[k]
         scaled_rewards_vec = th.stack(list(sub_rewards_return.values()), dim = 1)
@@ -1188,7 +1219,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = self._current_state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
         self._stats["ep_max_javg_sensed_effort"] = th.maximum(self._stats["ep_max_javg_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1)).view((self.num_envs,)) 
-        self._stats["ep_max_peak_sensed_effort"] = th.maximum(self._stats["ep_max_peak_sensed_effort"],    state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=[1,2])).view((self.num_envs,))
+        self._stats["ep_max_peak_sensed_effort"] = th.maximum(self._stats["ep_max_peak_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=[1,2])).view((self.num_envs,))
 
    
     @override
@@ -1246,6 +1277,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                                                        current_state_locom_vec = curr_locom_state,
                                                                                                        current_state_internal = curr_inter_state,
                                                                                                        prev_state_extr_vec = prev_extri_state)
+        _, i["heading_vel"], i["goal_heading_vel"], i["heading_vel_err"] = self._heading_velocity_reward(state=state, dt=last_dt)
+        
 
         if labels is not None: # Generate at least some labels
             for k in i:

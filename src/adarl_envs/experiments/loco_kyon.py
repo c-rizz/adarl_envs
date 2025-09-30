@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 4
+        train_envs = 2048
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -31,7 +31,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     eval_freq = 10
     r = 1.0
     n = 0.0
-    p = 0.0
+    p = 0.0001
     env_builder_args = {
         "action_delay_mustd_std" : (0.005, 0.002*n, 0.0025*n),
         "action_noise_mustd" : (0.0,   0.0005*n),
@@ -62,7 +62,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_goal_height_speed" : 0.1,
         "max_good_step_duration" : 1.0,
         "max_steps_per_episode" : max_steps_per_episode,
-        "merge_privileged" : True,
+        "merge_privileged" : False,
         "min_good_step_duration" : 0.1,
         "mode" : mode,
         "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.02*n],
@@ -84,8 +84,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_reference_filter_distribution" : ("uniform", (20.0-15*r, 20.0+15*r)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "reward_acceleration_weight" :      5.0*p,
-        "reward_actacc_weight" :            100.0*p,
+        "reward_acceleration_weight" :      2.0,
+        "reward_actacc_weight" :            10.0,
         "reward_actdiff_weight" :           1.0*p,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
@@ -93,14 +93,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_feet_air_time_weight" :     20.0,
         "reward_feet_on_ground_weight" :    0.0,
         "reward_heading_weight" :           0.0,
+        "reward_heading_velocity_weight" :  0.0001,
         "reward_health_weight" :            0.0,
         "reward_height_position_weight" :   0.3,
         "reward_height_velocity_weight" :   0.0,
         "reward_pitchnroll_weight" :        0.15,
         "reward_pos2posref_weight" :        0.0,       
         "reward_position_limit_weight" :    0.1*p,
-        "reward_position_weight" :          0.0,
-        "reward_sensed_effort_weight" :     0.0,
+        "reward_position_weight" :          0.1*p,
+        "reward_sensed_effort_weight" :     1.0*p,
         "reward_slip_weight" :              1.0*p,
         "reward_torque_limit_weight" :      0.0,
         "reward_torque_weight" :            30.0,
@@ -227,7 +228,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_init_hparams( model_th_device = "cuda",
-                                                    q_network_arch=[2048,256],
+                                                    q_network_arch=[1024,256],
                                                     q_lr=0.001,
                                                     policy_lr=0.0005,
                                                     policy_arch=[512,128],

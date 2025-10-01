@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 2048
+        train_envs = 1024
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -30,7 +30,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     eval_freq = 10
     r = 1.0
-    n = 0.0
+    n = 1.0
     p = 0.0001
     env_builder_args = {
         "action_delay_mustd_std" : (0.005, 0.002*n, 0.0025*n),
@@ -231,11 +231,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     q_network_arch=[1024,256],
                                                     q_lr=0.001,
                                                     policy_lr=0.0005,
-                                                    policy_arch=[512,128],
+                                                    policy_arch=[1024,128],
                                                     gamma=0.99,
                                                     target_tau = 0.001,
-                                                    batch_size=8192,
-                                                    buffer_size=5_000_000,
+                                                    batch_size=16384,
+                                                    buffer_size=8_000_000,
                                                     total_steps=1_000_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=60,

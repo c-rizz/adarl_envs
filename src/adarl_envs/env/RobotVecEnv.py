@@ -926,7 +926,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 self._configuration.noise_posz_ep_mustdstd[2].expand(1),
                                                                 self._configuration.noise_gravity_ep_mustdstd[2].expand(3),
                                                                 self._configuration.noise_linacc_ep_mustdstd[2].expand(3)]).unsqueeze(-1))
-        observable_substates = [self.STATE_ROBOT,
+        all_observable_substates = [self.STATE_ROBOT,
                                 self.STATE_INTERNAL,
                                 self.STATE_ACT_RAW_HIST,
                                 self.STATE_LAST_ACT_RAW,
@@ -936,7 +936,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 ]
         if not self._configuration.merge_privileged:
             obs_definitions={"base" : 
-                            DictStateHelper.SimpleDictObsDef(  observable_substates=observable_substates,
+                            DictStateHelper.SimpleDictObsDef(  observable_substates=all_observable_substates, # this will only take the "base" obs inside these
                                                                 flattened_subobss=[self.STATE_ROBOT,
                                                                                 self.STATE_EXTRINSIC,
                                                                                 self.STATE_INTERNAL,
@@ -945,15 +945,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                 # self.STATE_ACT_PREPROC,
                                                                                 self.STATE_JOINT_LONGTERM_STATS],
                                                                 flattened_part_name="vec",
-                                                                noise_generators={}),
+                                                                noise_generators={self.STATE_ROBOT      : robot_state_noise,
+                                                                                  self.STATE_EXTRINSIC  : extrinsic_state_noise}),
                             "privileged" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_EXTRINSIC],
                                                                 flattened_subobss=[self.STATE_EXTRINSIC],
                                                                 flattened_part_name="vec",
-                                                                noise_generators={self.STATE_EXTRINSIC : extrinsic_state_noise})}
+                                                                noise_generators={})}
         else:
             obs_definitions={"base" : 
-                            DictStateHelper.SimpleDictObsDef(  observable_substates=observable_substates,
+                            DictStateHelper.SimpleDictObsDef(  observable_substates=all_observable_substates,
                                                                 flattened_subobss=[self.STATE_ROBOT,
                                                                                 self.STATE_EXTRINSIC,
                                                                                 self.STATE_INTERNAL,
@@ -962,7 +963,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                 # self.STATE_ACT_PREPROC,
                                                                                 self.STATE_JOINT_LONGTERM_STATS],
                                                                 flattened_part_name="vec",
-                                                                noise_generators={  self.STATE_ROBOT : robot_state_noise,
+                                                                noise_generators={  self.STATE_ROBOT     : robot_state_noise,
                                                                                     self.STATE_EXTRINSIC : extrinsic_state_noise})}
         self._state_helper = DictStateHelper({  self.STATE_ROBOT : robot_state_helper,
                                                 self.STATE_JOINT_STEP_STATS : joint_step_stats_state_helper,

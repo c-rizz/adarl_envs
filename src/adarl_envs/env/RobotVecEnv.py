@@ -1,5 +1,6 @@
 from __future__ import annotations
 from ast import Not
+from re import S
 from traceback import print_stack
 from adarl.adapters.BaseVecAdapter import JointType
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
@@ -670,10 +671,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._state_helper : DictStateHelper
         self._build_state_helper(adapter)
         # ggLog.info(f"self._state_helper.observation_names() = {self._state_helper.observation_names()}")
-        self._current_state = self._state_helper.reset_state()
         # ggLog.info(f"current_state = {self._current_state}")
-        self._last_obs = self._state_helper.observe(self._current_state)
-        self._eps_start_stime = self._thzeros(size=(adapter.vec_size(),))
         self._safety_limits = self._state_helper.sub_helpers[self.STATE_ROBOT].build_robot_limits(
                                                     joint_limit_minmax_pve={jn:self._configuration.joint_safe_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
                                                     stiffness_minmax={jn: self._configuration.joint_safe_limits_minmax_stiffness[jn] for jn in self._configuration.controlled_joints},
@@ -697,9 +695,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                          seed = seed)
         self._build()
         # preallocate some things
-        self._no_envs = th.zeros((self.num_envs,), dtype=th.bool, device=self._configuration.th_device)
-        self._all_envs = th.zeros((self.num_envs,), dtype=th.bool, device=self._configuration.th_device)
         self._abs_gravity_dir = self._thtens([0.0,0.0,-1.0])
+        self._eps_start_stime = self._thzeros(size=(self.num_envs,))
+        self._reset_state(self._all_envs)
+        self._last_obs = self._state_helper.observe(self._current_state)
 
         # Randomizations
         randomized_mass_links = self._expand_link_filters(randomized_mass_links)
@@ -1080,7 +1079,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._spawn_defs.append(axes_spawn_def)
         return self._spawn_defs
         
-
+    def _reset_state(self, vec_mask : th.Tensor, options = {}):
+        resetted_state = self._state_helper.reset_state()
+        # ggLog.info(f"resetted_state = {resetted_state}")
+        if not hasattr(self, "_current_state") or self._current_state is None:
+            self._current_state = resetted_state
+        map2_tensor_tree(self._current_state, resetted_state,
+                        lambda l1, l2: masked_assign(l1, vec_mask, l2)) # should not be necessary, just for safety
+        self._set_current_ep_config(reset_options = options, vec_mask=vec_mask)
+        self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.STEP_COUNT] = self._thtens(-1.) # all other fields will be overwritten accordingly in state_update
+        self._current_state[self.STATE_EXTRINSIC][vec_mask,:,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z] = -1.0
 
     @override
     def _initialize_episodes(self, vec_mask : th.Tensor | None = None, options = {}) -> None:
@@ -1092,14 +1100,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             mjx_adapter : MjxAdapter = self._adapter # type: ignore
             mjx_adapter.reset_model_alterations(vec_mask)
         # ggLog.info(f"initializing episodes {vec_mask}")
-        resetted_state = self._state_helper.reset_state()
-        # ggLog.info(f"resetted_state = {resetted_state}")
-        map2_tensor_tree(self._current_state, resetted_state,
-                        lambda l1, l2: masked_assign(l1, vec_mask, l2)) # should not be necessary, just for safety
-        self._set_current_ep_config(reset_options = options, vec_mask=vec_mask)
-        self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.STEP_COUNT] = self._thtens(-1.) # all other fields will be overwritten accordingly in state_update
+        self._reset_state(vec_mask=vec_mask, options=options)
         masked_assign(self._eps_start_stime, vec_mask, self._adapter.getEnvTimeFromStartup())
-        self._last_obs = self._state_helper.observe(self._current_state)
         
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             self._simulation_initialization(vec_mask=vec_mask)
@@ -1138,6 +1140,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             
         self._update_state(self._get_adapter_data())
         self._update_stats()
+        self._last_obs = self._state_helper.observe(self._current_state)
 
 
 

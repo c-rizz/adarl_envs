@@ -423,7 +423,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         max_goal_height_pos_change_speed = max_goal_height_pos_change_speed,
                         max_height_speed_goal = max_height_speed_goal,
                         heading_kp=self._thtens(1),
-                        max_heading_speed_goal=self._thtens(th.pi/2)
+                        max_heading_speed_goal=self._thtens(th.pi/4)
                         )
         
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xys       = self._thtens([1.0,0.0,0.0]).expand(adapter.vec_size(), 3).detach().clone(),
@@ -905,33 +905,75 @@ class LocomotionVecEnv(RobotVecEnv):
                                                 dt : th.Tensor,
                                                 max_speed : th.Tensor,
                                                 kp : th.Tensor):
+        curr_pos = curr_pos.view((self.num_envs,))
+        prev_pos = prev_pos.view((self.num_envs,))
+        goal_pos = goal_pos.view((self.num_envs,))
+        dt = dt.view((self.num_envs,))
+        max_speed = max_speed.view((1,))
+        kp = kp.view((1,))
+
         err = curr_pos-goal_pos
         goal_velocity = th.clamp(-err*kp, min=-max_speed, max=max_speed) 
         velocity = (curr_pos - prev_pos)/dt
-        reward = double_bell_reward(velocity-goal_velocity,
+        velocity_err = velocity-goal_velocity
+        reward = double_bell_reward(velocity_err,
                                            bell_width_a=self._thtens(0.05),
                                            bell_width_b=goal_velocity*2+0.025,
                                            bell_b_weight=self._thtens(0.5))
-        return reward, velocity, goal_velocity, err
+        # ggLog.info(f"_velocity_from_position_reward: curr_pos={curr_pos.shape}, prev_pos={prev_pos.shape}, goal_pos={goal_pos.shape},"
+        #            f" dt={dt.shape}, err={err.shape}, velocity={velocity.shape}, goal_velocity={goal_velocity.shape}, reward={reward.shape}")
+        return reward, velocity, goal_velocity, velocity_err
 
     def _heading_velocity_reward(self, state, dt : th.Tensor):
-        rel_goal_linvel_dir_xyz = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0]
-        rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0]
-        prev_rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:,1,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0]
-        prev_rel_goal_linvel_dir_xyz = state[self.STATE_LOCOMOTION][:,1,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0]
-        rel_body_direction_xyz = self._unit_3d_vector # The body orientation in the body frame
-        body_proj_gravity_plane   = rel_body_direction_xyz  - vector_projection(rel_body_direction_xyz, rel_gravity_vec_xyz) # body direction projected in the gravity plane
-        linvel_proj_gravity_plane = rel_goal_linvel_dir_xyz - vector_projection(rel_goal_linvel_dir_xyz, rel_gravity_vec_xyz) # should already be in the plane, but to be safe
-        prev_body_proj_gravity_plane   = rel_body_direction_xyz  - vector_projection(rel_body_direction_xyz, prev_rel_gravity_vec_xyz) # body direction projected in the gravity plane
-        prev_linvel_proj_gravity_plane = rel_goal_linvel_dir_xyz - vector_projection(prev_rel_goal_linvel_dir_xyz, prev_rel_gravity_vec_xyz) # should already be in the plane, but to be safe
-        prev_heading_yaw_err = vectors_angle(prev_body_proj_gravity_plane, prev_linvel_proj_gravity_plane)
-        heading_yaw_err = vectors_angle(body_proj_gravity_plane, linvel_proj_gravity_plane)
-        return self._velocity_from_position_reward( curr_pos=heading_yaw_err,
-                                                    prev_pos = prev_heading_yaw_err,
-                                                    goal_pos = th.zeros_like(heading_yaw_err),
+        rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
+        rel_goal_linvel_dir_xyz = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
+        prev_rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:,1,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
+        prev_rel_goal_linvel_dir_xyz = state[self.STATE_LOCOMOTION][:,1,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
+        rel_body_direction_xyz = self._unit_3d_vector.expand_as(rel_gravity_vec_xyz) # The body orientation in the body frame
+        
+        flattening_rotation = quat_xyzw_between_vecs_py(rel_gravity_vec_xyz, self._abs_gravity_dir.expand_as(rel_gravity_vec_xyz)) # rotation that brings gravity to 0,0,-1
+        prev_flattening_rotation = quat_xyzw_between_vecs_py(prev_rel_gravity_vec_xyz, self._abs_gravity_dir.expand_as(rel_gravity_vec_xyz)) # rotation that brings gravity to 0,0,-1
+        # print(  f"\n rel_body_direction_xyz = {rel_body_direction_xyz}"
+        #         f"\n rel_goal_linvel_dir_xyz = {rel_goal_linvel_dir_xyz}"
+        #         f"\n rel_gravity_vec_xyz = {rel_gravity_vec_xyz}"
+        #         f"\n flattening_rotation = {flattening_rotation}")
+        curr_body_rot2gravity = th_quat_rotate(rel_body_direction_xyz, flattening_rotation)
+        curr_goal_rot2gravity = th_quat_rotate(rel_goal_linvel_dir_xyz, flattening_rotation)
+        prev_body_rot2gravity = th_quat_rotate(rel_body_direction_xyz, prev_flattening_rotation)
+        prev_goal_rot2gravity = th_quat_rotate(prev_rel_goal_linvel_dir_xyz, prev_flattening_rotation)
+
+        # ggLog.info(f"\nbody_rot2gravity = {body_rot2gravity}"
+        #            f"\ngoal_rot2gravity = {goal_rot2gravity}"
+        #            f"\nprev_body_ro2gravity = {prev_body_rot2gravity}"
+        #            f"\nprev_goal_rot2gravity = {prev_goal_rot2gravity}")
+        eps = 1e-3
+        dbg_check(lambda : th.all(th.stack([th.all(curr_goal_rot2gravity[:,2]<eps),
+                                            th.all(prev_goal_rot2gravity[:,2]<eps)])),
+                  assert_msg="flattened goal vectors not parallel to ground", async_assert=True)
+        
+        curr_body_rot2gravity[:,2] = 0 # project to the gravity plane
+        curr_goal_rot2gravity[:,2] = 0 # project to the gravity plane
+        prev_body_rot2gravity[:,2] = 0 # project to the gravity plane
+        prev_goal_rot2gravity[:,2] = 0 # project to the gravity plane
+        
+        # body_proj_gravity_plane   = rel_body_direction_xyz  - vector_projection(rel_body_direction_xyz, rel_gravity_vec_xyz) # body direction projected in the gravity plane
+        # linvel_proj_gravity_plane = rel_goal_linvel_dir_xyz - vector_projection(rel_goal_linvel_dir_xyz, rel_gravity_vec_xyz) # should already be in the plane, but to be safe
+        # prev_body_proj_gravity_plane   = rel_body_direction_xyz  - vector_projection(rel_body_direction_xyz, prev_rel_gravity_vec_xyz) # body direction projected in the gravity plane
+        # prev_linvel_proj_gravity_plane = rel_goal_linvel_dir_xyz - vector_projection(prev_rel_goal_linvel_dir_xyz, prev_rel_gravity_vec_xyz) # should already be in the plane, but to be safe
+        prev_yaw_err = vectors_angle(prev_body_rot2gravity, prev_goal_rot2gravity)
+        curr_yaw_err = vectors_angle(curr_body_rot2gravity, curr_goal_rot2gravity)
+        # prev_body_yaw = th.atan2(prev_body_rot2gravity[:,1], prev_body_rot2gravity[:,0])
+        # prev_goal_yaw = th.atan2(prev_goal_rot2gravity[:,1], prev_goal_rot2gravity[:,0])
+        # curr_body_yaw = th.atan2(body_rot2gravity[:,1], body_rot2gravity[:,0])
+        # curr_goal_yaw = th.atan2(goal_rot2gravity[:,1], goal_rot2gravity[:,0])
+        # prev_yaw_err = prev_body_yaw - prev_goal_yaw
+        # curr_yaw_err = curr_body_yaw - curr_goal_yaw
+        return *self._velocity_from_position_reward(curr_pos = curr_yaw_err,
+                                                    prev_pos = prev_yaw_err ,
+                                                    goal_pos = th.zeros_like(prev_yaw_err),
                                                     dt=dt,
                                                     max_speed=self._loco_conf.max_heading_speed_goal,
-                                                    kp=self._loco_conf.heading_kp)
+                                                    kp=self._loco_conf.heading_kp), curr_yaw_err
 
     @override
     # @th.compile(mode="max-autotune")
@@ -1006,7 +1048,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                             zero_rew_dist=self._loco_conf.pitchnroll_reward_settle_point)
         reward_heading_position      = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR],
                                             zero_rew_dist=self._loco_conf.heading_reward_settle_point)
-        reward_heading_velocity, _, _, _ = self._heading_velocity_reward(state, current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT])
+        reward_heading_velocity, _, _, _, _ = self._heading_velocity_reward(state, current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT])
 
         goalrelative_weight = self._loco_conf.vel_reward_goalrelative_weight
         rel_goal_bell_width = self._loco_conf.reward_vel_goal_relative_width
@@ -1280,7 +1322,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                                                        current_state_locom_vec = curr_locom_state,
                                                                                                        current_state_internal = curr_inter_state,
                                                                                                        prev_state_extr_vec = prev_extri_state)
-        _, i["heading_vel"], i["goal_heading_vel"], i["heading_vel_err"] = self._heading_velocity_reward(state=state, dt=last_dt)
+        _, i["heading_vel"], i["goal_heading_vel"], i["heading_vel_err"], i["heading_err"] = self._heading_velocity_reward(state=state, dt=last_dt)
         
 
         if labels is not None: # Generate at least some labels

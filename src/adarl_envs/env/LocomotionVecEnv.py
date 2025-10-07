@@ -182,6 +182,8 @@ class LocomotionVecEnv(RobotVecEnv):
         """ Maximum goal speed for the speed-based heading reward."""
         heading_kp : th.Tensor
         """ Proportional gain used to compute the goal heading angular velocity from the heading error."""
+        feet_air_time_avg_alpha : float
+        """ Exponential smoothing factor (for 1 second) used to compute the average step duration of each foot for the feet_air_time_uniformity reward."""
 
 
     @dataclass
@@ -246,9 +248,10 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     "SUPPORT_POLYGON_LINVEL_Y",
                                                     "SUPPORT_POLYGON_LINVEL_Z"], start=0)
     
-    FEET_FIELDS = IntEnum("FEET_FIELDS" , ["FEET_LIFTOFF_TIMES",
+    FEET_FIELDS = IntEnum("FEET_FIELDS" , ["FEET_STEP_DURATIONS",
                                            "FEET_VEL_X",
-                                           "FEET_VEL_Y"], start=0)
+                                           "FEET_VEL_Y",
+                                           "AVG_FEET_STEP_DURATIONS"], start=0)
 
     def __init__(self,  action_delay_mustd_std : tuple[float,float,float],
                         action_noise_mustd : Sequence[float] | th.Tensor, 
@@ -361,7 +364,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         ui_camera_resolution_hw : tuple[int,int] = (256,144),
                         goal_resampling_probability_per_sec : float = 0.0,
                         max_goal_height_pos_change_speed : float = 0.25,
-                        max_height_speed_goal : float = 1.0
+                        max_height_speed_goal : float = 1.0,
+                        feet_air_time_avg_alpha = 1.0
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -423,7 +427,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         max_goal_height_pos_change_speed = max_goal_height_pos_change_speed,
                         max_height_speed_goal = max_height_speed_goal,
                         heading_kp=self._thtens(1),
-                        max_heading_speed_goal=self._thtens(th.pi/4)
+                        max_heading_speed_goal=self._thtens(th.pi/4),
+                        feet_air_time_avg_alpha = feet_air_time_avg_alpha
                         )
         
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xys       = self._thtens([1.0,0.0,0.0]).expand(adapter.vec_size(), 3).detach().clone(),
@@ -619,13 +624,14 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     th_device=self._th_device,
                                                     field_size=(len(self._loco_conf.feet_links),),
                                                     fields_minmax={ 
-                                                        self.FEET_FIELDS.FEET_LIFTOFF_TIMES : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_STEP_DURATIONS     : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_VEL_X : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_VEL_Y : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num)},
                                                     vec_size=adapter.vec_size(),
                                                     history_length=1,
                                                     observation_definitions=
-                                                        {   feet_obs_type : ThBoxStateHelper.SimpleObsDef(observable_fields=[self.FEET_FIELDS.FEET_LIFTOFF_TIMES,
+                                                        {   feet_obs_type : ThBoxStateHelper.SimpleObsDef(observable_fields=[self.FEET_FIELDS.FEET_STEP_DURATIONS,
                                                                                                                             self.FEET_FIELDS.FEET_VEL_X,
                                                                                                                             self.FEET_FIELDS.FEET_VEL_Y])})
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_FEET,
@@ -846,7 +852,7 @@ class LocomotionVecEnv(RobotVecEnv):
             curr_time = new_internal_state[self.INTERNAL_FIELDS.SIM_TIME].view((self.num_envs,))
             dt : th.Tensor = curr_time - prev_time
             # ggLog.info(f"feet_state = {self._current_state[self.STATE_FEET]}")
-            prev_feet_step_durations_vec_foot_t = self._current_state[self.STATE_FEET][:, 0, self.FEET_FIELDS.FEET_LIFTOFF_TIMES]
+            prev_feet_step_durations_vec_foot_t = self._current_state[self.STATE_FEET][:, 0, self.FEET_FIELDS.FEET_STEP_DURATIONS]
             feet_were_touching_ground = prev_feet_step_durations_vec_foot_t <= 0
             # if foot is just lifting off, mark the time in the state
             # if foot is already up, and stays up, leave the time there
@@ -858,7 +864,7 @@ class LocomotionVecEnv(RobotVecEnv):
             # ggLog.info(f"dt = {dt}")
             # ggLog.info(f"feet_were_touching_ground = \n{feet_were_touching_ground}")
             # ggLog.info(f"feet_are_touching_ground = \n{feet_are_touching_ground}")
-            new_feet_step_durations_vec_foot_t  = self._current_state[self.STATE_FEET][:, 0, self.FEET_FIELDS.FEET_LIFTOFF_TIMES].clone()
+            new_feet_step_durations_vec_foot_t  = self._current_state[self.STATE_FEET][:, 0, self.FEET_FIELDS.FEET_STEP_DURATIONS].clone()
             th.where(condition=just_touching_down.expand(nenv_nfeet),
                      input = -prev_feet_step_durations_vec_foot_t, # if touching down, write negative step duration
                      other = new_feet_step_durations_vec_foot_t,
@@ -873,9 +879,18 @@ class LocomotionVecEnv(RobotVecEnv):
                      out   = new_feet_step_durations_vec_foot_t)
             # ggLog.info(f"prev_feet_step_durations_vec_foot_t = \n{prev_feet_step_durations_vec_foot_t}")
             # ggLog.info(f"new_feet_step_durations_vec_foot_t = \n{new_feet_step_durations_vec_foot_t}")
+            prev_avg_feet_step_durations = self._current_state[self.STATE_FEET][:, 0, self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS]
+            new_avg_feet_step_durations = prev_avg_feet_step_durations.clone()
+            alpha = self._loco_conf.feet_air_time_avg_alpha
+            th.where(condition=just_touching_down.expand(nenv_nfeet),
+                     input = -prev_feet_step_durations_vec_foot_t*(1-alpha) + prev_avg_feet_step_durations*alpha,
+                     other = new_avg_feet_step_durations,
+                     out   = new_avg_feet_step_durations)
         else:
             new_feet_step_durations_vec_foot_t = self._thtens([0.0]).expand(nenv_nfeet)
-        new_feet_state = {  self.FEET_FIELDS.FEET_LIFTOFF_TIMES : new_feet_step_durations_vec_foot_t,
+            new_avg_feet_step_durations = self._thtens([0.0]).expand(nenv_nfeet)
+        new_feet_state = {  self.FEET_FIELDS.FEET_STEP_DURATIONS : new_feet_step_durations_vec_foot_t,
+                            self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS : new_avg_feet_step_durations,
                             self.FEET_FIELDS.FEET_VEL_X : feet_linvels_vec_foot_xyz[:,:,0],
                             self.FEET_FIELDS.FEET_VEL_Y : feet_linvels_vec_foot_xyz[:,:,1]}
 
@@ -917,7 +932,7 @@ class LocomotionVecEnv(RobotVecEnv):
         velocity = (curr_pos - prev_pos)/dt
         velocity_err = velocity-goal_velocity
         reward = double_bell_reward(velocity_err,
-                                           bell_width_a=self._thtens(0.05),
+                                           bell_width_a=self._thtens(0.1),
                                            bell_width_b=goal_velocity*2+0.025,
                                            bell_b_weight=self._thtens(0.5))
         # ggLog.info(f"_velocity_from_position_reward: curr_pos={curr_pos.shape}, prev_pos={prev_pos.shape}, goal_pos={goal_pos.shape},"
@@ -1024,7 +1039,8 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_sensed_effort    = penalty_reward(norm_senseff,     max_rew=1.0, exponent=8.0, reduction="max")
         reward_torque           = penalty_reward(normcmdtorques,   max_rew=max_rew, exponent=4.0)
         reward_velocity         = penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
-        reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=8.0, flattening_scale=0.1)
+        # reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=8.0, flattening_scale=0.1)
+        reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=2.0, flattening_scale=0.1)
         reward_position         = flattened_penalty_reward(normposhomingdiff,max_rew=max_rew, exponent=0.5, flattening_scale=0.02)
         reward_torquediff       = penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
         reward_actdiff          = penalty_reward(actdiff,max_rew=max_rew,exponent=2)
@@ -1066,13 +1082,13 @@ class LocomotionVecEnv(RobotVecEnv):
 
         goal_speed = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED].view((self.num_envs,1))
         feet_state = state[self.STATE_FEET][:,0] # vec_size*history*fields*nfeet -> vec_size*fields*nfeet
-        feet_step_durations = feet_state[:,self.FEET_FIELDS.FEET_LIFTOFF_TIMES] # vec_size*fields*nfeet -> vec_size*nfeet
-        steps_finishing = feet_step_durations < 0
-        step_durations = steps_finishing*(-feet_step_durations) # When the value is negative then it is the duration of a finished step
+        feet_step_durations_counters = feet_state[:,self.FEET_FIELDS.FEET_STEP_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
+        steps_finishing = feet_step_durations_counters < 0
+        feet_step_durations = -feet_step_durations_counters # When the value is positive then it is the duration of a currently ongoing step
         # subtracting 0.1 from the durations makes it so that very short steps are actually penalized with a negative reward
         # this makes doing small steps worse than doing nothing
         # squash the durations to max_good step, and offset it o that steps shorter than min_good_step are negative
-        corrected_step_durations = th.tanh((step_durations - self._loco_conf.min_good_step_duration)/self._loco_conf.max_good_step_duration)*self._loco_conf.max_good_step_duration
+        corrected_step_durations = th.tanh((feet_step_durations - self._loco_conf.min_good_step_duration)/self._loco_conf.max_good_step_duration)*self._loco_conf.max_good_step_duration
         # only keep the reward for finishing steps, and use reward quadratic in the duration (so two small steps are worse than one long one).
         # But keep the sign of the reward
         # Also, add add a linear term to keep a good gradient at min_good_step_duration
@@ -1082,10 +1098,15 @@ class LocomotionVecEnv(RobotVecEnv):
         # feet_rewards = step_is_good*squashed_feet_rewards + step_is_bad*feet_rewards # only squash the positive rewards
         feet_rewards = feet_rewards*(th.logical_or(goal_speed>0.01, step_is_bad)) # Only enable if speed is > 0.05 or the reward is a small step penalty
         reward_feet_air_time = th.mean(feet_rewards, dim=1) # average across the feet
+
+        avg_feet_step_durations = feet_state[:,self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
+        avg_all_feet_step_duration = th.mean(avg_feet_step_durations, dim=1) # vec_size*nfeet -> vec_size
+        step_duration_difformity = steps_finishing*(feet_step_durations-avg_all_feet_step_duration.unsqueeze(1).expand_as(feet_step_durations)) # vec_size*nfeet
+        reward_feet_air_time_uniformity = penalty_reward(step_duration_difformity, max_rew=1, exponent=2)
         
         feet_linvels_xy = feet_state[:,1:3] # vec_size*fields*nfeet -> vec_size*2*nfeet
         feet_linvels = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*fields*nfeet -> vec_size*nfeet
-        feet_touching_ground = feet_step_durations <= 0
+        feet_touching_ground = feet_step_durations_counters <= 0
         feet_sliding_linvel = feet_linvels*feet_touching_ground
         reward_slip = penalty_reward(feet_sliding_linvel, max_rew=1, exponent=2)
 
@@ -1102,11 +1123,13 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return["actdiff"] = reward_actdiff
         sub_rewards_return["contacts"] = reward_contacts
         sub_rewards_return["feet_air_time"] = reward_feet_air_time
+        # sub_rewards_return["feet_air_time_uniformity"] = reward_feet_air_time_uniformity
         sub_rewards_return["feet_on_ground"] = reward_feet_on_ground
         sub_rewards_return["heading"] = reward_heading_position
+        sub_rewards_return["heading_velocity"] = reward_heading_velocity
         sub_rewards_return["health"] = th.ones((current_state_locom_vec.size()[0],), device=current_state_locom_vec.device)
-        sub_rewards_return["height_velocity"] = reward_height_velocity
         sub_rewards_return["height_position"] = reward_height_position
+        sub_rewards_return["height_velocity"] = reward_height_velocity
         sub_rewards_return["pitchnroll"] = reward_pitchnroll
         sub_rewards_return["pos2posref_diff"] = reward_pos2posref_diff
         sub_rewards_return["position"] = reward_position
@@ -1121,7 +1144,6 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return["velocity"] = reward_velocity
         sub_rewards_return["velocity_limit"] = reward_velocity_limit
         sub_rewards_return["velocity_refs"] = reward_velocity_refs
-        sub_rewards_return["heading_velocity"] = reward_heading_velocity
         sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards_return.items()}
 
         # for k,v in sub_rewards_return.items():
@@ -1148,6 +1170,7 @@ class LocomotionVecEnv(RobotVecEnv):
                     "failure" :         current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_FAILURE_WEIGHT],
                     "actacc" :          current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_ACTACC_WEIGHT],
                     "feet_air_time" :   current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_FEET_AIR_TIME_WEIGHT],
+                    # "feet_air_time_uniformity" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_FEET_AIR_TIME_UNIFORMITY_WEIGHT],
                     "feet_on_ground" :  current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_FEET_ON_GROUND_WEIGHT],
                     "velocity_refs" :   current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_VELREF_WEIGHT],
                     "sensed_effort" :   current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_SENSED_EFFORT_WEIGHT],

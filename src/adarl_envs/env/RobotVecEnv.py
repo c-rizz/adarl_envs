@@ -859,7 +859,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     )
         joint_step_stats_state_helper = RobotStatsStateHelper(  joint_limit_minmax_pve={jn:self._configuration.joint_physical_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
                                                                 **vsize_dev_type,
-                                                                include_senseff=True) # type: ignore
+                                                                include_senseff=True,
+                                                                observation_definitions={
+                                                                    "privileged": ThBoxStateHelper.SimpleObsDef(observable_fields=None,
+                                                                                                                observable_subfields=["minseff","maxseff"],
+                                                                                                                obs_history_length=1),
+                                                                    "base": ThBoxStateHelper.SimpleObsDef(observable_fields=[],
+                                                                                                          observable_subfields=[],
+                                                                                                          obs_history_length=1)})
         joint_longterm_stats_helper = ThBoxStateHelper( field_names=[e for e in self.JOINT_LONGTERM_STATS_FIELDS],
                                                         field_size=(len(self._configuration.controlled_joints),),
                                                         fields_minmax={self.JOINT_LONGTERM_STATS_FIELDS.AVG_POS : 
@@ -932,7 +939,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.STATE_LAST_ACT_RAW,
                                 # self.STATE_ACT_PREPROC,
                                 self.STATE_JOINT_LONGTERM_STATS,
-                                self.STATE_EXTRINSIC
+                                self.STATE_EXTRINSIC,
+                                self.STATE_JOINT_STEP_STATS
                                 ]
         if not self._configuration.merge_privileged:
             obs_definitions={"base" : 
@@ -948,8 +956,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 noise_generators={self.STATE_ROBOT      : robot_state_noise,
                                                                                   self.STATE_EXTRINSIC  : extrinsic_state_noise}),
                             "privileged" : 
-                            DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_EXTRINSIC],
-                                                                flattened_subobss=[self.STATE_EXTRINSIC],
+                            DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS],
+                                                                flattened_subobss=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS],
                                                                 flattened_part_name="vec",
                                                                 noise_generators={})}
         else:

@@ -30,7 +30,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     eval_freq = 10
     r = 1.0
-    n = 1.0
+    n = 0.0
     p = 0.0001
     env_builder_args = {
         "action_delay_mustd_std" : (0.005, 0.002*n, 0.0025*n),
@@ -51,7 +51,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "held_joints_stiffness" : 500.0,
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
-        "impulse_probability_per_sec" : 0.1,
+        "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 0.2,
         "initial_height_randomization_range_meters" : 0.0,
         "initial_joint_pose_randomization_range" : 0.8,
@@ -60,9 +60,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "longterm_states_decimation_time" : 0.05, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,
         "max_goal_height_speed" : 0.1,
-        "max_good_step_duration" : 1.0,
+        "max_good_step_duration" : 0.3,
         "max_steps_per_episode" : max_steps_per_episode,
-        "merge_privileged" : True,
+        "merge_privileged" : False,
         "min_good_step_duration" : 0.1,
         "mode" : mode,
         "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.02*n],
@@ -84,9 +84,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_reference_filter_distribution" : ("uniform", (20.0-15*r, 20.0+15*r)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "reward_acceleration_weight" :      2.0,
+        "reward_acceleration_weight" :      1.0*p,
         "reward_actacc_weight" :            10.0,
-        "reward_actdiff_weight" :           1.0*p,
+        "reward_actdiff_weight" :           1.0,
         "reward_contacts_weight" :          0.0,
         "reward_energy_weight" :            0.0,
         "reward_failure_weight" :           1.0,
@@ -95,13 +95,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_heading_weight" :           0.0,
         "reward_heading_velocity_weight" :  0.2,
         "reward_health_weight" :            0.0,
-        "reward_height_position_weight" :   0.3,
+        "reward_height_position_weight" :   0.5,
         "reward_height_velocity_weight" :   0.0,
         "reward_pitchnroll_weight" :        0.15,
         "reward_pos2posref_weight" :        0.0,       
         "reward_position_limit_weight" :    0.1*p,
         "reward_position_weight" :          0.1*p,
-        "reward_sensed_effort_weight" :     1.0*p,
+        "reward_sensed_effort_weight" :     1.0,
         "reward_slip_weight" :              1.0*p,
         "reward_torque_limit_weight" :      0.0,
         "reward_torque_weight" :            30.0,
@@ -235,8 +235,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     gamma=0.99,
                                                     target_tau = 0.001,
                                                     batch_size=16384,
-                                                    buffer_size=8_000_000,
-                                                    total_steps=1_000_000_000,
+                                                    buffer_size=5_000_000,
+                                                    total_steps=100_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=60,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),

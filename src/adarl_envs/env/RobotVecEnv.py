@@ -1691,7 +1691,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.SIM_TIME : (vec_time_from_start - self._eps_start_stime).view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.LAST_STEP_DT : last_step_dt.view(self.num_envs,1)}
-        new_robot_state = th.cat([vec_jstates_j_pveae, vec_last_sent_j_pvesd], dim = -1)
+        use_referr = True
+        if use_referr:
+            jreferrs_vec_j_pve = vec_jstates_j_pveae[:,:,:3] - vec_last_sent_j_pvesd[:,:,:3]
+            new_robot_state = th.cat([jreferrs_vec_j_pve, vec_jstates_j_pveae[:,:,3:], vec_last_sent_j_pvesd], dim = -1)
+        else:
+            new_robot_state = th.cat([vec_jstates_j_pveae, vec_last_sent_j_pvesd], dim = -1)
         # build stats:
         # with permute the first dimension becomes the joint (ordered as in set_monitored_joints)
         # with flatten the second dimension becomes minp,minv,mina,mmine,maxp,maxv,...

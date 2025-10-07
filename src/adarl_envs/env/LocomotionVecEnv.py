@@ -309,7 +309,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_sensed_effort_weight : float,
                         reward_slip_weight : float,
                         reward_torque_limit_weight : float,
-                        reward_torque_weight : float,
+                        reward_cmdtorque_weight : float,
                         reward_torquediff_weight : float,
                         reward_torqueref_weight : float,
                         reward_tracking_weight : float,
@@ -382,7 +382,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_position_limit  = self._thtens(reward_position_limit_weight) ,
                         reward_scale  = self._thtens(reward_scale) ,
                         reward_weight_torque_limit  = self._thtens(reward_torque_limit_weight) ,
-                        reward_weight_torque = self._thtens(reward_torque_weight),
+                        reward_weight_torque = self._thtens(reward_cmdtorque_weight),
                         reward_weight_torquediff = self._thtens(reward_torquediff_weight),
                         reward_weight_tracking = self._thtens(reward_tracking_weight),
                         reward_weight_velocity_limit = self._thtens(reward_velocity_limit_weight),
@@ -1025,7 +1025,7 @@ class LocomotionVecEnv(RobotVecEnv):
         # normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
         max_senseff = 1_000 # max expected sensed effort (not really a strict max)
         max_jacc = 1_000 # max expected joint acceleration (not really a strict max)
-        norm_senseff        = th.clamp(state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4]/max_senseff, -1, 1) # normalized average sensed effort
+        norm_senseff        = th.clamp(state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=2)/max_senseff, -1, 1) # normalized max abs sensed effort
         normaccelerations   = state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,2]/max_jacc # normalized average accelearation
         normtorquediff      = state_robot_norm[:,0,:,2] - state_robot_norm[:,1,:,2]
         actdiff             = th.flatten((state_action_raw_vec[:,0] - state_action_raw_vec[:,1])/2, start_dim=1) # divide by 2 to keep it in [-1,1]
@@ -1037,7 +1037,7 @@ class LocomotionVecEnv(RobotVecEnv):
         torque_safenorm     = state_robot_safenorm[:,0,:,2]
 
         reward_sensed_effort    = penalty_reward(norm_senseff,     max_rew=1.0, exponent=8.0, reduction="max")
-        reward_torque           = penalty_reward(normcmdtorques,   max_rew=max_rew, exponent=4.0)
+        reward_cmdtorque        = penalty_reward(normcmdtorques,   max_rew=max_rew, exponent=4.0)
         reward_velocity         = penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
         # reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=8.0, flattening_scale=0.1)
         reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=2.0, flattening_scale=0.1)
@@ -1136,7 +1136,7 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return["position_limit"] = reward_position_limit
         sub_rewards_return["sensed_effort"] = reward_sensed_effort
         sub_rewards_return["slip"] = reward_slip
-        sub_rewards_return["torque"] = reward_torque
+        sub_rewards_return["torque"] = reward_cmdtorque
         sub_rewards_return["torque_limit"] = reward_torque_limit
         sub_rewards_return["torque_refs"] = reward_torque_refs
         sub_rewards_return["torquediff"] = reward_torquediff
@@ -1284,6 +1284,8 @@ class LocomotionVecEnv(RobotVecEnv):
         set_column(self._stats["body_speeds_vec"], idx, body_speed_vec.view(self.num_envs,))
 
         state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = self._current_state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
+        masked_assign(self._stats["ep_max_javg_sensed_effort"], starting_eps, 0)
+        masked_assign(self._stats["ep_max_peak_sensed_effort"], starting_eps, 0)
         self._stats["ep_max_javg_sensed_effort"] = th.maximum(self._stats["ep_max_javg_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1)).view((self.num_envs,)) 
         self._stats["ep_max_peak_sensed_effort"] = th.maximum(self._stats["ep_max_peak_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=[1,2])).view((self.num_envs,))
 

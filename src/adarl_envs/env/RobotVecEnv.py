@@ -1,7 +1,4 @@
 from __future__ import annotations
-from ast import Not
-from re import S
-from traceback import print_stack
 from adarl.adapters.BaseVecAdapter import JointType
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
@@ -18,13 +15,10 @@ from adarl.utils.tensor_trees import map_tensor_tree, flatten_tensor_tree, map2_
 from adarl.utils.utils import build_pose, JointState, Pose, LinkState, isinstance_noimport, masked_assign, masked_assign_sc, quat_conj_xyzw_np, quat_mul_xyzw_np
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run, dbg_check_bounded, dbg_check_finite
 from dataclasses import dataclass
-from gymnasium import Space
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any, Callable, Union, List, Tuple
-from matplotlib.pyplot import thetagrids
 from typing_extensions import override
 import adarl.utils.dbg.ggLog as ggLog
-import adarl.utils.tensor_trees
 import adarl.utils.utils
 from adarl.utils.spaces import ThBox
 import dataclasses
@@ -32,9 +26,7 @@ import numpy as np
 import torch as th
 import time
 from pathlib import Path
-from adarl.utils.spaces import get_space_labels
 import pprint
-import adarl.utils.mp_helper
 import scipy.stats
 
 disable_compile = False
@@ -860,6 +852,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         joint_step_stats_state_helper = RobotStatsStateHelper(  joint_limit_minmax_pve={jn:self._configuration.joint_physical_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
                                                                 **vsize_dev_type,
                                                                 include_senseff=True,
+                                                                flatten_observation=True,
                                                                 observation_definitions={
                                                                     "privileged": ThBoxStateHelper.SimpleObsDef(observable_fields=None,
                                                                                                                 observable_subfields=["minseff","maxseff"],

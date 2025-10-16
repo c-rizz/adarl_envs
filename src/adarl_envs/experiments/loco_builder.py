@@ -28,17 +28,19 @@ def format_tensor(t, float_precision):
 
 def overlay_text_func(vo, a, r, te, tr, info, extra_info):   
     if 'state_extrinsic' in info:
-        body_abs_linvel = format_tensor(info['state_extrinsic'][[LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z]], 3)
+        body_abs_linvel : th.Tensor = info['state_extrinsic'][[LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z]]
+        body_abs_linvel_str = format_tensor(body_abs_linvel, 3)
     else:
-        body_abs_linvel = 'N/A'
+        body_abs_linvel_str = 'N/A'
     if 'state_internal' in info:
         safety_triggered = info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED] if 'state_internal' in info else 'N/A'
     else:
         safety_triggered = 'N/A'
+    goal_abs_linvel_xyz = info['goal_abs_xyz_vec']
     return  (   f"\n"
                 f"Step    {info['ep_step_count']: .3f}\n"+
-                f"body_abs_linvel       {body_abs_linvel}\n"
-                f"goal_vel_abs          {format_tensor(info['goal_abs_xyz_vec'], 3)}\n"
+                f"body_abs_linvel       {body_abs_linvel_str} ({th.linalg.norm(body_abs_linvel):.3f} m/s)\n"
+                f"goal_vel_abs          {format_tensor(goal_abs_linvel_xyz, 3)} ({th.linalg.norm(goal_abs_linvel_xyz):.3f} m/s)\n"
                 f"goal_vel_rel          {format_tensor(info['goal_rel_xyz_vec'], 3)}\n"
                 f"smoothed_linvel_error {format_tensor(info['smoothed_linvel_error'], 3)}\n"
                 f"linvel_error          {format_tensor(info['linvel_error'], 3)}\n"

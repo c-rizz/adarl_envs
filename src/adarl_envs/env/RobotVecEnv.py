@@ -785,32 +785,39 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if self._configuration.observe_full_robot_state:
             observable_robot_state = ["pos","vel","cmdeff","refpos","refvel","refeff","stiff","damp"] 
         else:
-            observable_robot_state = ["pos","refpos"] 
+            observable_robot_state = ["pos","refpos"]
+
         robot_state_helper = RobotStateHelper(joint_limit_minmax_pveae={jn:self._configuration.joint_physical_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
                                               stiffness_minmax={jn:self._configuration.joint_safe_limits_minmax_stiffness[jn] for jn in self._configuration.controlled_joints},
                                               damping_minmax={jn:self._configuration.joint_safe_limits_minmax_damping[jn] for jn in self._configuration.controlled_joints},
                                               obs_dtype=self._configuration.obs_dtype,
                                               th_device=self._configuration.th_device,
                                               history_length=self._configuration.history_length,
-                                              obs_history_length = self._configuration.frame_stack_length,
                                               vec_size=adapter.vec_size(),
-                                              observable_subfields = observable_robot_state)
+                                              observation_definitions={ "base":ThBoxStateHelper.SimpleObsDef(
+                                                                                    observable_fields=None,
+                                                                                    obs_history_length = self._configuration.frame_stack_length,
+                                                                                    observable_subfields=observable_robot_state),
+                                                                        "privileged":ThBoxStateHelper.SimpleObsDef(
+                                                                                    observable_fields=None,
+                                                                                    obs_history_length = self._configuration.frame_stack_length,
+                                                                                    observable_subfields=observable_robot_state)})
+        robot_state_noise =  StateNoiseGenerator(robot_state_helper,
+                                                self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
+                                                episode_mu_std = self._configuration.noise_joints_pve_mustdstd[:2],
+                                                step_std = self._configuration.noise_joints_pve_mustdstd[2])
+        
+
         privileged_extrinsic_observable_fields = [
-                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z,
                                         self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
                                         ]
         base_extrinsic_observable_fields = [
-                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
                                         ]
         if not self._configuration.merge_privileged:
             extr_observation_definitions={  "base":ThBoxStateHelper.SimpleObsDef(
@@ -849,6 +856,40 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     observation_definitions=extr_observation_definitions,
                                                     **vsize_dev_type # type: ignore
                                                     )
+        extrinsic_state_noise =  StateNoiseGenerator(extrinsic_state_helper,
+                                            self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
+                                            episode_mu_std = {  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : self._configuration.noise_angvel_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : self._configuration.noise_angvel_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : self._configuration.noise_angvel_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : self._configuration.noise_linacc_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : self._configuration.noise_linacc_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : self._configuration.noise_linacc_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : self._configuration.noise_posz_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : self._configuration.noise_gravity_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : self._configuration.noise_gravity_ep_mustdstd[:2],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : self._configuration.noise_gravity_ep_mustdstd[:2]},
+                                            step_std = {self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : self._configuration.noise_angvel_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : self._configuration.noise_angvel_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : self._configuration.noise_angvel_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : self._configuration.noise_linacc_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : self._configuration.noise_linacc_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : self._configuration.noise_linacc_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : self._configuration.noise_posz_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : self._configuration.noise_gravity_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : self._configuration.noise_gravity_ep_mustdstd[2],
+                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : self._configuration.noise_gravity_ep_mustdstd[2]})
         joint_step_stats_state_helper = RobotStatsStateHelper(  joint_limit_minmax_pve={jn:self._configuration.joint_physical_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
                                                                 **vsize_dev_type,
                                                                 include_senseff=True,
@@ -908,24 +949,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                             observable_subfields=None,
                                                             obs_history_length=1),
                                                         **vsize_dev_type) # type: ignore
-        robot_state_noise =  StateNoiseGenerator(robot_state_helper,
-                                                self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
-                                                episode_mu_std = self._configuration.noise_joints_pve_mustdstd[:2],
-                                                step_std = self._configuration.noise_joints_pve_mustdstd[2])
-        extrinsic_state_noise =  StateNoiseGenerator(extrinsic_state_helper,
-                                            self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
-                                            episode_mu_std = th.cat([   self._configuration.noise_linvel_ep_mustdstd[:2].expand(3,2),
-                                                                        self._configuration.noise_angvel_ep_mustdstd[:2].expand(3,2),
-                                                                        self._configuration.noise_linvel_ep_mustdstd[:2].expand(3,2),
-                                                                        self._configuration.noise_posz_ep_mustdstd[:2].expand(1,2),
-                                                                        self._configuration.noise_gravity_ep_mustdstd[:2].expand(3,2),
-                                                                        self._configuration.noise_linacc_ep_mustdstd[:2].expand(3,2)]).permute(1,0).unsqueeze(-1),
-                                            step_std = th.cat([ self._configuration.noise_linvel_ep_mustdstd[2].expand(3),
-                                                                self._configuration.noise_angvel_ep_mustdstd[2].expand(3),
-                                                                self._configuration.noise_linvel_ep_mustdstd[2].expand(3),
-                                                                self._configuration.noise_posz_ep_mustdstd[2].expand(1),
-                                                                self._configuration.noise_gravity_ep_mustdstd[2].expand(3),
-                                                                self._configuration.noise_linacc_ep_mustdstd[2].expand(3)]).unsqueeze(-1))
         all_observable_substates = [self.STATE_ROBOT,
                                 self.STATE_INTERNAL,
                                 self.STATE_ACT_RAW_HIST,

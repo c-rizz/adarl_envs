@@ -944,7 +944,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                 # self.STATE_LAST_ACT_RAW,
                                                                                 self.STATE_ACT_RAW_HIST,
                                                                                 # self.STATE_ACT_PREPROC,
-                                                                                self.STATE_JOINT_LONGTERM_STATS],
+                                                                                self.STATE_JOINT_LONGTERM_STATS,
+                                                                                self.STATE_JOINT_STEP_STATS],
                                                                 flattened_part_name="vec",
                                                                 noise_generators={self.STATE_ROBOT      : robot_state_noise,
                                                                                   self.STATE_EXTRINSIC  : extrinsic_state_noise}),
@@ -962,7 +963,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                 # self.STATE_LAST_ACT_RAW,
                                                                                 self.STATE_ACT_RAW_HIST,
                                                                                 # self.STATE_ACT_PREPROC,
-                                                                                self.STATE_JOINT_LONGTERM_STATS],
+                                                                                self.STATE_JOINT_LONGTERM_STATS,
+                                                                                self.STATE_JOINT_STEP_STATS],
                                                                 flattened_part_name="vec",
                                                                 noise_generators={  self.STATE_ROBOT     : robot_state_noise,
                                                                                     self.STATE_EXTRINSIC : extrinsic_state_noise})}
@@ -1069,6 +1071,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                             pose=arrow_pose,
                                             format="urdf.xacro",
                                             kwargs={"add_world_link":str(is_pybullet)})
+            arrow_yellow_spawn_def = ModelSpawnDef(definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","models/red_arrow.urdf.xacro")).read_text(),
+                                            name="arrow_yellow",
+                                            pose=arrow_pose,
+                                            format="urdf.xacro",
+                                            kwargs={"add_world_link":str(is_pybullet),
+                                                    "color_rgba":"1 1 0 1"})
             axes_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","models/axes.urdf.xacro")).read_text(),
                                             name="axes",
                                             pose=None,
@@ -1078,6 +1086,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     camera_spawn_def]
             if self._configuration.show_goal:
                 self._spawn_defs.append(arrow_spawn_def)
+                self._spawn_defs.append(arrow_yellow_spawn_def)
             self._spawn_defs.append(axes_spawn_def)
         return self._spawn_defs
         
@@ -1090,6 +1099,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         lambda l1, l2: masked_assign(l1, vec_mask, l2)) # should not be necessary, just for safety
         self._set_current_ep_config(reset_options = options, vec_mask=vec_mask)
         self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.STEP_COUNT] = self._thtens(-1.) # all other fields will be overwritten accordingly in state_update
+        self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.LAST_STEP_DT] = self._thtens(self._intendedStepLength_sec)
         self._current_state[self.STATE_EXTRINSIC][vec_mask,:,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z] = -1.0
 
     @override
@@ -1302,15 +1312,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._adapter.build_scenario(models = self._get_spawn_defs(),
                                          default_link_group_collisions = self._configuration.enable_link_collisions)
             self._arrow_base = ("arrow","arrow_link")
+            self._arrow_yellow = ("arrow_yellow","arrow_link")
         elif isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper):
             if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("PyBulletJointImpedanceAdapter")):
                 self._adapter.build_scenario(models = self._get_spawn_defs())
                 self._arrow_base = ("arrow","world")
+                self._arrow_yellow = ("arrow_yellow","world")
             elif adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("RosXbotGazeboAdapter")):
                 self._adapter.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path( "adarl_envs",
                                                                                                             "gazebo/all_gazebo_xbot.launch"),
                                             launch_file_args={"gui":"false"})
                 self._arrow_base = ("arrow","arrow_link")
+                self._arrow_yellow = ("arrow_yellow","arrow_link")
             else:
                 raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         elif isinstance_noimport(self._adapter, "VecRosXBotAdapterWrapper"):
@@ -1323,6 +1336,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     #                                                                                                 "ros/all_kyon_mujoco.launch"),
                     #                                 launch_file_args={"gui":"false"})
                     self._arrow_base = ("arrow","arrow_link")
+                    self._arrow_yellow = ("arrow_yellow","arrow_link")
         else:
             raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         

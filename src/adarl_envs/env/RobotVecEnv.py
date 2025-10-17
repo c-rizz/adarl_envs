@@ -973,8 +973,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 noise_generators={self.STATE_ROBOT      : robot_state_noise,
                                                                                   self.STATE_EXTRINSIC  : extrinsic_state_noise}),
                             "privileged" : 
-                            DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS],
-                                                                flattened_subobss=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS],
+                            DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS, self.STATE_ROBOT],
+                                                                flattened_subobss=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS, self.STATE_ROBOT],
                                                                 flattened_part_name="vec",
                                                                 noise_generators={})}
         else:

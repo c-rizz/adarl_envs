@@ -67,7 +67,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mode" : mode,
         "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.01*n, 0.02*n],
         "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.01*n, 0.02*n],
-        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.0,    0.0],
+        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.001*n],
         "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],

@@ -237,7 +237,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     gamma=0.99,
                                                     target_tau = 0.001,
                                                     batch_size=4096,
-                                                    buffer_size=10240, #4096_000, # 10_240_000 Should fit in 16Gb of VRAM
+                                                    buffer_size=4096_000, # 10_240_000 Should fit in 16Gb of VRAM
                                                     total_steps=400_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=50,

@@ -584,7 +584,9 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y,
                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z,
                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED,
-                            self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
+                            self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT,
+                            self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X,
+                            self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_Y]
         privileged_loco_fields = [  self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,
@@ -1052,11 +1054,11 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     absolute_bell_width=th.pi/8), curr_err
 
     def _heading_velocity_reward(self, state, dt : th.Tensor):
-        rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
-        rel_goal_linvel_dir_xyz = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
-        prev_rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:,1,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
-        prev_rel_goal_linvel_dir_xyz = state[self.STATE_LOCOMOTION][:,1,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
-        prevprev_rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:,2,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
+        rel_gravity_vec_xyz              = state[self.STATE_EXTRINSIC][:, 0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
+        rel_goal_linvel_dir_xyz          = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
+        prev_rel_gravity_vec_xyz         = state[self.STATE_EXTRINSIC][:, 1,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
+        prev_rel_goal_linvel_dir_xyz     = state[self.STATE_LOCOMOTION][:,1,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
+        prevprev_rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:, 2,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
         prevprev_rel_goal_linvel_dir_xyz = state[self.STATE_LOCOMOTION][:,2,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
         rel_body_direction_xyz = self._unit_3d_vector.expand_as(rel_gravity_vec_xyz) # The body orientation in the body frame
         
@@ -1064,29 +1066,35 @@ class LocomotionVecEnv(RobotVecEnv):
         prev_flattening_rotation = quat_xyzw_between_vecs_py(prev_rel_gravity_vec_xyz, self._abs_gravity_dir.expand_as(rel_gravity_vec_xyz)) # rotation that brings gravity to 0,0,-1
         prevprev_flattening_rotation = quat_xyzw_between_vecs_py(prevprev_rel_gravity_vec_xyz, self._abs_gravity_dir.expand_as(rel_gravity_vec_xyz)) # rotation that brings gravity to 0,0,-1
         
-        curr_body_rot2gravity = th_quat_rotate(rel_body_direction_xyz,  flattening_rotation)
-        curr_goal_rot2gravity = th_quat_rotate(rel_goal_linvel_dir_xyz, flattening_rotation)
-        prev_body_rot2gravity = th_quat_rotate(rel_body_direction_xyz,       prev_flattening_rotation)
-        prev_goal_rot2gravity = th_quat_rotate(prev_rel_goal_linvel_dir_xyz, prev_flattening_rotation)
-        prevprev_body_rot2gravity = th_quat_rotate(rel_body_direction_xyz,           prevprev_flattening_rotation)
-        prevprev_goal_rot2gravity = th_quat_rotate(prevprev_rel_goal_linvel_dir_xyz, prevprev_flattening_rotation)
+        # rotate body and goal direction into the flattened frame
+        curr_bodydir_flatbodyframe = th_quat_rotate(rel_body_direction_xyz,  flattening_rotation)
+        curr_linvelgoaldir_flatbodyframe = th_quat_rotate(rel_goal_linvel_dir_xyz, flattening_rotation)
+        prev_bodydir_flatbodyframe = th_quat_rotate(rel_body_direction_xyz,       prev_flattening_rotation)
+        prev_linvelgoaldir_flatbodyframe = th_quat_rotate(prev_rel_goal_linvel_dir_xyz, prev_flattening_rotation)
+        prevprev_bodydir_flatbodyframe = th_quat_rotate(rel_body_direction_xyz,           prevprev_flattening_rotation)
+        prevprev_linvelgoaldir_flatbodyframe = th_quat_rotate(prevprev_rel_goal_linvel_dir_xyz, prevprev_flattening_rotation)
 
         eps = 1e-3
-        dbg_check(lambda : th.all(th.stack([th.all(curr_goal_rot2gravity[:,2]<eps),
-                                            th.all(prev_goal_rot2gravity[:,2]<eps),
-                                            th.all(prevprev_goal_rot2gravity[:,2]<eps)])),
+        dbg_check(lambda : th.all(th.stack([th.all(curr_linvelgoaldir_flatbodyframe[:,2]<eps),
+                                            th.all(prev_linvelgoaldir_flatbodyframe[:,2]<eps),
+                                            th.all(prevprev_linvelgoaldir_flatbodyframe[:,2]<eps)])),
                   assert_msg="flattened goal vectors not parallel to ground", async_assert=True)
         
-        curr_body_rot2gravity[:,2] = 0 # project to the gravity plane
-        curr_goal_rot2gravity[:,2] = 0 # project to the gravity plane
-        prev_body_rot2gravity[:,2] = 0 # project to the gravity plane
-        prev_goal_rot2gravity[:,2] = 0 # project to the gravity plane
-        prevprev_body_rot2gravity[:,2] = 0 # project to the gravity plane
-        prevprev_goal_rot2gravity[:,2] = 0 # project to the gravity plane
-        
-        curr_yaw_err = vectors_angle(curr_body_rot2gravity, curr_goal_rot2gravity)
-        prev_yaw_err = vectors_angle(prev_body_rot2gravity, prev_goal_rot2gravity)
-        prevprev_yaw_err = vectors_angle(prevprev_body_rot2gravity, prevprev_goal_rot2gravity)
+        curr_bodydir_flatbodyframe[:,2] = 0 # project to the gravity plane
+        curr_linvelgoaldir_flatbodyframe[:,2] = 0 # project to the gravity plane
+        prev_bodydir_flatbodyframe[:,2] = 0 # project to the gravity plane
+        prev_linvelgoaldir_flatbodyframe[:,2] = 0 # project to the gravity plane
+        prevprev_bodydir_flatbodyframe[:,2] = 0 # project to the gravity plane
+        prevprev_linvelgoaldir_flatbodyframe[:,2] = 0 # project to the gravity plane
+
+        rel_headinggoal_flatgoalframe = th.zeros_like(curr_bodydir_flatbodyframe)
+        rel_headinggoal_flatgoalframe[:,:2] = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X:self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_Y+1,0]
+        headinggoal_flatbodyframe = th_quat_rotate(rel_headinggoal_flatgoalframe, quat_xyzw_between_vecs_py(self._unit_3d_vector.expand_as(rel_headinggoal_flatgoalframe), curr_linvelgoaldir_flatbodyframe))
+
+
+        curr_yaw_err = vectors_angle(curr_bodydir_flatbodyframe, headinggoal_flatbodyframe)
+        prev_yaw_err = vectors_angle(prev_bodydir_flatbodyframe, headinggoal_flatbodyframe)
+        prevprev_yaw_err = vectors_angle(prevprev_bodydir_flatbodyframe, headinggoal_flatbodyframe)
         
         return *self._velocity_from_position_reward(curr_pos = curr_yaw_err,
                                                     prev_pos = prev_yaw_err,

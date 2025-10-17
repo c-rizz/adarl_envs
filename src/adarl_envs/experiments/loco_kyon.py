@@ -30,7 +30,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     eval_freq = 10
     r = 1.0
-    n = 0.0
+    n = 1.0
     p = 0.0001
     env_builder_args = {
         "action_delay_mustd_std" : (0.005, 0.00025*n, 0.0025*n),
@@ -98,7 +98,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_health_weight" :              0.0,
         "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     1e-4,
-        "reward_pitchnroll_weight" :          1.0,
+        "reward_pitchnroll_weight" :          0.5,
         "reward_pitchnroll_velocity_weight" : 0.1,
         "reward_pos2posref_weight" :          0.0,       
         "reward_position_limit_weight" :      0.1*p,

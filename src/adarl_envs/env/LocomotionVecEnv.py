@@ -80,6 +80,17 @@ def penalty_reward(x, max_rew : float, exponent : float):
     """
     return -th.tanh(th.pow(th.abs(x),exponent)/max_rew)*max_rew
 
+
+@th.jit.script
+def flattened_penalty_reward(x, max_rew : float, exponent : float, flattening_scale : float):
+    """A penalty produced by raising abs(x) at the power of exponent, and flattening it with
+        a flipped exponential, scaled with flattening_scale. With exponent=1.5 and 
+        flattening_scale=0.1 results in an x^1.5 that is quite flat below 0.1.
+        This then is squashed with a tanh to be under max_rew.
+        In formulas (not squashed): x^exponent * (-e^(-x^2/flattening_scale)+1)
+    """
+    return -th.tanh((th.pow(th.abs(x),exponent)*(1-th.exp(-(x/flattening_scale)**2)))/max_rew)*max_rew
+
 def planar_tracking_error_vec(body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_vec_xyz : th.Tensor, goal_rel_linvel_vec_xyz : th.Tensor) -> th.Tensor:
         """_summary_
 
@@ -1177,7 +1188,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                             bell_b_weight=self._loco_conf.height_reward_2_weight)
         # reward_pitchnroll   = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR],
         #                                     zero_rew_dist=self._loco_conf.pitchnroll_reward_settle_point)
-        reward_pitchnroll = penalty_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR], max_rew=1, exponent=2)
+        reward_pitchnroll = 1+flattened_penalty_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR], max_rew=1, exponent=1.5, flattening_scale=0.001)
         # reward_pitchnroll_velocity, _, _, _, _ = self._pitchnroll_velocity_reward(state, current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT])
         reward_pitchnroll_velocity = self._pitchnroll_velocity_penalty_reward(state)
         reward_heading_position = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR],

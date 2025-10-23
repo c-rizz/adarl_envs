@@ -45,7 +45,8 @@ if [[ $ubuntu_release == "24.04" ]]; then
                    ros-jazzy-srdfdom ros-jazzy-geometric-shapes ros-jazzy-gz-cmake-vendor \
                    libglfw3-dev ros-jazzy-xacro
 fi
-sed -i '/DXBOT2_GZ_SUPPORT=ON/c\    - -DXBOT2_GZ_SUPPORT=OFF' ./recipes/multidof_recipes/recipes/xbot2.yaml # Issues finding gz-cmake3, and I got annoyed
+# sed -i '/DXBOT2_GZ_SUPPORT=ON/c\    - -DXBOT2_GZ_SUPPORT=OFF' ./recipes/multidof_recipes/recipes/xbot2.yaml # Issues finding gz-cmake3, and I got annoyed
+source /opt/ros/jazzy/setup.bash
 forest grow -j10 xbot2_mujoco
 forest grow -j10 iit-kyon-ros-pkg
 if [ stop_sshagent_afterwards ]; then

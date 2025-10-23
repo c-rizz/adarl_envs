@@ -9,7 +9,7 @@
   <param name="use_sim_time" type="bool" value="false" />
   
   <node name="kyon_xbotcore" pkg="adarl_ros" type="run_xbot_core.sh" respawn="false" output="screen"
-        args="-C $(dirname)/kyon_basic.yaml --"/>
+        args="-C $(dirname)/xbotcore_kyon_ros1.yaml --"/>
 
 
 </launch>

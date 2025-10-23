@@ -470,12 +470,12 @@ class LocomotionVecEnv(RobotVecEnv):
                         max_goal_height_pos_change_speed = max_goal_height_pos_change_speed,
                         max_height_speed_goal = max_height_speed_goal,
                         heading_kp=self._thtens(1.0),
-                        heading_kd=self._thtens(0.0),
+                        heading_kd=self._thtens(0.01),
                         max_heading_speed_goal=self._thtens(th.pi/4),
                         feet_air_time_avg_alpha = feet_air_time_avg_alpha,
                         max_pitchnroll_speed_goal=self._thtens(th.pi/2),
                         pitchnroll_kp=self._thtens(1.0),
-                        pitchnroll_kd=self._thtens(0.0),
+                        pitchnroll_kd=self._thtens(0.01),
                         goal_heading_rel_yaw_minmax=self._thtens([-th.pi, th.pi])
                         )
         
@@ -1114,7 +1114,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     dt=dt,
                                                     max_speed=self._loco_conf.max_heading_speed_goal,
                                                     kp=self._loco_conf.heading_kp,
-                                                    kd=self._loco_conf.heading_kd), curr_yaw_err
+                                                    kd=self._loco_conf.heading_kd,
+                                                    relative_bell_width=1.1), curr_yaw_err
 
     @override
     # @th.compile(mode="max-autotune")
@@ -1209,7 +1210,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_contacts = - th.clamp(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 
         # FEET AIR TIME REWARD
-        should_be_moving = goal_speed.view((self.num_envs,1)) > 0.01
+        should_be_moving = goal_speed.view((self.num_envs,1)) > 0.05
         feet_state = state[self.STATE_FEET][:,0] # vec_size*history*fields*nfeet -> vec_size*fields*nfeet
         feet_air_durations_secs = feet_state[:,self.FEET_FIELDS.FEET_AIR_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
         steps_finishing = feet_air_durations_secs < 0

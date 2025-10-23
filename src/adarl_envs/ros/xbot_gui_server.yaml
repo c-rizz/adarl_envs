@@ -1,0 +1,6 @@
+# Section for the internal GUI Launcher component
+launcher:
+  type: launcher
+  # **THIS KEY IS REQUIRED** to fix the current 'KeyError: launcher_config'
+  # It must point to a concert_launcher-style YAML file defining processes for the GUI.
+  launcher_config: xbot_gui_server_launcher.yaml # Example: using the main one

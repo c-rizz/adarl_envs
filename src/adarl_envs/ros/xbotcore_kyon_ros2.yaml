@@ -1,0 +1,56 @@
+XBotInterface:
+    urdf: ros2 run xbot2_ros topic_echo /robot_description
+    srdf: ros2 run xbot2_ros topic_echo /robot_description_semantic
+
+ModelInterface:
+  model_type: pin
+
+
+# hal
+xbotcore_device_configs:
+    sim: $(ros2 pkg prefix --share kyon_config)/hal/kyon_gz.yaml
+    mj: $(ros2 pkg prefix --share kyon_config)/hal/kyon_mj.yaml
+    dummy: $(ros2 pkg prefix --share kyon_config)/hal/kyon_dummy.yaml
+
+
+# threads
+xbotcore_threads:
+    rt_main:  {sched: fifo , prio: 60, period: 0.001}
+    nrt_main: {sched: other, prio: 0 , period: 0.001}
+
+    # Used for Horizon
+    # nrt_main: {sched: other, prio: 0 , period: 0.005}
+
+
+# plugins
+xbotcore_plugins:
+
+    homing:
+        thread: rt_main
+        type: homing
+
+    ros_io: {thread: nrt_main, type: ros2_io}
+
+    ros_control: {thread: nrt_main, type: ros2_control, params: {autostart: {type: bool, value: true}}}
+    
+    zmq_io: {type: zmq_io, thread: nrt_main, params: {autostart: true}}
+    
+    # Used for Horizon 
+    # ros_io: {thread: nrt_main, type: ros2_io, params: {joint_state_queue_depth: {type: int, value: 1}}}
+
+    # ros_control: {thread: nrt_main, type: ros2_control, params: {autostart: {type: bool, value: true}, command_queue_depth: {type: int, value: 1}}}
+    
+
+
+# global parameters
+xbotcore_param:
+    /jm/tx_filter_autostart: {value: true, type: bool}
+    /jm/tx_filter_cutoff: {value: 2.0, type: double}
+    /jm/enable_safety: {value: false, type: bool}
+    /xbot_internal/ros_io/call_timeout: {value: 1.0, type: chrono}
+    /rt_main/memory_hooks: {value: true, type: bool}
+    /xbot/hal/enable_safety: {value: false, type: bool}
+    /xbot/hal/joint_safety/filter_safe_cutoff_hz: {value: 5.0, type: double}
+    /xbot/hal/joint_safety/filter_medium_cutoff_hz: {value: 20.0, type: double}
+    /xbot/hal/joint_safety/filter_fast_cutoff_hz: {value: 40.0, type: double}
+    /xbot/hal/joint_safety/delta_check_dt: 0.05

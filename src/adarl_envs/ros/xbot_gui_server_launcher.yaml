@@ -1,0 +1,9 @@
+context:
+  session: kyon_sim
+  params:
+    hw_type: sim
+
+# Simulation components
+roscore:
+  cmd: roscore
+  ready_check: rostopic list

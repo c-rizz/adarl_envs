@@ -19,7 +19,7 @@ from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionD
 from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import pprint
 
-disable_compile = False
+disable_compile = True
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):

@@ -352,12 +352,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : 0
     }
 
+    skip_optionals = True
     env_builder_args.update({
         "enable_rendering" : True,
         "record_video" : args["mode"]!="xbot",
-        "verbose_infos" : True,
+        "verbose_infos" : not skip_optionals,
         "video_save_freq" : True if args["record"] else 0,
-        "action_delay_mustd" : (0.0,0.0),
+        "action_delay_mustd_std" : (0.0,0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
         "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
         "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
@@ -366,7 +367,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
-        "log_info_stats" : True,
+        "log_info_stats" : not skip_optionals,
         "initial_joint_pose_randomization_range" : 0.0,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.0,0.0,0.0])),
         "randomized_friction_slide_spin_roll_ratios" : (0.0,0.0,0.0),
@@ -375,7 +376,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_mass_ratios" : ("normal", (0.0, 0.0)),
         "impulse_probability_per_sec" : 0.0,
         "show_gui" : args["gui"],
-        "just_health_reward" : True})
+        "just_health_reward" : skip_optionals})
     return play(seed,
                 folderName,
                 run_id, args,

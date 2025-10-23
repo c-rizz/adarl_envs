@@ -19,7 +19,7 @@ from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionD
 from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import pprint
 
-disable_compile = False
+disable_compile = True
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -962,7 +962,6 @@ class LocomotionVecEnv(RobotVecEnv):
                      input = new_feet_ground_durations_vec_foot_t+dt.unsqueeze(1).expand(nenv_nfeet), # if is on ground, increase time
                      other = new_feet_ground_durations_vec_foot_t,
                      out   = new_feet_ground_durations_vec_foot_t)
-            
 
             # ggLog.info(f"prev_feet_step_durations_vec_foot_t = \n{prev_feet_step_durations_vec_foot_t}")
             # ggLog.info(f"new_feet_step_durations_vec_foot_t = \n{new_feet_step_durations_vec_foot_t}")
@@ -975,6 +974,7 @@ class LocomotionVecEnv(RobotVecEnv):
                      out   = new_avg_feet_step_durations)
         else:
             new_feet_air_durations_vec_foot_t = self._thtens([0.0]).expand(nenv_nfeet)
+            new_feet_ground_durations_vec_foot_t = self._thtens([0.0]).expand(nenv_nfeet)
             new_avg_feet_step_durations = self._thtens([0.0]).expand(nenv_nfeet)
         new_feet_state = {  self.FEET_FIELDS.FEET_AIR_DURATIONS : new_feet_air_durations_vec_foot_t,
                             self.FEET_FIELDS.FEET_GROUND_DURATIONS : new_feet_ground_durations_vec_foot_t,

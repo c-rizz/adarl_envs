@@ -1459,8 +1459,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if self._configuration.enable_dbg_checks:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
                 dbg_check_finite(state, async_assert=True, assert_msg="Nonfinite state detected in RobotVecEnv")
-            dbg_check_finite(self._last_obs, async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
-            # dbg_check_bounded(self._last_obs, min=-100, max=100, just_warn=True)
+                dbg_check_finite(self._last_obs, async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
+            else:
+                dbg_check_finite(self._last_obs["base.vec"], async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
         return self._last_obs
 
 

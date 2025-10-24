@@ -70,6 +70,7 @@ def loco_runner_builder(seed,
     robot_name = env_builder_args["robot_name"]
     max_steps = env_builder_args.pop("max_steps_per_episode")
     mode = env_builder_args["mode"]
+    walltime_factor = env_builder_args.pop("walltime_factor")
 
     if mode == "gz":
         raise NotImplementedError()
@@ -98,7 +99,7 @@ def loco_runner_builder(seed,
                                                                         enable_filters=True,
                                                                         position_commands_stiffness = 400.0,
                                                                         position_commands_damping = 10.0,
-                                                                        walltime_factor=1.0),
+                                                                        walltime_factor=walltime_factor),
                                                 vec_size = 1,
                                                 th_device = th_device)
 

@@ -356,7 +356,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args.update({
         "enable_rendering" : True,
         "record_video" : args["mode"]!="xbot",
-        "verbose_infos" : not skip_optionals,
+        "verbose_infos" : (not skip_optionals) or args["record"],
         "video_save_freq" : True if args["record"] else 0,
         "action_delay_mustd_std" : (0.0,0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
@@ -367,7 +367,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
-        "log_info_stats" : not skip_optionals,
+        "log_info_stats" : (not skip_optionals) or args["record"],
         "initial_joint_pose_randomization_range" : 0.0,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.0,0.0,0.0])),
         "randomized_friction_slide_spin_roll_ratios" : (0.0,0.0,0.0),
@@ -376,7 +376,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_mass_ratios" : ("normal", (0.0, 0.0)),
         "impulse_probability_per_sec" : 0.0,
         "show_gui" : args["gui"],
-        "just_health_reward" : skip_optionals})
+        "just_health_reward" : skip_optionals,
+        "goal_resampling_probability_per_sec" : 0.0,
+        "walltime_factor" : args["rt_factor"]})
     return play(seed,
                 folderName,
                 run_id, args,
@@ -561,8 +563,8 @@ def play(seed, folderName, run_id, args,
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
                            f" tstep={t1_step-t0_step:1.4f} \t"
-                           f" goal_dir={goals['abs_linvel_xys'][0,:2].tolist()} \t"
-                           f" goal_speed={goals['abs_linvel_xys'][0,2]} \t"
+                           f" rgoal_dir={goals['rel_linvel_xys'][0,:2].tolist()} \t"
+                           f" rgoal_speed={goals['rel_linvel_xys'][0,2]} \t"
                            f" goal_height={goals['abs_height'][0].item()} \t")
             if step_count>0:
                 rewards.append(th.as_tensor(ep_reward,device="cpu").item())

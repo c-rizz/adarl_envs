@@ -836,15 +836,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                 observable_subfields=None)
         extrinsic_state_helper =  ThBoxStateHelper(field_names=[e for e in self.EXTRINSIC_FIELDS],
                                                     field_size=(1,),
-                                                    fields_minmax={ self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : [-10,10],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : [-10,10],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : [-10,10],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : [-100,100],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : [-100,100],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : [-100,100],
-                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : [-10,10],
-                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : [-10,10],
-                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : [-10,10],
+                                                    fields_minmax={ self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : [-5,5],
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : [-5,5],
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : [-5,5],
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : [-20,20],
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : [-20,20],
+                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : [-20,20],
+                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : [-5,5],
+                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : [-5,5],
+                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : [-5,5],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : [-1000,1000],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : [-1000,1000],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : [-1000,1000],
@@ -1035,7 +1035,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 posref_diff = th.clamp(posref_diff, min=self._posref_saturation_minmmax_diff[0], max=self._posref_saturation_minmmax_diff[1])
                 v_j_pvesd[:,:,0] = self._last_sent_v_j_pvesd[:,:,0] + posref_diff
             if self._configuration.control_mode in [JointImpedanceActionHelper.CONTROL_MODES.POSITION, JointImpedanceActionHelper.CONTROL_MODES.PS, JointImpedanceActionHelper.CONTROL_MODES.PT] :
-                v_j_pvesd[:,:,1] = th.clamp((v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec, 
+                refvel = (v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec
+                # current_pos = self._current_state[self.STATE_ROBOT][:,0,:,0]
+                # refvel = (v_j_pvesd[:,:,0] - current_pos)/self._intendedStepLength_sec
+                # refvel = th.zeros_like(refvel)
+                v_j_pvesd[:,:,1] = th.clamp(refvel,
                                             min=self._safe_limits_minmax_j_pve[0,:,1], 
                                             max=self._safe_limits_minmax_j_pve[1,:,1]) # set velocity reference
 
@@ -1722,10 +1726,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.SIM_TIME : (vec_time_from_start - self._eps_start_stime).view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.LAST_STEP_DT : last_step_dt.view(self.num_envs,1)}
-        use_referr = True
+        use_referr = False
         if use_referr:
             jreferrs_vec_j_pve = vec_jstates_j_pveae[:,:,:3] - vec_last_sent_j_pvesd[:,:,:3]
-            new_robot_state = th.cat([jreferrs_vec_j_pve, vec_jstates_j_pveae[:,:,3:], vec_last_sent_j_pvesd], dim = -1)
+            new_robot_state = th.cat([vec_jstates_j_pveae[:,:,:3], jreferrs_vec_j_pve, vec_last_sent_j_pvesd], dim = -1)
         else:
             new_robot_state = th.cat([vec_jstates_j_pveae, vec_last_sent_j_pvesd], dim = -1)
         # build stats:

@@ -66,9 +66,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "merge_privileged" : False,
         "min_good_step_duration" : 0.1,
         "mode" : mode,
-        "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.05*n, 0.1*n],
+        "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.05*n],
         "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.01*n, 0.02*n],
-        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.001*n],
+        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.02*n],
         "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
@@ -100,7 +100,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     eps,
         "reward_pitchnroll_weight" :          0.5,
-        "reward_pitchnroll_velocity_weight" : 0.1,
+        "reward_pitchnroll_velocity_weight" : 1.0,
         "reward_pos2posref_weight" :          eps,       
         "reward_position_limit_weight" :      eps,
         "reward_position_weight" :            eps,
@@ -116,7 +116,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velref_weight" :              eps,
         "robot_model" : "kyon",
         "safe_damping" : 5,
-        "safe_stiffness" : 400,
+        "safe_stiffness" : 600,
         "saturate_jimp_ref_limits" : False,
         "stepLength_sec" : step_length_sec,
         "stop_on_failure" : False,
@@ -125,7 +125,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "ui_camera_resolution_hw" : [144,256],
         "use_contacts" : False,
         "verbose_infos" : False,
-        "video_save_freq" : 0
+        "video_save_freq" : 0,
+        "walltime_factor" : 1.0
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({        

@@ -705,6 +705,12 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                  heightmap_state_helper,
                                                                  obs_defs={"base":{"observable":True,"flatten":False,"noise":None}})
         ggLog.info(f"Built state/obs/action helpers")
+
+    def _reset_state(self, vec_mask : th.Tensor, options = {}):
+        super()._reset_state(vec_mask, options)
+        self._current_state[self.STATE_LOCOMOTION][vec_mask,:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X] = 1.0
+        self._current_state[self.STATE_LOCOMOTION][vec_mask,:,self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X] = 1.0
+
         
     @th.compiler.disable
     def _get_loco_adapter_data(self):
@@ -1040,7 +1046,7 @@ class LocomotionVecEnv(RobotVecEnv):
         prev_rel_gravity_vec_xyz      = state[self.STATE_EXTRINSIC][:,1,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
         
         angle_vel = vectors_angle(curr_rel_gravity_vec_xyz, prev_rel_gravity_vec_xyz).view((self.num_envs,))
-        return -penalty_reward(angle_vel, max_rew=1, exponent=2)
+        return penalty_reward(angle_vel, max_rew=1, exponent=2)
 
     def _pitchnroll_velocity_reward(self, state, dt : th.Tensor):
         curr_rel_gravity_vec_xyz      = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))

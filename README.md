@@ -83,7 +83,7 @@ At this point, inside the container, you should be able to train kyon with SAC o
 byobu
 cd /home/host/adarl_ws
 . virtualenv/adarl/bin/activate
-./src/adarl_envs/src/adarl_envs/experiments/vec_loco_env_test.py --algorithm sac --mode mjx --comment kyon_training --robot kyon
+./src/adarl_envs/src/adarl_envs/experiments/loco_kyon.py --algorithm sac --mode mjx --comment kyon_training
 ```
 
 On your first run you may get in the terminal a prompt from wandb asking you to log in.
@@ -94,6 +94,7 @@ You can also terminate it by repatedly pressing CTRL+C.
 
 Outputs for the runs will be saved in adarl_ws/lrg_exps/vec_loco_env_test. There you can find checkpints, videos, and all information regarding the run.
 
+You can find some info for deploying on Xbot in readme_ros_xbot.md
 
 
 # Framework Overview
@@ -106,3 +107,12 @@ The overall framework is composed of 3 main packages:
 
 In addition to this othere relevant packages are **pykyon** and **pycentauro**, which wrap the the HHCM kyon and centauro repositories in standard python packages.
 In this way they can be indexed sing standard python tooling, and, using this [fork of xacro](https://github.com/c-rizz/xacro_standalone/tree/extra_find_pkg_path), XACRO files can be directly compiled without using ROS (hopefully the xaro fork will eventually be merged, see [xacro issue #356](https://github.com/ros/xacro/pull/356)).
+
+
+# Package Overview
+
+In this package you can find:
+
+* **env/RobotVecEnv.py**, a base environment for implementing robotics environment
+* **env/LocomotionVecEnv.py**, a locomotion environment, based on RobotVecEnv
+* **env/GraspVecEnv**, a simple grasping envoronment, again based on RobotVecEnv (still very much a work in progress)

@@ -49,14 +49,14 @@ def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     return 1-error/zero_rew_dist
 
 @th.jit.script
-def flattened_joint_penalty_reward(x, max_rew, exponent : float, flattening_scale : float):
+def flattened_joint_penalty_reward(x, max_rew : float, exponent : float, flattening_scale : float, presquash_factor : float = 1.0):
     """A penalty produced by raising abs(x) at the power of exponent, and flattening it with
         a flipped exponential, scaled with flattening_scale. With exponent=1.5 and 
         flattening_scale=0.1 results in an x^1.5 that is quite flat below 0.1.
         This then is squashed with a tanh to be under max_rew.
         In formulas (not squashed): x^exponent * (-e^(-x^2/flattening_scale)+1)
     """
-    return -th.tanh((th.mean(th.pow(th.abs(x),exponent)*(1-th.exp(-(x/flattening_scale)**2)), dim=1))/max_rew)*max_rew
+    return -th.tanh((th.mean(th.pow(th.abs(x),exponent)*(1-th.exp(-(x/flattening_scale)**2)), dim=1))*presquash_factor/max_rew)*max_rew
 
 @th.jit.script
 def joint_penalty_reward(x, max_rew : float, exponent : float, reduction : str = "mean", presquash_factor : float = 1.0):
@@ -271,7 +271,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     "REWARD_SLIP_WEIGHT",
                                                     "REWARD_VELREF_WEIGHT",
                                                     "REWARD_TORQUEREF_WEIGHT",
-                                                    "REWARD_POS2POSREF_WEIGHT",
+                                                    "REWARD_POSREF_VEL_WEIGHT",
                                                     "SMOOTHED_TRACKING_ERROR",
                                                     "SMOOTHED_HEIGHT_ERROR",
                                                     "SMOOTHED_PITCHNROLL_ERROR",
@@ -341,7 +341,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_height_position_weight : float,
                         reward_pitchnroll_weight : float,
                         reward_pitchnroll_velocity_weight : float,
-                        reward_pos2posref_weight : float,
+                        reward_posref_vel_weight : float,
                         reward_position_limit_weight : float,
                         reward_position_weight : float,
                         reward_scale : float,
@@ -443,7 +443,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_slip=self._thtens(reward_slip_weight),
                         reward_weight_velref=self._thtens(reward_velref_weight),
                         reward_weight_torqueref=self._thtens(reward_torqueref_weight),
-                        reward_weight_pos2posref=self._thtens(reward_pos2posref_weight),
+                        reward_weight_pos2posref=self._thtens(reward_posref_vel_weight),
                         use_contacts = use_contacts,
                         disallowed_contact_links=disallowed_contact_links,
                         terminating_contact_pairs=terminating_contact_pairs,
@@ -652,7 +652,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.REWARD_VELREF_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_SENSED_EFFORT_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_TORQUEREF_WEIGHT : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_POS2POSREF_WEIGHT : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.REWARD_POSREF_VEL_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.REWARD_SLIP_WEIGHT : [0,10],
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : [0,10],
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR : [0,10],
@@ -891,7 +891,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.REWARD_SLIP_WEIGHT : self._loco_conf.reward_weight_slip.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_VELREF_WEIGHT : self._loco_conf.reward_weight_velref.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_TORQUEREF_WEIGHT : self._loco_conf.reward_weight_torqueref.expand(vsize,1),
-                            self.LOCOMOTION_FIELDS.REWARD_POS2POSREF_WEIGHT : self._loco_conf.reward_weight_pos2posref.expand(vsize,1),
+                            self.LOCOMOTION_FIELDS.REWARD_POSREF_VEL_WEIGHT : self._loco_conf.reward_weight_pos2posref.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_tracking_err_vec.view(vsize,1),
                             self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR : smoothed_height_error.view(vsize,1),
                             self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR : smoothed_pitchnroll_error.view(vsize,1),
@@ -1140,12 +1140,14 @@ class LocomotionVecEnv(RobotVecEnv):
         current_state_internal = state[self.STATE_INTERNAL][:, 0,:,0]
         state_action_raw_vec = state[self.STATE_ACT_RAW_HIST]
         state_stats_v_h_j_minmaxavgstd_pvaee = state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
+        last_step_dt = current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT].view((self.num_envs,))
 
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
         normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
         state_robot_norm        = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)
         longterm_stats_pos_norm = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
                                                                                                       warn_limits_violation=False)
+        joints_num = state_robot_norm.size()[2]
         # self._warn_out_of_bounds(state_robot_norm)
         state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
         # state_stats_norm = self._state_helper.sub_helpers[self.STATE_ROBOT_STATS].normalize(state_stats)
@@ -1154,7 +1156,8 @@ class LocomotionVecEnv(RobotVecEnv):
         normcmdtorques       = state_robot_norm[:,0,:,2]
         norm_velocity_refs   = state_robot_norm[:,0,:,6]
         norm_torque_refs     = state_robot_norm[:,0,:,7]
-        norm_pos2posref_diff = state_robot_norm[:,0,:,0] - state_robot_norm[:,0,:,5]
+        # norm_pos2posref_diff = state_robot_norm[:,0,:,0] - state_robot_norm[:,0,:,5]
+        norm_posref_vel      = (state_robot_norm[:,0,:,5] - state_robot_norm[:,1,:,5])/2/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         # normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
         max_senseff = 1_000 # max expected sensed effort (not really a strict max)
         max_jacc = 1_000 # max expected joint acceleration (not really a strict max)
@@ -1176,7 +1179,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_acceleration     = flattened_joint_penalty_reward(normaccelerations,max_rew=max_rew, exponent=2.0, flattening_scale=0.1)
         reward_position         = flattened_joint_penalty_reward(normposhomingdiff,max_rew=max_rew, exponent=0.5, flattening_scale=0.02)
         reward_torquediff       = joint_penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
-        reward_actdiff          = joint_penalty_reward(actdiff,max_rew=max_rew,exponent=2)
+        reward_actdiff          = joint_penalty_reward(actdiff,max_rew=1, exponent=2, presquash_factor=10)
         reward_actacc           = joint_penalty_reward(act_acc,max_rew=1, exponent=2, presquash_factor=100)
         reward_torque_limit     = joint_penalty_reward(torque_safenorm,max_rew=1,exponent=50)
         reward_position_limit   = joint_penalty_reward(position_safenorm,max_rew=1,exponent=50)
@@ -1184,7 +1187,7 @@ class LocomotionVecEnv(RobotVecEnv):
         
         reward_velocity_refs    = joint_penalty_reward(norm_velocity_refs,   max_rew=max_rew,exponent=2)
         reward_torque_refs      = joint_penalty_reward(norm_torque_refs,     max_rew=max_rew,exponent=2)
-        reward_pos2posref_diff  = joint_penalty_reward(norm_pos2posref_diff, max_rew=max_rew,exponent=2)
+        reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
         #                                     zero_rew_dist=self._thtens(0.02))
         reward_height_velocity, _, _, _, _ = self._height_velocity_reward(curr_state_extr_vec, current_state_locom_vec, current_state_internal, prev_state_extr_vec)
@@ -1200,7 +1203,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_pitchnroll_velocity = self._pitchnroll_velocity_penalty_reward(state)
         reward_heading_position = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR],
                                             zero_rew_dist=self._loco_conf.heading_reward_settle_point)
-        reward_heading_velocity, _, _, _, _ = self._heading_velocity_reward(state, current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT])
+        reward_heading_velocity, _, _, _, _ = self._heading_velocity_reward(state, last_step_dt)
 
         goalrelative_weight = self._loco_conf.vel_reward_goalrelative_weight
         rel_goal_bell_width = self._loco_conf.reward_vel_goal_relative_width
@@ -1260,7 +1263,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         # FEET ON GROUND REWARD
         feet_touching_ground = feet_state[:,0] <= 0
-        reward_feet_on_ground = th.mean(feet_touching_ground.to(th.float32), dim=1)
+        reward_feet_on_ground = th.mean(feet_touching_ground.to(th.float32), dim=1) * th.logical_not(should_be_moving.view((self.num_envs,)))
 
         # FAILURE REWARD
         failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
@@ -1283,7 +1286,7 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return["height_velocity"] = reward_height_velocity
         sub_rewards_return["pitchnroll"] = reward_pitchnroll
         sub_rewards_return["pitchnroll_velocity"] = reward_pitchnroll_velocity
-        sub_rewards_return["pos2posref_diff"] = reward_pos2posref_diff
+        sub_rewards_return["posref_vel"] = reward_posref_vel
         sub_rewards_return["position"] = reward_position
         sub_rewards_return["position_limit"] = reward_position_limit
         sub_rewards_return["sensed_effort"] = reward_sensed_effort
@@ -1331,7 +1334,7 @@ class LocomotionVecEnv(RobotVecEnv):
                     "velocity_refs" :      current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_VELREF_WEIGHT],
                     "sensed_effort" :      current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_SENSED_EFFORT_WEIGHT],
                     "torque_refs" :        current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_TORQUEREF_WEIGHT],
-                    "pos2posref_diff" :    current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_POS2POSREF_WEIGHT],
+                    "posref_vel" :         current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_POSREF_VEL_WEIGHT],
                     "slip" :               current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_SLIP_WEIGHT],
                     "heading_velocity":    current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_HEADING_VELOCITY_WEIGHT]}
         for k in sub_rewards_return:

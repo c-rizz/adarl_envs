@@ -33,9 +33,11 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
     else:
         body_abs_linvel_str = 'N/A'
     if 'state_internal' in info:
-        safety_triggered = info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED] if 'state_internal' in info else 'N/A'
+        posref_safety_triggered = info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED] if 'state_internal' in info else 'N/A'
+        limits_safety_triggered = info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED] if 'state_internal' in info else 'N/A'
     else:
-        safety_triggered = 'N/A'
+        posref_safety_triggered = 'N/A'
+        limits_safety_triggered = 'N/A'
     goal_abs_linvel_xyz = info['goal_abs_xyz_vec']
     return  (   f"\n"
                 f"Step    {info['ep_step_count']: .3f}\n"+
@@ -47,7 +49,8 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
                 f"goal_height           {format_tensor(info['goal_height'], 3)}\n"
                 f"height_error          {format_tensor(info['height_err'], 3)}\n"
                 f"log_prob              {format_tensor(extra_info.get('act_log_prob',th.as_tensor(float('nan'))), 3)}\n"
-                f"safety                {safety_triggered}\n")
+                f"posref_safety         {posref_safety_triggered}\n"
+                f"limits_safety         {limits_safety_triggered}\n")
 
 def loco_runner_builder(seed,
                         run_folder,
@@ -258,7 +261,7 @@ def loco_runner_builder(seed,
                             reward_height_position_weight=env_builder_args.pop("reward_height_position_weight"),
                             reward_pitchnroll_weight=env_builder_args.pop("reward_pitchnroll_weight"),
                             reward_pitchnroll_velocity_weight=env_builder_args.pop("reward_pitchnroll_velocity_weight"),
-                            reward_pos2posref_weight = env_builder_args.pop("reward_pos2posref_weight"),
+                            reward_posref_vel_weight = env_builder_args.pop("reward_posref_vel_weight"),
                             reward_position_limit_weight = env_builder_args.pop("reward_position_limit_weight"),
                             reward_position_weight=env_builder_args.pop("reward_position_weight"),
                             reward_sensed_effort_weight = env_builder_args.pop("reward_sensed_effort_weight"),

@@ -267,6 +267,7 @@ def loco_runner_builder(seed,
                             reward_sensed_effort_weight = env_builder_args.pop("reward_sensed_effort_weight"),
                             reward_scale=1000/max_steps,
                             reward_slip_weight = env_builder_args.pop("reward_slip_weight"),
+                            reward_stand_position_weight = env_builder_args.pop("reward_stand_position_weight"),
                             reward_torque_limit_weight = env_builder_args.pop("reward_torque_limit_weight"),
                             reward_cmdtorque_weight = env_builder_args.pop("reward_torque_weight"),
                             reward_torquediff_weight = env_builder_args.pop("reward_torquediff_weight"),
@@ -292,7 +293,8 @@ def loco_runner_builder(seed,
                             th_device=th_device,
                             ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw"),
                             use_contacts=env_builder_args.pop("use_contacts"),
-                            verbose_infos=env_builder_args.pop("verbose_infos")
+                            verbose_infos=env_builder_args.pop("verbose_infos"),
+                            split_rewards=env_builder_args.pop("split_rewards")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

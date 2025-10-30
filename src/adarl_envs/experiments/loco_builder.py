@@ -33,9 +33,11 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
     else:
         body_abs_linvel_str = 'N/A'
     if 'state_internal' in info:
-        safety_triggered = info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED] if 'state_internal' in info else 'N/A'
+        posref_safety_triggered = info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED] if 'state_internal' in info else 'N/A'
+        limits_safety_triggered = info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED] if 'state_internal' in info else 'N/A'
     else:
-        safety_triggered = 'N/A'
+        posref_safety_triggered = 'N/A'
+        limits_safety_triggered = 'N/A'
     goal_abs_linvel_xyz = info['goal_abs_xyz_vec']
     return  (   f"\n"
                 f"Step    {info['ep_step_count']: .3f}\n"+
@@ -47,7 +49,8 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
                 f"goal_height           {format_tensor(info['goal_height'], 3)}\n"
                 f"height_error          {format_tensor(info['height_err'], 3)}\n"
                 f"log_prob              {format_tensor(extra_info.get('act_log_prob',th.as_tensor(float('nan'))), 3)}\n"
-                f"safety                {safety_triggered}\n")
+                f"posref_safety         {posref_safety_triggered}\n"
+                f"limits_safety         {limits_safety_triggered}\n")
 
 def loco_runner_builder(seed,
                         run_folder,
@@ -70,6 +73,7 @@ def loco_runner_builder(seed,
     robot_name = env_builder_args["robot_name"]
     max_steps = env_builder_args.pop("max_steps_per_episode")
     mode = env_builder_args["mode"]
+    walltime_factor = env_builder_args.pop("walltime_factor")
 
     if mode == "gz":
         raise NotImplementedError()
@@ -98,7 +102,7 @@ def loco_runner_builder(seed,
                                                                         enable_filters=True,
                                                                         position_commands_stiffness = 400.0,
                                                                         position_commands_damping = 10.0,
-                                                                        walltime_factor=1.0),
+                                                                        walltime_factor=walltime_factor),
                                                 vec_size = 1,
                                                 th_device = th_device)
 
@@ -257,12 +261,13 @@ def loco_runner_builder(seed,
                             reward_height_position_weight=env_builder_args.pop("reward_height_position_weight"),
                             reward_pitchnroll_weight=env_builder_args.pop("reward_pitchnroll_weight"),
                             reward_pitchnroll_velocity_weight=env_builder_args.pop("reward_pitchnroll_velocity_weight"),
-                            reward_pos2posref_weight = env_builder_args.pop("reward_pos2posref_weight"),
+                            reward_posref_vel_weight = env_builder_args.pop("reward_posref_vel_weight"),
                             reward_position_limit_weight = env_builder_args.pop("reward_position_limit_weight"),
                             reward_position_weight=env_builder_args.pop("reward_position_weight"),
                             reward_sensed_effort_weight = env_builder_args.pop("reward_sensed_effort_weight"),
                             reward_scale=1000/max_steps,
                             reward_slip_weight = env_builder_args.pop("reward_slip_weight"),
+                            reward_stand_position_weight = env_builder_args.pop("reward_stand_position_weight"),
                             reward_torque_limit_weight = env_builder_args.pop("reward_torque_limit_weight"),
                             reward_cmdtorque_weight = env_builder_args.pop("reward_torque_weight"),
                             reward_torquediff_weight = env_builder_args.pop("reward_torquediff_weight"),
@@ -288,7 +293,8 @@ def loco_runner_builder(seed,
                             th_device=th_device,
                             ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw"),
                             use_contacts=env_builder_args.pop("use_contacts"),
-                            verbose_infos=env_builder_args.pop("verbose_infos")
+                            verbose_infos=env_builder_args.pop("verbose_infos"),
+                            split_rewards=env_builder_args.pop("split_rewards")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

@@ -253,7 +253,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         joint_safe_limits_minmax_damping : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_stiffness : dict[tuple[str,str],th.Tensor]
-        just_health_reward : bool
+        fixed_reward : bool
         longterm_stats_alpha : th.Tensor
         main_body_link : tuple[str,str]
         merge_privileged : bool
@@ -573,7 +573,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     joint_safe_limits_minmax_damping = minmax_damping_thdict,
                                                     joint_safe_limits_minmax_pve = safe_limits_minmax_pve,
                                                     joint_safe_limits_minmax_stiffness = minmax_stiffness_thdict,
-                                                    just_health_reward = just_health_reward,
+                                                    fixed_reward = just_health_reward,
                                                     longterm_stats_alpha = self._thtens(0.1**(stepLength_sec/longterm_states_decimation_time)), # alpha so that the contribution of a sample longterm_states_decimation_time seconds ago is 0.1
                                                     main_body_link=(robot_name,robot_main_body_link),
                                                     merge_privileged = merge_privileged,
@@ -1238,7 +1238,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
     def _realworld_robot_init_move(self, vec_mask : th.Tensor):
-        if isinstance_noimport(self._adapter,"VecRosXBotAdapterWrapper"):
+        if isinstance_noimport(self._adapter,["VecRosXBotAdapterWrapper","VecZmqXbotAdapter"]):
             vjpose = self._current_episode_config.vec_initial_ctrl_joint_pose
             initial_cmd_vec_j_pvesd = th.stack([vjpose,
                                         th.zeros_like(vjpose),
@@ -1366,6 +1366,19 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     #                                 launch_file_args={"gui":"false"})
                     self._arrow_base = ("arrow","arrow_link")
                     self._arrow_yellow = ("arrow_yellow","arrow_link")
+        elif isinstance_noimport(self._adapter, "VecZmqXbotAdapter"):
+            if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("ZmqXbotAdapter")):
+                if self._configuration.real:
+                    raise NotImplementedError()
+                else:
+                    # self._adapter.build_scenario(   models = [],
+                    #                                 launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path(  "adarl_envs",
+                    #                                                                                                 "ros/all_kyon_mujoco.launch"),
+                    #                                 launch_file_args={"gui":"false"})
+                    self._arrow_base = ("arrow","arrow_link")
+                    self._arrow_yellow = ("arrow_yellow","arrow_link")
+            else:
+                raise NotImplementedError("Unexpected sub adapter "+self._adapter.sub_adapter())
         else:
             raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         

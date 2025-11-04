@@ -43,7 +43,7 @@ if [[ $ubuntu_release == "24.04" ]]; then
     echo "Installing 24.04 dependencies"
     apt install -y libboost-all-dev libhdf5-dev libqhull-dev libassimp-dev liboctomap-dev \
                    ros-jazzy-srdfdom ros-jazzy-geometric-shapes ros-jazzy-gz-cmake-vendor \
-                   libglfw3-dev ros-jazzy-xacro
+                   libglfw3-dev ros-jazzy-xacro libprotobuf32t64
 fi
 # sed -i '/DXBOT2_GZ_SUPPORT=ON/c\    - -DXBOT2_GZ_SUPPORT=OFF' ./recipes/multidof_recipes/recipes/xbot2.yaml # Issues finding gz-cmake3, and I got annoyed
 source /opt/ros/jazzy/setup.bash

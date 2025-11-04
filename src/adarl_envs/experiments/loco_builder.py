@@ -75,6 +75,10 @@ def loco_runner_builder(seed,
     mode = env_builder_args["mode"]
     walltime_factor = env_builder_args.pop("walltime_factor")
 
+    robot_urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(env_builder_args.pop("model_file")).read_text(),
+                                                            model_kwargs=env_builder_args.pop("model_kwargs"),
+                                                            extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
+    
     if mode == "gz":
         raise NotImplementedError()
     elif mode == "gazebo":
@@ -94,7 +98,7 @@ def loco_runner_builder(seed,
                                                                         torch_device = th.device("cpu"),
                                                                         fallback_cmd_stiffness = 200.0,
                                                                         fallback_cmd_damping = 10.0,
-                                                                        allow_fallback = True,
+                                                                        allow_fallback = False,
                                                                         jpos_cmd_max_vel = {},
                                                                         jpos_cmd_max_vel_default = 5.0,
                                                                         jpos_cmd_max_acc = {},
@@ -105,8 +109,32 @@ def loco_runner_builder(seed,
                                                                         walltime_factor=walltime_factor),
                                                 vec_size = 1,
                                                 th_device = th_device)
-
-
+    elif mode == "xbot_zmq":
+        from adarl.adapters.VecZmqXbotAdapter import VecZmqXbotAdapter
+        from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter
+        ground_link = ("ground_plane","ground_link") # Should not be used
+        adapter = VecZmqXbotAdapter(   adapter = ZmqXbotAdapter( model_name = robot_name,
+                                                                        stepLength_sec = stepLength_sec,
+                                                                        is_floating_base = True,
+                                                                        reference_frame = "world",
+                                                                        torch_device = th.device("cpu"),
+                                                                        allow_fallback = False,
+                                                                        jpos_cmd_max_vel = {},
+                                                                        jpos_cmd_max_vel_default = 5.0,
+                                                                        jpos_cmd_max_acc = {},
+                                                                        jpos_cmd_max_acc_default = 5.0,
+                                                                        enable_filters = True,
+                                                                        position_commands_stiffness = 400.0,
+                                                                        position_commands_damping = 10.0,
+                                                                        is_simulated = False,
+                                                                        walltime_factor = 1.0,
+                                                                        remote_ip = 'localhost',
+                                                                        remote_port = 5557,
+                                                                        remote_joint_state_port = 5556,
+                                                                        remote_cmd_port = 5558,
+                                                                        robot_urdf=robot_urdf_string),
+                                                vec_size = 1,
+                                                th_device = th_device)
     elif mode == "xbot-gazebo":
         from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
         from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
@@ -177,9 +205,6 @@ def loco_runner_builder(seed,
 
     time.sleep(1)
 
-    urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(env_builder_args.pop("model_file")).read_text(),
-                                                            model_kwargs=env_builder_args.pop("model_kwargs"),
-                                                            extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
     
     lrenv = LocomotionVecEnv(action_delay_mustd_std = env_builder_args.pop("action_delay_mustd_std"),
                             action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
@@ -279,7 +304,7 @@ def loco_runner_builder(seed,
                             robot_main_body_link=env_builder_args.pop("robot_main_body_link"),
                             robot_name=robot_name,
                             robot_root_link=env_builder_args.pop("robot_root_link"),
-                            robot_urdf_string=urdf_string,
+                            robot_urdf_string=robot_urdf_string,
                             safe_damping=env_builder_args.pop("safe_damping"),
                             safe_limits_position_offset=env_builder_args.pop("safe_limits_position_offset"),
                             safe_stiffness=env_builder_args.pop("safe_stiffness"),

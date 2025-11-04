@@ -489,9 +489,9 @@ class LocomotionVecEnv(RobotVecEnv):
                         split_rewards = split_rewards
                         )
         
-        self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xys       = self._thtens([1.0,0.0,0.0]).expand(adapter.vec_size(), 3).detach().clone(),
-                                                                                     goal_rel_vel_vec_xy_speed  = None,
-                                                                                     goal_abs_gravity_vec_xyz   = self._thtens([0.0,0.0,-1.0]).expand(adapter.vec_size(), 3).detach().clone(),
+        self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xys       = None,
+                                                                                     goal_rel_vel_vec_xy_speed  = self._thtens([1.0,0.0,0.0]).expand(adapter.vec_size(), 3).clone(),
+                                                                                     goal_abs_gravity_vec_xyz   = self._thtens([0.0,0.0,-1.0]).expand(adapter.vec_size(), 3).clone(),
                                                                                      goal_abs_height_vec_z      = self._thtens([sum(self._loco_conf.goal_height_minmax)/2]).expand(adapter.vec_size(), 1).detach().clone(),
                                                                                      goal_heading_rel_vec_yaw = self._thtens([0.0]).expand(adapter.vec_size(), 1).detach().clone())
         
@@ -575,6 +575,7 @@ class LocomotionVecEnv(RobotVecEnv):
         obs_labels = self._state_helper.observation_names()
         sub_rewards = {}
         reward = self.compute_rewards(self._current_state, sub_rewards)
+        ggLog.info(f"LocomotionVecEnv: reward shape = {reward.shape}")
         if self._loco_conf.split_rewards:
             rewards_num = reward.shape[1]
             self.single_reward_space=ThBox( low=th.full((rewards_num,), float("-inf"), device=th_device),
@@ -740,15 +741,16 @@ class LocomotionVecEnv(RobotVecEnv):
     def _get_loco_adapter_data(self):
         if isinstance(self._adapter,BaseVecSimulationAdapter):
             feet_linvels_vec_foot_xyz = self._adapter.getLinksState(self._feet_link_ids)[:,:,7:10]
+            borient_quat_vec_xyzw = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,3:7]
         else:
             feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
+            borient_quat_vec_xyzw = self._unit_quaternion.expand((self.num_envs,4))
         if isinstance_noimport(self._adapter, "MjxAdapter"):
             from adarl.adapters.MjxAdapter import MjxAdapter
             mjx_adapter : MjxAdapter = self._adapter #type: ignore
             feet_are_touching_ground = mjx_adapter.check_colliding_links(self._feet_link_ids, self._ground_link_id)
         else:
             feet_are_touching_ground = self._thzeros((self.num_envs,4))
-        borient_quat_vec_xyzw = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,3:7]
         return feet_linvels_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw
 
     @override
@@ -793,6 +795,8 @@ class LocomotionVecEnv(RobotVecEnv):
 
         vsize = step_counts.size()[0]
         if self._locomotion_episode_config.goal_rel_vel_vec_xy_speed is None:
+            if not isinstance_noimport(self._adapter, "BaseVecSimulationAdapter"):
+                raise RuntimeError(f"Absolute velocity goals are supported only in simulation adapters, but adapter is of type {type(self._adapter)}")
             # Get the relative goal from the absolute one
             # Only possible with body pose (i.e. in simulation)
             goal_speed = self._locomotion_episode_config.goal_abs_vel_vec_xys[:,2].view((vsize,1))
@@ -801,7 +805,7 @@ class LocomotionVecEnv(RobotVecEnv):
             abs_goal_linvel_xyz = abs_goal_linvel_direction_xyz * goal_speed
             # abs_planar_linvelgoal_dir_quat = quat_xyzw_between_vecs_py(self._unit_3d_vector_vec_x, abs_planar_linvel_goal) # orientation of the linvel goal (quat that aligns (1,0,0) to it)
             rel_goal_linvel_dir_xyz = th_quat_rotate(abs_goal_linvel_direction_xyz, th_quat_conj(borient_quat_vec_xyzw))
-        else:
+        elif self._locomotion_episode_config.goal_rel_vel_vec_xy_speed is not None:
             # The relative goal is expressed in the plane orthogonal to gravity
             # So the full realtive goal must be converted in the frame of the body.
             # In this formulation, we can see the planar relative goal direction as a twist around the gravity vector,
@@ -815,6 +819,8 @@ class LocomotionVecEnv(RobotVecEnv):
             dir_quat = quat_mul_xyzw(twist,swing) #first swing then twist, i think
             rel_goal_linvel_dir_xyz = th_quat_rotate(self._unit_3d_vector.expand_as(gravity_rel_vec_xyz), dir_quat)
             abs_goal_linvel_xyz = th.zeros_like(rel_goal_linvel_dir_xyz) # not used in this branch
+        else:
+            raise RuntimeError(f"Neither absolute nor relative goal velocity is set, cannot compute goals")
         rel_goal_linvel_xyz = rel_goal_linvel_dir_xyz*goal_speed # relative to the body orientation
         rel_curr_heading_quat = quat_xyzw_between_vecs_py(rel_goal_linvel_dir_xyz, self._unit_3d_vector.expand(self.num_envs,3)) # orientation of the body with respect to linvel goal (quat that aligns linvel to the body)
 
@@ -1153,7 +1159,7 @@ class LocomotionVecEnv(RobotVecEnv):
     @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune", disable=disable_compile)
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
-        if self._configuration.just_health_reward:
+        if self._configuration.fixed_reward:
             sub_rewards_return["health"] = th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
             return self._thtens([1.0]).expand(self.num_envs)
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
@@ -1377,8 +1383,8 @@ class LocomotionVecEnv(RobotVecEnv):
             reward = stacked_rewards
             dbg_check_size(reward, (self._adapter.vec_size(),len(sub_rewards_return)), f"Unexpected reward size")
         else:
-            reward = th.sum(stacked_rewards, dim =1)
-            dbg_check_size(reward, (self._adapter.vec_size(),), f"Unexpected reward size")
+            reward = th.sum(stacked_rewards, dim =1, keepdim=True)
+            dbg_check_size(reward, (self._adapter.vec_size(),1), f"Unexpected reward size")
         reward = th.clamp(reward, -self._configuration.reward_clamp, self._configuration.reward_clamp)
         # if dbg_info is not None:
         #     sub_rewards_scaled = {f"{k}_scaled":v for k,v in sub_rewards_return.items()}
@@ -1564,14 +1570,14 @@ class LocomotionVecEnv(RobotVecEnv):
 
         return i
     
-    def _sample_goals(self):
+    def _sample_abs_goals(self):
         goal_speeds = unnormalize(self._thrand(size=(self.num_envs,))*2-1,
                                     min=self._loco_conf.goal_speed_minmax[0],
                                     max=self._loco_conf.goal_speed_minmax[1])
         goal_yaws = unnormalize(self._thrand(size=(self.num_envs,))*2-1,
                                     min=self._loco_conf.goal_abs_yaw_minmax[0],
                                     max=self._loco_conf.goal_abs_yaw_minmax[1])
-        goal_height = self._thrand(size=(self.num_envs,))*(self._loco_conf.goal_height_minmax[1]-self._loco_conf.goal_height_minmax[0])+self._loco_conf.goal_height_minmax[0]
+        goal_abs_height = self._thrand(size=(self.num_envs,))*(self._loco_conf.goal_height_minmax[1]-self._loco_conf.goal_height_minmax[0])+self._loco_conf.goal_height_minmax[0]
         goal_abs_linvel_vec_xys = th.stack([  th.cos(goal_yaws),
                                                 th.sin(goal_yaws),
                                                 goal_speeds],
@@ -1579,7 +1585,7 @@ class LocomotionVecEnv(RobotVecEnv):
         goal_heading_yaws = unnormalize(self._thrand(size=(self.num_envs,))*2-1,
                                     min=self._loco_conf.goal_heading_rel_yaw_minmax[0],
                                     max=self._loco_conf.goal_heading_rel_yaw_minmax[1])
-        return goal_abs_linvel_vec_xys, goal_height, goal_heading_yaws
+        return goal_abs_linvel_vec_xys, goal_abs_height, goal_heading_yaws
 
     @override
     @th.compile(mode="max-autotune-no-cudagraphs", disable=disable_compile)
@@ -1588,7 +1594,7 @@ class LocomotionVecEnv(RobotVecEnv):
         if self._loco_conf.goal_resampling_enabled>0:
             resample_prob_per_env_dt = 1-th.pow(1-self._loco_conf.goal_resampling_probability_per_sec, self._intendedStepLength_sec)
             vec_mask = self._thrand((self.num_envs,)) < resample_prob_per_env_dt
-            goal_abs_linvel_vec_xys, goal_height, goal_heading_yaws = self._sample_goals()
+            goal_abs_linvel_vec_xys, goal_height, goal_heading_yaws = self._sample_abs_goals()
             self.set_goal(goal_abs_linvel_vec_xys, 
                       goal_abs_height=goal_height,
                       vec_mask=vec_mask,
@@ -1597,7 +1603,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
     @override
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
-        goal_abs_linvel_vec_xys, goal_height, goal_heading_yaws = self._sample_goals()
+        goal_abs_linvel_vec_xys, goal_height, goal_heading_yaws = self._sample_abs_goals()
         if "goal_velocity_xy" in reset_options:
             goal_velocity_vec_xy = th.as_tensor(reset_options["goal_velocity_xy"],device=self._configuration.th_device).view(self.num_envs,2)
             goal_speeds = th.linalg.norm(goal_velocity_vec_xy, dim=-1)
@@ -1606,12 +1612,18 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     th.sin(goal_yaws),
                                                     goal_speeds],
                                                 dim=1)
+        if isinstance(self._adapter, BaseVecSimulationAdapter):
+            self.set_goal(goal_abs_linvel_vec_xys, 
+                        goal_abs_height=goal_height,
+                        vec_mask=vec_mask,
+                        goal_heading_yaw=goal_heading_yaws)
+        else:
+            self.set_goal(goal_rel_linvel_xys=goal_abs_linvel_vec_xys,
+                        goal_abs_height=goal_height,
+                        vec_mask=vec_mask,
+                        goal_heading_yaw=goal_heading_yaws)
         super()._set_current_ep_config(vec_mask=vec_mask, reset_options=reset_options)
         self.set_max_episode_steps(reset_options.get("reset_options",self._current_episode_config.vec_max_ep_steps))
-        self.set_goal(goal_abs_linvel_vec_xys, 
-                      goal_abs_height=goal_height,
-                      vec_mask=vec_mask,
-                      goal_heading_yaw=goal_heading_yaws)
 
     def set_goal(self,  goal_abs_linvel_vec_xys : Sequence[tuple[float,float,float]] | tuple[float,float,float] | th.Tensor | None = None,
                         goal_diff_linvel_speed_yaw : tuple[float,float] | th.Tensor | None = None,
@@ -1621,6 +1633,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         vec_mask : th.Tensor | None = None):
         if vec_mask is None:
             vec_mask = self._all_vecs
+
         if goal_abs_linvel_vec_xys is not None:
             goal_abs_linvel_vec_xys = self._thtens(goal_abs_linvel_vec_xys).expand(self.num_envs,3)
             masked_assign(self._locomotion_episode_config.goal_abs_vel_vec_xys,
@@ -1641,8 +1654,11 @@ class LocomotionVecEnv(RobotVecEnv):
             masked_assign(self._locomotion_episode_config.goal_abs_vel_vec_xys,
                           vec_mask,
                           new_goals_xys)
-        else:
+        elif goal_rel_linvel_xys is not None:
             self._locomotion_episode_config.goal_rel_vel_vec_xy_speed = self._thtens(goal_rel_linvel_xys).view(self.num_envs,3)
+        else:
+            raise RuntimeError("One of goal_abs_linvel_vec_xys, goal_diff_linvel_speed_yaw or goal_rel_linvel_xys must be provided")
+        
         if goal_abs_height is not None:
             goal_abs_height = self._thtens(goal_abs_height).expand(1,self.num_envs).permute(1,0)
             masked_assign(self._locomotion_episode_config.goal_abs_height_vec_z,

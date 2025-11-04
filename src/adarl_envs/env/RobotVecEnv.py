@@ -639,6 +639,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._always_present_collisions : set[tuple[str,str]] = set()
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
         self._posref_safety_minmmax_diff = self._safe_limits_minmax_j_pve[:,:,1]*self._configuration.posref_safety_period
+        ggLog.info(f"self._posref_safety_minmmax_diff = {self._posref_safety_minmmax_diff}")
+        ggLog.info(f"self._posref_safety_minmmax_vel = {self._posref_safety_minmmax_diff/stepLength_sec}")
         self._posref_saturation_minmmax_diff = self._posref_safety_minmmax_diff*0.999
         self._impulse_disturbances_enabled = impulse_probability_per_sec > 0
         self._homing_held_joints_vec_pvesd = self._configuration.homing_held_joints_pvesd.expand(adapter.vec_size(),len(self._configuration.held_joints),5)
@@ -1713,8 +1715,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             posref_safety_triggered = th.logical_or(posref_diff < self._posref_safety_minmmax_diff[0],
                                                     posref_diff > self._posref_safety_minmmax_diff[1])
             posref_safety_triggered = th.any(posref_safety_triggered, dim=1)
-            triggered = th.logical_and(vec_limits_safety_triggered, has_settled)
-            vec_safety_posref_state = th.logical_or(was_posref_safety_triggered,triggered)*1.0
+            posref_triggered = th.logical_and(posref_safety_triggered, has_settled)
+            vec_safety_posref_state = th.logical_or(was_posref_safety_triggered,posref_triggered)*1.0
         else:
             vec_safety_posref_state = self._thzeros((self.num_envs,))
         last_step_dt = self._thtens(self._configuration.stepLength_sec).expand((self.num_envs,1))

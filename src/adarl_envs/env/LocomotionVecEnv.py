@@ -6,7 +6,7 @@ from adarl.utils.utils import (LinkState, to_string_tensor, th_quat_rotate, th_q
 from adarl.utils.dbg.dbg_checks import dbg_check_finite, dbg_check_size, dbg_check
 import adarl.utils.utils
 from adarl.utils.vec_state_helper import ThBoxStateHelper, unnormalize, normalize
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any
 from git import Tree
@@ -179,7 +179,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_weight_slip : th.Tensor
         reward_weight_velref : th.Tensor
         reward_weight_torqueref : th.Tensor
-        reward_weight_pos2posref : th.Tensor
+        reward_weight_posref_vel : th.Tensor
         terminating_contact_pairs : list[tuple[tuple[str,str],tuple[str,str]]]
         use_contacts : bool
         height_reward_settle_point : th.Tensor
@@ -222,6 +222,8 @@ class LocomotionVecEnv(RobotVecEnv):
         """ Min and max yaw angle for the goal heading, relative to the linvel goal direction."""
         split_rewards : bool
         """ Split the rewards into separate components, making the reward n-dimensional."""
+        enabled_rewards : list[str]
+        """ List of enabled rewards. If None, all rewards are enabled."""
 
     @dataclass
     class EpisodeLocomConfiguration:
@@ -422,12 +424,12 @@ class LocomotionVecEnv(RobotVecEnv):
         self._unit_quaternion = self._thtens([0.0, 0.0, 0.0, 1.0])
         self._zero = self._thtens([0.0])
         self._loco_conf = LocomotionVecEnv.LocomotionConfiguration(
+                        reward_scale  = self._thtens(reward_scale) ,
                         reward_weight_acceleration = self._thtens(reward_acceleration_weight),
                         reward_weight_contacts  = self._thtens(reward_contacts_weight) ,
                         reward_weight_health = self._thtens(reward_health_weight),
                         reward_weight_energy  = self._thtens(reward_energy_weight) ,
                         reward_weight_position_limit  = self._thtens(reward_position_limit_weight) ,
-                        reward_scale  = self._thtens(reward_scale) ,
                         reward_weight_torque_limit  = self._thtens(reward_torque_limit_weight) ,
                         reward_weight_torque = self._thtens(reward_cmdtorque_weight),
                         reward_weight_torquediff = self._thtens(reward_torquediff_weight),
@@ -452,7 +454,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_slip=self._thtens(reward_slip_weight),
                         reward_weight_velref=self._thtens(reward_velref_weight),
                         reward_weight_torqueref=self._thtens(reward_torqueref_weight),
-                        reward_weight_pos2posref=self._thtens(reward_posref_vel_weight),
+                        reward_weight_posref_vel=self._thtens(reward_posref_vel_weight),
                         use_contacts = use_contacts,
                         disallowed_contact_links=disallowed_contact_links,
                         terminating_contact_pairs=terminating_contact_pairs,
@@ -486,8 +488,17 @@ class LocomotionVecEnv(RobotVecEnv):
                         pitchnroll_kp=self._thtens(1.0),
                         pitchnroll_kd=self._thtens(0.01),
                         goal_heading_rel_yaw_minmax=self._thtens([-th.pi, th.pi]),
-                        split_rewards = split_rewards
+                        split_rewards = split_rewards,
+                        enabled_rewards = None
                         )
+        enabled_rewards = []
+        for k,v in asdict(self._loco_conf).items():
+            prefix = "reward_weight_"
+            if k.startswith(prefix):
+                if v != 0:
+                    enabled_rewards.append(k[len(prefix):])
+        self._loco_conf.enabled_rewards = enabled_rewards
+        ggLog.info(f"Locomotion rewards enabled: {self._loco_conf.enabled_rewards}")
         
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xys       = None,
                                                                                      goal_rel_vel_vec_xy_speed  = self._thtens([1.0,0.0,0.0]).expand(adapter.vec_size(), 3).clone(),
@@ -922,7 +933,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.REWARD_SLIP_WEIGHT : self._loco_conf.reward_weight_slip.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_VELREF_WEIGHT : self._loco_conf.reward_weight_velref.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.REWARD_TORQUEREF_WEIGHT : self._loco_conf.reward_weight_torqueref.expand(vsize,1),
-                            self.LOCOMOTION_FIELDS.REWARD_POSREF_VEL_WEIGHT : self._loco_conf.reward_weight_pos2posref.expand(vsize,1),
+                            self.LOCOMOTION_FIELDS.REWARD_POSREF_VEL_WEIGHT : self._loco_conf.reward_weight_posref_vel.expand(vsize,1),
                             self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_tracking_err_vec.view(vsize,1),
                             self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR : smoothed_height_error.view(vsize,1),
                             self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR : smoothed_pitchnroll_error.view(vsize,1),
@@ -1154,14 +1165,24 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     kd=self._loco_conf.heading_kd,
                                                     relative_bell_width=1.1), curr_yaw_err
 
+
     @override
-    # @th.compile(mode="max-autotune")
-    @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune", disable=disable_compile)
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
+<<<<<<< HEAD
         if self._configuration.fixed_reward:
+=======
+        rewards, sub_rewards_dict = self._compute_rewards(state) # Avoid input mutation for compiled function
+        sub_rewards_return.update(sub_rewards_dict)
+        return rewards
+
+    @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune", disable=disable_compile)
+    def _compute_rewards(self,   state : dict[str,th.Tensor]) -> tuple[th.Tensor, dict[str,th.Tensor]]:
+        sub_rewards_return = {}
+        if self._configuration.just_health_reward:
+>>>>>>> cc23bd50990c93869e16da2877f843472e50bc91
             sub_rewards_return["health"] = th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
-            return self._thtens([1.0]).expand(self.num_envs)
+            return self._thtens([1.0]).expand(self.num_envs), sub_rewards_return
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
         max_rew = self._configuration.reward_penalties_max
@@ -1177,12 +1198,13 @@ class LocomotionVecEnv(RobotVecEnv):
 
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
         normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
-        state_robot_norm        = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)
+        state_robot = state[self.STATE_ROBOT]
+        state_robot_norm        = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state_robot, warn_limits_violation=False)
         longterm_stats_pos_norm = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
                                                                                                       warn_limits_violation=False)
         joints_num = state_robot_norm.size()[2]
         # self._warn_out_of_bounds(state_robot_norm)
-        state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
+        state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state_robot, self._safety_limits, warn_limits_violation=False)
         # state_stats_norm = self._state_helper.sub_helpers[self.STATE_ROBOT_STATS].normalize(state_stats)
         normposhomingdiff    = longterm_stats_pos_norm[:,0,0] - normhoming
         normpositions        = state_robot_norm[:,0,:,0]
@@ -1191,6 +1213,7 @@ class LocomotionVecEnv(RobotVecEnv):
         norm_velocity_refs   = state_robot_norm[:,0,:,6]
         norm_torque_refs     = state_robot_norm[:,0,:,7]
         # norm_pos2posref_diff = state_robot_norm[:,0,:,0] - state_robot_norm[:,0,:,5]
+        posref_vel           = (state_robot[:,0,:,5] - state_robot[:,1,:,5])/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         norm_posref_vel      = (state_robot_norm[:,0,:,5] - state_robot_norm[:,1,:,5])/2/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         # normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
         max_senseff = 1_000 # max expected sensed effort (not really a strict max)
@@ -1222,7 +1245,9 @@ class LocomotionVecEnv(RobotVecEnv):
         
         reward_velocity_refs    = joint_penalty_reward(norm_velocity_refs,   max_rew=max_rew,exponent=2)
         reward_torque_refs      = joint_penalty_reward(norm_torque_refs,     max_rew=max_rew,exponent=2)
-        reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
+        # reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
+        posref_threshold = 5.0
+        reward_posref_vel       = joint_penalty_reward(posref_vel/posref_threshold,     max_rew=1.0,exponent=5, presquash_factor=1)
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
         #                                     zero_rew_dist=self._thtens(0.02))
         reward_height_velocity, _, _, _, _ = self._height_velocity_reward(curr_state_extr_vec, current_state_locom_vec, current_state_internal, prev_state_extr_vec)
@@ -1319,12 +1344,12 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return["height_velocity"] = reward_height_velocity
         sub_rewards_return["pitchnroll"] = reward_pitchnroll
         sub_rewards_return["pitchnroll_velocity"] = reward_pitchnroll_velocity
-        sub_rewards_return["posref_vel"] = reward_posref_vel
-        sub_rewards_return["stand_position"] = reward_stand_position
         sub_rewards_return["position"] = reward_position
         sub_rewards_return["position_limit"] = reward_position_limit
+        sub_rewards_return["posref_vel"] = reward_posref_vel
         sub_rewards_return["sensed_effort"] = reward_sensed_effort
         sub_rewards_return["slip"] = reward_slip
+        sub_rewards_return["stand_position"] = reward_stand_position
         sub_rewards_return["torque"] = reward_cmdtorque
         sub_rewards_return["torque_limit"] = reward_torque_limit
         sub_rewards_return["torque_refs"] = reward_torque_refs
@@ -1333,7 +1358,10 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return["velocity"] = reward_velocity
         sub_rewards_return["velocity_limit"] = reward_velocity_limit
         sub_rewards_return["velocity_refs"] = reward_velocity_refs
-        sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards_return.items()}
+        sub_rewards_return["failure"] = th.zeros((current_state_locom_vec.size()[0],), device=current_state_locom_vec.device)
+        sub_rewards_return = dict(sorted(sub_rewards_return.items())) # Keep sorted
+        # sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards_return.items()}
+        
 
         # ggLog.info(f"heading_velocity = {reward_heading_velocity}")
         # ggLog.info(f"height_velocity = {reward_height_velocity}")
@@ -1374,10 +1402,16 @@ class LocomotionVecEnv(RobotVecEnv):
                     "heading_velocity":    current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_HEADING_VELOCITY_WEIGHT]}
         for k in sub_rewards_return:
             sub_rewards_return[k] = self._loco_conf.reward_scale*sub_rewards_return[k]*weights[k]
-        scaled_rewards_vec = th.stack(list(sub_rewards_return.values()), dim = 1)
-        sub_rewards_return["failure"] = -th.sum(scaled_rewards_vec*(scaled_rewards_vec>0), dim =1)*failed # negate all the positive rewards
-        sub_rewards_return = {k:v.view(self._adapter.vec_size(),) for k,v in sub_rewards_return.items()}
-        sub_rewards_unscaled = {k:v.view(self._adapter.vec_size(),) for k,v in sub_rewards_unscaled.items()}
+            sub_rewards_return[k] = sub_rewards_return[k]*th.where(failed, 0.001, 1.0)
+        # scaled_rewards_vec = th.stack(list(sub_rewards_return.values()), dim = 1)
+        # sub_rewards_return["failure"] = -th.sum(scaled_rewards_vec*(scaled_rewards_vec>0), dim =1)*failed*weights["failure"] # negate all the positive rewards
+        for k in sub_rewards_return:
+            sub_rewards_return[k] =sub_rewards_return[k].view((self.num_envs,))
+        sub_rewards_return = {k:v for k,v in sub_rewards_return.items() if k in self._loco_conf.enabled_rewards}
+        if len(sub_rewards_return) != len(self._loco_conf.enabled_rewards):
+            missing = set(self._loco_conf.enabled_rewards)-set(sub_rewards_return.keys())
+            raise ValueError(f"Some enabled rewards are missing in the computed rewards: {missing}")
+        # sub_rewards_unscaled = {k:v.view(self._adapter.vec_size(),) for k,v in sub_rewards_unscaled.items()}
         stacked_rewards = th.stack(list(sub_rewards_return.values()), dim = 1)
         if self._loco_conf.split_rewards:
             reward = stacked_rewards
@@ -1409,7 +1443,7 @@ class LocomotionVecEnv(RobotVecEnv):
         # dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(reward, -100, 100),
         #           lambda: f"Reward over 100. sub_rewards = {map_tensor_tree(sub_rewards_return,lambda t: 'minmax='+str((th.min(t).cpu().item(), th.max(t).cpu().item())))}",
         #           just_warn=True)
-        return reward
+        return reward, sub_rewards_return
     
 
 

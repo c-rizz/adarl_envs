@@ -32,7 +32,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     r = 1.0 # randomization strength
     n = 1.0 # noise strength
     p = 1.0 # penalties strength
-    eps = 1e-6 # For disabled things (but no zero, so I can still see how they would behave)
+    eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
         "action_delay_mustd_std" : (0.003, 0.001*n, 0.0025*n),
         "action_noise_mustd" : (0.0,   0.0),
@@ -86,29 +86,29 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "record_video" : True,
         "recycle_pose_randomization" : True,
         "reward_acceleration_weight" :        eps,
-        "reward_actacc_weight" :              10.0*p,
-        "reward_actdiff_weight" :             20.0*p,
+        "reward_actacc_weight" :              eps,
+        "reward_actdiff_weight" :             1.0,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
-        "reward_failure_weight" :             1.0,
+        "reward_failure_weight" :             eps,
         "reward_feet_air_time_weight" :       20.0,
         "reward_feet_ground_time_weight" :    20.0,
         "reward_feet_on_ground_weight" :      eps,
-        "reward_heading_weight" :             0.1,
         "reward_heading_velocity_weight" :    1.0,
+        "reward_heading_weight" :             0.1,
         "reward_health_weight" :              eps,
         "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     eps,
+        "reward_pitchnroll_velocity_weight" : 100.0,
         "reward_pitchnroll_weight" :          0.5,
-        "reward_pitchnroll_velocity_weight" : 20.0,
-        "reward_posref_vel_weight" :          eps,       
         "reward_position_limit_weight" :      eps,
         "reward_position_weight" :            eps,
+        "reward_posref_vel_weight" :          1.0*p,       
         "reward_sensed_effort_weight" :       eps,
-        "reward_stand_position_weight" :      1.0,
         "reward_slip_weight" :                eps,
+        "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,
-        "reward_torque_weight" :              20.0*p,
+        "reward_torque_weight" :              eps,
         "reward_torquediff_weight" :          eps,
         "reward_torqueref_weight" :           eps,
         "reward_tracking_weight" :            1.0,
@@ -215,6 +215,47 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "env_builder_args" : video_feasible_jump_env_builder_args,
     #     "num_envs" : 1
     # }
+
+    gammas = {
+        "acceleration" :        0.98,
+        "actacc" :              0.0,
+        "actdiff" :             0.0,
+        "contacts" :            0.98,
+        "failure" :             0.98,
+        "feet_air_time" :       0.98,
+        "feet_ground_time" :    0.98,
+        "feet_on_ground" :      0.98,
+        "heading" :             0.98,
+        "heading_velocity" :    0.98,
+        "health" :              0.98,
+        "height_position" :     0.98,
+        "height_velocity" :     0.98,
+        "pitchnroll" :          0.98,
+        "pitchnroll_velocity" : 0.98,
+        "position" :            0.98,
+        "position_limit" :      0.98,
+        "posref_vel" :          0.0,
+        "sensed_effort" :       0.98,
+        "slip" :                0.98,
+        "stand_position" :      0.98,
+        "torque" :              0.97,
+        "torque_limit" :        0.98,
+        "torque_refs" :         0.0,
+        "torquediff" :          0.9,
+        "tracking" :            0.98,
+        "velocity" :            0.9,
+        "velocity_refs" :       0.0,
+        "velocity_limit" :      0.98
+    }
+
+    # disabled_rewards = []
+    # for k, v in env_builder_args.items():
+    #     if k.startswith("reward_") and k.endswith("_weight") and v == 0.0:
+    #         reward_name = k[len("reward_"):-len("_weight")]
+    #         disabled_rewards.append(reward_name)
+    # reward_enable_mask = {k:0 for k in disabled_rewards}
+
+
     eval_configurations = [  
                             eval_conf_video_det,
                             eval_conf_video_stoch,
@@ -238,10 +279,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     q_lr=0.001,
                                                     policy_lr=0.001,
                                                     policy_arch=[512,256,256],
-                                                    gamma=0.98,
+                                                    gamma=gammas,
                                                     target_tau = 0.001,
                                                     batch_size=4096,
-                                                    buffer_size=4096_000, # 10_240_000 Should fit in 16Gb of VRAM
+                                                    buffer_size=(6*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
                                                     total_steps=400_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=50,
@@ -285,7 +326,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     q_lr=0.001,
                                                     policy_lr=0.0003,
                                                     policy_arch=[128,128],
-                                                    gamma=0.99,
+                                                    gamma=gammas,
                                                     target_tau = 0.005,
                                                     batch_size=512,
                                                     buffer_size=100_000,

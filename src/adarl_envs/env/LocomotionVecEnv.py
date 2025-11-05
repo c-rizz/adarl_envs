@@ -414,7 +414,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         max_goal_height_pos_change_speed : float = 0.25,
                         max_height_speed_goal : float = 1.0,
                         feet_air_time_avg_alpha = 1.0,
-                        split_rewards : bool = False
+                        split_rewards : bool = False,
+                        minimal_infos : bool = False
                         ):
         self._th_device = th_device
         self._obs_dtype = th.float32
@@ -576,7 +577,8 @@ class LocomotionVecEnv(RobotVecEnv):
                             stop_on_failure = stop_on_failure,
                             th_device = th_device,
                             ui_camera_resolution_hw = ui_camera_resolution_hw,
-                            verbose_infos = verbose_infos
+                            verbose_infos = verbose_infos,
+                            minimal_infos = minimal_infos
                         )
 
         
@@ -1169,9 +1171,6 @@ class LocomotionVecEnv(RobotVecEnv):
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
-<<<<<<< HEAD
-        if self._configuration.fixed_reward:
-=======
         rewards, sub_rewards_dict = self._compute_rewards(state) # Avoid input mutation for compiled function
         sub_rewards_return.update(sub_rewards_dict)
         return rewards
@@ -1179,10 +1178,10 @@ class LocomotionVecEnv(RobotVecEnv):
     @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune", disable=disable_compile)
     def _compute_rewards(self,   state : dict[str,th.Tensor]) -> tuple[th.Tensor, dict[str,th.Tensor]]:
         sub_rewards_return = {}
-        if self._configuration.just_health_reward:
->>>>>>> cc23bd50990c93869e16da2877f843472e50bc91
-            sub_rewards_return["health"] = th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
-            return self._thtens([1.0]).expand(self.num_envs), sub_rewards_return
+        if self._configuration.fixed_reward:
+            sub_rewards_return = {k:th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype) for k in self._loco_conf.enabled_rewards}
+            reward = th.ones((self.num_envs, len(self._loco_conf.enabled_rewards)), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)*len(self._loco_conf.enabled_rewards)
+            return reward, sub_rewards_return
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
         max_rew = self._configuration.reward_penalties_max
@@ -1525,6 +1524,8 @@ class LocomotionVecEnv(RobotVecEnv):
    
     @override
     def get_infos(self,state, labels : dict[str, th.Tensor] | None = None) -> dict[Any,Any]:
+        if self._configuration.minimal_infos:
+            return super().get_infos(state=state, labels=labels)
         i = super().get_infos(state=state, labels=labels)
         curr_locom_state = state[self.STATE_LOCOMOTION][:,0]
         curr_extri_state = state[self.STATE_EXTRINSIC][:,0]

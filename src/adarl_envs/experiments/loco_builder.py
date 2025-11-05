@@ -319,7 +319,8 @@ def loco_runner_builder(seed,
                             ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw"),
                             use_contacts=env_builder_args.pop("use_contacts"),
                             verbose_infos=env_builder_args.pop("verbose_infos"),
-                            split_rewards=env_builder_args.pop("split_rewards")
+                            split_rewards=env_builder_args.pop("split_rewards"),
+                            minimal_infos=env_builder_args.pop("minimal_infos")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

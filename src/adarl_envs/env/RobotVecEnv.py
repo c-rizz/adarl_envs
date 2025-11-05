@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 import pprint
 import scipy.stats
+from adarl.utils.base_utils import record_time
 
 disable_compile = False
 
@@ -315,6 +316,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_jimp_cmd_size : tuple[int,int,int]
         vec_size : int
         verbose_infos : bool
+        minimal_infos : bool
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -448,7 +450,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         randomized_reference_filter_distribution : DistributionDef | None = None,
                         recycle_pose_randomization : bool = False,
                         saturate_jimp_ref_limits : bool = True,
-                        ui_camera_resolution_hw : tuple[int,int] = (144,256)
+                        ui_camera_resolution_hw : tuple[int,int] = (144,256),
+                        minimal_infos : bool = False
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -625,7 +628,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     ui_rel_camera_pose_dist_pitch_yaw = self._thtens([2.5, 30/180*3.14159, -90/180*3.14159]),
                                                     vec_jimp_cmd_size=(adapter.vec_size(), len(controlled_joints_rn), 5),
                                                     vec_size=adapter.vec_size(),
-                                                    verbose_infos = verbose_infos
+                                                    verbose_infos = verbose_infos,
+                                                    minimal_infos=minimal_infos
                                                     )
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
                                                     vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
@@ -1538,12 +1542,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     @override
     def post_step(self):
+        record_time("RobotVecEnv.post_step()")
         adapter_data = self._get_adapter_data()
         self._post_step_optimized(adapter_data)
-        self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # TODO: remove, this shouldn't be necessary, just here out of caution, unless it's needed for cudagraphs
+        # self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # TODO: remove, this shouldn't be necessary, just here out of caution, unless it's needed for cudagraphs
+        record_time("RobotVecEnv.post_step() end")
 
 
-    # @th.compile(mode="max-autotune", disable=disable_compile)
+    @th.compile(mode="max-autotune", disable=disable_compile)
     def _post_step_optimized(self, adapter_data):
         # t0 = time.monotonic()
         self._update_state(adapter_data)
@@ -1832,6 +1838,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
     @override
     def get_infos(self,state, labels : dict[str, th.Tensor] | None = None) -> dict[str, th.Tensor]:
+        if self._configuration.minimal_infos:
+            return {}
         i : dict[str, th.Tensor] = {}
         i.update(self._stats)
         i["ep_step_count"] = self._ep_step_counter

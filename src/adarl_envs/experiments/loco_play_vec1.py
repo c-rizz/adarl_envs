@@ -21,6 +21,7 @@ import adarl.utils.sigint_handler
 from adarl_envs.experiments.loco_builder import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args
 from adarl_envs.env.LocomotionVecEnv import LocomotionVecEnv
 from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
+from adarl.utils.base_utils import record_time, clear_recorded_times, print_recorded_times
 
 import adarl.utils.dbg
 from typing import Any
@@ -170,6 +171,10 @@ def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("
                                     -0.0,  0.1, -0.17,
                                      0.0, -0.1,  0.17,
                                     -0.0,  0.1, -0.17],device = device)
+        # act_range.view(4,3)[0] *= -1.0
+        act_range.view(4,3)[1] *= -1.0
+        # act_range.view(4,3)[2] *= -1.0
+        act_range.view(4,3)[3] *= -1.0
     elif robot == "centauro":
         act_range = th.as_tensor([0.1], device = device)
     else:
@@ -358,7 +363,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     skip_optionals = True
     env_builder_args.update({
         "enable_rendering" : True,
-        "record_video" : args["mode"]!="xbot",
+        "record_video" : args["mode"] not in ["xbot","xbot_zmq"],
         "verbose_infos" : (not skip_optionals) or args["record"],
         "video_save_freq" : True if args["record"] else 0,
         "action_delay_mustd_std" : (0.0,0.0,0.0),
@@ -371,6 +376,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : (not skip_optionals) or args["record"],
+        "minimal_infos" : skip_optionals or not args["record"],
         "initial_joint_pose_randomization_range" : 0.0,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.0,0.0,0.0])),
         "randomized_friction_slide_spin_roll_ratios" : (0.0,0.0,0.0),
@@ -506,6 +512,7 @@ def play(seed, folderName, run_id, args,
             cmd_height = 0.45
             while not done:
                 t0 = time.monotonic()
+                record_time("start_step")
                 session.run_info["collected_steps"].value += 1
                 # ggLog.info(f"ep_config = {info['ep_config']}")
                 t0_pred = time.monotonic()
@@ -515,11 +522,17 @@ def play(seed, folderName, run_id, args,
                 if recorder is not None:
                     recorder.add_to_extra_info({"act_log_prob": act_info.get("log_prob", -1)})
                 t0_step = time.monotonic()
+                record_time("pre env step")
                 obs, reward, terminated, truncated, info = env.step(action.detach().squeeze()) #type: ignore
+                record_time("post env step")
+                # print_recorded_times()
+                clear_recorded_times()
+                record_time("post print")
                 t1_step = time.monotonic()
                 if render:
                     img = env.render()
                     dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
+                record_time("post render")
                 # input("press enter")
                 if verbose:
                     print(f"obs = {obs}\n"+
@@ -560,8 +573,11 @@ def play(seed, folderName, run_id, args,
                 ep_reward += reward
                 step_wallduration = time.monotonic()-t0
                 ep_wall_duration += step_wallduration
-                if args["mode"] != "xbot":
+
+                record_time("pre sleep")
+                if args["mode"] not in ["xbot","xbot_zmq"]:
                     time.sleep(max(0,step_length_sec/rt - step_wallduration))
+                record_time("step end")
                 full_step_wallduration = time.monotonic()-t0
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
@@ -569,8 +585,9 @@ def play(seed, folderName, run_id, args,
                            f" rgoal_dir={goals['rel_linvel_xys'][0,:2].tolist()} \t"
                            f" rgoal_speed={goals['rel_linvel_xys'][0,2]} \t"
                            f" goal_height={goals['abs_height'][0].item()} \t")
+                # print_recorded_times()
             if step_count>0:
-                rewards.append(th.as_tensor(ep_reward,device="cpu").item())
+                rewards.append(th.as_tensor(ep_reward,device="cpu").sum().item())
                 durations.append(th.as_tensor(step_count,device="cpu").item())
                 # avg10_dists.append(info["avg_vel_track_err"])
             with session.run_info["collected_episodes"].get_lock():

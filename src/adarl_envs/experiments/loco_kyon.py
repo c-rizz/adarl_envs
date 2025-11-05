@@ -88,7 +88,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_acceleration_weight" :        eps,
         "reward_actacc_weight" :              eps,
         "reward_actdiff_weight" :             1.0,
-        "reward_contacts_weight" :            eps,
+        "reward_contacts_weight" :            0.1,
         "reward_energy_weight" :              eps,
         "reward_failure_weight" :             eps,
         "reward_feet_air_time_weight" :       20.0,

@@ -603,7 +603,11 @@ class GraspVecEnv(RobotVecEnv):
     @override
     def _get_spawn_defs(self):
         spawn_defs = super()._get_spawn_defs()
-        is_pybullet = isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper) and adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("PyBulletJointImpedanceAdapter"))
+        if isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper):
+            subadapters = self._adapter.sub_adapters()
+            is_pybullet = adarl.utils.utils.isinstance_noimport(subadapters[0], ("PyBulletJointImpedanceAdapter"))
+        else:
+            is_pybullet = False
         if not hasattr(self,"_cube_spawn_def"):
             self._cube_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","models/cube.urdf.xacro")).read_text(),
                                             name="cube",

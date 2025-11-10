@@ -1086,9 +1086,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             is_pybullet = False
             is_ros = False
             if isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper):
-                if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("PyBulletJointImpedanceAdapter")):
+                subadapters = self._adapter.sub_adapters()
+                if len(subadapters) != 1:
+                    raise RuntimeError(f"Expected exactly one subadapter in VecSimJointImpedanceAdapterWrapper, got {len(subadapters)}")
+                subadapter = subadapters[0]
+                if adarl.utils.utils.isinstance_noimport(subadapter, ("PyBulletJointImpedanceAdapter")):
                     is_pybullet= True
-                elif adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("RosXbotAdapter", "RosXbotGazeboAdapter")):
+                elif adarl.utils.utils.isinstance_noimport(subadapter, ("RosXbotAdapter", "RosXbotGazeboAdapter")):
                     is_ros = True
             camera_spawn_def = ModelSpawnDef(   definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
                                                 name="simple_camera",
@@ -1345,11 +1349,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._arrow_base = ("arrow","arrow_link")
             self._arrow_yellow = ("arrow_yellow","arrow_link")
         elif isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper):
-            if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("PyBulletJointImpedanceAdapter")):
+            subadapters = self._adapter.sub_adapters()
+            if len(subadapters) != 1:
+                raise RuntimeError(f"Expected exactly one subadapter in VecSimJointImpedanceAdapterWrapper, got {len(subadapters)}")
+            subadapter = subadapters[0]
+            if adarl.utils.utils.isinstance_noimport(subadapter, ("PyBulletJointImpedanceAdapter")):
                 self._adapter.build_scenario(models = self._get_spawn_defs())
                 self._arrow_base = ("arrow","world")
                 self._arrow_yellow = ("arrow_yellow","world")
-            elif adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("RosXbotGazeboAdapter")):
+            elif adarl.utils.utils.isinstance_noimport(subadapter, ("RosXbotGazeboAdapter")):
                 self._adapter.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path( "adarl_envs",
                                                                                                             "gazebo/all_gazebo_xbot.launch"),
                                             launch_file_args={"gui":"false"})

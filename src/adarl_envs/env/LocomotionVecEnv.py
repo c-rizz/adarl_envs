@@ -1196,12 +1196,13 @@ class LocomotionVecEnv(RobotVecEnv):
         # self._warn_out_of_bounds(state_robot_norm)
         state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state_robot, self._safety_limits, warn_limits_violation=False)
         # state_stats_norm = self._state_helper.sub_helpers[self.STATE_ROBOT_STATS].normalize(state_stats)
-        normposhomingdiff    = longterm_stats_pos_norm[:,0,0] - normhoming
+        normposstathomingdiff    = longterm_stats_pos_norm[:,0,0] - normhoming
         normpositions        = state_robot_norm[:,0,:,0]
         normvelocities       = state_robot_norm[:,0,:,1]
         normcmdtorques       = state_robot_norm[:,0,:,2]
         norm_velocity_refs   = state_robot_norm[:,0,:,6]
         norm_torque_refs     = state_robot_norm[:,0,:,7]
+        normpohomingdiff     = normpositions - normhoming
         # norm_pos2posref_diff = state_robot_norm[:,0,:,0] - state_robot_norm[:,0,:,5]
         posref_vel           = (state_robot[:,0,:,5] - state_robot[:,1,:,5])/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         norm_posref_vel      = (state_robot_norm[:,0,:,5] - state_robot_norm[:,1,:,5])/2/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
@@ -1224,8 +1225,8 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_velocity         = joint_penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
         # reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=8.0, flattening_scale=0.1)
         reward_acceleration     = flattened_joint_penalty_reward(normaccelerations,max_rew=max_rew, exponent=2.0, flattening_scale=0.1)
-        reward_stand_position   = joint_penalty_reward(normpositions,    max_rew=max_rew, exponent=1.0)*(th.logical_not(should_be_moving.view((self.num_envs,))))
-        reward_position         = flattened_joint_penalty_reward(normposhomingdiff,max_rew=max_rew, exponent=2.0, flattening_scale=0.02)
+        reward_stand_position   = joint_penalty_reward(normpohomingdiff,    max_rew=max_rew, exponent=1.0)*(th.logical_not(should_be_moving.view((self.num_envs,))))
+        reward_position         = flattened_joint_penalty_reward(normposstathomingdiff,max_rew=max_rew, exponent=2.0, flattening_scale=0.02)
         reward_torquediff       = joint_penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
         reward_actdiff          = joint_penalty_reward(actdiff,max_rew=1, exponent=2, presquash_factor=10)
         reward_actacc           = joint_penalty_reward(act_acc,max_rew=1, exponent=2, presquash_factor=100)
@@ -1236,7 +1237,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_velocity_refs    = joint_penalty_reward(norm_velocity_refs,   max_rew=max_rew,exponent=2)
         reward_torque_refs      = joint_penalty_reward(norm_torque_refs,     max_rew=max_rew,exponent=2)
         # reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
-        posref_threshold = 5.0
+        posref_threshold = 7.0
         reward_posref_vel       = joint_penalty_reward(posref_vel/posref_threshold,     max_rew=1.0,exponent=5, presquash_factor=1)
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
         #                                     zero_rew_dist=self._thtens(0.02))
@@ -1248,7 +1249,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                             bell_b_weight=self._loco_conf.height_reward_2_weight)
         # reward_pitchnroll   = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR],
         #                                     zero_rew_dist=self._loco_conf.pitchnroll_reward_settle_point)
-        reward_pitchnroll = 1+flattened_penalty_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR], max_rew=1, exponent=1.5, flattening_scale=0.001)
+        reward_pitchnroll = 1+penalty_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR]*4, max_rew=1, exponent=2.0)
         # reward_pitchnroll_velocity, _, _, _, _ = self._pitchnroll_velocity_reward(state, current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT])
         reward_pitchnroll_velocity = self._pitchnroll_velocity_penalty_reward(state)
         reward_heading_position = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR],

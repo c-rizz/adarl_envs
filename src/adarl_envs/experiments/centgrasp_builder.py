@@ -78,7 +78,7 @@ def runner_builder(seed,
     elif mode == "xbot-gazebo":
         from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
         from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
-        adapter = VecSimJointImpedanceAdapterWrapper(adapter = RosXbotGazeboAdapter(model_name = robot_name,
+        adapter = VecSimJointImpedanceAdapterWrapper(adapters = RosXbotGazeboAdapter(model_name = robot_name,
                                                                                     stepLength_sec = stepLength_sec,
                                                                                     forced_ros_master_uri = None,
                                                                                     maxObsDelay = float("+inf"),
@@ -100,7 +100,7 @@ def runner_builder(seed,
         from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
         ground_link = ("ground_plane","ground_link")
         env_builder_args["enable_link_collisions"] = None
-        adapter = VecSimJointImpedanceAdapterWrapper(adapter = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
+        adapter = VecSimJointImpedanceAdapterWrapper(adapters = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
                                                                             restore_on_reset=False,
                                                                             debug_gui=show_gui,
                                                                             simulation_step=1/1024,

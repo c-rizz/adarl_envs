@@ -1,6 +1,41 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
 
+class TargetEntropyAnnealer:
+    def __init__(self, start_target: float = -1.5,
+                 end_target: float = -5.0,
+                 start_reference_threshold: float = 0.25,
+                 reference_smoothing_alpha: float = 0.999,
+                 reference_key: str = "linvel_q95"):
+        self._start_target = start_target
+        self._end_target = end_target
+        self._start_reference_threshold = start_reference_threshold
+        self._reference_key = reference_key
+
+        self._reference_smoothing_alpha = reference_smoothing_alpha
+        self._smoothed_reference : float | None = None
+
+    def anneal(self, global_exp_step : int, train_iterations : int) -> float:
+        import adarl.utils.session
+        import adarl.utils.dbg.ggLog as ggLog
+        linvelq95 = adarl.utils.session.default_session.run_info["extras"].get(self._reference_key, None)
+
+        if self._smoothed_reference is None:
+            self._smoothed_reference = linvelq95
+        else:
+            a = self._reference_smoothing_alpha
+            self._smoothed_reference = a*self._smoothed_reference + (1.0 - a)*linvelq95
+        linvelq95 = self._smoothed_reference
+
+        if linvelq95 is None:
+            ggLog.warn(f"target_entropy_annealing_linvelq95: No linvel q95 info found, using default target entropy factor of {self._start_target}")
+            return self._start_target
+        # print(f"Linvel q95 = {linvelq95}")
+        if linvelq95 < self._start_reference_threshold:
+            return self._end_target + (self._start_target - self._end_target)*(linvelq95/self._start_reference_threshold)
+        else:
+            return self._start_target
+
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
@@ -85,9 +120,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_reference_filter_distribution" : ("uniform", (20.0-15*r, 20.0+15*r)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
+        "reward_superweight_joint_penalties" : ["uniform", (0.01, 0.5)],
         "reward_acceleration_weight" :        eps,
-        "reward_actacc_weight" :              eps,
-        "reward_actdiff_weight" :             1.0,
+        "reward_actacc_weight" :              2.0,
+        "reward_actdiff_weight" :             0.5,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
         "reward_failure_weight" :             eps,
@@ -103,12 +139,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      eps,
         "reward_position_weight" :            eps,
-        "reward_posref_vel_weight" :          1.0*p,       
+        "reward_posref_vel_weight" :          1.0,
         "reward_sensed_effort_weight" :       eps,
         "reward_slip_weight" :                eps,
         "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,
-        "reward_torque_weight" :              1.0,
+        "reward_torque_weight" :              0.0,
         "reward_torquediff_weight" :          eps,
         "reward_torqueref_weight" :           eps,
         "reward_tracking_weight" :            4.0,
@@ -149,22 +185,23 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0, 0.0],
         # "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0, 0.0],
         # "th_device" : th.device("cpu",0) # this segfaults
+        # "reward_superweight_joint_penalties" : 1.0
     })
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,
         "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 10,
+        "eval_eps" : 100,
         "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 10
+        "num_envs" : 100
     }
     eval_conf_video_stoch = {
         "name" : "video_stoch",
         "deterministic" : False,
         "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 10,
+        "eval_eps" : 100,
         "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 10,
+        "num_envs" : 100,
     }
     # video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
     # video_norand_eval_env_builder_args["enable_rendering"] = True
@@ -265,6 +302,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                             # #  eval_conf_video_feasible,
                             # #  eval_conf_video_jump_feasible
                         ]
+    
+    annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
+                                     start_target=-1.5,
+                                     end_target=-5.0,
+                                     start_reference_threshold=0.5)
+
     if algo.lower() == "sac":
         
         sac_train(  seed,
@@ -280,9 +323,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     policy_lr=0.0005,
                                                     policy_arch=[512,256,256],
                                                     gamma=gammas,
-                                                    target_tau = 0.005,
+                                                    target_tau = 0.001,
                                                     batch_size=4096,
-                                                    buffer_size=(6*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
+                                                    buffer_size=(8*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
                                                     total_steps=400_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=50,
@@ -291,17 +334,18 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -1.0,
+                                                    target_entropy_factor = None,
                                                     actor_log_std_init = -2.0,
                                                     actor_observation_filter=["base.vec","base.last_action_raw"],
                                                     critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec"],
-                                                    # target_entropy_factor_annealing=("ramp",[100*1e6, 150*1e6, -1, -5]),
+                                                    target_entropy_factor_annealing=annealer.anneal,
                                                     action_reference_obs_key="base.last_action_raw",
                                                     actor_weight_decay=0.0,
                                                     critic_weight_decay=0.0,
                                                     policy_update_freq=2,
                                                     deterministic_collection_ratio=0.01,
-                                                    actor_mean_bounds_ratio = 0.8
+                                                    actor_mean_bounds_ratio = 0.8,
+                                                    alpha_lr_factor = 1.0
                                                     ),
                     checkpoint_freq=20,
                     collector_device=env_device,

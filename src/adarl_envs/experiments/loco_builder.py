@@ -20,6 +20,8 @@ from rreal.algorithms.sac_helpers import build_vec_env, VecEnvRunnerBuilderProto
 from math import pi
 
 def format_tensor(t, float_precision):
+    if isinstance(t, float) or isinstance(t, int):
+        t = th.as_tensor(t)
     t = t.squeeze().cpu().tolist()
     if not isinstance(t,list):
         t = [t]
@@ -50,7 +52,10 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
                 f"height_error          {format_tensor(info['height_err'], 3)}\n"
                 f"log_prob              {format_tensor(extra_info.get('act_log_prob',th.as_tensor(float('nan'))), 3)}\n"
                 f"posref_safety         {posref_safety_triggered}\n"
-                f"limits_safety         {limits_safety_triggered}\n")
+                f"limits_safety         {limits_safety_triggered}\n"
+                f"actacc_weight         {format_tensor(info.get('actacc_weight',float('nan')), 3)}\n"
+                f"actdiff_weight        {format_tensor(info.get('actdiff_weight',float('nan')), 3)}\n"
+                f"posrefvel_weight      {format_tensor(info.get('posrefvel_weight',float('nan')), 3)}\n")
 
 def loco_runner_builder(seed,
                         run_folder,
@@ -245,6 +250,7 @@ def loco_runner_builder(seed,
                             randomized_mass_ratios_distr=env_builder_args.pop("randomized_mass_ratios"),
                             randomized_reference_filter_distribution=env_builder_args.pop("randomized_reference_filter_distribution"),
                             recycle_pose_randomization=env_builder_args.pop("recycle_pose_randomization"),
+                            reward_superweight_joint_penalties = env_builder_args.pop("reward_superweight_joint_penalties"),    
                             reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
                             reward_actacc_weight = env_builder_args.pop("reward_actacc_weight"),
                             reward_actdiff_weight = env_builder_args.pop("reward_actdiff_weight"),

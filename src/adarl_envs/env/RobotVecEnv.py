@@ -35,8 +35,8 @@ def hash_tensor(tensor):
     return hash(tuple(tensor.reshape(-1).tolist()))
 
 TensorLike = Union[th.Tensor, float, List[float]]
-DistributionDef = Union[Tuple[str,Tuple[TensorLike, TensorLike], Tuple[TensorLike, TensorLike, TensorLike]]]
-DistributionDefTh = Union[Tuple[str,Tuple[th.Tensor, th.Tensor], Tuple[th.Tensor, th.Tensor, th.Tensor]]]
+DistributionDef = Union[Tuple[str,Tuple[TensorLike, TensorLike], Tuple[TensorLike, TensorLike, TensorLike]], TensorLike]
+DistributionDefTh = Union[Tuple[str,Tuple[th.Tensor, th.Tensor], Tuple[th.Tensor, th.Tensor, th.Tensor]], th.Tensor]
 
 JOINT_FILTERS = Enum("JOINT_FILTERS",["ALL_REVOLUTE",
                                          "ALL"])
@@ -715,9 +715,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     )
 
 
-        self._configuration.randomized_mass_ratio_distribution = self.distr_to_tensor(randomized_mass_ratios_distr, size=(len(randomized_mass_links),))
+        self._configuration.randomized_mass_ratio_distribution = self._distr_to_tensor(randomized_mass_ratios_distr, size=(len(randomized_mass_links),))
         self._randomized_mass_link_ids = self._adapter.get_links_ids(self._configuration.randomized_mass_links)
-        self._configuration.randomized_com_xyz_diff_distribution = self.distr_to_tensor(randomized_com_xyz_diff_distribution, size=(len(randomized_com_links), 3))
+        self._configuration.randomized_com_xyz_diff_distribution = self._distr_to_tensor(randomized_com_xyz_diff_distribution, size=(len(randomized_com_links), 3))
         self._randomized_com_links_ids = self._adapter.get_links_ids(self._configuration.randomized_com_links)
         self._configuration.randomized_friction_slide_spin_roll_ratios = self._thtens(randomized_friction_slide_spin_roll_ratios).expand((len(randomized_friction_links),3))
         self._randomized_friction_links_ids = self._adapter.get_links_ids(self._configuration.randomized_friction_links)
@@ -726,7 +726,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._configuration.randomized_frictionloss_ratios = self._thtens(randomized_frictionloss_ratios).expand((len(randomized_frictionloss_joints),))
         self._randomized_frictionloss_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_frictionloss_joints)
 
-        self._configuration.randomized_reference_filter_distribution = self.distr_to_tensor(randomized_reference_filter_distribution, size=(1,)) if randomized_reference_filter_distribution is not None else None
+        self._configuration.randomized_reference_filter_distribution = self._distr_to_tensor(randomized_reference_filter_distribution, size=(1,)) if randomized_reference_filter_distribution is not None else None
 
 
         # ggLog.info(f"enable_link_collisions = {enable_link_collisions}")
@@ -1175,7 +1175,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                             (self._thrand(size=(self.num_envs, len(self._configuration.randomized_frictionloss_ratios)))*2-1)*self._configuration.randomized_frictionloss_ratios))
             mjx_adapter.alter_model_sum(  com_position_diffs = (self._randomized_com_links_ids,
                                                                   self._sample_distr(size=(self.num_envs, len(self._configuration.randomized_com_links),3),
-                                                                                     type_and_params=self._configuration.randomized_com_xyz_diff_distribution),),
+                                                                                     distribution=self._configuration.randomized_com_xyz_diff_distribution),),
                                             com_quatxyzw_diffs = None)
         if self._configuration.randomized_reference_filter_distribution != None and not self._distr_is_constant(self._configuration.randomized_reference_filter_distribution):
             if not isinstance_noimport(self._adapter, "MjxJointImpedanceAdapter"):
@@ -1969,39 +1969,53 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         reward = th.sum(th.stack([sub_rewards_return[k]*weights[k] for k in sub_rewards_return]), dim=0)
         return reward
 
-    def _sample_distr(self, size, type_and_params : DistributionDefTh) -> th.Tensor:
-        if type_and_params[0] == "uniform":
-            low, high = type_and_params[1] #type: ignore
+    def _sample_distr(self, size, distribution : DistributionDefTh) -> th.Tensor:
+        if isinstance(distribution, th.Tensor):
+            return distribution.expand(size).clone()
+        elif distribution[0] == "uniform":
+            low, high = distribution[1] #type: ignore
             return self._thrand(size)*(high-low)+low
-        elif type_and_params[0] == "normal":
-            if len(type_and_params[1]) == 2:
-                mean, std = type_and_params[1]
+        elif distribution[0] == "normal":
+            if len(distribution[1]) == 2:
+                mean, std = distribution[1]
                 clamp_width = self._thtens(5.0)
             else:
-                mean, std, clamp_width = type_and_params[1] #type: ignore
+                mean, std, clamp_width = distribution[1] #type: ignore
             return th.clamp(self._thrandn(size), -clamp_width, clamp_width)*std+mean
         else:
-            raise NotImplementedError(f"Unsupported distribution type {type_and_params[0]}")
+            raise NotImplementedError(f"Unsupported distribution type {distribution[0]}")
         
     def _distr_is_constant(self, distr : DistributionDef) -> bool:
-        distr_type = distr[0]
-        if distr_type == "uniform":
-            low, high = distr[1]
-            return th.all(th.as_tensor(low) == th.as_tensor(high)).item()
-        elif distr_type == "normal":
-            if len(distr[1]) == 2:
-                mean, std = distr[1]
+        if isinstance(distr, (th.Tensor, float, int)):
+            return True
+        else:
+            distr_type = distr[0]
+            if isinstance(distr_type, (float, int)):
+                return True # Then it must be a list of numbers, thus a constant distribution
             else:
-                mean, std, _ = distr[1]
-            return th.all(th.as_tensor(std) == 0).item()
-        else:
-            raise NotImplementedError(f"Unsupported distribution type {distr_type}")
+                if distr_type == "uniform":
+                    low, high = distr[1]
+                    return th.all(th.as_tensor(low) == th.as_tensor(high)).item()
+                elif distr_type == "normal":
+                    if len(distr[1]) == 2:
+                        mean, std = distr[1]
+                    else:
+                        mean, std, _ = distr[1]
+                    return th.all(th.as_tensor(std) == 0).item()
+                else:
+                    raise NotImplementedError(f"Unsupported distribution type {distr_type}")
         
         
-    def distr_to_tensor(self, distr : DistributionDef, size : tuple[int,...] | None = None) -> DistributionDefTh:
-        distr_type = distr[0]
-        if size is not None:
-            distr_params = tuple(self._thtens(t).expand(size) for t in distr[1])
+    def _distr_to_tensor(self, distr : DistributionDef, size : tuple[int,...] | None = None) -> DistributionDefTh:
+        if isinstance(distr, (float, int, th.Tensor)):
+            return self._thtens(distr)
         else:
-            distr_params = tuple(self._thtens(t) for t in distr[1])            
-        return distr_type, distr_params
+            distr_type = distr[0]
+            if isinstance(distr_type, str):
+                if size is not None:
+                    distr_params = tuple(self._thtens(t).expand(size) for t in distr[1])
+                else:
+                    distr_params = tuple(self._thtens(t) for t in distr[1])            
+                return distr_type, distr_params
+            else:
+                return self._thtens(distr)

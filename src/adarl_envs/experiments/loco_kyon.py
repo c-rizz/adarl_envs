@@ -1,46 +1,11 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
 
-class TargetEntropyAnnealer:
-    def __init__(self, start_target: float = -1.5,
-                 end_target: float = -5.0,
-                 start_reference_threshold: float = 0.25,
-                 reference_smoothing_alpha: float = 0.999,
-                 reference_key: str = "linvel_q95"):
-        self._start_target = start_target
-        self._end_target = end_target
-        self._start_reference_threshold = start_reference_threshold
-        self._reference_key = reference_key
-
-        self._reference_smoothing_alpha = reference_smoothing_alpha
-        self._smoothed_reference : float | None = None
-
-    def anneal(self, global_exp_step : int, train_iterations : int) -> float:
-        import adarl.utils.session
-        import adarl.utils.dbg.ggLog as ggLog
-        linvelq95 = adarl.utils.session.default_session.run_info["extras"].get(self._reference_key, None)
-
-        if self._smoothed_reference is None:
-            self._smoothed_reference = linvelq95
-        else:
-            a = self._reference_smoothing_alpha
-            self._smoothed_reference = a*self._smoothed_reference + (1.0 - a)*linvelq95
-        linvelq95 = self._smoothed_reference
-
-        if linvelq95 is None:
-            ggLog.warn(f"target_entropy_annealing_linvelq95: No linvel q95 info found, using default target entropy factor of {self._start_target}")
-            return self._start_target
-        # print(f"Linvel q95 = {linvelq95}")
-        if linvelq95 < self._start_reference_threshold:
-            return self._end_target + (self._start_target - self._end_target)*(linvelq95/self._start_reference_threshold)
-        else:
-            return self._start_target
-
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
-    from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams
+    from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams, TargetEntropyAnnealer
     from adarl_envs.experiments.loco_builder import named_loco_venv_builder
     import math
     
@@ -50,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 1024
+        train_envs = 4096
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -79,7 +44,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "fail_on_safety" : False,
         "frame_stack_length" : 5,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : [0.45,0.45],
+        "goal_height_minmax" : [0.47,0.47],
         "goal_resampling_probability_per_sec" : 0.1,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
@@ -120,34 +85,35 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_reference_filter_distribution" : ("uniform", (20.0-15*r, 20.0+15*r)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "reward_superweight_joint_penalties" : ["uniform", (0.01, 0.5)],
+        "reward_superweight_joint_penalties" : ["loguniform", (0.01, 0.5)],
         "reward_acceleration_weight" :        eps,
-        "reward_actacc_weight" :              2.0,
-        "reward_actdiff_weight" :             0.5,
+        "reward_actacc_weight" :              eps,
+        "reward_actdiff_weight" :             eps,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
         "reward_failure_weight" :             eps,
         "reward_feet_air_time_weight" :       eps,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      eps,
-        "reward_heading_velocity_weight" :    1.0,
+        "reward_heading_velocity_weight" :    eps,
         "reward_heading_weight" :             0.1,
         "reward_health_weight" :              eps,
         "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     eps,
         "reward_pitchnroll_velocity_weight" : 20.0,
         "reward_pitchnroll_weight" :          0.5,
-        "reward_position_limit_weight" :      eps,
+        "reward_position_limit_weight" :      1.0,
         "reward_position_weight" :            eps,
         "reward_posref_vel_weight" :          1.0,
+        "reward_posref_acc_weight":           0.2,
         "reward_sensed_effort_weight" :       eps,
         "reward_slip_weight" :                eps,
         "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,
-        "reward_torque_weight" :              0.0,
+        "reward_torque_weight" :              eps,
         "reward_torquediff_weight" :          eps,
         "reward_torqueref_weight" :           eps,
-        "reward_tracking_weight" :            4.0,
+        "reward_tracking_weight" :            2.0,
         "reward_velocity_limit_weight" :      eps,
         "reward_velocity_weight" :            eps,
         "reward_velref_weight" :              eps,
@@ -187,12 +153,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # "th_device" : th.device("cpu",0) # this segfaults
         # "reward_superweight_joint_penalties" : 1.0
     })
+    highpen_video_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
+    highpen_video_eval_env_builder_args.update({
+        "reward_superweight_joint_penalties" : 1.0
+    })
     eval_conf_video_det = {
-        "name" : "video_det",
+        "name" : "video_stoch_highpen",
         "deterministic" : True,
         "eval_freq_ep" : eval_freq*train_envs,
         "eval_eps" : 100,
-        "env_builder_args" : video_eval_env_builder_args,
+        "env_builder_args" : highpen_video_eval_env_builder_args,
         "num_envs" : 100
     }
     eval_conf_video_stoch = {
@@ -253,36 +223,38 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "num_envs" : 1
     # }
 
+    long_gamma = 0.98
     gammas = {
-        "acceleration" :        0.98,
+        "acceleration" :        long_gamma,
         "actacc" :              0.0,
         "actdiff" :             0.0,
-        "contacts" :            0.98,
-        "failure" :             0.98,
-        "feet_air_time" :       0.98,
-        "feet_ground_time" :    0.98,
-        "feet_on_ground" :      0.98,
-        "heading" :             0.98,
-        "heading_velocity" :    0.98,
-        "health" :              0.98,
-        "height_position" :     0.98,
-        "height_velocity" :     0.98,
-        "pitchnroll" :          0.98,
-        "pitchnroll_velocity" : 0.98,
-        "position" :            0.98,
-        "position_limit" :      0.98,
+        "contacts" :            long_gamma,
+        "failure" :             long_gamma,
+        "feet_air_time" :       long_gamma,
+        "feet_ground_time" :    long_gamma,
+        "feet_on_ground" :      long_gamma,
+        "heading" :             long_gamma,
+        "heading_velocity" :    long_gamma,
+        "health" :              long_gamma,
+        "height_position" :     long_gamma,
+        "height_velocity" :     long_gamma,
+        "pitchnroll" :          long_gamma,
+        "pitchnroll_velocity" : long_gamma,
+        "position" :            long_gamma,
+        "position_limit" :      long_gamma,
         "posref_vel" :          0.0,
-        "sensed_effort" :       0.98,
-        "slip" :                0.98,
-        "stand_position" :      0.98,
-        "torque" :              0.98,
-        "torque_limit" :        0.98,
+        "posref_acc" :          0.0,
+        "sensed_effort" :       long_gamma,
+        "slip" :                long_gamma,
+        "stand_position" :      long_gamma,
+        "torque" :              long_gamma,
+        "torque_limit" :        long_gamma,
         "torque_refs" :         0.0,
-        "torquediff" :          0.9,
-        "tracking" :            0.98,
-        "velocity" :            0.9,
+        "torquediff" :          0.0,
+        "tracking" :            long_gamma,
+        "velocity" :            long_gamma,
         "velocity_refs" :       0.0,
-        "velocity_limit" :      0.98
+        "velocity_limit" :      long_gamma
     }
 
     # disabled_rewards = []
@@ -324,9 +296,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     policy_arch=[512,256,256],
                                                     gamma=gammas,
                                                     target_tau = 0.001,
-                                                    batch_size=4096,
+                                                    batch_size=16384,
                                                     buffer_size=(8*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
-                                                    total_steps=400_000_000,
+                                                    total_steps=800_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=50,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
@@ -340,10 +312,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec"],
                                                     target_entropy_factor_annealing=annealer.anneal,
                                                     action_reference_obs_key="base.last_action_raw",
-                                                    actor_weight_decay=0.0,
+                                                    actor_weight_decay=1e-5,
                                                     critic_weight_decay=0.0,
                                                     policy_update_freq=2,
-                                                    deterministic_collection_ratio=0.01,
+                                                    deterministic_collection_ratio=0.00,
                                                     actor_mean_bounds_ratio = 0.8,
                                                     alpha_lr_factor = 1.0
                                                     ),

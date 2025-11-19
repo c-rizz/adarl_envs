@@ -1873,8 +1873,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             #     labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["base.vec"]])
             #     if not self._configuration.merge_privileged:
             #         labels["vec_obs_privileged"] = to_string_tensor([n for n in self._state_helper.observation_names()["privileged.vec"]])
-            i["posref_diff"] = state[self.STATE_ROBOT][:,1,:,5] - state[self.STATE_ROBOT][:,0,:,5]
-            i["posref_vel"] = i["posref_diff"]/self._configuration.stepLength_sec
+            posref_diff = state[self.STATE_ROBOT][:,1,:,5] - state[self.STATE_ROBOT][:,0,:,5]
+            posref_vel = posref_diff/self._configuration.stepLength_sec
+            prev_posref_vel = (state[self.STATE_ROBOT][:,2,:,5] - state[self.STATE_ROBOT][:,1,:,5])/self._configuration.stepLength_sec
+            posref_acc = (posref_vel - prev_posref_vel)/self._configuration.stepLength_sec
+            i["posref_diff"] = posref_diff
+            i["posref_vel"] = posref_vel
+            i["posref_acc"] = posref_acc
             i["normposref_diff"] = statenorm[self.STATE_ROBOT][:,1,:,5] - statenorm[self.STATE_ROBOT][:,0,:,5]
             i["normposref_vel"] = i["normposref_diff"]/2/self._configuration.stepLength_sec
             for substate in self._state_helper.sub_helpers.keys():
@@ -1975,6 +1980,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         elif distribution[0] == "uniform":
             low, high = distribution[1] #type: ignore
             return self._thrand(size)*(high-low)+low
+        elif distribution[0] == "loguniform":
+            low, high = distribution[1] #type: ignore
+            lowlog = th.log(low)
+            highlog = th.log(high)
+            return th.exp(self._thrand(size)*(highlog-lowlog)+lowlog)
         elif distribution[0] == "normal":
             if len(distribution[1]) == 2:
                 mean, std = distribution[1]
@@ -1993,7 +2003,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if isinstance(distr_type, (float, int)):
                 return True # Then it must be a list of numbers, thus a constant distribution
             else:
-                if distr_type == "uniform":
+                if distr_type == "uniform" or distr_type == "loguniform":
                     low, high = distr[1]
                     return th.all(th.as_tensor(low) == th.as_tensor(high)).item()
                 elif distr_type == "normal":

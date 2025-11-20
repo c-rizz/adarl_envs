@@ -22,7 +22,7 @@ import numpy as np
 import pprint
 import torch as th
 
-disable_compile = False
+disable_compile = True
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -114,13 +114,14 @@ def planar_tracking_error_vec(body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_v
         """
         body_planar_rel_linvel_xyz = body_rel_linvel_vec_xyz - vector_projection(body_rel_linvel_vec_xyz,gravity_rel_vec_xyz)
         # goal_rel_linvel_xyz should already be "planar", it's projection along gravity_rel should be zero
+        eps = 1e-3
         norms = th.norm(vector_projection(goal_rel_linvel_vec_xyz,gravity_rel_vec_xyz), dim = 1)
-        dbg_check(lambda: th.all(norms < 0.1) == True,
-                  lambda:   f"goal_rel_linvel_xyz is not horizontal (th.all(norms < 0.1) = {th.all(norms < 0.1)}), projection is "
-                            f"{vector_projection(goal_rel_linvel_vec_xyz, gravity_rel_vec_xyz)[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
-                            f"goal={goal_rel_linvel_vec_xyz[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
-                            f"gravity={gravity_rel_vec_xyz[th.logical_or(norms >= 0.1,th.logical_not(th.isfinite(norms)))]}"
-                            f" big={th.nonzero(norms >= 0.1)}"
+        dbg_check(lambda: th.all(norms < eps) == True,
+                  lambda:   f"goal_rel_linvel_xyz is not horizontal (th.all(norms < {eps}) = {th.all(norms < eps)}), projection is "
+                            f"{vector_projection(goal_rel_linvel_vec_xyz, gravity_rel_vec_xyz)[th.logical_or(norms >= eps,th.logical_not(th.isfinite(norms)))]}"
+                            f"goal={goal_rel_linvel_vec_xyz[th.logical_or(norms >= eps,th.logical_not(th.isfinite(norms)))]}"
+                            f"gravity={gravity_rel_vec_xyz[th.logical_or(norms >= eps,th.logical_not(th.isfinite(norms)))]}"
+                            f" big={th.nonzero(norms >= eps)}"
                             f" isnan={th.nonzero(th.isnan(norms))}"
                             f" isinf={th.nonzero(th.isinf(norms))}",
                     async_assert=True,
@@ -230,10 +231,10 @@ class LocomotionVecEnv(RobotVecEnv):
 
     @dataclass
     class EpisodeLocomConfiguration:
-        goal_abs_vel_vec_xys : th.Tensor
+        goal_abs_vel_vec_xys : th.Tensor | None
         """Absolute frame linvel goal, if goal_rel_vel_vec_xy_speed_xy is not None, it is ignored. Expressed as 3 
            scalars: xy direction of the velocity and speed."""
-        goal_rel_vel_vec_xy_speed : th.Tensor | None
+        goal_rel_vel_vec_xys : th.Tensor | None
         """Relative frame linvel goal, overrides goal_abs_vel_vec_xy. Expressed as 3 scalars: xy direction of the
            velocity and speed"""
         goal_abs_gravity_vec_xyz : th.Tensor
@@ -504,7 +505,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         pitchnroll_kd=self._thtens(0.01),
                         goal_heading_rel_yaw_minmax=self._thtens([-th.pi, th.pi]),
                         split_rewards = split_rewards,
-                        enabled_rewards = None
+                        enabled_rewards = None #type: ignore Will be set below
                         )
         enabled_rewards = []
         for k,v in asdict(self._loco_conf).items():
@@ -516,7 +517,7 @@ class LocomotionVecEnv(RobotVecEnv):
         ggLog.info(f"Locomotion rewards enabled: {self._loco_conf.enabled_rewards}")
         
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(goal_abs_vel_vec_xys       = None,
-                                                                                     goal_rel_vel_vec_xy_speed  = self._thtens([1.0,0.0,0.0]).expand(adapter.vec_size(), 3).clone(),
+                                                                                     goal_rel_vel_vec_xys       = self._thtens([1.0,0.0,0.0]).expand(adapter.vec_size(), 3).clone(),
                                                                                      goal_abs_gravity_vec_xyz   = self._thtens([0.0,0.0,-1.0]).expand(adapter.vec_size(), 3).clone(),
                                                                                      goal_abs_height_vec_z      = self._thtens([sum(self._loco_conf.goal_height_minmax)/2]).expand(adapter.vec_size(), 1).detach().clone(),
                                                                                      goal_heading_rel_vec_yaw   = self._thtens([0.0]).expand(adapter.vec_size(), 1).detach().clone(),
@@ -831,7 +832,7 @@ class LocomotionVecEnv(RobotVecEnv):
         masked_assign(smoothed_goal_height,         starting_eps,   goal_height)
 
         vsize = step_counts.size()[0]
-        if self._locomotion_episode_config.goal_rel_vel_vec_xy_speed is None:
+        if self._locomotion_episode_config.goal_abs_vel_vec_xys is not None:
             if not isinstance_noimport(self._adapter, "BaseVecSimulationAdapter"):
                 raise RuntimeError(f"Absolute velocity goals are supported only in simulation adapters, but adapter is of type {type(self._adapter)}")
             # Get the relative goal from the absolute one
@@ -842,14 +843,15 @@ class LocomotionVecEnv(RobotVecEnv):
             abs_goal_linvel_xyz = abs_goal_linvel_direction_xyz * goal_speed
             # abs_planar_linvelgoal_dir_quat = quat_xyzw_between_vecs_py(self._unit_3d_vector_vec_x, abs_planar_linvel_goal) # orientation of the linvel goal (quat that aligns (1,0,0) to it)
             rel_goal_linvel_dir_xyz = th_quat_rotate(abs_goal_linvel_direction_xyz, th_quat_conj(borient_quat_vec_xyzw))
-        elif self._locomotion_episode_config.goal_rel_vel_vec_xy_speed is not None:
+        elif self._locomotion_episode_config.goal_rel_vel_vec_xys is not None:
+            ggLog.info(f"Using relative velocity goals")
             # The relative goal is expressed in the plane orthogonal to gravity
             # So the full realtive goal must be converted in the frame of the body.
             # In this formulation, we can see the planar relative goal direction as a twist around the gravity vector,
             # we have then to add a swing rotation, perpendicular to the gravity vector.
             # The swing can be obtained directly from the gravity vector, as the rotation that brings it to 0,0,-1
-            goal_speed = self._locomotion_episode_config.goal_rel_vel_vec_xy_speed[:,2]
-            rel_planar_goal_linvel_direction_xy = self._locomotion_episode_config.goal_rel_vel_vec_xy_speed[:,:2]
+            goal_speed = self._locomotion_episode_config.goal_rel_vel_vec_xys[:,2].view((vsize,1))
+            rel_planar_goal_linvel_direction_xy = self._locomotion_episode_config.goal_rel_vel_vec_xys[:,:2]
             rel_planar_goal_linvel_direction_xyz = th.cat([rel_planar_goal_linvel_direction_xy[:,:2], th.zeros_like(rel_planar_goal_linvel_direction_xy[:,:1])], dim=1)
             swing = quat_xyzw_between_vecs_py(gravity_rel_vec_xyz, self._abs_gravity_dir.expand_as(gravity_rel_vec_xyz))
             twist = quat_xyzw_between_vecs_py(self._unit_3d_vector.expand_as(gravity_rel_vec_xyz), rel_planar_goal_linvel_direction_xyz)
@@ -1141,31 +1143,50 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     absolute_bell_width=th.pi/8), curr_err
 
     def _heading_velocity_reward(self, state, dt : th.Tensor):
-        rel_gravity_vec_xyz              = state[self.STATE_EXTRINSIC][:, 0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
-        rel_goal_linvel_dir_xyz          = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
-        prev_rel_gravity_vec_xyz         = state[self.STATE_EXTRINSIC][:, 1,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
-        prev_rel_goal_linvel_dir_xyz     = state[self.STATE_LOCOMOTION][:,1,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
-        prevprev_rel_gravity_vec_xyz     = state[self.STATE_EXTRINSIC][:, 2,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
-        prevprev_rel_goal_linvel_dir_xyz = state[self.STATE_LOCOMOTION][:,2,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
+        state_loco = state[self.STATE_LOCOMOTION]
+        state_extr = state[self.STATE_EXTRINSIC]
+        rel_goal_linvel_dir_xyz          = state_loco[:, 0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
+        prev_rel_goal_linvel_dir_xyz     = state_loco[:, 1,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
+        prevprev_rel_goal_linvel_dir_xyz = state_loco[:, 2,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0].view((self.num_envs,3))
+        rel_gravity_vec_xyz              = state_extr[:, 0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
+        prev_rel_gravity_vec_xyz         = state_extr[:, 1,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
+        prevprev_rel_gravity_vec_xyz     = state_extr[:, 2,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
         rel_body_direction_xyz = self._unit_3d_vector.expand_as(rel_gravity_vec_xyz) # The body orientation in the body frame
         
-        flattening_rotation = quat_xyzw_between_vecs_py(rel_gravity_vec_xyz, self._abs_gravity_dir.expand_as(rel_gravity_vec_xyz)) # rotation that brings gravity to 0,0,-1
-        prev_flattening_rotation = quat_xyzw_between_vecs_py(prev_rel_gravity_vec_xyz, self._abs_gravity_dir.expand_as(rel_gravity_vec_xyz)) # rotation that brings gravity to 0,0,-1
-        prevprev_flattening_rotation = quat_xyzw_between_vecs_py(prevprev_rel_gravity_vec_xyz, self._abs_gravity_dir.expand_as(rel_gravity_vec_xyz)) # rotation that brings gravity to 0,0,-1
+        flattening_rotation          = quat_xyzw_between_vecs_py(rel_gravity_vec_xyz,           self._abs_gravity_dir.expand_as(rel_gravity_vec_xyz)) # rotation that brings gravity to 0,0,-1
+        prev_flattening_rotation     = quat_xyzw_between_vecs_py(prev_rel_gravity_vec_xyz,      self._abs_gravity_dir.expand_as(rel_gravity_vec_xyz)) # rotation that brings gravity to 0,0,-1
+        prevprev_flattening_rotation = quat_xyzw_between_vecs_py(prevprev_rel_gravity_vec_xyz,  self._abs_gravity_dir.expand_as(rel_gravity_vec_xyz)) # rotation that brings gravity to 0,0,-1
         
         # rotate body and goal direction into the flattened frame
-        curr_bodydir_flatbodyframe = th_quat_rotate(rel_body_direction_xyz,  flattening_rotation)
-        curr_linvelgoaldir_flatbodyframe = th_quat_rotate(rel_goal_linvel_dir_xyz, flattening_rotation)
-        prev_bodydir_flatbodyframe = th_quat_rotate(rel_body_direction_xyz,       prev_flattening_rotation)
-        prev_linvelgoaldir_flatbodyframe = th_quat_rotate(prev_rel_goal_linvel_dir_xyz, prev_flattening_rotation)
-        prevprev_bodydir_flatbodyframe = th_quat_rotate(rel_body_direction_xyz,           prevprev_flattening_rotation)
+        curr_bodydir_flatbodyframe      = th_quat_rotate(rel_body_direction_xyz, flattening_rotation)
+        prev_bodydir_flatbodyframe      = th_quat_rotate(rel_body_direction_xyz, prev_flattening_rotation)
+        prevprev_bodydir_flatbodyframe  = th_quat_rotate(rel_body_direction_xyz, prevprev_flattening_rotation)
+        curr_linvelgoaldir_flatbodyframe     = th_quat_rotate(rel_goal_linvel_dir_xyz,          flattening_rotation)
+        prev_linvelgoaldir_flatbodyframe     = th_quat_rotate(prev_rel_goal_linvel_dir_xyz,     prev_flattening_rotation)
         prevprev_linvelgoaldir_flatbodyframe = th_quat_rotate(prevprev_rel_goal_linvel_dir_xyz, prevprev_flattening_rotation)
 
         eps = 1e-3
         dbg_check(lambda : th.all(th.stack([th.all(curr_linvelgoaldir_flatbodyframe[:,2]<eps),
                                             th.all(prev_linvelgoaldir_flatbodyframe[:,2]<eps),
                                             th.all(prevprev_linvelgoaldir_flatbodyframe[:,2]<eps)])),
-                  assert_msg="flattened goal vectors not parallel to ground", async_assert=True)
+                  assert_msg="flattened goal vectors not parallel to ground", async_assert=False,
+                  build_msg=lambda : f"flattened goal vectors not parallel to ground:\n"
+                                     f" envs: {th.arange(self.num_envs, device=rel_goal_linvel_dir_xyz.device)[(curr_linvelgoaldir_flatbodyframe[:,2]>=eps)|(prev_linvelgoaldir_flatbodyframe[:,2]>=eps)|(prevprev_linvelgoaldir_flatbodyframe[:,2]>=eps)]}\n"
+                                     f" curr_linvelgoaldir_flatbodyframe[:,2]={curr_linvelgoaldir_flatbodyframe[:,2]}\n"
+                                     f"   violations = {curr_linvelgoaldir_flatbodyframe[:,2][curr_linvelgoaldir_flatbodyframe[:,2]>=eps]}\n"
+                                     f"   rel_goal_linvel_dir_xyz = {rel_goal_linvel_dir_xyz[curr_linvelgoaldir_flatbodyframe[:,2]>=eps]}\n"
+                                     f"   flattening_rotation = {flattening_rotation[curr_linvelgoaldir_flatbodyframe[:,2]>=eps]}\n"
+                                     f"   (failing steps = {state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT][curr_linvelgoaldir_flatbodyframe[:,2]>=eps]})\n"
+                                     f" prev_linvelgoaldir_flatbodyframe[:,2]={prev_linvelgoaldir_flatbodyframe[:,2]}\n"
+                                     f"   violations = {prev_linvelgoaldir_flatbodyframe[:,2][prev_linvelgoaldir_flatbodyframe[:,2]>=eps]}\n"
+                                     f"   prev_rel_goal_linvel_dir_xyz = {prev_rel_goal_linvel_dir_xyz[prev_linvelgoaldir_flatbodyframe[:,2]>=eps]}\n"
+                                     f"   prev_flattening_rotation = {prev_flattening_rotation[prev_linvelgoaldir_flatbodyframe[:,2]>=eps]}\n"
+                                     f"   (failing steps = {state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT][prev_linvelgoaldir_flatbodyframe[:,2]>=eps]})\n"
+                                     f" prevprev_linvelgoaldir_flatbodyframe[:,2]={prevprev_linvelgoaldir_flatbodyframe[:,2]}\n"
+                                     f"   violations = {prevprev_linvelgoaldir_flatbodyframe[:,2][prevprev_linvelgoaldir_flatbodyframe[:,2]>=eps]}\n"
+                                     f"   prevprev_rel_goal_linvel_dir_xyz = {prevprev_rel_goal_linvel_dir_xyz[prevprev_linvelgoaldir_flatbodyframe[:,2]>=eps]}\n"
+                                     f"   prevprev_flattening_rotation = {prevprev_flattening_rotation[prevprev_linvelgoaldir_flatbodyframe[:,2]>=eps]}\n"
+                                     f"   (failing steps = {state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT][prev_linvelgoaldir_flatbodyframe[:,2]>=eps]})\n")
         
         curr_bodydir_flatbodyframe[:,2] = 0 # project to the gravity plane
         curr_linvelgoaldir_flatbodyframe[:,2] = 0 # project to the gravity plane
@@ -1175,7 +1196,7 @@ class LocomotionVecEnv(RobotVecEnv):
         prevprev_linvelgoaldir_flatbodyframe[:,2] = 0 # project to the gravity plane
 
         rel_headinggoal_flatgoalframe = th.zeros_like(curr_bodydir_flatbodyframe)
-        rel_headinggoal_flatgoalframe[:,:2] = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X:self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_Y+1,0]
+        rel_headinggoal_flatgoalframe[:,:2] = state_loco[:,0,self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X:self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_Y+1,0]
         headinggoal_flatbodyframe = th_quat_rotate(rel_headinggoal_flatgoalframe, quat_xyzw_between_vecs_py(self._unit_3d_vector.expand_as(rel_headinggoal_flatgoalframe), curr_linvelgoaldir_flatbodyframe))
 
 
@@ -1206,7 +1227,7 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return = {}
         if self._configuration.fixed_reward:
             sub_rewards_return = {k:th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype) for k in self._loco_conf.enabled_rewards}
-            reward = th.ones((self.num_envs, len(self._loco_conf.enabled_rewards)), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)*len(self._loco_conf.enabled_rewards)
+            reward = th.ones((self.num_envs, len(sub_rewards_return)), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)*len(sub_rewards_return)
             return reward, sub_rewards_return
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
@@ -1358,7 +1379,9 @@ class LocomotionVecEnv(RobotVecEnv):
         failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
 
         if self._configuration.fail_on_safety:
-            failed = th.logical_or(failed, state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED,0])
+            safety_triggered = th.logical_or(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED,0],
+                                             state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,0])
+            failed = th.logical_or(failed, safety_triggered)
 
         # sub_rewards_return["feet_air_time_uniformity"] = reward_feet_air_time_uniformity
         sub_rewards_return["acceleration"] = reward_acceleration
@@ -1440,10 +1463,11 @@ class LocomotionVecEnv(RobotVecEnv):
         # sub_rewards_return["failure"] = -th.sum(scaled_rewards_vec*(scaled_rewards_vec>0), dim =1)*failed*weights["failure"] # negate all the positive rewards
         for k in sub_rewards_return:
             sub_rewards_return[k] =sub_rewards_return[k].view((self.num_envs,))
-        sub_rewards_return = {k:v for k,v in sub_rewards_return.items() if k in self._loco_conf.enabled_rewards}
-        if len(sub_rewards_return) != len(self._loco_conf.enabled_rewards):
-            missing = set(self._loco_conf.enabled_rewards)-set(sub_rewards_return.keys())
-            raise ValueError(f"Some enabled rewards are missing in the computed rewards: {missing}")
+        if self._loco_conf.enabled_rewards is not None:
+            sub_rewards_return = {k:v for k,v in sub_rewards_return.items() if k in self._loco_conf.enabled_rewards}
+            if len(sub_rewards_return) != len(self._loco_conf.enabled_rewards):
+                missing = set(self._loco_conf.enabled_rewards)-set(sub_rewards_return.keys())
+                raise ValueError(f"Some enabled rewards are missing in the computed rewards: {missing}")
         # sub_rewards_unscaled = {k:v.view(self._adapter.vec_size(),) for k,v in sub_rewards_unscaled.items()}
         stacked_rewards = th.stack(list(sub_rewards_return.values()), dim = 1)
         if self._loco_conf.split_rewards:
@@ -1480,7 +1504,9 @@ class LocomotionVecEnv(RobotVecEnv):
     
 
 
-
+    def _update_state(self, adapter_data):
+        super()._update_state(adapter_data)
+        self._heading_velocity_reward(self._current_state, dt=self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.LAST_STEP_DT].view((self.num_envs,)))
 
 
 
@@ -1540,14 +1566,14 @@ class LocomotionVecEnv(RobotVecEnv):
         masked_assign(self._stats["vel_errs_vec"],        starting_eps, vel_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
         masked_assign(self._stats["height_errs_vec"],     starting_eps, height_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
         masked_assign(self._stats["pitchnroll_errs_vec"], starting_eps, pitchnroll_err_vec.unsqueeze(1).expand(-1, self._buff_sizes))
-        masked_assign(self._stats["body_speeds_vec"],     starting_eps, vel_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
+        masked_assign(self._stats["body_speeds_vec"],     starting_eps, body_speed_vec.unsqueeze(1).expand(-1, self._buff_sizes))
         # Update the buffers
         # idxs = step_counts%self._buff_sizes
         idx : th.Tensor = self._th_tot_step_counter.view(tuple())%self._stats["vel_errs_vec"].size()[1]
-        set_column(self._stats["vel_errs_vec"], idx, vel_error_vec.view(self.num_envs,))
-        set_column(self._stats["height_errs_vec"], idx, height_error_vec.view(self.num_envs,))
+        set_column(self._stats["vel_errs_vec"],     idx, vel_error_vec.view(self.num_envs,))
+        set_column(self._stats["height_errs_vec"],  idx, height_error_vec.view(self.num_envs,))
         set_column(self._stats["pitchnroll_errs_vec"], idx, pitchnroll_err_vec.view(self.num_envs,))
-        set_column(self._stats["body_speeds_vec"], idx, body_speed_vec.view(self.num_envs,))
+        set_column(self._stats["body_speeds_vec"],  idx, body_speed_vec.view(self.num_envs,))
 
         state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = self._current_state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
         masked_assign(self._stats["ep_max_javg_sensed_effort"], starting_eps, 0)
@@ -1690,10 +1716,10 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     goal_speeds],
                                                 dim=1)
         if isinstance(self._adapter, BaseVecSimulationAdapter):
-            self.set_goal(goal_abs_linvel_vec_xys, 
-                        goal_abs_height=goal_height,
-                        vec_mask=vec_mask,
-                        goal_heading_yaw=goal_heading_yaws)
+            self.set_goal(  goal_abs_linvel_vec_xys=goal_abs_linvel_vec_xys, 
+                            goal_abs_height=goal_height,
+                            vec_mask=vec_mask,
+                            goal_heading_yaw=goal_heading_yaws)
         else:
             self.set_goal(goal_rel_linvel_xys=goal_abs_linvel_vec_xys,
                         goal_abs_height=goal_height,
@@ -1701,10 +1727,6 @@ class LocomotionVecEnv(RobotVecEnv):
                         goal_heading_yaw=goal_heading_yaws)
         super()._set_current_ep_config(vec_mask=vec_mask, reset_options=reset_options)
         self.set_max_episode_steps(reset_options.get("reset_options",self._current_episode_config.vec_max_ep_steps))
-        self.set_goal(goal_abs_linvel_vec_xys, 
-                      goal_abs_height=goal_height,
-                      vec_mask=vec_mask,
-                      goal_heading_yaw=goal_heading_yaws)
         sw = self._sample_distr((self.num_envs,1), self._loco_conf.reward_superweight_joint_penalties)
         self._locomotion_episode_config.reward_weight_acceleration          = sw*self._sample_distr((self.num_envs,1), self._loco_conf.reward_weight_acceleration)
         self._locomotion_episode_config.reward_weight_actacc                = sw*self._sample_distr((self.num_envs,1), self._loco_conf.reward_weight_actacc)
@@ -1724,18 +1746,24 @@ class LocomotionVecEnv(RobotVecEnv):
             vec_mask = self._all_vecs
 
         if goal_abs_linvel_vec_xys is not None:
+            if self._locomotion_episode_config.goal_abs_vel_vec_xys is None:
+                self._locomotion_episode_config.goal_abs_vel_vec_xys = self._thtens([1.0,0.0,0.0]).expand(self.num_envs,3).clone()
+            self._locomotion_episode_config.goal_rel_vel_vec_xys = None
             goal_abs_linvel_vec_xys = self._thtens(goal_abs_linvel_vec_xys).expand(self.num_envs,3)
             masked_assign(self._locomotion_episode_config.goal_abs_vel_vec_xys,
                           vec_mask,
                           goal_abs_linvel_vec_xys)
         elif goal_diff_linvel_speed_yaw is not None:
+            if self._locomotion_episode_config.goal_abs_vel_vec_xys is None:
+                self._locomotion_episode_config.goal_abs_vel_vec_xys = self._thtens([1.0,0.0,0.0]).expand(self.num_envs,3)
+            self._locomotion_episode_config.goal_rel_vel_vec_xys = None
             if isinstance(goal_diff_linvel_speed_yaw, Sequence):
                 goal_diff_linvel_speed_yaw = self._thtens(goal_diff_linvel_speed_yaw)
             elif not isinstance(goal_diff_linvel_speed_yaw, th.Tensor):
                 raise RuntimeError(f"Unexpected type {type(goal_diff_linvel_speed_yaw)} for goal_velocity_diff_speed_yaw")
-            curr_goal_speeds : th.Tensor = self._locomotion_episode_config.goal_abs_vel_vec_xys[:,2]
-            curr_goal_yaws = th.atan2(self._locomotion_episode_config.goal_abs_vel_vec_xys[:,1],
-                           self._locomotion_episode_config.goal_abs_vel_vec_xys[:,0])
+            prev_goal_abs_vel_vec_xys = self._locomotion_episode_config.goal_abs_vel_vec_xys
+            curr_goal_speeds : th.Tensor = prev_goal_abs_vel_vec_xys[:,2]
+            curr_goal_yaws = th.atan2(prev_goal_abs_vel_vec_xys[:,1], prev_goal_abs_vel_vec_xys[:,0])
             new_goal_speeds = curr_goal_speeds + goal_diff_linvel_speed_yaw[0]
             new_goal_yaws = curr_goal_yaws + goal_diff_linvel_speed_yaw[1]
             new_goal_dirs = th.stack([th.cos(new_goal_yaws), th.sin(new_goal_yaws)], dim = 1)    
@@ -1744,10 +1772,11 @@ class LocomotionVecEnv(RobotVecEnv):
                           vec_mask,
                           new_goals_xys)
         elif goal_rel_linvel_xys is not None:
-            self._locomotion_episode_config.goal_rel_vel_vec_xy_speed = self._thtens(goal_rel_linvel_xys).view(self.num_envs,3)
+            self._locomotion_episode_config.goal_rel_vel_vec_xys = self._thtens(goal_rel_linvel_xys).view(self.num_envs,3)
+            self._locomotion_episode_config.goal_abs_vel_vec_xys = None
         else:
             raise RuntimeError("One of goal_abs_linvel_vec_xys, goal_diff_linvel_speed_yaw or goal_rel_linvel_xys must be provided")
-        
+
         if goal_abs_height is not None:
             goal_abs_height = self._thtens(goal_abs_height).expand(1,self.num_envs).permute(1,0)
             masked_assign(self._locomotion_episode_config.goal_abs_height_vec_z,
@@ -1762,7 +1791,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
     def get_goals(self):
         return {"abs_linvel_xys" : self._locomotion_episode_config.goal_abs_vel_vec_xys,
-                "rel_linvel_xys" : self._locomotion_episode_config.goal_rel_vel_vec_xy_speed,
+                "rel_linvel_xys" : self._locomotion_episode_config.goal_rel_vel_vec_xys,
                 "abs_gravity" : self._locomotion_episode_config.goal_abs_gravity_vec_xyz,
                 "abs_height" : self._locomotion_episode_config.goal_abs_height_vec_z,
                 "heading_rel" : self._locomotion_episode_config.goal_heading_rel_vec_yaw}
@@ -1782,7 +1811,10 @@ class LocomotionVecEnv(RobotVecEnv):
 
     def _set_arrow_pose(self, vec_mask : th.Tensor):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
-            goals_corrected = self._locomotion_episode_config.goal_abs_vel_vec_xys.detach().clone()
+            goal_abs_vel_vec_xys = self._locomotion_episode_config.goal_abs_vel_vec_xys
+            if goal_abs_vel_vec_xys is None:
+                goal_abs_vel_vec_xys = self._thtens([1.0,0.0,0.0]).expand(self.num_envs,3)
+            goals_corrected = goal_abs_vel_vec_xys.detach().clone()
             zero_goals = th.linalg.norm(goals_corrected, dim = 1) < 0.0001
             if len(zero_goals)>0:
                 masked_assign(goals_corrected,zero_goals,self._thtens([0,0,-1.0]))

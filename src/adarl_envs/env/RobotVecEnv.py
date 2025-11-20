@@ -1310,7 +1310,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._adapter.setLinksStateDirect(link_names=[self._configuration.main_body_link],
                                               link_states_pose_vel=th.cat([self._configuration.homing_body_pose_xyz_xyzw,
                                                                            th.zeros((6,), device=self._configuration.th_device, dtype=th.float32)])
-                                                                           .expand(self._adapter.vec_size(), 1, 13),
+                                                                           .expand(self._adapter.vec_size(), 1, 13).clone(),
                                               vec_mask=th.logical_and(self._current_episode_config.vec_init_on_reset, vec_mask))
         not_resetting_sims = th.logical_not(self._current_episode_config.vec_init_on_reset)
         vjpose = self._current_episode_config.vec_initial_ctrl_joint_pose
@@ -1589,9 +1589,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             vec_bodystates_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
             vec_body_rel_linacc_xyz = self._adapter.get_local_link_linear_acceleration(self._main_body_link_ids)[:,0,:]
-            vec_body_abs_linvel_xyz = None
-            vec_body_ground_dist = None
-            vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz = None, None, None
+            vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
+            vec_body_ground_dist = vec_bodystates_13[:,2]  
+            vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz = self._compute_extr_from_bodystate(body_abs_linvel_xyz_vec = vec_body_abs_linvel_xyz,
+                                                                                                                           body_abs_angvel_xyz_vec = vec_bodystates_13[:,10:13],
+                                                                                                                           bstates_v_13 = vec_bodystates_13)
             if self._configuration.enable_dbg_checks:
                 dbg_check(lambda: th.all(th.isfinite(vec_bodystates_13)),
                         lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(vec_bodystates_13)).nonzero()}: {vec_bodystates_13[th.logical_not(th.isfinite(vec_bodystates_13))]} : {vec_bodystates_13}",
@@ -1688,8 +1690,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     vec_body_rel_angvel_xyz = vec_body_rel_angvel_xyz,
                                     vec_robot_state = vec_robot_state,
                                     vec_body_rel_linacc_xyz = vec_body_rel_linacc_xyz,
-                                    vec_time_from_start=vec_time_from_start,
-                                    bstates_v_13 = vec_bodystates_13)
+                                    vec_time_from_start=vec_time_from_start)
         # ggLog.info(f"insta_state sizes = "+str(map_tensor_tree(new_inst_state,lambda t: t.size())))
         # th.cuda.synchronize()
         # if not th.all(th.isfinite(new_inst_state[self.STATE_ROBOT_STATS])):
@@ -1711,16 +1712,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_body_rel_angvel_xyz : th.Tensor,
                                                     vec_robot_state : th.Tensor,
                                                     vec_body_rel_linacc_xyz : th.Tensor,
-                                                    vec_time_from_start : th.Tensor,
-                                                    bstates_v_13 : th.Tensor):
+                                                    vec_time_from_start : th.Tensor):
 
-        if isinstance(self._adapter, BaseVecSimulationAdapter):
-            vec_body_abs_linvel_xyz = bstates_v_13[:,7:10]
-            vec_body_ground_dist = bstates_v_13[:,2]            
-            vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz = self._compute_extr_from_bodystate(body_abs_linvel_xyz_vec = vec_body_abs_linvel_xyz,
-                                                                                                                           body_abs_angvel_xyz_vec = bstates_v_13[:,10:13],
-                                                                                                                           bstates_v_13 = bstates_v_13)
-        
         vec_step_count = vec_internal_state[:,self.INTERNAL_FIELDS.STEP_COUNT]
         has_settled = (vec_step_count > 10).view((self.num_envs,))
         prev_vec_time_from_start = vec_internal_state[:,self.INTERNAL_FIELDS.SIM_TIME]
@@ -1822,10 +1815,54 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                   async_assert=True,
                   assert_msg="asynchronous terminations are not supported yet")
         new_step_count = new_step_counts[0]
+        # ggLog.info(f"Updating state at step_count={new_step_count}")
+        # ggLog.info(f" instantaneous linvel_goal_rel = {instantaneous_state[self.STATE_LOCOMOTION][self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X],
+        #                                                instantaneous_state[self.STATE_LOCOMOTION][self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y],
+        #                                                instantaneous_state[self.STATE_LOCOMOTION][self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z]}")
+        # ggLog.info(f" instantaneous gravity_rel     = {instantaneous_state[self.STATE_EXTRINSIC][self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X],
+        #                                                instantaneous_state[self.STATE_EXTRINSIC][self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y],
+        #                                                instantaneous_state[self.STATE_EXTRINSIC][self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z]}")
+        # ggLog.info(f"  linvel_goal_rel = {self._current_state[self.STATE_LOCOMOTION][:, :,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0]}")
+        # ggLog.info(f"  gravity_rel = {self._current_state[self.STATE_EXTRINSIC][:,:,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0]}")
         if new_step_count == 0: # cuda sync
             self._current_state = self._state_helper.reset_state(instantaneous_state) # fills up history with current instantaneous state
         else:
             self._state_helper.update(instantaneous_state, state=self._current_state) # rolls down the history and adds current state
+        linvel_goal_rel = self._current_state[self.STATE_LOCOMOTION][:, :,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0]
+        gravity_rel = self._current_state[self.STATE_EXTRINSIC][:,:,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0]
+        
+        th.set_printoptions(threshold=1000_000)
+        has_error = False
+        if new_step_count == 0:
+            nonzero_zs = linvel_goal_rel[:,0,2] != 0
+            has_error = th.any(nonzero_zs).item()
+            if has_error:
+                ggLog.info(f"Detected envs with nonzero z in linvelgoal_z at step 0, idx = {th.nonzero(nonzero_zs, as_tuple=False)}")
+                ggLog.info(f"linvel_goal_rel with nonzero z: {linvel_goal_rel[nonzero_zs]}")
+                ggLog.info(f"gravity_rel in those envs: {gravity_rel[nonzero_zs]}")
+        if new_step_count == 1:
+            nonzero_zs = linvel_goal_rel[:,1,2] != 0
+            has_error = th.any(nonzero_zs).item()
+            if has_error:
+                ggLog.info(f"Detected envs with nonzero z in prevlinvelgoal_z at step 1, idx = {th.nonzero(nonzero_zs, as_tuple=False)}")
+                ggLog.info(f"linvel_goal_rel with nonzero z: {linvel_goal_rel[nonzero_zs]}")
+                ggLog.info(f"gravity_rel in those envs: {gravity_rel[nonzero_zs]}")
+        if new_step_count == 2:
+            nonzero_zs = linvel_goal_rel[:,2,2] != 0
+            has_error = th.any(nonzero_zs).item()
+            if has_error:
+                ggLog.info(f"Detected envs with nonzero z in prevprevlinvelgoal_z at step 2, idx = {th.nonzero(nonzero_zs, as_tuple=False)}")
+                ggLog.info(f"linvel_goal_rel with nonzero z: {linvel_goal_rel[nonzero_zs]}")
+                ggLog.info(f"gravity_rel in those envs: {gravity_rel[nonzero_zs]}")
+        if has_error:
+            ggLog.info(f" updated")
+            ggLog.info(f"  linvel_goal_rel = {linvel_goal_rel}")
+            ggLog.info(f"  gravity_rel = {gravity_rel}")
+        th.set_printoptions(threshold=1000)
+
+        # hvr = self._heading_velocity_reward(self._current_state, dt=self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.LAST_STEP_DT].view((self.num_envs,)))
+        # ggLog.info(f"{new_step_count}: hvr = {hvr[0]}")
+        
         # ss = {k:t.size() for k,t in self._current_state.items()}
         # ggLog.info(f"state sizes = {ss}")
         dbg_check(lambda: th.all(self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT] >= 0),

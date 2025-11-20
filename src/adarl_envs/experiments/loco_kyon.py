@@ -103,7 +103,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_pitchnroll_velocity_weight" : 20.0,
         "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      1.0,
-        "reward_position_weight" :            eps,
+        "reward_position_weight" :            0.1,
         "reward_posref_vel_weight" :          1.0,
         "reward_posref_acc_weight":           0.2,
         "reward_sensed_effort_weight" :       eps,
@@ -130,7 +130,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "use_contacts" : False,
         "verbose_infos" : False,
         "video_save_freq" : 0,
-        "walltime_factor" : 1.0
+        "walltime_factor" : 1.0,
+        "minimal_infos" : False
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({        
@@ -155,7 +156,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     })
     highpen_video_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
     highpen_video_eval_env_builder_args.update({
-        "reward_superweight_joint_penalties" : 1.0
+        "reward_superweight_joint_penalties" : 0.5
     })
     eval_conf_video_det = {
         "name" : "video_stoch_highpen",
@@ -266,8 +267,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
 
     eval_configurations = [  
-                            eval_conf_video_det,
-                            eval_conf_video_stoch,
+                            # eval_conf_video_det,
+                            # eval_conf_video_stoch,
                             # eval_conf_run_1ms,
                             # eval_conf_video_norand_det,
                             # #  eval_conf_feasible,

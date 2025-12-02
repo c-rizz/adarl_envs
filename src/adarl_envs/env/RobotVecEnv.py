@@ -29,6 +29,7 @@ from pathlib import Path
 import pprint
 import scipy.stats
 from adarl.utils.base_utils import record_time
+from gymnasium.vector.utils.spaces import batch_space
 
 disable_compile = False
 
@@ -329,6 +330,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     STATE_JOINT_LONGTERM_STATS = "joint_longterm_stats"
     STATE_EXTRINSIC = "extrinsic"
     STATE_INTERNAL = "internal"
+    STATE_RANDOMIZATIONS = "randomizations"
     
     
     INTERNAL_FIELDS = IntEnum("INTERNAL_FIELDS", [  "SAFETY_LIMITS_TRIGGERED",
@@ -355,8 +357,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                    "BODY_REL_LINACC_Z"], start=0)
     ACT_FIELDS = IntEnum("ACT_FIELDS", ["ACTION"], start=0)
 
-    JOINT_LONGTERM_STATS_FIELDS = IntEnum("LONGTERM_STATS_FIELDS", ["AVG_POS"])    
+    JOINT_LONGTERM_STATS_FIELDS = IntEnum("LONGTERM_STATS_FIELDS", ["AVG_POS"])
 
+    RANDOMIZATIONS_FIELDS = IntEnum("RANDOMIZATIONS_FIELDS", [  "FULL_RANDOMIZATION_STATE"]) # Right now put everything together as there are randomizations of different dimensionality
 
     joint_filters = {JOINT_FILTERS.ALL : lambda joint_name, robot_model: True,
                      JOINT_FILTERS.ALL_REVOLUTE : _is_joint_revolute}
@@ -373,6 +376,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         """Shape (envs_num, ctrl_joints)"""
         action_delay_mu : th.Tensor
         """Mean of the action delay in these episodes, shape (envs_num,)"""
+        link_masses_ratios : th.Tensor
+        link_frictions_ratios : th.Tensor
+        link_coms_diffs : th.Tensor
+        joint_armatures_ratios : th.Tensor
+        joint_frictionlosses_ratios : th.Tensor
+        joint_reference_filter_freqs : th.Tensor
 
     @dataclass
     class Statistics:
@@ -631,20 +640,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     verbose_infos = verbose_infos,
                                                     minimal_infos=minimal_infos
                                                     )
-        self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
-                                                    vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
-                                                    vec_init_on_reset = th.ones(size=(adapter.vec_size(),), dtype=th.bool).to(device=th_device, non_blocking=th_device.type=="cuda"),
-                                                    vec_max_ep_steps = th.full(fill_value=maxStepsPerEpisode, size=(adapter.vec_size(),), dtype=th.int64).to(device=th_device, non_blocking=th_device.type=="cuda"),
-                                                    randomized_damping_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.controlled_joints)).clone(),
-                                                    randomized_stiffness_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.controlled_joints)).clone(),
-                                                    action_delay_mu=self._thzeros((adapter.vec_size(),)))
         self._previous_pose_randomization : th.Tensor | None = None
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
         self._always_present_collisions : set[tuple[str,str]] = set()
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
         self._posref_safety_minmmax_diff = self._safe_limits_minmax_j_pve[:,:,1]*self._configuration.posref_safety_period
-        ggLog.info(f"self._posref_safety_minmmax_diff = {self._posref_safety_minmmax_diff}")
-        ggLog.info(f"self._posref_safety_minmmax_vel = {self._posref_safety_minmmax_diff/stepLength_sec}")
         self._posref_saturation_minmmax_diff = self._posref_safety_minmmax_diff*0.999
         self._impulse_disturbances_enabled = impulse_probability_per_sec > 0
         self._homing_held_joints_vec_pvesd = self._configuration.homing_held_joints_pvesd.expand(adapter.vec_size(),len(self._configuration.held_joints),5)
@@ -665,26 +665,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 safe_damping=self._thtens([self._configuration.safe_damping]).repeat(len(controlled_joints_rn)),
                                 th_device=self._configuration.th_device,
                                 generator=self._rng)
-        ggLog.info(f"Built action helper")
-
-        self._state_helper : DictStateHelper
-        self._build_state_helper(adapter)
-        # ggLog.info(f"self._state_helper.observation_names() = {self._state_helper.observation_names()}")
-        # ggLog.info(f"current_state = {self._current_state}")
-        self._safety_limits = self._state_helper.sub_helpers[self.STATE_ROBOT].build_robot_limits(
-                                                    joint_limit_minmax_pve={jn:self._configuration.joint_safe_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
-                                                    stiffness_minmax={jn: self._configuration.joint_safe_limits_minmax_stiffness[jn] for jn in self._configuration.controlled_joints},
-                                                    damping_minmax={jn: self._configuration.joint_safe_limits_minmax_damping[jn] for jn in self._configuration.controlled_joints})
-        # ggLog.info(f"Built safety limits")
         
         self._build_stats()
-        ggLog.info(f"Built stats")
 
         super().__init__(max_episode_steps=maxStepsPerEpisode,
                          step_duration_sec=stepLength_sec,
                          adapter=adapter,
-                         single_state_space=self._state_helper.get_single_space(),
-                         single_observation_space=self._state_helper.get_single_obs_space(),
+                         single_state_space=None,
+                         single_observation_space=None,
                          single_action_space=self._action_helper.get_single_action_space(),
                          single_reward_space=ThBox(low=float("-inf"),high=float("+inf"), shape=tuple(), torch_device=th_device),
                          info_space=None,
@@ -693,11 +681,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                          obs_dtype = self._obs_dtype,
                          seed = seed)
         self._build()
-        # preallocate some things
-        self._abs_gravity_dir = self._thtens([0.0,0.0,-1.0])
-        self._eps_start_stime = self._thzeros(size=(self.num_envs,))
-        self._reset_state(self._all_envs)
-        self._last_obs = self._state_helper.observe(self._current_state)
 
         # Randomizations
         randomized_mass_links = self._expand_link_filters(randomized_mass_links)
@@ -717,20 +700,56 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                          len(self._configuration.randomized_armature_joints)>0 and randomized_armature_ratios>0,
                          len(self._configuration.randomized_frictionloss_joints)>0 and randomized_frictionloss_ratios>0]) 
                     )
-
-
         self._configuration.randomized_mass_ratio_distribution = self._distr_to_tensor(randomized_mass_ratios_distr, size=(len(randomized_mass_links),))
-        self._randomized_mass_link_ids = self._adapter.get_links_ids(self._configuration.randomized_mass_links)
         self._configuration.randomized_com_xyz_diff_distribution = self._distr_to_tensor(randomized_com_xyz_diff_distribution, size=(len(randomized_com_links), 3))
-        self._randomized_com_links_ids = self._adapter.get_links_ids(self._configuration.randomized_com_links)
         self._configuration.randomized_friction_slide_spin_roll_ratios = self._thtens(randomized_friction_slide_spin_roll_ratios).expand((len(randomized_friction_links),3))
-        self._randomized_friction_links_ids = self._adapter.get_links_ids(self._configuration.randomized_friction_links)
         self._configuration.randomized_armature_ratios = self._thtens(randomized_armature_ratios).expand((len(randomized_armature_joints),))
-        self._randomized_armature_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_armature_joints)
         self._configuration.randomized_frictionloss_ratios = self._thtens(randomized_frictionloss_ratios).expand((len(randomized_frictionloss_joints),))
+        self._configuration.randomized_reference_filter_distribution = self._distr_to_tensor(randomized_reference_filter_distribution, size=(1,)) if randomized_reference_filter_distribution is not None else None
+
+
+        self._state_helper : DictStateHelper
+        self._build_state_helper(adapter)
+        self._safety_limits = self._state_helper.sub_helpers[self.STATE_ROBOT].build_robot_limits(
+                                                    joint_limit_minmax_pve={jn:self._configuration.joint_safe_limits_minmax_pve[jn] for jn in self._configuration.controlled_joints},
+                                                    stiffness_minmax={jn: self._configuration.joint_safe_limits_minmax_stiffness[jn] for jn in self._configuration.controlled_joints},
+                                                    damping_minmax={jn: self._configuration.joint_safe_limits_minmax_damping[jn] for jn in self._configuration.controlled_joints})
+
+        self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
+                                                    vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.controlled_joints)).clone(),
+                                                    vec_init_on_reset = th.ones(size=(adapter.vec_size(),), dtype=th.bool).to(device=th_device, non_blocking=th_device.type=="cuda"),
+                                                    vec_max_ep_steps = th.full(fill_value=maxStepsPerEpisode, size=(adapter.vec_size(),), dtype=th.int64).to(device=th_device, non_blocking=th_device.type=="cuda"),
+                                                    randomized_damping_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.controlled_joints)).clone(),
+                                                    randomized_stiffness_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.controlled_joints)).clone(),
+                                                    action_delay_mu = self._thzeros((adapter.vec_size(),)),
+                                                    link_masses_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_mass_links))),
+                                                    link_frictions_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_friction_links), 3)),
+                                                    link_coms_diffs = self._thzeros((adapter.vec_size(), len(self._configuration.randomized_com_links), 3)),
+                                                    joint_armatures_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_armature_joints))),
+                                                    joint_frictionlosses_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_frictionloss_joints))),
+                                                    joint_reference_filter_freqs = self._thzeros((adapter.vec_size(),))
+                                                    )
+
+        # preallocate some things
+        self._randomized_mass_link_ids = self._adapter.get_links_ids(self._configuration.randomized_mass_links)
+        self._randomized_com_links_ids = self._adapter.get_links_ids(self._configuration.randomized_com_links)
+        self._randomized_friction_links_ids = self._adapter.get_links_ids(self._configuration.randomized_friction_links)
+        self._randomized_armature_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_armature_joints)
         self._randomized_frictionloss_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_frictionloss_joints)
 
-        self._configuration.randomized_reference_filter_distribution = self._distr_to_tensor(randomized_reference_filter_distribution, size=(1,)) if randomized_reference_filter_distribution is not None else None
+
+        self.single_state_space=self._state_helper.get_single_space()
+        self.single_observation_space=self._state_helper.get_single_obs_space()
+        self.vec_state_space = batch_space(self.single_state_space, self._adapter.vec_size())
+        self.vec_observation_space = batch_space(self.single_observation_space, self._adapter.vec_size())
+
+        self._abs_gravity_dir = self._thtens([0.0,0.0,-1.0])
+        self._eps_start_stime = self._thzeros(size=(self.num_envs,))
+        self._reset_state(self._all_envs)
+        self._set_current_ep_config(reset_options = {}, vec_mask=self._all_envs)
+        self._last_obs = self._state_helper.observe(self._current_state)
+
+
 
 
         # ggLog.info(f"enable_link_collisions = {enable_link_collisions}")
@@ -743,7 +762,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"Built info helper")
 
         self.set_seeds(th.as_tensor(seed))
-        self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.startup()
         self.initialize_episodes()
         
@@ -957,6 +975,17 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                             observable_subfields=None,
                                                             obs_history_length=1),
                                                         **vsize_dev_type) # type: ignore
+        
+
+        # randomizations_state_size = (   len(self._current_episode_config.link_masses_ratios)+
+        #                                 len(self._current_episode_config.link_frictions_ratios)*3+
+        #                                 len(self._current_episode_config.link_coms_diffs)*3+
+        #                                 len(self._current_episode_config.joint_armatures_ratios)+
+        #                                 len(self._current_episode_config.joint_frictionlosses_ratios)+
+        #                                 len(self._current_episode_config.joint_reference_filter_freqs))
+        # randomizations_
+        
+
         all_observable_substates = [self.STATE_ROBOT,
                                 self.STATE_INTERNAL,
                                 self.STATE_ACT_RAW_HIST,
@@ -1129,17 +1158,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._spawn_defs.append(axes_spawn_def)
         return self._spawn_defs
         
-    def _reset_state(self, vec_mask : th.Tensor, options = {}):
+    def _reset_state(self, vec_mask : th.Tensor):
         resetted_state = self._state_helper.reset_state()
         # ggLog.info(f"resetted_state = {resetted_state}")
         if not hasattr(self, "_current_state") or self._current_state is None:
             self._current_state = resetted_state
         map2_tensor_tree(self._current_state, resetted_state,
                         lambda l1, l2: masked_assign(l1, vec_mask, l2)) # should not be necessary, just for safety
-        self._set_current_ep_config(reset_options = options, vec_mask=vec_mask)
         self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.STEP_COUNT] = self._thtens(-1.) # all other fields will be overwritten accordingly in state_update
         self._current_state[self.STATE_INTERNAL][vec_mask,0,self.INTERNAL_FIELDS.LAST_STEP_DT] = self._thtens(self._intendedStepLength_sec)
         self._current_state[self.STATE_EXTRINSIC][vec_mask,:,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z] = -1.0
+
+        
 
     @override
     def _initialize_episodes(self, vec_mask : th.Tensor | None = None, options = {}) -> None:
@@ -1150,8 +1180,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             from adarl.adapters.MjxAdapter import MjxAdapter
             mjx_adapter : MjxAdapter = self._adapter # type: ignore
             mjx_adapter.reset_model_alterations(vec_mask)
-        # ggLog.info(f"initializing episodes {vec_mask}")
-        self._reset_state(vec_mask=vec_mask, options=options)
+
+
+        self._reset_state(vec_mask=vec_mask)
+        self._set_current_ep_config(reset_options = options, vec_mask=vec_mask)
+
         masked_assign(self._eps_start_stime, vec_mask, self._adapter.getEnvTimeFromStartup())
         
         if isinstance(self._adapter, BaseVecSimulationAdapter):
@@ -1162,32 +1195,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._last_raw_actions = self._last_preprocessed_actions
 
         # ggLog.info(f"initial action {self._last_out_action}, pvesd = {self._last_sent_pvesd}")
-
-        if self._model_randomizations_enabled:
-            if not isinstance_noimport(self._adapter, "MjxAdapter"):
-                raise RuntimeError(f"Model randomizations are currently only supported with MjxAdapter")
-            from adarl.adapters.MjxAdapter import MjxAdapter
-            mjx_adapter : MjxAdapter = self._adapter # type: ignore
-            # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")
-            mjx_adapter.alter_model_rel(  link_masses = ( self._randomized_mass_link_ids,
-                                                            self._sample_distr((self.num_envs, len(self._configuration.randomized_mass_links)), self._configuration.randomized_mass_ratio_distribution)),
-                                            link_frictions = (self._randomized_friction_links_ids,
-                                                              (self._thrand(size=(self.num_envs,)+self._configuration.randomized_friction_slide_spin_roll_ratios.size())*2-1)*self._configuration.randomized_friction_slide_spin_roll_ratios),
-                                            joint_armature_ratios = ( self._randomized_armature_joints_ids,
-                                                            (self._thrand(size=(self.num_envs, len(self._configuration.randomized_armature_ratios)))*2-1)*self._configuration.randomized_armature_ratios),
-                                            joint_frictionloss_ratios = ( self._randomized_frictionloss_joints_ids,
-                                                            (self._thrand(size=(self.num_envs, len(self._configuration.randomized_frictionloss_ratios)))*2-1)*self._configuration.randomized_frictionloss_ratios))
-            mjx_adapter.alter_model_sum(  com_position_diffs = (self._randomized_com_links_ids,
-                                                                  self._sample_distr(size=(self.num_envs, len(self._configuration.randomized_com_links),3),
-                                                                                     distribution=self._configuration.randomized_com_xyz_diff_distribution),),
-                                            com_quatxyzw_diffs = None)
-        if self._configuration.randomized_reference_filter_distribution != None and not self._distr_is_constant(self._configuration.randomized_reference_filter_distribution):
-            if not isinstance_noimport(self._adapter, "MjxJointImpedanceAdapter"):
-                raise RuntimeError(f"Reference filter randomizations are currently only supported with MjxJointImpedanceAdapter")
-            from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
-            mjx_adapter : MjxJointImpedanceAdapter = self._adapter # type: ignore
-            new_filters_freqs = self._sample_distr((self.num_envs,), self._configuration.randomized_reference_filter_distribution)
-            mjx_adapter.set_reference_filter(new_filters_freqs)
             
         self._update_state(self._get_adapter_data())
         self._update_stats()
@@ -1233,18 +1240,52 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         else:
             vec_init_on_reset = th.ones((selected_vecs_num,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
         # ggLog.info(f"initial_jpose = {initial_joint_pose}, homing = {homing}")
-        masked_assign(self._current_episode_config.vec_initial_ctrl_joint_pose, vec_mask, initial_ctrl_jposes)
         ctrl_joints_num = len(self._configuration.controlled_joints)
-        damping_ratios = self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.randomized_gains_damping_ratio_epstd+1
+        damping_ratios =    self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.randomized_gains_damping_ratio_epstd+1
+        stiffness_ratios =  self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.randomized_gains_stiffness_ratio_epstd+1
+        masked_assign(self._current_episode_config.vec_initial_ctrl_joint_pose, vec_mask, initial_ctrl_jposes)
         masked_assign(self._current_episode_config.randomized_damping_factor, vec_mask, damping_ratios)
-        stiffness_ratios = self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.randomized_gains_stiffness_ratio_epstd+1
         masked_assign(self._current_episode_config.randomized_stiffness_factor, vec_mask, stiffness_ratios)
         masked_assign(self._current_episode_config.vec_init_on_reset, vec_mask, vec_init_on_reset)
         masked_assign(self._current_episode_config.vec_max_ep_steps, vec_mask, maxStepsPerEpisode)
-        self.set_max_episode_steps(self._current_episode_config.vec_max_ep_steps)
-        delay_mu, delay_std = self._configuration.action_delay_epmustd_ststd[:2]
-        self._current_episode_config.action_delay_mu = th.clamp(self._thrandn_clamp(size=(self.num_envs,), min=-5, max=5)*delay_std+delay_mu, min=0)
         # ggLog.info(f"_current_episode_config = {self._current_episode_config}")
+        if self._model_randomizations_enabled:
+            if not isinstance_noimport(self._adapter, "MjxAdapter"):
+                raise RuntimeError(f"Model randomizations are currently only supported with MjxAdapter")
+            from adarl.adapters.MjxAdapter import MjxAdapter
+            mjx_adapter : MjxAdapter = self._adapter # type: ignore
+            # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")
+            link_masses_ratios =            self._sample_distr((self.num_envs, len(self._configuration.randomized_mass_links)), self._configuration.randomized_mass_ratio_distribution)
+            link_coms_diffs =               self._sample_distr(size=(self.num_envs, len(self._configuration.randomized_com_links),3), distribution=self._configuration.randomized_com_xyz_diff_distribution)
+            link_frictions_ratios =         (self._thrand(size=(self.num_envs,)+self._configuration.randomized_friction_slide_spin_roll_ratios.size())*2-1)*self._configuration.randomized_friction_slide_spin_roll_ratios
+            joint_armatures_ratios =        (self._thrand(size=(self.num_envs, len(self._configuration.randomized_armature_ratios)))*2-1)*self._configuration.randomized_armature_ratios
+            joint_frictionlosses_ratios =   (self._thrand(size=(self.num_envs, len(self._configuration.randomized_frictionloss_ratios)))*2-1)*self._configuration.randomized_frictionloss_ratios
+            mjx_adapter.alter_model_rel(link_masses =               (self._randomized_mass_link_ids, link_masses_ratios),
+                                        link_frictions =            (self._randomized_friction_links_ids, link_frictions_ratios),
+                                        joint_armature_ratios =     (self._randomized_armature_joints_ids, joint_armatures_ratios),
+                                        joint_frictionloss_ratios = (self._randomized_frictionloss_joints_ids, joint_frictionlosses_ratios))
+            mjx_adapter.alter_model_sum(com_position_diffs =        (self._randomized_com_links_ids, link_coms_diffs),
+                                        com_quatxyzw_diffs =        None)
+            masked_assign(self._current_episode_config.link_masses_ratios,          vec_mask, link_masses_ratios)
+            masked_assign(self._current_episode_config.link_frictions_ratios,       vec_mask, link_frictions_ratios)
+            masked_assign(self._current_episode_config.joint_armatures_ratios,      vec_mask, joint_armatures_ratios)
+            masked_assign(self._current_episode_config.joint_frictionlosses_ratios, vec_mask, joint_frictionlosses_ratios)
+            masked_assign(self._current_episode_config.link_coms_diffs,             vec_mask, link_coms_diffs)
+        
+        if self._configuration.randomized_reference_filter_distribution != None and not self._distr_is_constant(self._configuration.randomized_reference_filter_distribution):
+            if not isinstance_noimport(self._adapter, "MjxJointImpedanceAdapter"):
+                raise RuntimeError(f"Reference filter randomizations are currently only supported with MjxJointImpedanceAdapter")
+            from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
+            mjx_adapter : MjxJointImpedanceAdapter = self._adapter # type: ignore
+            new_filters_freqs = self._sample_distr((self.num_envs,), self._configuration.randomized_reference_filter_distribution)
+            mjx_adapter.set_reference_filter(new_filters_freqs)
+            masked_assign(self._current_episode_config.joint_reference_filter_freqs, vec_mask, new_filters_freqs)
+        
+        delay_mu, delay_std = self._configuration.action_delay_epmustd_ststd[:2]
+        action_delay_mu = th.clamp(self._thrandn_clamp(size=(self.num_envs,), min=-5, max=5)*delay_std+delay_mu, min=0)
+        masked_assign(self._current_episode_config.action_delay_mu, vec_mask, action_delay_mu)
+
+        self.set_max_episode_steps(self._current_episode_config.vec_max_ep_steps)
 
 
     def _realworld_robot_init_move(self, vec_mask : th.Tensor):
@@ -1310,7 +1351,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._adapter.setLinksStateDirect(link_names=[self._configuration.main_body_link],
                                               link_states_pose_vel=th.cat([self._configuration.homing_body_pose_xyz_xyzw,
                                                                            th.zeros((6,), device=self._configuration.th_device, dtype=th.float32)])
-                                                                           .expand(self._adapter.vec_size(), 1, 13).clone(),
+                                                                           .expand(self._adapter.vec_size(), 1, 13),
                                               vec_mask=th.logical_and(self._current_episode_config.vec_init_on_reset, vec_mask))
         not_resetting_sims = th.logical_not(self._current_episode_config.vec_init_on_reset)
         vjpose = self._current_episode_config.vec_initial_ctrl_joint_pose
@@ -1380,19 +1421,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     #                                 launch_file_args={"gui":"false"})
                     self._arrow_base = ("arrow","arrow_link")
                     self._arrow_yellow = ("arrow_yellow","arrow_link")
-        elif isinstance_noimport(self._adapter, "VecZmqXbotAdapter"):
-            if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("ZmqXbotAdapter")):
-                if self._configuration.real:
-                    raise NotImplementedError()
-                else:
-                    # self._adapter.build_scenario(   models = [],
-                    #                                 launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path(  "adarl_envs",
-                    #                                                                                                 "ros/all_kyon_mujoco.launch"),
-                    #                                 launch_file_args={"gui":"false"})
-                    self._arrow_base = ("arrow","arrow_link")
-                    self._arrow_yellow = ("arrow_yellow","arrow_link")
-            else:
-                raise NotImplementedError("Unexpected sub adapter "+self._adapter.sub_adapter())
         else:
             raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         
@@ -1428,6 +1456,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             threshold=1.0)
         ggLog.info(f"Always present self collisions = {pprint.pformat(self._always_present_collisions)}")
         self._adapter.set_monitored_joints(self._configuration.controlled_joints)
+        self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.set_impedance_controlled_joints(self._configuration.all_controlled_joints)
         # ggLog.info("Initialized RobotVecEnv scenario")
 
@@ -1553,11 +1582,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         record_time("RobotVecEnv.post_step()")
         adapter_data = self._get_adapter_data()
         self._post_step_optimized(adapter_data)
-        # self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # TODO: remove, this shouldn't be necessary, just here out of caution, unless it's needed for cudagraphs
+        self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # just here out of caution (on 20/11/2025 it was still necessary, maybe...)
         record_time("RobotVecEnv.post_step() end")
 
 
-    @th.compile(mode="max-autotune", disable=disable_compile)
+    # @th.compile(mode="max-autotune", disable=disable_compile) # this seems to cause issues with the rolling buffer used in states with history
     def _post_step_optimized(self, adapter_data):
         # t0 = time.monotonic()
         self._update_state(adapter_data)
@@ -1568,8 +1597,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"on_step(): {self._current_state[self.STATE_ROBOT][0,0]}")
 
     # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
-    def _compute_extr_from_bodystate(self, body_abs_linvel_xyz_vec, body_abs_angvel_xyz_vec, bstates_v_13):
-        conj_body_abs_quat_xyzw_vec = th_quat_conj(bstates_v_13[:,3:7])
+    def _compute_extr_from_bodystate(self, body_abs_linvel_xyz_vec, body_abs_angvel_xyz_vec, body_abs_quat_xyzw_vec):
+        conj_body_abs_quat_xyzw_vec = th_quat_conj(body_abs_quat_xyzw_vec)
         vec_body_rel_gravity_dir = th_quat_rotate_py(self._abs_gravity_dir.expand_as(body_abs_linvel_xyz_vec), conj_body_abs_quat_xyzw_vec)
         vec_body_rel_linvel_xyz = th_quat_rotate_py(body_abs_linvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
         vec_body_rel_angvel_xyz = th_quat_rotate_py(body_abs_angvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
@@ -1588,12 +1617,17 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         t1 = time.monotonic()
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             vec_bodystates_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
-            vec_body_rel_linacc_xyz = self._adapter.get_local_link_linear_acceleration(self._main_body_link_ids)[:,0,:]
-            vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
-            vec_body_ground_dist = vec_bodystates_13[:,2]  
+            body_abs_quat_xyzw_vec  = vec_bodystates_13[:,3:7]
+            # vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
+            # vec_body_abs_angvel_xyz = vec_bodystates_13[:,10:13]
+            vec_linkstate_stats = self._adapter.get_links_state_step_stats()
+            vec_body_abs_linvel_xyz = vec_linkstate_stats[:,2,0,0:3]
+            vec_body_abs_angvel_xyz = vec_linkstate_stats[:,2,0,3:6]
             vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz = self._compute_extr_from_bodystate(body_abs_linvel_xyz_vec = vec_body_abs_linvel_xyz,
-                                                                                                                           body_abs_angvel_xyz_vec = vec_bodystates_13[:,10:13],
-                                                                                                                           bstates_v_13 = vec_bodystates_13)
+                                                                                                                           body_abs_angvel_xyz_vec = vec_body_abs_angvel_xyz,
+                                                                                                                           body_abs_quat_xyzw_vec = body_abs_quat_xyzw_vec)
+            vec_body_ground_dist = vec_bodystates_13[:,2]              
+            vec_body_rel_linacc_xyz = self._adapter.get_local_link_linear_acceleration(self._main_body_link_ids)[:,0,:]
             if self._configuration.enable_dbg_checks:
                 dbg_check(lambda: th.all(th.isfinite(vec_bodystates_13)),
                         lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(vec_bodystates_13)).nonzero()}: {vec_bodystates_13[th.logical_not(th.isfinite(vec_bodystates_13))]} : {vec_bodystates_13}",
@@ -1713,7 +1747,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_robot_state : th.Tensor,
                                                     vec_body_rel_linacc_xyz : th.Tensor,
                                                     vec_time_from_start : th.Tensor):
-
+        
         vec_step_count = vec_internal_state[:,self.INTERNAL_FIELDS.STEP_COUNT]
         has_settled = (vec_step_count > 10).view((self.num_envs,))
         prev_vec_time_from_start = vec_internal_state[:,self.INTERNAL_FIELDS.SIM_TIME]
@@ -1815,54 +1849,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                   async_assert=True,
                   assert_msg="asynchronous terminations are not supported yet")
         new_step_count = new_step_counts[0]
-        # ggLog.info(f"Updating state at step_count={new_step_count}")
-        # ggLog.info(f" instantaneous linvel_goal_rel = {instantaneous_state[self.STATE_LOCOMOTION][self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X],
-        #                                                instantaneous_state[self.STATE_LOCOMOTION][self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y],
-        #                                                instantaneous_state[self.STATE_LOCOMOTION][self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z]}")
-        # ggLog.info(f" instantaneous gravity_rel     = {instantaneous_state[self.STATE_EXTRINSIC][self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X],
-        #                                                instantaneous_state[self.STATE_EXTRINSIC][self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y],
-        #                                                instantaneous_state[self.STATE_EXTRINSIC][self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z]}")
-        # ggLog.info(f"  linvel_goal_rel = {self._current_state[self.STATE_LOCOMOTION][:, :,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0]}")
-        # ggLog.info(f"  gravity_rel = {self._current_state[self.STATE_EXTRINSIC][:,:,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0]}")
         if new_step_count == 0: # cuda sync
             self._current_state = self._state_helper.reset_state(instantaneous_state) # fills up history with current instantaneous state
         else:
             self._state_helper.update(instantaneous_state, state=self._current_state) # rolls down the history and adds current state
-        linvel_goal_rel = self._current_state[self.STATE_LOCOMOTION][:, :,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X:self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z+1,0]
-        gravity_rel = self._current_state[self.STATE_EXTRINSIC][:,:,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0]
-        
-        th.set_printoptions(threshold=1000_000)
-        has_error = False
-        if new_step_count == 0:
-            nonzero_zs = linvel_goal_rel[:,0,2] != 0
-            has_error = th.any(nonzero_zs).item()
-            if has_error:
-                ggLog.info(f"Detected envs with nonzero z in linvelgoal_z at step 0, idx = {th.nonzero(nonzero_zs, as_tuple=False)}")
-                ggLog.info(f"linvel_goal_rel with nonzero z: {linvel_goal_rel[nonzero_zs]}")
-                ggLog.info(f"gravity_rel in those envs: {gravity_rel[nonzero_zs]}")
-        if new_step_count == 1:
-            nonzero_zs = linvel_goal_rel[:,1,2] != 0
-            has_error = th.any(nonzero_zs).item()
-            if has_error:
-                ggLog.info(f"Detected envs with nonzero z in prevlinvelgoal_z at step 1, idx = {th.nonzero(nonzero_zs, as_tuple=False)}")
-                ggLog.info(f"linvel_goal_rel with nonzero z: {linvel_goal_rel[nonzero_zs]}")
-                ggLog.info(f"gravity_rel in those envs: {gravity_rel[nonzero_zs]}")
-        if new_step_count == 2:
-            nonzero_zs = linvel_goal_rel[:,2,2] != 0
-            has_error = th.any(nonzero_zs).item()
-            if has_error:
-                ggLog.info(f"Detected envs with nonzero z in prevprevlinvelgoal_z at step 2, idx = {th.nonzero(nonzero_zs, as_tuple=False)}")
-                ggLog.info(f"linvel_goal_rel with nonzero z: {linvel_goal_rel[nonzero_zs]}")
-                ggLog.info(f"gravity_rel in those envs: {gravity_rel[nonzero_zs]}")
-        if has_error:
-            ggLog.info(f" updated")
-            ggLog.info(f"  linvel_goal_rel = {linvel_goal_rel}")
-            ggLog.info(f"  gravity_rel = {gravity_rel}")
-        th.set_printoptions(threshold=1000)
-
-        # hvr = self._heading_velocity_reward(self._current_state, dt=self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.LAST_STEP_DT].view((self.num_envs,)))
-        # ggLog.info(f"{new_step_count}: hvr = {hvr[0]}")
-        
         # ss = {k:t.size() for k,t in self._current_state.items()}
         # ggLog.info(f"state sizes = {ss}")
         dbg_check(lambda: th.all(self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT] >= 0),
@@ -1883,8 +1873,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
     @override
     def get_infos(self,state, labels : dict[str, th.Tensor] | None = None) -> dict[str, th.Tensor]:
-        if self._configuration.minimal_infos:
-            return {}
         i : dict[str, th.Tensor] = {}
         i.update(self._stats)
         i["ep_step_count"] = self._ep_step_counter
@@ -1899,6 +1887,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         i["joint_pos_error_instant"] = th.mean(th.abs(joint_pose - normhoming), dim=1)
         sub_rews = {}
         i["tot_reward"] = self.compute_rewards(state, sub_rews)
+        i["tot_reward_sum"] = i["tot_reward"].sum(dim=1)
         i["rewards"] = th.stack(list(sub_rews.values()), dim = 1) 
         i["safety_limits_triggered"] = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED]
         i["safety_posref_triggered"] = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED]

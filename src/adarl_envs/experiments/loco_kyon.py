@@ -29,7 +29,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
     
     eval_freq = 10
-    r = 1.0 # randomization strength
+    r = 0.0 # randomization strength
     n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
@@ -85,14 +85,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_reference_filter_distribution" : ("uniform", (20.0-15*r, 20.0+15*r)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "reward_superweight_joint_penalties" : ["loguniform", (0.01, 0.5)],
+        "reward_superweight_joint_penalties" : ["loguniform", (0.01, 1.0)],
         "reward_acceleration_weight" :        eps,
         "reward_actacc_weight" :              eps,
         "reward_actdiff_weight" :             eps,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
         "reward_failure_weight" :             eps,
-        "reward_feet_air_time_weight" :       eps,
+        "reward_feet_air_time_weight" :       20.0,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      eps,
         "reward_heading_velocity_weight" :    eps,
@@ -104,13 +104,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      1.0,
         "reward_position_weight" :            0.1,
-        "reward_posref_vel_weight" :          1.0,
-        "reward_posref_acc_weight":           0.2,
+        "reward_posref_vel_weight" :          0.1,
+        "reward_posref_acc_weight":           1.0,
         "reward_sensed_effort_weight" :       eps,
         "reward_slip_weight" :                eps,
         "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,
-        "reward_torque_weight" :              eps,
+        "reward_torque_weight" :              1.0,
         "reward_torquediff_weight" :          eps,
         "reward_torqueref_weight" :           eps,
         "reward_tracking_weight" :            2.0,
@@ -158,9 +158,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     highpen_video_eval_env_builder_args.update({
         "reward_superweight_joint_penalties" : 0.5
     })
-    eval_conf_video_det = {
+    video_stoch_highpen = {
         "name" : "video_stoch_highpen",
-        "deterministic" : True,
+        "deterministic" : False,
         "eval_freq_ep" : eval_freq*train_envs,
         "eval_eps" : 100,
         "env_builder_args" : highpen_video_eval_env_builder_args,
@@ -174,19 +174,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "env_builder_args" : video_eval_env_builder_args,
         "num_envs" : 100,
     }
-    # video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
-    # video_norand_eval_env_builder_args["enable_rendering"] = True
-    # video_norand_eval_env_builder_args["verbose_infos"] = True
-    # video_norand_eval_env_builder_args["video_save_freq"] = 1
-    # video_norand_eval_env_builder_args["initial_pose_randomization_range"] = 0.0
-    # eval_conf_video_norand_det = {
-    #     "name" : "video_norand_stoch",
-    #     "deterministic" : False,
-    #     "eval_freq_ep" : 10*train_envs,
-    #     "eval_eps" : 1,
-    #     "env_builder_args" : video_norand_eval_env_builder_args,
-    #     "num_envs" : 1
-    # }
+    video_det_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
+    eval_conf_video_det = {
+        "name" : "video_det",
+        "deterministic" : True,
+        "eval_freq_ep" : 10*train_envs,
+        "eval_eps" : 100,
+        "env_builder_args" : video_det_eval_env_builder_args,
+        "num_envs" : 100
+    }
     # run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
     # run_1ms_env_builder_args["goal_speed_minmax"] = (1,1)
     # run_1ms_env_builder_args["enable_rendering"] = True
@@ -224,39 +220,41 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "num_envs" : 1
     # }
 
-    long_gamma = 0.98
+    gamma_long = 0.99
+    gamma_short = 0.0
     gammas = {
-        "acceleration" :        long_gamma,
-        "actacc" :              0.0,
-        "actdiff" :             0.0,
-        "contacts" :            long_gamma,
-        "failure" :             long_gamma,
-        "feet_air_time" :       long_gamma,
-        "feet_ground_time" :    long_gamma,
-        "feet_on_ground" :      long_gamma,
-        "heading" :             long_gamma,
-        "heading_velocity" :    long_gamma,
-        "health" :              long_gamma,
-        "height_position" :     long_gamma,
-        "height_velocity" :     long_gamma,
-        "pitchnroll" :          long_gamma,
-        "pitchnroll_velocity" : long_gamma,
-        "position" :            long_gamma,
-        "position_limit" :      long_gamma,
-        "posref_vel" :          0.0,
-        "posref_acc" :          0.0,
-        "sensed_effort" :       long_gamma,
-        "slip" :                long_gamma,
-        "stand_position" :      long_gamma,
-        "torque" :              long_gamma,
-        "torque_limit" :        long_gamma,
-        "torque_refs" :         0.0,
-        "torquediff" :          0.0,
-        "tracking" :            long_gamma,
-        "velocity" :            long_gamma,
-        "velocity_refs" :       0.0,
-        "velocity_limit" :      long_gamma
+        "acceleration" :        gamma_long,
+        "actacc" :              gamma_short,
+        "actdiff" :             gamma_short,
+        "contacts" :            gamma_long,
+        "failure" :             gamma_long,
+        "feet_air_time" :       gamma_long,
+        "feet_ground_time" :    gamma_long,
+        "feet_on_ground" :      gamma_long,
+        "heading" :             gamma_long,
+        "heading_velocity" :    gamma_long,
+        "health" :              gamma_long,
+        "height_position" :     gamma_long,
+        "height_velocity" :     gamma_long,
+        "pitchnroll" :          gamma_long,
+        "pitchnroll_velocity" : gamma_long,
+        "position" :            gamma_long,
+        "position_limit" :      gamma_long,
+        "posref_vel" :          gamma_short,
+        "posref_acc" :          gamma_short,
+        "sensed_effort" :       gamma_long,
+        "slip" :                gamma_long,
+        "stand_position" :      gamma_long,
+        "torque" :              gamma_long,
+        "torque_limit" :        gamma_long,
+        "torque_refs" :         gamma_short,
+        "torquediff" :          gamma_short,
+        "tracking" :            gamma_long,
+        "velocity" :            gamma_long,
+        "velocity_refs" :       gamma_short,
+        "velocity_limit" :      gamma_long
     }
+    # gammas = long_gamma
 
     # disabled_rewards = []
     # for k, v in env_builder_args.items():
@@ -267,17 +265,17 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
 
     eval_configurations = [  
-                            # eval_conf_video_det,
-                            # eval_conf_video_stoch,
+                            video_stoch_highpen,
+                            eval_conf_video_stoch,
                             # eval_conf_run_1ms,
-                            # eval_conf_video_norand_det,
+                            eval_conf_video_det,
                             # #  eval_conf_feasible,
                             # #  eval_conf_video_feasible,
                             # #  eval_conf_video_jump_feasible
                         ]
     
     annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
-                                     start_target=-1.5,
+                                     start_target=-1.0,
                                      end_target=-5.0,
                                      start_reference_threshold=0.5)
 
@@ -298,8 +296,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     gamma=gammas,
                                                     target_tau = 0.001,
                                                     batch_size=16384,
-                                                    buffer_size=(8*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
-                                                    total_steps=800_000_000,
+                                                    buffer_size=(6*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
+                                                    total_steps=1_500_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=50,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),

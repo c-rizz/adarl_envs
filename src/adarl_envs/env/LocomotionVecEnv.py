@@ -22,7 +22,7 @@ import numpy as np
 import pprint
 import torch as th
 
-disable_compile = True
+disable_compile = False
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -93,6 +93,74 @@ def flattened_penalty_reward(x, max_rew : float, exponent : float, flattening_sc
         In formulas (not squashed): x^exponent * (-e^(-x^2/flattening_scale)+1)
     """
     return -th.tanh((th.pow(th.abs(x),exponent)*(1-th.exp(-(x/flattening_scale)**2)))/max_rew)*max_rew
+
+@th.jit.script
+def smooth_clip(x : th.Tensor, max_value : float, softness : float) -> th.Tensor:
+    """ Smoothly clips x to be under max_value, with a softness parameter.
+
+    Parameters
+    ----------
+    x : th.Tensor
+        Input tensor
+    max_value : th.Tensor
+        Maximum value
+    softness : th.Tensor
+        Softness parameter, lower values result in a softer clipping
+
+    Returns
+    -------
+    th.Tensor
+        Clipped tensor
+    """
+    return x/(1+th.abs(x/max_value)**softness)**(1/softness)
+
+def flattener(x: th.Tensor, scale: float, power : float) -> th.Tensor:
+    """ Flattens the input tensor x using a smooth clipping function.
+
+    Parameters
+    ----------
+    x : th.Tensor
+        Input tensor
+    scale : float
+        Scale parameter for the flattening
+
+    Returns
+    -------
+    th.Tensor
+        Flattened tensor
+    """
+    return x * (1 - th.exp(-(x**power/scale)))
+
+@th.jit.script
+def norm_penalty(x : th.Tensor, norm : float, power : float, max_val : float = 1.0, squash_smoothness : float = 4.0, flattening_scale : float = 0.0, flattening_power : float = 2.0) -> th.Tensor:
+    """ A joint penalty applied to the norm of the vectors in x. The penalty is computed as the norm raised to the power of 'power',
+        and then flattened using a smooth clipping function.
+
+    Parameters
+    ----------
+    x : th.Tensor
+        Input tensor (batch_size, n_dimensions)
+    norm : float
+        Norm to use for the penalty
+    power : float
+        Power to raise the norm to
+    max_val : float
+        Maximum value for the penalty
+    squash_smoothness : float
+        Smoothness parameter for the clipping
+
+    Returns
+    -------
+    th.Tensor
+        Penalty tensor
+    """
+    joint_norms = th.linalg.norm(x, dim=1, ord=norm)
+    base_penalty = th.pow(joint_norms, power)
+    squashed_penalties = smooth_clip(base_penalty, max_val, squash_smoothness)
+    if flattening_scale > 0.0:
+        flattened_penalties = flattener(squashed_penalties, flattening_scale, flattening_power)
+        return -flattened_penalties
+    return -squashed_penalties
 
 def planar_tracking_error_vec(body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_vec_xyz : th.Tensor, goal_rel_linvel_vec_xyz : th.Tensor) -> th.Tensor:
         """_summary_
@@ -770,7 +838,7 @@ class LocomotionVecEnv(RobotVecEnv):
         ggLog.info(f"Built state/obs/action helpers")
 
     def _reset_state(self, vec_mask : th.Tensor, options = {}):
-        super()._reset_state(vec_mask, options)
+        super()._reset_state(vec_mask)
         self._current_state[self.STATE_LOCOMOTION][vec_mask,:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X] = 1.0
         self._current_state[self.STATE_LOCOMOTION][vec_mask,:,self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X] = 1.0
 
@@ -1263,6 +1331,7 @@ class LocomotionVecEnv(RobotVecEnv):
         posref_vel           = (state_robot[:,0,:,5] - state_robot[:,1,:,5])/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         prev_posref_vel      = (state_robot[:,2,:,5] - state_robot[:,1,:,5])/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         norm_posref_vel      = (state_robot_norm[:,0,:,5] - state_robot_norm[:,1,:,5])/2/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
+        posref_acc    = (posref_vel-prev_posref_vel)/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         # normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
         max_senseff = 1_000 # max expected sensed effort (not really a strict max)
         max_jacc = 1_000 # max expected joint acceleration (not really a strict max)
@@ -1278,7 +1347,7 @@ class LocomotionVecEnv(RobotVecEnv):
         torque_safenorm     = state_robot_safenorm[:,0,:,2]
 
         reward_sensed_effort    = joint_penalty_reward(norm_senseff,     max_rew=1.0, exponent=8.0, reduction="max")
-        reward_cmdtorque        = joint_penalty_reward(normcmdtorques,   max_rew=max_rew, exponent=4.0)
+        reward_cmdtorque        = norm_penalty(normcmdtorques,   norm=4, power=2, max_val=1.0, squash_smoothness=4.0)
         reward_velocity         = joint_penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
         # reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=8.0, flattening_scale=0.1)
         reward_acceleration     = flattened_joint_penalty_reward(normaccelerations, max_rew=max_rew, exponent=2.0, flattening_scale=0.1)
@@ -1294,11 +1363,11 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_velocity_refs    = joint_penalty_reward(norm_velocity_refs,   max_rew=max_rew,exponent=2)
         reward_torque_refs      = joint_penalty_reward(norm_torque_refs,     max_rew=max_rew,exponent=2)
         # reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
-        posref_threshold = 7.0
-        reward_posref_vel       = joint_penalty_reward(posref_vel/posref_threshold,     max_rew=1.0,exponent=5, presquash_factor=1)
-
-        posref_acc    = (posref_vel-prev_posref_vel)/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
-        reward_posref_acc = flattened_joint_penalty_reward(posref_acc/1_000, max_rew=1.0, exponent=2.0, presquash_factor=100, flattening_scale=0.01)
+        # posref_threshold = 7.0
+        # reward_posref_vel       = joint_penalty_reward(posref_vel/posref_threshold,     max_rew=1.0,exponent=5, presquash_factor=1)
+        reward_posref_vel       = norm_penalty(posref_vel/10,     norm=4, power=2, max_val=1.0, squash_smoothness=4.0, flattening_scale=0.005, flattening_power=4.0)
+        reward_posref_acc       = norm_penalty(posref_acc/2_000,  norm=4, power=1, max_val=1.0, squash_smoothness=4.0)
+        # reward_posref_acc = flattened_joint_penalty_reward(posref_acc/1_000, max_rew=1.0, exponent=2.0, presquash_factor=100, flattening_scale=0.01)
 
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
         #                                     zero_rew_dist=self._thtens(0.02))
@@ -1457,8 +1526,9 @@ class LocomotionVecEnv(RobotVecEnv):
                     "slip" :               current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_SLIP],
                     "heading_velocity":    current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEADING_VELOCITY]}
         for k in sub_rewards_return:
-            sub_rewards_return[k] = self._loco_conf.reward_scale*sub_rewards_return[k]*weights[k]
-            sub_rewards_return[k] = sub_rewards_return[k]*th.where(failed, 0.001, 1.0)
+            r = sub_rewards_return[k]
+            r = self._loco_conf.reward_scale*r*weights[k]
+            sub_rewards_return[k] = r*th.where(th.logical_and(failed, r>0), 0.001, 1.0)
         # scaled_rewards_vec = th.stack(list(sub_rewards_return.values()), dim = 1)
         # sub_rewards_return["failure"] = -th.sum(scaled_rewards_vec*(scaled_rewards_vec>0), dim =1)*failed*weights["failure"] # negate all the positive rewards
         for k in sub_rewards_return:
@@ -1506,7 +1576,14 @@ class LocomotionVecEnv(RobotVecEnv):
 
     def _update_state(self, adapter_data):
         super()._update_state(adapter_data)
-        self._heading_velocity_reward(self._current_state, dt=self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.LAST_STEP_DT].view((self.num_envs,)))
+        # self._heading_velocity_reward(self._current_state, dt=self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.LAST_STEP_DT].view((self.num_envs,)))
+
+        # step_counts = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT,0]
+        # state_loco = self._current_state[self.STATE_LOCOMOTION]
+        # buff_filled = step_counts >= state_loco.shape[1]
+        # dbg_check(lambda: th.all((state_loco[:,0]!=state_loco[:,1])|~buff_filled), assert_msg="Locomotion state history repeats!", async_assert=True)
+        # dbg_check(lambda: th.all((state_loco[:,1]!=state_loco[:,2])|~buff_filled), assert_msg="Locomotion state history repeats!", async_assert=True)
+        # Update the buffers
 
 
 
@@ -1636,6 +1713,7 @@ class LocomotionVecEnv(RobotVecEnv):
         i["actdiff_weight"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTDIFF]
         i["actacc_weight"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTACC]
         i["posrefvel_weight"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_VEL]
+        i["posrefacc_weight"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_ACC]
         
         _, i["height_velocity"], i["goal_height_velocity"], last_dt, i["height_err_raw"] = self._height_velocity_reward(curr_state_extr_vec = curr_extri_state,
                                                                                                        current_state_locom_vec = curr_locom_state,

@@ -7,7 +7,7 @@ from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 from adarl.utils.utils import (LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection, isinstance_noimport,
                                 quat_xyzw_between_vecs_py, masked_assign, quat_mul_xyzw, quat_angle_xyzw, vectors_angle, ros_rpy_to_quaternion_xyzw_th)
 from adarl.utils.vec_state_helper import ThBoxStateHelper, unnormalize, normalize
-from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionDef, DistributionDefTh
+from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionDef, DistributionDefTh, DistributionTh
 from dataclasses import dataclass, field, asdict
 from enum import Enum, IntEnum
 from git import Tree
@@ -115,7 +115,7 @@ def smooth_clip(x : th.Tensor, max_value : float, softness : float) -> th.Tensor
     return x/(1+th.abs(x/max_value)**softness)**(1/softness)
 
 def flattener(x: th.Tensor, scale: float, power : float) -> th.Tensor:
-    """ Flattens the input tensor x using a smooth clipping function.
+    """ Flattens the input tensor x using a smooth clipping function. The flattening is done by multiplying x with (1 - exp(-(x**power/scale))).
 
     Parameters
     ----------
@@ -132,7 +132,14 @@ def flattener(x: th.Tensor, scale: float, power : float) -> th.Tensor:
     return x * (1 - th.exp(-(x**power/scale)))
 
 @th.jit.script
-def norm_penalty(x : th.Tensor, norm : float, power : float, max_val : float = 1.0, squash_smoothness : float = 4.0, flattening_scale : float = 0.0, flattening_power : float = 2.0) -> th.Tensor:
+def norm_penalty(x : th.Tensor,
+                 norm : float,
+                 power : float,
+                 squash_max : float = 1.0,
+                 squash_smoothness : float = 4.0,
+                 flattening_scale : float = 0.0,
+                 flattening_power : float = 2.0,
+                 scale : float = 1.0) -> th.Tensor:
     """ A joint penalty applied to the norm of the vectors in x. The penalty is computed as the norm raised to the power of 'power',
         and then flattened using a smooth clipping function.
 
@@ -148,6 +155,12 @@ def norm_penalty(x : th.Tensor, norm : float, power : float, max_val : float = 1
         Maximum value for the penalty
     squash_smoothness : float
         Smoothness parameter for the clipping
+    flattening_scale : float
+        Scale parameter for the flattening, see flattener()
+    flattening_power : float
+        Power parameter for the flattening, see flattener()
+    scaling : float
+        Output will be scaled to be maximum this value
 
     Returns
     -------
@@ -156,11 +169,14 @@ def norm_penalty(x : th.Tensor, norm : float, power : float, max_val : float = 1
     """
     joint_norms = th.linalg.norm(x, dim=1, ord=norm)
     base_penalty = th.pow(joint_norms, power)
-    squashed_penalties = smooth_clip(base_penalty, max_val, squash_smoothness)
+    squashed_penalties = smooth_clip(base_penalty, squash_max, squash_smoothness)
     if flattening_scale > 0.0:
         flattened_penalties = flattener(squashed_penalties, flattening_scale, flattening_power)
-        return -flattened_penalties
-    return -squashed_penalties
+        penalties = flattened_penalties
+    else:
+        penalties = squashed_penalties
+    penalties = penalties/squash_max * scale
+    return -penalties
 
 def planar_tracking_error_vec(body_rel_linvel_vec_xyz : th.Tensor, gravity_rel_vec_xyz : th.Tensor, goal_rel_linvel_vec_xyz : th.Tensor) -> th.Tensor:
         """_summary_
@@ -213,6 +229,7 @@ class LocomotionVecEnv(RobotVecEnv):
     STATE_LOCOMOTION = "loco"
     STATE_FEET = "feet"
     STATE_HEIGHTMAP = "heightmap"
+    STATE_REWARDS = "reward_weights"
 
     @dataclass
     class LocomotionConfiguration:
@@ -315,62 +332,65 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_weight_acceleration : th.Tensor
         reward_weight_posref_acc : th.Tensor
 
-    LOCOMOTION_FIELDS = IntEnum("LOCOMOTION_FIELDS", ["COLLISON_COUNT",
-                                                    "GOAL_LINVEL_REL_DIRECTION_X",
-                                                    "GOAL_LINVEL_REL_DIRECTION_Y",
-                                                    "GOAL_LINVEL_REL_DIRECTION_Z",
-                                                    "GOAL_LINVEL_SPEED",
-                                                    "GOAL_VELOCITY_ABS_X",
-                                                    "GOAL_VELOCITY_ABS_Y",
-                                                    "GOAL_VELOCITY_ABS_Z",
-                                                    "GOAL_BODY_HEIGHT",
-                                                    "GOAL_REL_HEADING_YAW_X",
-                                                    "GOAL_REL_HEADING_YAW_Y",
-                                                    "GOAL_GRAVITY_ABS_X",
-                                                    "GOAL_GRAVITY_ABS_Y",
-                                                    "GOAL_GRAVITY_ABS_Z",
-                                                    "REWARD_WEIGHT_ACCELERATION",
-                                                    "REWARD_WEIGHT_CONTACTS",
-                                                    "REWARD_WEIGHT_HEALTH",
-                                                    "REWARD_WEIGHT_POSITION_LIMIT",
-                                                    "REWARD_WEIGHT_TORQUEDIFF",
-                                                    "REWARD_WEIGHT_TORQUE_LIMIT",
-                                                    "REWARD_WEIGHT_TORQUE",
-                                                    "REWARD_WEIGHT_TRACKING",
-                                                    "REWARD_WEIGHT_VELOCITY_LIMIT",
-                                                    "REWARD_WEIGHT_VELOCITY",
-                                                    "REWARD_WEIGHT_HEIGHT_VELOCITY",
-                                                    "REWARD_WEIGHT_HEIGHT_POSITION",
-                                                    "REWARD_WEIGHT_PITCHNROLL",
-                                                    "REWARD_WEIGHT_PITCHNROLL_VELOCITY",
-                                                    "REWARD_WEIGHT_ACTDIFF",
-                                                    "REWARD_WEIGHT_ACTACC",
-                                                    "REWARD_WEIGHT_FEET_AIR_TIME",
-                                                    "REWARD_WEIGHT_FEET_GROUND_TIME",
-                                                    "REWARD_WEIGHT_FEET_ON_GROUND",
-                                                    "REWARD_WEIGHT_POSITION",
-                                                    "REWARD_WEIGHT_HEADING",
-                                                    "REWARD_WEIGHT_HEADING_VELOCITY",
-                                                    "REWARD_WEIGHT_FAILURE",
-                                                    "REWARD_WEIGHT_SENSED_EFFORT",
-                                                    "REWARD_WEIGHT_SLIP",
-                                                    "REWARD_WEIGHT_STAND_POSITION",
-                                                    "REWARD_WEIGHT_TORQUEREF",
-                                                    "REWARD_WEIGHT_VELREF",
-                                                    "REWARD_WEIGHT_POSREF_VEL",
-                                                    "REWARD_WEIGHT_POSREF_ACC",
-                                                    "SMOOTHED_TRACKING_ERROR",
-                                                    "SMOOTHED_HEIGHT_ERROR",
-                                                    "SMOOTHED_PITCHNROLL_ERROR",
-                                                    "SMOOTHED_HEADING_ERROR",
-                                                    "SMOOTHED_PITCHNROLL_ERROR_VELOCITY",
-                                                    "SMOOTHED_GOAL_BODY_HEIGHT",
-                                                    "SUM_IMPULSES",
-                                                    "CRASHED",
-                                                    "SUPPORT_POLYGON_LINVEL_X",
-                                                    "SUPPORT_POLYGON_LINVEL_Y",
-                                                    "SUPPORT_POLYGON_LINVEL_Z"], start=0)
+    LOCOMOTION_FIELDS = IntEnum("LOCOMOTION_FIELDS", [  "COLLISON_COUNT",
+                                                        "GOAL_LINVEL_REL_DIRECTION_X",
+                                                        "GOAL_LINVEL_REL_DIRECTION_Y",
+                                                        "GOAL_LINVEL_REL_DIRECTION_Z",
+                                                        "GOAL_LINVEL_SPEED",
+                                                        "GOAL_VELOCITY_ABS_X",
+                                                        "GOAL_VELOCITY_ABS_Y",
+                                                        "GOAL_VELOCITY_ABS_Z",
+                                                        "GOAL_BODY_HEIGHT",
+                                                        "GOAL_REL_HEADING_YAW_X",
+                                                        "GOAL_REL_HEADING_YAW_Y",
+                                                        "GOAL_GRAVITY_ABS_X",
+                                                        "GOAL_GRAVITY_ABS_Y",
+                                                        "GOAL_GRAVITY_ABS_Z",
+                                                        "SMOOTHED_TRACKING_ERROR",
+                                                        "SMOOTHED_HEIGHT_ERROR",
+                                                        "SMOOTHED_PITCHNROLL_ERROR",
+                                                        "SMOOTHED_HEADING_ERROR",
+                                                        "SMOOTHED_PITCHNROLL_ERROR_VELOCITY",
+                                                        "SMOOTHED_GOAL_BODY_HEIGHT",
+                                                        "SUM_IMPULSES",
+                                                        "CRASHED",
+                                                        "SUPPORT_POLYGON_LINVEL_X",
+                                                        "SUPPORT_POLYGON_LINVEL_Y",
+                                                        "SUPPORT_POLYGON_LINVEL_Z"], start=0)
     
+    REWARD_WEIGHTS_FIELDS = IntEnum("REWARD_FIELDS", [  # Important! keep sorted alphabetically
+                                                "ACCELERATION",
+                                                "ACTACC",
+                                                "ACTDIFF",
+                                                "CONTACTS",
+                                                "FAILURE",
+                                                "FEET_AIR_TIME",
+                                                "FEET_GROUND_TIME",
+                                                "FEET_ON_GROUND",
+                                                "HEADING",
+                                                "HEADING_VELOCITY",
+                                                "HEALTH",
+                                                "HEIGHT_POSITION",
+                                                "HEIGHT_VELOCITY",
+                                                "PITCHNROLL",
+                                                "PITCHNROLL_VELOCITY",
+                                                "POSITION",
+                                                "POSITION_LIMIT",
+                                                "POSREF_ACC",
+                                                "POSREF_VEL",
+                                                "SENSED_EFFORT",
+                                                "SLIP",
+                                                "STAND_POSITION",
+                                                "TORQUE",
+                                                "TORQUEDIFF",
+                                                "TORQUE_REFS",
+                                                "TORQUE_LIMIT",
+                                                "TRACKING",
+                                                "VELOCITY",
+                                                "VELOCITY_LIMIT",
+                                                "VELOCITY_REFs"
+                                                ], start=0)
+
     FEET_FIELDS = IntEnum("FEET_FIELDS" , ["FEET_AIR_DURATIONS",
                                            "FEET_GROUND_DURATIONS",
                                            "FEET_VEL_X",
@@ -688,6 +708,8 @@ class LocomotionVecEnv(RobotVecEnv):
             self.single_reward_space=ThBox( low=th.tensor(float("-inf"), device=th_device),
                                             high=th.tensor(float("inf"), device=th_device),
                                             shape=tuple(), torch_device=th_device)
+        ggLog.info(f"LocomotionVecEnv: single_reward_space = {self.single_reward_space}")
+        ggLog.info(f"LocomotionVecEnv: single_reward_space.labels = {self.single_reward_space.labels}")
         self.vec_reward_space=batch_space(self.single_reward_space, self._configuration.vec_size)
         # ggLog.info(f"Obs labels = \n{pprint.pformat(obs_labels)}")
         # ggLog.info(f"Env constructed")
@@ -723,20 +745,17 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED,
                             self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT,
                             self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X,
-                            self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_Y,
-                            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTACC,
-                            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTDIFF,
-                            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_VEL]
+                            self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_Y]
         privileged_loco_fields = [  self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR_VELOCITY]
         if self._configuration.merge_privileged:
-            obs_defs = {"base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields+privileged_loco_fields)}
+            loco_obs_defs = {"base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields+privileged_loco_fields)}
         else:
-            obs_defs = {"base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields),
-                        "privileged" : ThBoxStateHelper.SimpleObsDef(observable_fields=privileged_loco_fields)}
+            loco_obs_defs = {   "base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields),
+                                "privileged" : ThBoxStateHelper.SimpleObsDef(observable_fields=privileged_loco_fields)}
         self._locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
@@ -754,37 +773,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_Y : [-1,1],
                                                                     self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X : [-1,1],
                                                                     self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Y : [-1,1], 
-                                                                    self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z : [-1,1], 
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TRACKING : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUE : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUE_LIMIT : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_VELOCITY : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACCELERATION : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_CONTACTS : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEALTH : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEIGHT_VELOCITY : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEIGHT_POSITION : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_PITCHNROLL : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_PITCHNROLL_VELOCITY : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTDIFF : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTACC : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FEET_AIR_TIME : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FEET_GROUND_TIME : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FEET_ON_GROUND : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSITION_LIMIT : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_VELOCITY_LIMIT : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUEDIFF : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSITION : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_STAND_POSITION : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEADING : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEADING_VELOCITY : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FAILURE : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_VELREF : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_SENSED_EFFORT : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUEREF : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_VEL : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_ACC : [0,10],
-                                                                    self.LOCOMOTION_FIELDS.REWARD_WEIGHT_SLIP : [0,10],
+                                                                    self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z : [-1,1],
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : [0,10],
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR : [0,10],
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR : [0,10],
@@ -797,13 +786,25 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Y : [-10,10],
                                                                     self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : [-10,10]},
                                                     history_length=3,
-                                                    observation_definitions=obs_defs,
+                                                    observation_definitions=loco_obs_defs,
                                                     vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
                                                             self._locomotion_state_helper,
-                                                            obs_defs={"base":{"observable":True,"flatten":True,"noise":None}})
+                                                            obs_defs={"base":{"observable":True,"concatenate":True,"noise":None}})
+        self._reward_state_helper = ThBoxStateHelper( field_names=self._loco_conf.enabled_rewards,
+                                                    dtype=self._obs_dtype,
+                                                    th_device=self._th_device,
+                                                    field_size=(1,),
+                                                    fields_minmax={n : [-1.0,1.0] for n in self._loco_conf.enabled_rewards}, # -1,1, makes it so that it does not get scaled
+                                                    history_length=1,
+                                                    observation_definitions={"base" : ThBoxStateHelper.SimpleObsDef()},
+                                                    flatten_observation=True,
+                                                    vec_size=adapter.vec_size())
+        self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_REWARDS,
+                                                            self._reward_state_helper,
+                                                            obs_defs={"base":{"observable":True,"concatenate":False,"noise":None}})
+        
         feet_num = len(self._loco_conf.feet_links)
-
         feet_obs_type = "privileged" if not self._configuration.merge_privileged else "base"
         self._feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET_FIELDS],
                                                     dtype=self._obs_dtype,
@@ -824,7 +825,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                                                                             self.FEET_FIELDS.FEET_VEL_Y])})
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_FEET,
                                                             self._feet_state_helper,
-                                                            obs_defs={feet_obs_type:{"observable":True,"flatten":True,"noise":None}})
+                                                            obs_defs={feet_obs_type:{"observable":True,"concatenate":True,"noise":None}})
         if self._loco_conf.heightmap_resolution_xy[0] > 0:
             heightmap_state_helper = ThBoxStateHelper( field_names=["map"],
                                                     dtype=self._obs_dtype,
@@ -834,7 +835,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     vec_size=adapter.vec_size())
             self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_HEIGHTMAP,
                                                                  heightmap_state_helper,
-                                                                 obs_defs={"base":{"observable":True,"flatten":False,"noise":None}})
+                                                                 obs_defs={"base":{"observable":True,"concatenate":False,"noise":None}})
         ggLog.info(f"Built state/obs/action helpers")
 
     def _reset_state(self, vec_mask : th.Tensor, options = {}):
@@ -1001,37 +1002,40 @@ class LocomotionVecEnv(RobotVecEnv):
 
 
 
+        new_reward_state = { 
+            self.REWARD_WEIGHTS_FIELDS.TORQUE_LIMIT           : self._loco_conf.reward_weight_torque_limit.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.POSITION_LIMIT         : self._loco_conf.reward_weight_position_limit.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.VELOCITY_LIMIT         : self._loco_conf.reward_weight_velocity_limit.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.VELOCITY               : self._loco_conf.reward_weight_velocity.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.ACCELERATION           : self._locomotion_episode_config.reward_weight_acceleration.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.CONTACTS               : self._loco_conf.reward_weight_contacts.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.HEALTH                 : self._loco_conf.reward_weight_health.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.HEIGHT_VELOCITY        : self._loco_conf.reward_weight_height_velocity.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.HEIGHT_POSITION        : self._loco_conf.reward_weight_height_position.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.PITCHNROLL             : self._loco_conf.reward_weight_pitchnroll.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.PITCHNROLL_VELOCITY    : self._loco_conf.reward_weight_pitchnroll_velocity.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.ACTDIFF                : self._locomotion_episode_config.reward_weight_actdiff.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.ACTACC                 : self._locomotion_episode_config.reward_weight_actacc.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.FEET_AIR_TIME          : self._loco_conf.reward_weight_feet_air_time.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.FEET_GROUND_TIME       : self._loco_conf.reward_weight_feet_ground_time.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.FEET_ON_GROUND         : self._loco_conf.reward_weight_feet_on_ground.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.TRACKING               : self._loco_conf.reward_weight_tracking.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.TORQUE                 : self._locomotion_episode_config.reward_torque_weight.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.TORQUEDIFF             : self._loco_conf.reward_weight_torquediff.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.POSITION               : self._loco_conf.reward_weight_position.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.STAND_POSITION         : self._loco_conf.reward_weight_stand_position.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.HEADING                : self._loco_conf.reward_weight_heading.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.HEADING_VELOCITY       : self._loco_conf.reward_weight_heading_velocity.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.FAILURE                : self._loco_conf.reward_weight_failure.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.SENSED_EFFORT          : self._loco_conf.reward_weight_sensed_effort.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.SLIP                   : self._loco_conf.reward_weight_slip.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.VELOCITY_REFs                 : self._loco_conf.reward_weight_velref.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.TORQUE_REFS              : self._loco_conf.reward_weight_torqueref.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.POSREF_VEL             : self._locomotion_episode_config.reward_weight_posref_vel.expand(vsize,1),
+            self.REWARD_WEIGHTS_FIELDS.POSREF_ACC             : self._locomotion_episode_config.reward_weight_posref_acc.expand(vsize,1)
+        }
+        new_reward_state = {k:new_reward_state[self.REWARD_WEIGHTS_FIELDS[k.upper()]] for k in self._loco_conf.enabled_rewards}
         new_locom_state = { 
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUE_LIMIT           : self._loco_conf.reward_weight_torque_limit.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSITION_LIMIT         : self._loco_conf.reward_weight_position_limit.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_VELOCITY_LIMIT         : self._loco_conf.reward_weight_velocity_limit.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_VELOCITY               : self._loco_conf.reward_weight_velocity.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACCELERATION           : self._locomotion_episode_config.reward_weight_acceleration.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_CONTACTS               : self._loco_conf.reward_weight_contacts.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEALTH                 : self._loco_conf.reward_weight_health.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEIGHT_VELOCITY        : self._loco_conf.reward_weight_height_velocity.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEIGHT_POSITION        : self._loco_conf.reward_weight_height_position.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_PITCHNROLL             : self._loco_conf.reward_weight_pitchnroll.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_PITCHNROLL_VELOCITY    : self._loco_conf.reward_weight_pitchnroll_velocity.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTDIFF                : self._locomotion_episode_config.reward_weight_actdiff.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTACC                 : self._locomotion_episode_config.reward_weight_actacc.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FEET_AIR_TIME          : self._loco_conf.reward_weight_feet_air_time.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FEET_GROUND_TIME       : self._loco_conf.reward_weight_feet_ground_time.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FEET_ON_GROUND         : self._loco_conf.reward_weight_feet_on_ground.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TRACKING               : self._loco_conf.reward_weight_tracking.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUE                 : self._locomotion_episode_config.reward_torque_weight.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUEDIFF             : self._loco_conf.reward_weight_torquediff.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSITION               : self._loco_conf.reward_weight_position.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_STAND_POSITION         : self._loco_conf.reward_weight_stand_position.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEADING                : self._loco_conf.reward_weight_heading.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEADING_VELOCITY       : self._loco_conf.reward_weight_heading_velocity.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FAILURE                : self._loco_conf.reward_weight_failure.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_SENSED_EFFORT          : self._loco_conf.reward_weight_sensed_effort.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_SLIP                   : self._loco_conf.reward_weight_slip.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_VELREF                 : self._loco_conf.reward_weight_velref.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUEREF              : self._loco_conf.reward_weight_torqueref.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_VEL             : self._locomotion_episode_config.reward_weight_posref_vel.expand(vsize,1),
-            self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_ACC   : self._locomotion_episode_config.reward_weight_posref_acc.expand(vsize,1),
             self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR : smoothed_tracking_err_vec.view(vsize,1),
             self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR : smoothed_height_error.view(vsize,1),
             self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR : smoothed_pitchnroll_error.view(vsize,1),
@@ -1129,6 +1133,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.FEET_FIELDS.FEET_VEL_Y : feet_linvels_vec_foot_xyz[:,:,1]}
 
         new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
+        new_inst_state[self.STATE_REWARDS] = new_reward_state
         new_inst_state[self.STATE_FEET] = new_feet_state
         return new_inst_state
 
@@ -1301,6 +1306,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         max_rew = self._configuration.reward_penalties_max
         current_state_locom_vec = state[self.STATE_LOCOMOTION][:, 0,:,0]
+        current_state_rewards_vec = state[self.STATE_REWARDS][:, 0,:,0]
         curr_state_extr_vec = state[self.STATE_EXTRINSIC][:, 0,:,0]
         prev_state_extr_vec = state[self.STATE_EXTRINSIC][:, 1,:,0]
         current_state_internal = state[self.STATE_INTERNAL][:, 0,:,0]
@@ -1347,7 +1353,7 @@ class LocomotionVecEnv(RobotVecEnv):
         torque_safenorm     = state_robot_safenorm[:,0,:,2]
 
         reward_sensed_effort    = joint_penalty_reward(norm_senseff,     max_rew=1.0, exponent=8.0, reduction="max")
-        reward_cmdtorque        = norm_penalty(normcmdtorques,   norm=4, power=2, max_val=1.0, squash_smoothness=4.0)
+        reward_cmdtorque        = norm_penalty(normcmdtorques,   norm=4, power=2, squash_max=1.0, squash_smoothness=4.0)
         reward_velocity         = joint_penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
         # reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=8.0, flattening_scale=0.1)
         reward_acceleration     = flattened_joint_penalty_reward(normaccelerations, max_rew=max_rew, exponent=2.0, flattening_scale=0.1)
@@ -1365,8 +1371,8 @@ class LocomotionVecEnv(RobotVecEnv):
         # reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
         # posref_threshold = 7.0
         # reward_posref_vel       = joint_penalty_reward(posref_vel/posref_threshold,     max_rew=1.0,exponent=5, presquash_factor=1)
-        reward_posref_vel       = norm_penalty(posref_vel/10,     norm=4, power=2, max_val=1.0, squash_smoothness=4.0, flattening_scale=0.005, flattening_power=4.0)
-        reward_posref_acc       = norm_penalty(posref_acc/2_000,  norm=4, power=1, max_val=1.0, squash_smoothness=4.0)
+        reward_posref_vel       = norm_penalty(posref_vel/15,     norm=4, power=2, squash_max=2.0, squash_smoothness=2.0, flattening_scale=0.005, flattening_power=4.0)
+        reward_posref_acc       = norm_penalty(posref_acc/1_000,  norm=4, power=2, squash_max=2.0, squash_smoothness=2.0)
         # reward_posref_acc = flattened_joint_penalty_reward(posref_acc/1_000, max_rew=1.0, exponent=2.0, presquash_factor=100, flattening_scale=0.01)
 
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
@@ -1453,37 +1459,41 @@ class LocomotionVecEnv(RobotVecEnv):
             failed = th.logical_or(failed, safety_triggered)
 
         # sub_rewards_return["feet_air_time_uniformity"] = reward_feet_air_time_uniformity
-        sub_rewards_return["acceleration"] = reward_acceleration
-        sub_rewards_return["actacc"] = reward_actacc
-        sub_rewards_return["actdiff"] = reward_actdiff
-        sub_rewards_return["contacts"] = reward_contacts
-        sub_rewards_return["feet_air_time"] = reward_feet_air_time
-        sub_rewards_return["feet_ground_time"] = reward_feet_ground_time
-        sub_rewards_return["feet_on_ground"] = reward_feet_on_ground
-        sub_rewards_return["heading"] = reward_heading_position
-        sub_rewards_return["heading_velocity"] = reward_heading_velocity
-        sub_rewards_return["health"] = th.ones((current_state_locom_vec.size()[0],), device=current_state_locom_vec.device)
-        sub_rewards_return["height_position"] = reward_height_position
-        sub_rewards_return["height_velocity"] = reward_height_velocity
-        sub_rewards_return["pitchnroll"] = reward_pitchnroll
-        sub_rewards_return["pitchnroll_velocity"] = reward_pitchnroll_velocity
-        sub_rewards_return["position"] = reward_position
-        sub_rewards_return["position_limit"] = reward_position_limit
-        sub_rewards_return["posref_vel"] = reward_posref_vel
-        sub_rewards_return["posref_acc"] = reward_posref_acc
-        sub_rewards_return["sensed_effort"] = reward_sensed_effort
-        sub_rewards_return["slip"] = reward_slip
-        sub_rewards_return["stand_position"] = reward_stand_position
-        sub_rewards_return["torque"] = reward_cmdtorque
-        sub_rewards_return["torque_limit"] = reward_torque_limit
-        sub_rewards_return["torque_refs"] = reward_torque_refs
-        sub_rewards_return["torquediff"] = reward_torquediff
-        sub_rewards_return["tracking"] = reward_velocity_tracking
-        sub_rewards_return["velocity"] = reward_velocity
-        sub_rewards_return["velocity_limit"] = reward_velocity_limit
-        sub_rewards_return["velocity_refs"] = reward_velocity_refs
-        sub_rewards_return["failure"] = th.zeros((current_state_locom_vec.size()[0],), device=current_state_locom_vec.device)
-        sub_rewards_return = dict(sorted(sub_rewards_return.items())) # Keep sorted
+        r = {}
+        r["acceleration"] = reward_acceleration
+        r["actacc"] = reward_actacc
+        r["actdiff"] = reward_actdiff
+        r["contacts"] = reward_contacts
+        r["feet_air_time"] = reward_feet_air_time
+        r["feet_ground_time"] = reward_feet_ground_time
+        r["feet_on_ground"] = reward_feet_on_ground
+        r["heading"] = reward_heading_position
+        r["heading_velocity"] = reward_heading_velocity
+        r["health"] = th.ones((current_state_locom_vec.size()[0],), device=current_state_locom_vec.device)
+        r["height_position"] = reward_height_position
+        r["height_velocity"] = reward_height_velocity
+        r["pitchnroll"] = reward_pitchnroll
+        r["pitchnroll_velocity"] = reward_pitchnroll_velocity
+        r["position"] = reward_position
+        r["position_limit"] = reward_position_limit
+        r["posref_acc"] = reward_posref_acc
+        r["posref_vel"] = reward_posref_vel
+        r["sensed_effort"] = reward_sensed_effort
+        r["slip"] = reward_slip
+        r["stand_position"] = reward_stand_position
+        r["torque"] = reward_cmdtorque
+        r["torque_limit"] = reward_torque_limit
+        r["torque_refs"] = reward_torque_refs
+        r["torquediff"] = reward_torquediff
+        r["tracking"] = reward_velocity_tracking
+        r["velocity"] = reward_velocity
+        r["velocity_limit"] = reward_velocity_limit
+        r["velocity_refs"] = reward_velocity_refs
+        r["failure"] = th.zeros((current_state_locom_vec.size()[0],), device=current_state_locom_vec.device)
+        # sub_rewards_return = dict(sorted(sub_rewards_return.items())) # Keep sorted
+        for n in self._reward_state_helper.field_names:
+            n = str(n).lower()
+            sub_rewards_return[n] = r[n]
         # sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards_return.items()}
         
 
@@ -1493,41 +1503,41 @@ class LocomotionVecEnv(RobotVecEnv):
         # for k,v in sub_rewards_return.items():
         #     dbg_check_size(v, (self._adapter.vec_size(),), f"Unexpected size for sub_reward {k}")
         # dbg_check_finite(sub_rewards_return)
-        
-        weights = { "tracking" :           current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TRACKING],
-                    "torque" :             current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUE],
-                    "torque_limit" :       current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUE_LIMIT],
-                    "torquediff" :         current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUEDIFF],
-                    "velocity" :           current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_VELOCITY],
-                    "velocity_limit" :     current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_VELOCITY_LIMIT],
-                    "acceleration" :       current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACCELERATION],
-                    "position_limit" :     current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSITION_LIMIT],
-                    "health" :             current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEALTH],
-                    "contacts" :           current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_CONTACTS],
-                    "height_velocity" :    current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEIGHT_VELOCITY],
-                    "height_position" :    current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEIGHT_POSITION],
-                    "pitchnroll" :         current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_PITCHNROLL],
-                    "pitchnroll_velocity": current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_PITCHNROLL_VELOCITY],
-                    "actdiff" :            current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTDIFF],
-                    "stand_position" :     current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_STAND_POSITION],
-                    "position" :           current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSITION],
-                    "heading" :            current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEADING],
-                    "failure" :            current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FAILURE],
-                    "actacc" :             current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTACC],
-                    "feet_air_time" :      current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FEET_AIR_TIME],
-                    "feet_ground_time" :   current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FEET_GROUND_TIME],
-                    # "feet_air_time_uniformity" : current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_FEET_AIR_TIME_UNIFORMITY_WEIGHT],
-                    "feet_on_ground" :     current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_FEET_ON_GROUND],
-                    "velocity_refs" :      current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_VELREF],
-                    "sensed_effort" :      current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_SENSED_EFFORT],
-                    "torque_refs" :        current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_TORQUEREF],
-                    "posref_vel" :         current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_VEL],
-                    "posref_acc" :         current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_ACC], 
-                    "slip" :               current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_SLIP],
-                    "heading_velocity":    current_state_locom_vec[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_HEADING_VELOCITY]}
+        weights = {n:current_state_rewards_vec[:,i] for i,n in enumerate(self._loco_conf.enabled_rewards)}
+        # weights = { "tracking" :           current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.TRACKING],
+        #             "torque" :             current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.TORQUE],
+        #             "torque_limit" :       current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.TORQUE_LIMIT],
+        #             "torquediff" :         current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.TORQUEDIFF],
+        #             "velocity" :           current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.VELOCITY],
+        #             "velocity_limit" :     current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.VELOCITY_LIMIT],
+        #             "acceleration" :       current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.ACCELERATION],
+        #             "position_limit" :     current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.POSITION_LIMIT],
+        #             "health" :             current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.HEALTH],
+        #             "contacts" :           current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.CONTACTS],
+        #             "height_velocity" :    current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.HEIGHT_VELOCITY],
+        #             "height_position" :    current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.HEIGHT_POSITION],
+        #             "pitchnroll" :         current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.PITCHNROLL],
+        #             "pitchnroll_velocity": current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.PITCHNROLL_VELOCITY],
+        #             "actdiff" :            current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.ACTDIFF],
+        #             "stand_position" :     current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.STAND_POSITION],
+        #             "position" :           current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.POSITION],
+        #             "heading" :            current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.HEADING],
+        #             "failure" :            current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.FAILURE],
+        #             "actacc" :             current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.ACTACC],
+        #             "feet_air_time" :      current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.FEET_AIR_TIME],
+        #             "feet_ground_time" :   current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.FEET_GROUND_TIME],
+        #             # "feet_air_time_uniformity" : current_state_rewards_vec[:,self.REWARD_FIELDS.REWARD_FEET_AIR_TIME_UNIFORMITY_WEIGHT],
+        #             "feet_on_ground" :     current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.FEET_ON_GROUND],
+        #             "velocity_refs" :      current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.VELOCITY_REFs],
+        #             "sensed_effort" :      current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.SENSED_EFFORT],
+        #             "torque_refs" :        current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.TORQUE_REFS],
+        #             "posref_vel" :         current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.POSREF_VEL],
+        #             "posref_acc" :         current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.POSREF_ACC], 
+        #             "slip" :               current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.SLIP],
+        #             "heading_velocity":    current_state_rewards_vec[:,self.REWARD_WEIGHTS_FIELDS.HEADING_VELOCITY]}
         for k in sub_rewards_return:
             r = sub_rewards_return[k]
-            r = self._loco_conf.reward_scale*r*weights[k]
+            r = self._loco_conf.reward_scale*r*weights.get(k, 0.0)
             sub_rewards_return[k] = r*th.where(th.logical_and(failed, r>0), 0.001, 1.0)
         # scaled_rewards_vec = th.stack(list(sub_rewards_return.values()), dim = 1)
         # sub_rewards_return["failure"] = -th.sum(scaled_rewards_vec*(scaled_rewards_vec>0), dim =1)*failed*weights["failure"] # negate all the positive rewards
@@ -1665,6 +1675,7 @@ class LocomotionVecEnv(RobotVecEnv):
             return super().get_infos(state=state, labels=labels)
         i = super().get_infos(state=state, labels=labels)
         curr_locom_state = state[self.STATE_LOCOMOTION][:,0]
+        curr_rewar_state = state[self.STATE_REWARDS][:,0]
         curr_extri_state = state[self.STATE_EXTRINSIC][:,0]
         prev_extri_state = state[self.STATE_EXTRINSIC][:,1]
         curr_inter_state = state[self.STATE_INTERNAL][:,0]
@@ -1710,10 +1721,10 @@ class LocomotionVecEnv(RobotVecEnv):
         state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
         i["avg_sensed_effort"] = state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1)
         i["avg_peak_sensed_effort"] = state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=2).amax(dim=1)
-        i["actdiff_weight"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTDIFF]
-        i["actacc_weight"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_ACTACC]
-        i["posrefvel_weight"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_VEL]
-        i["posrefacc_weight"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.REWARD_WEIGHT_POSREF_ACC]
+        i["actdiff_weight"] = curr_rewar_state[:,0] #self.REWARD_WEIGHTS_FIELDS.ACTDIFF]
+        i["actacc_weight"] = curr_rewar_state[:,0] #self.REWARD_WEIGHTS_FIELDS.ACTACC]
+        i["posrefvel_weight"] = curr_rewar_state[:,0] #self.REWARD_WEIGHTS_FIELDS.POSREF_VEL]
+        i["posrefacc_weight"] = curr_rewar_state[:,0] #self.REWARD_WEIGHTS_FIELDS.POSREF_ACC]
         
         _, i["height_velocity"], i["goal_height_velocity"], last_dt, i["height_err_raw"] = self._height_velocity_reward(curr_state_extr_vec = curr_extri_state,
                                                                                                        current_state_locom_vec = curr_locom_state,
@@ -1930,3 +1941,56 @@ class LocomotionVecEnv(RobotVecEnv):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             self._set_arrow_pose(vec_mask=self._all_vecs)
         return super().get_ui_renderings(vec_mask=vec_mask)
+    
+class TransitionAugmentor:
+
+    def __init__(self, reward_space : ThBox,
+                       reward_weights_distr : DistributionTh.DistributionDef,
+                       augmented_samples : int,
+                       generator : th.Generator | None = None):
+        self._reward_weights_key = "base.reward_weights"
+        self._randomized_rewards = ["posref_acc", "posref_vel"]
+        for rr in self._randomized_rewards:
+            if rr not in reward_space.labels:
+                raise ValueError(f"Reward '{rr}' not found in reward space labels")
+        self._th_device = reward_space.th_device
+        self._reward_mask = th.as_tensor([rn in self._randomized_rewards for rn in reward_space.labels], device=self._th_device)
+        self._rewards_distribution = DistributionTh(distribution_def=reward_weights_distr,
+                                                    device=self._th_device,
+                                                    dtype=reward_space.torch_dtype,
+                                                    generator=generator)
+        self._augmented_samples = augmented_samples
+
+    def augment_transition(self, observations : dict[str, th.Tensor],
+                                actions : th.Tensor,
+                                next_observations : dict[str, th.Tensor],
+                                rewards : th.Tensor,
+                                terminateds : th.Tensor
+                                ) -> tuple[dict[str, th.Tensor], th.Tensor, dict[str, th.Tensor], th.Tensor, th.Tensor]:
+        with th.no_grad():
+            original_reward_weights = observations[self._reward_weights_key]
+            
+            # We will augment just the first augmented_samples elements of the batch
+
+            # Sample augmented_samples new reward weights
+            new_rews_size = (self._augmented_samples,) + original_reward_weights.size()[1:]
+            sampled_weights = self._rewards_distribution.sample(size=new_rews_size,)
+            # Apply the new weight just to the rewards specified by the mask
+            sampled_weights = th.where(self._reward_mask.unsqueeze(0),
+                                    sampled_weights,
+                                    original_reward_weights[:self._augmented_samples])
+            # Compute the new rewards accoridng to these weights
+            rescaled_rewards = rewards[:self._augmented_samples]/original_reward_weights[:self._augmented_samples]*sampled_weights
+
+            # Substitute these reward in the original batch
+            new_rewards = rewards.clone()
+            new_rewards[:self._augmented_samples] = rescaled_rewards
+            # Substitute the weights in the observation and next observation
+            new_reward_weights = original_reward_weights.clone()
+            new_reward_weights[:self._augmented_samples] = sampled_weights
+            new_obss = {k:v for k,v in observations.items()}
+            new_obss[self._reward_weights_key] = new_reward_weights
+            new_next_obss = {k:v for k,v in next_observations.items()}
+            new_next_obss[self._reward_weights_key] = new_reward_weights # What if the next_obs weights were different, they shoudlnt be for how the env is formulated now
+
+        return new_obss, actions, new_next_obss, new_rewards, terminateds

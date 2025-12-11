@@ -37,8 +37,55 @@ def hash_tensor(tensor):
     return hash(tuple(tensor.reshape(-1).tolist()))
 
 TensorLike = Union[th.Tensor, float, List[float]]
-DistributionDef = Union[Tuple[str,Tuple[TensorLike, TensorLike], Tuple[TensorLike, TensorLike, TensorLike]], TensorLike]
-DistributionDefTh = Union[Tuple[str,Tuple[th.Tensor, th.Tensor], Tuple[th.Tensor, th.Tensor, th.Tensor]], th.Tensor]
+DistributionDef = Union[Tuple[str,Tuple[TensorLike, ...]], TensorLike]
+DistributionDefTh = Union[Tuple[str,Tuple[th.Tensor, ...]], th.Tensor]
+
+class DistributionTh:
+    DistributionDef = Union[Tuple[str,Tuple[TensorLike, ...]], TensorLike]
+
+    def __init__(self,  distribution_def : DistributionTh.DistributionDef,
+                        device : th.device,
+                        dtype : th.dtype,
+                        generator : th.Generator | None = None):
+        if isinstance(distribution_def, (float,th.Tensor, np.ndarray)) or not isinstance(distribution_def[0], str):
+            distribution_def = ("constant", distribution_def) #type: ignore
+        distrtype : str = distribution_def[0]
+        distrparams : Sequence = distribution_def[1]
+        self._device = device
+        self._dtype = dtype
+        self._type = distrtype
+        self._params = tuple(th.as_tensor(p, device=device, dtype=dtype) for p in distrparams)
+        self._rng = generator
+
+    def sample(self,    size, 
+                        device : th.device | None = None, 
+                        dtype : th.dtype | None = None, 
+                        generator : th.Generator | None = None) -> th.Tensor:
+        if device is None:
+            device = self._device
+        if dtype is None:
+            dtype = self._dtype
+        if generator is None:
+            generator = self._rng
+        if self._type == "constant":
+            return self._params[0].expand(size).clone()
+        elif self._type == "uniform":
+            low, high = self._params
+            return th.rand(size, device=device, dtype=dtype, generator=generator)*(high-low)+low
+        elif self._type == "loguniform":
+            low, high = self._params
+            lowlog = th.log(low)
+            highlog = th.log(high)
+            return th.exp(th.rand(size, device=device, dtype=dtype, generator=generator)*(highlog-lowlog)+lowlog)
+        elif self._type == "normal":
+            if len(self._params) == 2:
+                mean, std = self._params
+                clamp_width = th.tensor(5.0, device=device, dtype=dtype)
+            else:
+                mean, std, clamp_width = self._params #type: ignore
+            return th.clamp(th.randn(size, device=device, dtype=dtype, generator=generator), -clamp_width, clamp_width)*std+mean
+        else:
+            raise NotImplementedError(f"Unsupported distribution type {self._type}")
 
 JOINT_FILTERS = Enum("JOINT_FILTERS",["ALL_REVOLUTE",
                                          "ALL"])
@@ -753,7 +800,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
         # ggLog.info(f"enable_link_collisions = {enable_link_collisions}")
-        if isinstance(self._adapter, BaseVecSimulationAdapter) and enable_link_collisions is not None:
+        if isinstance(self._adapter, BaseVecSimulationAdapter) and enable_link_collisions is not None and not isinstance_noimport(self._adapter, "MujocoAdapter"):
             self._adapter.set_body_collisions(enable_link_collisions)
         # ggLog.info(f"Built scenario")
         example_labels : dict[str,th.Tensor] = {}
@@ -998,7 +1045,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if not self._configuration.merge_privileged:
             obs_definitions={"base" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=all_observable_substates, # this will only take the "base" obs inside these
-                                                                flattened_subobss=[self.STATE_ROBOT,
+                                                                concatenable_substates=[self.STATE_ROBOT,
                                                                                 self.STATE_EXTRINSIC,
                                                                                 self.STATE_INTERNAL,
                                                                                 # self.STATE_LAST_ACT_RAW,
@@ -1006,18 +1053,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                 # self.STATE_ACT_PREPROC,
                                                                                 self.STATE_JOINT_LONGTERM_STATS,
                                                                                 self.STATE_JOINT_STEP_STATS],
-                                                                flattened_part_name="vec",
+                                                                concatenated_part_name="vec",
                                                                 noise_generators={self.STATE_ROBOT      : robot_state_noise,
                                                                                   self.STATE_EXTRINSIC  : extrinsic_state_noise}),
                             "privileged" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS, self.STATE_ROBOT],
-                                                                flattened_subobss=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS, self.STATE_ROBOT],
-                                                                flattened_part_name="vec",
+                                                                concatenable_substates=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS, self.STATE_ROBOT],
+                                                                concatenated_part_name="vec",
                                                                 noise_generators={})}
         else:
             obs_definitions={"base" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=all_observable_substates,
-                                                                flattened_subobss=[self.STATE_ROBOT,
+                                                                concatenable_substates=[self.STATE_ROBOT,
                                                                                 self.STATE_EXTRINSIC,
                                                                                 self.STATE_INTERNAL,
                                                                                 # self.STATE_LAST_ACT_RAW,
@@ -1025,7 +1072,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                 # self.STATE_ACT_PREPROC,
                                                                                 self.STATE_JOINT_LONGTERM_STATS,
                                                                                 self.STATE_JOINT_STEP_STATS],
-                                                                flattened_part_name="vec",
+                                                                concatenated_part_name="vec",
                                                                 noise_generators={  self.STATE_ROBOT     : robot_state_noise,
                                                                                     self.STATE_EXTRINSIC : extrinsic_state_noise})}
         self._state_helper = DictStateHelper({  self.STATE_ROBOT : robot_state_helper,
@@ -1112,7 +1159,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                             pose=robot_pose,
                                             format="urdf",
                                             kwargs={})
-            if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
+            if adarl.utils.utils.isinstance_noimport(self._adapter, ("MjxAdapter", "MujocoAdapter")):
                 cam_file = "models/simple_camera.mjcf.xacro"
             else:            
                 cam_file = "models/simple_camera.sdf.xacro"
@@ -1234,7 +1281,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             initial_ctrl_jposes = self._previous_pose_randomization
         else:
             initial_ctrl_jposes = homing_pos.expand(selected_vecs_num, len(self._configuration.controlled_joints))
-        ggLog.info(f"pose randomization took {time.monotonic()-t0:.6f}s")
+        rand_time = time.monotonic()-t0
+        if rand_time > 1.0:
+            ggLog.info(f"pose randomization took {rand_time:.6f}s")
         if  self._configuration.init_on_reset_ratio<1.0 and self._init_counter_since_reset>1:
             vec_init_on_reset = self._thrand((selected_vecs_num,)) < self._configuration.init_on_reset_ratio
         else:
@@ -1421,6 +1470,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     #                                 launch_file_args={"gui":"false"})
                     self._arrow_base = ("arrow","arrow_link")
                     self._arrow_yellow = ("arrow_yellow","arrow_link")
+        elif isinstance_noimport(self._adapter, "MujocoAdapter"):
+            self._adapter.build_scenario(models = self._get_spawn_defs())
+            self._arrow_base = ("arrow","arrow_link")
+            self._arrow_yellow = ("arrow_yellow","arrow_link")
         else:
             raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         
@@ -1611,7 +1664,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_jstates_j_pveae = self._adapter.getExtendedJointsState(requestedJoints=self._controlled_joints_ids)
         else:
             jstates_v_j_pve = self._adapter.getJointsState(requestedJoints=self._controlled_joints_ids)
-            vec_jstates_j_pveae = th.cat([jstates_v_j_pve, th.zeros(jstates_v_j_pve.shape[:2]+(2,), dtype=jstates_v_j_pve.dtype, device=jstates_v_j_pve.device)], dim = -1)
+            vec_jstates_j_pveae = th.cat([jstates_v_j_pve, th.zeros_like(jstates_v_j_pve[:2])], dim = -1)
         # ggLog.info(f"jstates_v_j_pve = {jstates_v_j_pve}")
         # th.cuda.synchronize()
         t1 = time.monotonic()
@@ -2022,27 +2075,36 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         return reward
 
     def _sample_distr(self, size, distribution : DistributionDefTh) -> th.Tensor:
+        return self.sample_distr(size,
+                                 distribution,
+                                 device=self._configuration.th_device,
+                                 dtype=self._configuration.obs_dtype,
+                                 generator=self._rng)
+    
+    @staticmethod
+    def sample_distr(size, distribution : DistributionDefTh, device : th.device, dtype : th.dtype, generator : th.Generator) -> th.Tensor:
         if isinstance(distribution, th.Tensor):
             return distribution.expand(size).clone()
         elif distribution[0] == "uniform":
             low, high = distribution[1] #type: ignore
-            return self._thrand(size)*(high-low)+low
+            return th.rand(size, device=device, dtype=dtype, generator=generator)*(high-low)+low
         elif distribution[0] == "loguniform":
             low, high = distribution[1] #type: ignore
             lowlog = th.log(low)
             highlog = th.log(high)
-            return th.exp(self._thrand(size)*(highlog-lowlog)+lowlog)
+            return th.exp(th.rand(size, device=device, dtype=dtype, generator=generator)*(highlog-lowlog)+lowlog)
         elif distribution[0] == "normal":
             if len(distribution[1]) == 2:
                 mean, std = distribution[1]
-                clamp_width = self._thtens(5.0)
+                clamp_width = th.tensor(5.0, device=device, dtype=dtype)
             else:
                 mean, std, clamp_width = distribution[1] #type: ignore
-            return th.clamp(self._thrandn(size), -clamp_width, clamp_width)*std+mean
+            return th.clamp(th.randn(size, device=device, dtype=dtype, generator=generator), -clamp_width, clamp_width)*std+mean
         else:
             raise NotImplementedError(f"Unsupported distribution type {distribution[0]}")
         
-    def _distr_is_constant(self, distr : DistributionDef) -> bool:
+    @staticmethod
+    def _distr_is_constant(distr : DistributionDef) -> bool:
         if isinstance(distr, (th.Tensor, float, int)):
             return True
         else:

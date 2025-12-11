@@ -205,6 +205,14 @@ def loco_runner_builder(seed,
                                                         "quad":"fastest"}.get(robot_model, "faster"),
                                             opt_override=opt_override,
                                             reference_filter_cutoff_frequency=20.0)
+    elif mode == "mujoco":
+        from adarl.adapters.MujocoJointImpedanceAdapter import MujocoJointImpedanceAdapter
+        from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
+        ground_link = ("ground","ground_link")
+        adapter = MujocoJointImpedanceAdapter(  step_length_sec=stepLength_sec,
+                                                sim_step_dt=1/2048,
+                                                output_th_device=th_device,
+                                                reference_filter_cutoff_frequency=20.0)
     else:
         print(f"Requested unknown adapter '{mode}'")
         exit(0)

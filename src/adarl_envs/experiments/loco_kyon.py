@@ -7,6 +7,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import torch as th
     from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams, TargetEntropyAnnealer
     from adarl_envs.experiments.loco_builder import named_loco_venv_builder
+    from adarl_envs.env.LocomotionVecEnv import TransitionAugmentor
     import math
     
     mode = args["mode"].lower()
@@ -104,8 +105,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      1.0,
         "reward_position_weight" :            0.1,
-        "reward_posref_vel_weight" :          0.1,
-        "reward_posref_acc_weight":           1.0,
+        "reward_posref_vel_weight" :          0.5,
+        "reward_posref_acc_weight":           2.0,
         "reward_sensed_effort_weight" :       eps,
         "reward_slip_weight" :                eps,
         "reward_stand_position_weight" :      1.0,
@@ -275,9 +276,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         ]
     
     annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
-                                     start_target=-1.0,
-                                     end_target=-5.0,
+                                     start_target=-2.0,
+                                     end_target=-6.0,
                                      start_reference_threshold=0.5)
+    
+    def transition_augmentor_builder(observation_space, action_space, reward_space):
+        return TransitionAugmentor(reward_space=reward_space,
+                                   reward_weights_distr=("uniform", (0.01, 1.0)),
+                                   augmented_samples=4096).augment_transition
 
     if algo.lower() == "sac":
         
@@ -295,9 +301,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     policy_arch=[512,256,256],
                                                     gamma=gammas,
                                                     target_tau = 0.001,
-                                                    batch_size=16384,
-                                                    buffer_size=(6*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
-                                                    total_steps=1_500_000_000,
+                                                    batch_size=8192,
+                                                    buffer_size=(5*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
+                                                    total_steps=3_000_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=50,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
@@ -307,8 +313,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy_factor = None,
                                                     actor_log_std_init = -2.0,
-                                                    actor_observation_filter=["base.vec","base.last_action_raw"],
-                                                    critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec"],
+                                                    actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
+                                                    critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
                                                     target_entropy_factor_annealing=annealer.anneal,
                                                     action_reference_obs_key="base.last_action_raw",
                                                     actor_weight_decay=1e-5,
@@ -327,7 +333,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
                     debug_level=2,
-                    log_weights_and_grads=False)                             
+                    log_weights_and_grads=False,
+                    transition_augmentor_builder=transition_augmentor_builder)
     elif algo.lower() == "sac_small":
         sac_train(  seed,
                     folderName,

@@ -30,7 +30,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     eval_freq = 5
     env_builder_args = {
-        "action_delay_mustd" : (0.001,0.01),
+        "action_delay_mustd_std" : (0.001, 0.001, 0.001),
         "action_noise_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
@@ -82,7 +82,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
         "initial_pose_randomization_range" : 0.0,
-        "mass_randomization_ratio" : 0.3,
+        "randomized_mass_ratios_distr" : 0.3,
         "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
         "impulse_probability_per_sec" : 0.0,
         "impulse_duration_minmax" : (0.01, 2.5),
@@ -181,7 +181,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     run_id,
                     args,
                     vec_env_builder = centgrasp_vecenv_builder,
-                    env_builder = None,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_init_hparams(  model_th_device = "cuda",

@@ -30,8 +30,9 @@ import pprint
 import scipy.stats
 from adarl.utils.base_utils import record_time
 from gymnasium.vector.utils.spaces import batch_space
+import os
 
-disable_compile = False
+disable_compile = os.environ.get("DISABLE_ENV_TH_COMPILE", False)
 
 def hash_tensor(tensor):
     return hash(tuple(tensor.reshape(-1).tolist()))
@@ -1313,8 +1314,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         link_frictions =            (self._randomized_friction_links_ids, link_frictions_ratios),
                                         joint_armature_ratios =     (self._randomized_armature_joints_ids, joint_armatures_ratios),
                                         joint_frictionloss_ratios = (self._randomized_frictionloss_joints_ids, joint_frictionlosses_ratios))
-            mjx_adapter.alter_model_sum(com_position_diffs =        (self._randomized_com_links_ids, link_coms_diffs),
-                                        com_quatxyzw_diffs =        None)
+            if len(self._randomized_com_links_ids) > 0:
+                mjx_adapter.alter_model_sum(com_position_diffs =        (self._randomized_com_links_ids, link_coms_diffs),
+                                            com_quatxyzw_diffs =        None)
             masked_assign(self._current_episode_config.link_masses_ratios,          vec_mask, link_masses_ratios)
             masked_assign(self._current_episode_config.link_frictions_ratios,       vec_mask, link_frictions_ratios)
             masked_assign(self._current_episode_config.joint_armatures_ratios,      vec_mask, joint_armatures_ratios)
@@ -1940,7 +1942,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         i["joint_pos_error_instant"] = th.mean(th.abs(joint_pose - normhoming), dim=1)
         sub_rews = {}
         i["tot_reward"] = self.compute_rewards(state, sub_rews)
-        i["tot_reward_sum"] = i["tot_reward"].sum(dim=1)
+        i["tot_reward_sum"] = i["tot_reward"].sum(dim=1) if i["tot_reward"].dim()>1 else i["tot_reward"]
         i["rewards"] = th.stack(list(sub_rews.values()), dim = 1) 
         i["safety_limits_triggered"] = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED]
         i["safety_posref_triggered"] = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED]

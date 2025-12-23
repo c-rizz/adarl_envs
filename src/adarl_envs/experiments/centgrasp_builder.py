@@ -1,6 +1,6 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
-from adarl.envs.vec.GymVecRunnerWrapper import GymVecRunnerWrapper
+from adarl.envs.vec.Runner2VecGymWrapper import Runner2VecGymWrapper
 import adarl.utils.dbg.ggLog as ggLog
 import torch as th
 import threading, os
@@ -11,7 +11,7 @@ import adarl.utils.utils
 from adarl_envs.env.GraspVecEnv import GraspVecEnv
 from adarl_envs.env.RobotVecEnv import JOINT_FILTERS, LINK_FILTERS
 from adarl.envs.vec.EnvRunner import EnvRunner
-from adarl.envs.vec.GymRunnerWrapper import GymRunnerWrapper
+from adarl.envs.vec.Runner2GymWrapper import Runner2GymWrapper
 from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
 import gymnasium as gym
 import copy
@@ -144,7 +144,7 @@ def runner_builder(seed,
                                                             model_kwargs=env_builder_args.pop("model_kwargs"),
                                                             extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
     
-    lrenv = GraspVecEnv(action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
+    lrenv = GraspVecEnv(action_delay_mustd_std = env_builder_args.pop("action_delay_mustd_std"),
                         action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
                         action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                         adapter=adapter,
@@ -198,7 +198,7 @@ def runner_builder(seed,
                         reward_position_weight=env_builder_args.pop("reward_position_weight"),
                         enable_link_collisions=env_builder_args.pop("enable_link_collisions"),
                         mass_randomized_links=env_builder_args.pop("mass_randomized_links"),
-                        mass_randomization_ratio=env_builder_args.pop("mass_randomization_ratio"),
+                        randomized_mass_ratios_distr=env_builder_args.pop("randomized_mass_ratios_distr"),
                         friction_randomized_links=env_builder_args.pop("friction_randomized_links"),
                         friction_slide_spin_roll_randomization_ratios=env_builder_args.pop("friction_slide_spin_roll_randomization_ratios"),
                         ground_link=ground_link,                            
@@ -369,7 +369,7 @@ def runner_builder_to_vecenv(runner_builder: VecEnvRunnerBuilderProtocol) -> Vec
                                         env_builder_args = env_builder_args,
                                         num_envs = num_envs,
                                         quiet=quiet)
-            env = GymVecRunnerWrapper(runner=vrunner, quiet=quiet)
+            env = Runner2VecGymWrapper(runner=vrunner, quiet=quiet)
         
         # if video_save_freq >0:
         #     env = wrap_with_recorder(env,
@@ -394,7 +394,7 @@ def runner_builder_to_singleenv(runner_builder: VecEnvRunnerBuilderProtocol) -> 
                                     num_envs = 1,
                                     quiet=quiet,
                                     autoreset = False)
-        return GymRunnerWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
+        return Runner2GymWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
     return builder
 
 centgrasp_vecenv_builder = runner_builder_to_vecenv(runner_builder)

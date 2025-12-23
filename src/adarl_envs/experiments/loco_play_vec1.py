@@ -238,9 +238,9 @@ def build_fixed_policy(env, robot : str, scale : float = 0.0):
 
 from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
 def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
-    from adarl.envs.vec.GymRunnerWrapper import GymRunnerWrapper
+    from adarl.envs.vec.GymRunnerWrapper import Runner2GymWrapper
     from adarl.envs.vec.EnvRunnerWrapper import EnvRunnerWrapper
-    if isinstance(env, GymRunnerWrapper):
+    if isinstance(env, Runner2GymWrapper):
         recorder = env
         while recorder is not None and not isinstance(recorder, EnvRunnerRecorderWrapper):
             if isinstance(recorder, EnvRunnerWrapper):

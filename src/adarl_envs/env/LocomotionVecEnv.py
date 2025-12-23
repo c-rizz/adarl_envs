@@ -21,8 +21,9 @@ import adarl.utils.utils
 import numpy as np
 import pprint
 import torch as th
+import os
 
-disable_compile = False
+disable_compile = os.environ.get("DISABLE_ENV_TH_COMPILE", False)
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -1776,15 +1777,16 @@ class LocomotionVecEnv(RobotVecEnv):
     @override
     @th.compile(mode="max-autotune-no-cudagraphs", disable=disable_compile)
     def pre_step(self):
-        super().pre_step()
-        if self._loco_conf.goal_resampling_enabled>0:
-            resample_prob_per_env_dt = 1-th.pow(1-self._loco_conf.goal_resampling_probability_per_sec, self._intendedStepLength_sec)
-            vec_mask = self._thrand((self.num_envs,)) < resample_prob_per_env_dt
-            goal_abs_linvel_vec_xys, goal_height, goal_heading_yaws = self._sample_abs_goals()
-            self.set_goal(goal_abs_linvel_vec_xys, 
-                      goal_abs_height=goal_height,
-                      vec_mask=vec_mask,
-                      goal_heading_yaw=goal_heading_yaws)
+        with th.no_grad():
+            super().pre_step()
+            if self._loco_conf.goal_resampling_enabled>0:
+                resample_prob_per_env_dt = 1-th.pow(1-self._loco_conf.goal_resampling_probability_per_sec, self._intendedStepLength_sec)
+                vec_mask = self._thrand((self.num_envs,)) < resample_prob_per_env_dt
+                goal_abs_linvel_vec_xys, goal_height, goal_heading_yaws = self._sample_abs_goals()
+                self.set_goal(goal_abs_linvel_vec_xys, 
+                        goal_abs_height=goal_height,
+                        vec_mask=vec_mask,
+                        goal_heading_yaw=goal_heading_yaws)
 
     def post_step(self):
         super().post_step()

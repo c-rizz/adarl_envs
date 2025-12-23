@@ -1,7 +1,7 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
 import random
-from adarl.envs.vec.GymVecRunnerWrapper import GymVecRunnerWrapper
+from adarl.envs.vec.Runner2VecGymWrapper import Runner2VecGymWrapper
 import adarl.utils.dbg.ggLog as ggLog
 import torch as th
 import threading, os
@@ -12,7 +12,7 @@ import adarl.utils.utils
 from adarl_envs.env.LocomotionVecEnv import LocomotionVecEnv
 from adarl_envs.env.RobotVecEnv import JOINT_FILTERS, LINK_FILTERS
 from adarl.envs.vec.EnvRunner import EnvRunner
-from adarl.envs.vec.GymRunnerWrapper import GymRunnerWrapper
+from adarl.envs.vec.Runner2GymWrapper import Runner2GymWrapper
 from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
 import gymnasium as gym
 import copy
@@ -373,7 +373,7 @@ def loco_env_builder(   seed : int,
                                 num_envs = 1,
                                 quiet=quiet,
                                 autoreset = False)
-    return GymRunnerWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
+    return Runner2GymWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
         
 
 def loco_venv_builder(  seed,
@@ -406,7 +406,7 @@ def loco_venv_builder(  seed,
                                         env_builder_args = env_builder_args,
                                         num_envs = num_envs,
                                         quiet=quiet)
-            env = GymVecRunnerWrapper(runner=vrunner, quiet=quiet)
+            env = Runner2VecGymWrapper(runner=vrunner, quiet=quiet)
         
         # if video_save_freq >0:
         #     env = wrap_with_recorder(env,

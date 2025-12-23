@@ -16,7 +16,7 @@ import numpy as np
 import torch as th
 import math
 import quaternion
-from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS
+from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionDef
 from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import adarl.utils.tensor_trees
 import traceback
@@ -92,7 +92,7 @@ class GraspVecEnv(RobotVecEnv):
     CAMERA_FIELDS = IntEnum("CAMERA_FIELDS",   ["IMAGE"], start=0)
     
 
-    def __init__(self,  action_delay_mustd : tuple[float,float],
+    def __init__(self,  action_delay_mustd_std : tuple[float,float,float],
                         action_noise_mustd : Sequence[float] | th.Tensor, 
                         action_smoothing_halflife_sec : float,
                         adapter: BaseVecJointImpedanceAdapter,
@@ -153,7 +153,7 @@ class GraspVecEnv(RobotVecEnv):
                         ui_camera_resolution_hw : tuple[int,int] = (256,144),
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
                         mass_randomized_links : list[tuple[str,str]] = [],
-                        mass_randomization_ratio : float = 0.1,
+                        randomized_mass_ratios_distr : DistributionDef = ("normal", (0.0, 0.05)),
                         friction_randomized_links : list[tuple[str,str]] = [],
                         friction_slide_spin_roll_randomization_ratios : tuple[float, float, float] = (0.1,0.1,0.1),
                         impulse_probability_per_sec : float = 0.0,
@@ -201,7 +201,7 @@ class GraspVecEnv(RobotVecEnv):
         if enable_link_collisions is None:
             enable_link_collisions = []
         enable_link_collisions.append((self._grasping_conf.target_object_link, [self._grasping_conf.table_link]+self._grasping_conf.manipulator_links))
-        super().__init__(   action_delay_mustd_std = action_delay_mustd,
+        super().__init__(   action_delay_mustd_std = action_delay_mustd_std,
                             action_noise_mustd = action_noise_mustd, 
                             action_smoothing_halflife_sec = action_smoothing_halflife_sec,
                             adapter = adapter,
@@ -227,7 +227,6 @@ class GraspVecEnv(RobotVecEnv):
                             homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
                             homing_joint_pose = homing_joint_pose,
                             control_limits_minmax_pve = control_limits_minmax_pve,
-                            observe_body_velocity = observe_body_velocity,
                             frame_stack_length=frame_stack_length,
                             verbose_infos = verbose_infos,
                             quiet = quiet,
@@ -242,7 +241,7 @@ class GraspVecEnv(RobotVecEnv):
                             ui_camera_resolution_hw = ui_camera_resolution_hw,
                             enable_link_collisions = enable_link_collisions,
                             randomized_mass_links=mass_randomized_links,
-                            randomized_mass_ratios=mass_randomization_ratio,
+                            randomized_mass_ratios_distr=randomized_mass_ratios_distr,
                             randomized_friction_links=friction_randomized_links,
                             randomized_friction_slide_spin_roll_ratios=friction_slide_spin_roll_randomization_ratios,
                             ground_link=ground_link,
@@ -253,7 +252,9 @@ class GraspVecEnv(RobotVecEnv):
                             longterm_states_decimation_time = longterm_states_decimation_time,
                             free_joints=free_joints,
                             held_joints_stiffness = held_joints_stiffness,
-                            held_joints_damping = held_joints_damping
+                            held_joints_damping = held_joints_damping,
+                            initial_height_randomization_range_meters=0.0,
+                            obs_noise_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
                         )
 
         
@@ -297,35 +298,40 @@ class GraspVecEnv(RobotVecEnv):
                                                     fields_minmax={ self.GRASPING_FIELDS.GOAL_POSE :    [-10, 10],
                                                                     self.GRASPING_FIELDS.OBJECT_POSE :  [-10, 10],
                                                                     self.GRASPING_FIELDS.GRIPPER_POSE : [-10, 10]},
-                                                    observable_fields=observable_fields, #type: ignore
                                                     vec_size=adapter.vec_size(),
                                                     history_length=2,
-                                                    obs_history_length=1)
+                                                    observation_definitions={"base":
+                                                                             ThBoxStateHelper.SimpleObsDef( obs_history_length=1,
+                                                                                                            observable_fields=observable_fields,
+                                                                                                            observable_subfields=None)})
         self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_GRASPING,
                                                             grasping_state_helper,
-                                                            observable = True,
-                                                            flatten_obs = True)
+                                                        obs_defs={"base":{"observable":True,"concatenate":True,"noise":None}})
         camera_state_helper = ThBoxStateHelper( field_names=[e for e in self.CAMERA_FIELDS],
                                                 dtype=self._obs_dtype,
                                                 th_device=self._th_device,
                                                 field_size=self._grasping_conf.camera_resolution_xy,
                                                 fields_minmax={ self.CAMERA_FIELDS.IMAGE : [-1,1]},
-                                                observable_fields=observable_fields, #type: ignore
-                                                vec_size=adapter.vec_size())
+                                                vec_size=adapter.vec_size(),
+                                                observation_definitions={"base":
+                                                                         ThBoxStateHelper.SimpleObsDef( obs_history_length=1,
+                                                                                                        observable_fields=None,
+                                                                                                        observable_subfields=None)})
         # if not self._grasping_conf.observe_object_pose:
         self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_CAMERA,
                                                             camera_state_helper,
-                                                            observable = not self._grasping_conf.observe_object_pose,
-                                                            flatten_obs = False)
+                                                            obs_defs={"base":{"observable":not self._grasping_conf.observe_object_pose,
+                                                                              "concatenate":False,
+                                                                              "noise":None}})
         ggLog.info(f"Built state/obs/action helpers")
         
 
 
 
     @override
-    def _get_new_instantaneous_state(self):
+    def _get_new_instantaneous_state(self, adapter_data):
 
-        new_inst_state = super()._get_new_instantaneous_state()
+        new_inst_state = super()._get_new_instantaneous_state(adapter_data)
 
         current_object_pose = self._adapter.getLinksState(self._object_link_id, use_com_pose=False)[:,0,:7]
         current_gripper_pose = self._adapter.getLinksState(self._gripper_link_id, use_com_pose=False)[:,0,:7]
@@ -419,9 +425,11 @@ class GraspVecEnv(RobotVecEnv):
         reward_object_pose = 1-th.tanh(obj2goal_dist/0.5)
         reward_gripper_pose = 1-th.tanh(obj2hand_dist/0.5)
 
-        failed = self._no_vecs
+        failed = self._no_vecs        
         if self._configuration.fail_on_safety:
-            failed = th.logical_or(failed, state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_TRIGGERED,0])
+            safety_triggered = th.logical_or(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED,0],
+                                             state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,0])
+            failed = th.logical_or(failed, safety_triggered)
 
         sub_rewards_unscaled_dict : dict[str,th.Tensor] = {
             "acceleration" : reward_acceleration,

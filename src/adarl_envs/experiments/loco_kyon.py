@@ -93,7 +93,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
         "reward_failure_weight" :             eps,
-        "reward_feet_air_time_weight" :       20.0,
+        "reward_feet_air_time_weight" :       eps,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      eps,
         "reward_heading_velocity_weight" :    eps,
@@ -104,9 +104,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_pitchnroll_velocity_weight" : 20.0,
         "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      1.0,
-        "reward_position_weight" :            0.1,
-        "reward_posref_vel_weight" :          0.5,
-        "reward_posref_acc_weight":           2.0,
+        "reward_position_weight" :            0.01,
+        "reward_posref_vel_weight" :          5.0,
+        "reward_posref_acc_weight":           5.0,
         "reward_sensed_effort_weight" :       eps,
         "reward_slip_weight" :                eps,
         "reward_stand_position_weight" :      1.0,
@@ -122,7 +122,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "safe_damping" : 5,
         "safe_stiffness" : 600,
         "saturate_jimp_ref_limits" : False,
-        "split_rewards" : False,
+        "split_rewards" : True,
         "stepLength_sec" : step_length_sec,
         "stop_on_failure" : False,
         "terminate_on_body_contact" : False,
@@ -277,7 +277,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
                                      start_target=-2.0,
-                                     end_target=-6.0,
+                                     end_target=-10.0,
                                      start_reference_threshold=0.5)
     
     def transition_augmentor_builder(observation_space, action_space, reward_space):

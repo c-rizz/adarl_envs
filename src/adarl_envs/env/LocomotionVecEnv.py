@@ -1694,6 +1694,7 @@ class LocomotionVecEnv(RobotVecEnv):
         body_linvel_rel_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z)) #type: ignore
+        
         goal_dir = curr_locom_state[:,goal_vel_rel_dir_xyz_idx].view(self.num_envs,3)
         goal_speed = curr_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED].view(self.num_envs,1)
         i["goal_rel_xyz_vec"] = goal_dir*goal_speed
@@ -1722,10 +1723,16 @@ class LocomotionVecEnv(RobotVecEnv):
         state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
         i["avg_sensed_effort"] = state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1)
         i["avg_peak_sensed_effort"] = state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=2).amax(dim=1)
-        i["actdiff_weight"] = curr_rewar_state[:,0] #self.REWARD_WEIGHTS_FIELDS.ACTDIFF]
-        i["actacc_weight"] = curr_rewar_state[:,0] #self.REWARD_WEIGHTS_FIELDS.ACTACC]
-        i["posrefvel_weight"] = curr_rewar_state[:,0] #self.REWARD_WEIGHTS_FIELDS.POSREF_VEL]
-        i["posrefacc_weight"] = curr_rewar_state[:,0] #self.REWARD_WEIGHTS_FIELDS.POSREF_ACC]
+        
+        rew_weights_needed = (   "actdiff", "actacc", "posref_vel", "posref_acc")
+        enabled_needed_weights = tuple([w for w in rew_weights_needed if w in self._loco_conf.enabled_rewards])
+        disabled_needed_weights = tuple([w for w in rew_weights_needed if w not in self._loco_conf.enabled_rewards])
+        enabled_needed_weights_idxs = self._state_helper.sub_helpers[self.STATE_REWARDS].field_idx(enabled_needed_weights) #type: ignore
+        enabled_rew_weights = curr_rewar_state[:,enabled_needed_weights_idxs]
+        for ri,rn in enumerate(enabled_needed_weights):
+            i[rn+"_weight"] = enabled_rew_weights[:,ri]
+        for rn in disabled_needed_weights:
+            i[rn+"_weight"] = th.zeros((self.num_envs,), device=curr_rewar_state.device)
         
         _, i["height_velocity"], i["goal_height_velocity"], last_dt, i["height_err_raw"] = self._height_velocity_reward(curr_state_extr_vec = curr_extri_state,
                                                                                                        current_state_locom_vec = curr_locom_state,

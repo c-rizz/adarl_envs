@@ -508,7 +508,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         recycle_pose_randomization : bool = False,
                         saturate_jimp_ref_limits : bool = True,
                         ui_camera_resolution_hw : tuple[int,int] = (144,256),
-                        minimal_infos : bool = False
+                        minimal_infos : bool = False,
+                        single_reward_space : ThBox | None = None
                         ):
         self._main_seed = seed
         # self._rng_get_count = 0
@@ -716,13 +717,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
         self._build_stats()
 
+        if single_reward_space is None:
+            single_reward_space = ThBox(low=float("-inf"),high=float("+inf"), shape=tuple(), torch_device=th_device)
         super().__init__(max_episode_steps=maxStepsPerEpisode,
                          step_duration_sec=stepLength_sec,
                          adapter=adapter,
                          single_state_space=None,
                          single_observation_space=None,
                          single_action_space=self._action_helper.get_single_action_space(),
-                         single_reward_space=ThBox(low=float("-inf"),high=float("+inf"), shape=tuple(), torch_device=th_device),
+                         single_reward_space=single_reward_space,
                          info_space=None,
                          step_precision_tolerance = step_precision_tolerance,
                          th_device = self._th_device,
@@ -1975,9 +1978,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             #     labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["base.vec"]])
             #     if not self._configuration.merge_privileged:
             #         labels["vec_obs_privileged"] = to_string_tensor([n for n in self._state_helper.observation_names()["privileged.vec"]])
-            posref_diff = state[self.STATE_ROBOT][:,1,:,5] - state[self.STATE_ROBOT][:,0,:,5]
+            posref_diff = state[self.STATE_ROBOT][:,0,:,5] - state[self.STATE_ROBOT][:,1,:,5]
+            prev_posref_diff = state[self.STATE_ROBOT][:,1,:,5] - state[self.STATE_ROBOT][:,2,:,5]
             posref_vel = posref_diff/self._configuration.stepLength_sec
-            prev_posref_vel = (state[self.STATE_ROBOT][:,2,:,5] - state[self.STATE_ROBOT][:,1,:,5])/self._configuration.stepLength_sec
+            prev_posref_vel = prev_posref_diff/self._configuration.stepLength_sec
             posref_acc = (posref_vel - prev_posref_vel)/self._configuration.stepLength_sec
             i["posref_diff"] = posref_diff
             i["posref_vel"] = posref_vel

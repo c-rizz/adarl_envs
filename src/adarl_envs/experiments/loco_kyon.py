@@ -12,11 +12,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=1000 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 4096
+        train_envs = 1024
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -30,7 +30,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
     
     eval_freq = 10
-    r = 0.0 # randomization strength
+    r = 1.0 # randomization strength
     n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
@@ -100,7 +100,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_heading_weight" :             0.1,
         "reward_health_weight" :              eps,
         "reward_height_position_weight" :     0.5,
-        "reward_height_velocity_weight" :     eps,
+        "reward_height_velocity_weight" :     0.1,
         "reward_pitchnroll_velocity_weight" : 20.0,
         "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      1.0,
@@ -277,7 +277,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
                                      start_target=-2.0,
-                                     end_target=-10.0,
+                                     end_target=-5.0,
                                      start_reference_threshold=0.5)
     
     def transition_augmentor_builder(observation_space, action_space, reward_space):
@@ -301,7 +301,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     policy_arch=[512,256,256],
                                                     gamma=gammas,
                                                     target_tau = 0.001,
-                                                    batch_size=8192,
+                                                    batch_size=4096,
                                                     buffer_size=(5*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
                                                     total_steps=3_000_000_000,
                                                     train_freq_vstep=5,

@@ -55,8 +55,8 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
                 f"limits_safety         {limits_safety_triggered}\n"
                 f"actacc_weight         {format_tensor(info.get('actacc_weight',float('nan')), 3)}\n"
                 f"actdiff_weight        {format_tensor(info.get('actdiff_weight',float('nan')), 3)}\n"
-                f"posrefvel_weight      {format_tensor(info.get('posrefvel_weight',float('nan')), 3)}\n"
-                f"posrefacc_weight      {format_tensor(info.get('posrefacc_weight',float('nan')), 3)}\n")
+                f"posrefvel_weight      {format_tensor(info.get('posref_vel_weight',float('nan')), 3)}\n"
+                f"posrefacc_weight      {format_tensor(info.get('posref_acc_weight',float('nan')), 3)}\n")
 
 def loco_runner_builder(seed,
                         run_folder,

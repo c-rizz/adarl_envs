@@ -1437,7 +1437,7 @@ class LocomotionVecEnv(RobotVecEnv):
         # posref_threshold = 7.0
         # reward_posref_vel       = joint_penalty_reward(posref_vel/posref_threshold,     max_rew=1.0,exponent=5, presquash_factor=1)
         reward_posref_vel       = norm_penalty(posref_vel/15,     norm=4, power=2, squash_max=2.0, squash_smoothness=2.0, flattening_scale=0.005, flattening_power=4.0)
-        reward_posref_acc       = norm_penalty(posref_acc/1_000,  norm=4, power=2, squash_max=2.0, squash_smoothness=2.0)
+        reward_posref_acc       = norm_penalty(posref_acc/1_000,  norm=4, power=1.0, squash_max=2.0, squash_smoothness=2.0)
         # reward_posref_acc = flattened_joint_penalty_reward(posref_acc/1_000, max_rew=1.0, exponent=2.0, presquash_factor=100, flattening_scale=0.01)
 
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
@@ -1979,9 +1979,9 @@ class TransitionAugmentor:
                        generator : th.Generator | None = None):
         self._reward_weights_key = "base.reward_weights"
         self._randomized_rewards = ["posref_acc", "posref_vel"]
-        for rr in self._randomized_rewards:
-            if rr not in reward_space.labels:
-                raise ValueError(f"Reward '{rr}' not found in reward space labels")
+        # for rr in self._randomized_rewards:
+        #     if rr not in reward_space.labels:
+        #         raise ValueError(f"Reward '{rr}' not found in reward space labels")
         self._th_device = reward_space.th_device
         self._reward_mask = th.as_tensor([rn in self._randomized_rewards for rn in reward_space.labels], device=self._th_device)
         self._rewards_distribution = DistributionTh(distribution_def=reward_weights_distr,

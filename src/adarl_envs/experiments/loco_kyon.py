@@ -97,7 +97,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      eps,
         "reward_heading_velocity_weight" :    eps,
-        "reward_heading_weight" :             0.1,
+        "reward_heading_weight" :             0.0,
         "reward_health_weight" :              eps,
         "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     0.1,
@@ -322,7 +322,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     policy_update_freq=2,
                                                     deterministic_collection_ratio=0.00,
                                                     actor_mean_bounds_ratio = 0.8,
-                                                    alpha_lr_factor = 1.0
+                                                    alpha_lr_factor = 1.0,
+                                                    independent_entropy_q=True
                                                     ),
                     checkpoint_freq=20,
                     collector_device=env_device,

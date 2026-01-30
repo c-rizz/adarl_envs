@@ -26,7 +26,6 @@ import dataclasses
 
 disable_compile = os.environ.get("DISABLE_ENV_TH_COMPILE", False)
 
-@th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     """A bell-shaped reward function. It's 1 at error = 0, it reaches about zero (~0.0183) at error = zero_rew_dist
 
@@ -44,16 +43,13 @@ def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     """
     return th.exp(-(2*error/zero_rew_dist)**2)
 
-@th.jit.script
 def double_bell_reward(error : th.Tensor, bell_width_a : th.Tensor, bell_width_b : th.Tensor, bell_b_weight : th.Tensor):
     return (   bell_b_weight  * bell_reward(error, zero_rew_dist=bell_width_b)+
             (1-bell_b_weight) * bell_reward(error, zero_rew_dist=bell_width_a))
 
-@th.jit.script
 def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     return 1-error/zero_rew_dist
 
-@th.jit.script
 def flattened_joint_penalty_reward(x, max_rew : float, exponent : float, flattening_scale : float, presquash_factor : float = 1.0):
     """A penalty produced by raising abs(x) at the power of exponent, and flattening it with
         a flipped exponential, scaled with flattening_scale. With exponent=1.5 and 
@@ -63,7 +59,6 @@ def flattened_joint_penalty_reward(x, max_rew : float, exponent : float, flatten
     """
     return -th.tanh((th.mean(th.pow(th.abs(x),exponent)*(1-th.exp(-(x/flattening_scale)**2)), dim=1))*presquash_factor/max_rew)*max_rew
 
-@th.jit.script
 def joint_penalty_reward(x, max_rew : float, exponent : float, reduction : str = "mean", presquash_factor : float = 1.0):
     """A penalty produced by raising abs(x) at the power of exponent, and squashing
         it with a tanh to be under max_rew.
@@ -78,7 +73,6 @@ def joint_penalty_reward(x, max_rew : float, exponent : float, reduction : str =
         raise ValueError(f"reduction must be 'mean' or 'sum', got {reduction}")
     
 
-@th.jit.script
 def penalty_reward(x, max_rew : float, exponent : float):
     """A penalty produced by raising abs(x) at the power of exponent, and squashing
         it with a tanh to be under max_rew.
@@ -86,7 +80,6 @@ def penalty_reward(x, max_rew : float, exponent : float):
     return -th.tanh(th.pow(th.abs(x),exponent)/max_rew)*max_rew
 
 
-@th.jit.script
 def flattened_penalty_reward(x, max_rew : float, exponent : float, flattening_scale : float):
     """A penalty produced by raising abs(x) at the power of exponent, and flattening it with
         a flipped exponential, scaled with flattening_scale. With exponent=1.5 and 
@@ -96,7 +89,6 @@ def flattened_penalty_reward(x, max_rew : float, exponent : float, flattening_sc
     """
     return -th.tanh((th.pow(th.abs(x),exponent)*(1-th.exp(-(x/flattening_scale)**2)))/max_rew)*max_rew
 
-@th.jit.script
 def smooth_clip(x : th.Tensor, max_value : float, softness : float) -> th.Tensor:
     """ Smoothly clips x to be under max_value, with a softness parameter.
 
@@ -133,7 +125,6 @@ def flattener(x: th.Tensor, scale: float, power : float) -> th.Tensor:
     """
     return x * (1 - th.exp(-(x**power/scale)))
 
-@th.jit.script
 def norm_penalty(x : th.Tensor,
                  norm : float,
                  power : float,
@@ -175,6 +166,56 @@ def norm_penalty(x : th.Tensor,
     if flattening_scale > 0.0:
         flattened_penalties = flattener(squashed_penalties, flattening_scale, flattening_power)
         penalties = flattened_penalties
+    else:
+        penalties = squashed_penalties
+    penalties = penalties/squash_max * scale
+    return -penalties
+
+
+def norm_penalty_flat2(x : th.Tensor,
+                 norm : float,
+                 power : float,
+                 squash_max : float = 1.0,
+                 squash_smoothness : float = 4.0,
+                 flattening_threshold : float = 0.0,
+                 flattening_width : float = 2.0,
+                 scale : float = 1.0) -> th.Tensor:
+    """ A joint penalty applied to the norm of the vectors in x. The penalty is computed as the norm raised to the power of 'power',
+        and then flattened using a smooth clipping function.
+
+    Parameters
+    ----------
+    x : th.Tensor
+        Input tensor (batch_size, n_dimensions)
+    norm : float
+        Norm to use for the penalty
+    power : float
+        Power to raise the norm to
+    max_val : float
+        Maximum value for the penalty
+    squash_smoothness : float
+        Smoothness parameter for the clipping
+    flattening_threshold : float
+        Threshold at which flattening starts
+    flattening_width : float
+        Width of the flattening ramp (the flattening reaches 1 at threshold + width)
+    scaling : float
+        Output will be scaled to be maximum this value
+
+    Returns
+    -------
+    th.Tensor
+        Penalty tensor
+    """
+    joint_norms = th.linalg.norm(x, dim=1, ord=norm)
+    base_penalty = th.pow(joint_norms, power)
+    squashed_penalties = smooth_clip(base_penalty, squash_max, squash_smoothness)
+    if flattening_width > 0.0:
+         # a smooth ramp that starts around flattening_threshold and reaches 1 around flattening_threshold+flattening_width
+        t = flattening_threshold
+        w = flattening_width
+        flattening = smooth_clip(((joint_norms-t)*2-1)/w-1, 1.0, 10.0)+1
+        penalties = squashed_penalties*flattening
     else:
         penalties = squashed_penalties
     penalties = penalties/squash_max * scale
@@ -1401,7 +1442,6 @@ class LocomotionVecEnv(RobotVecEnv):
         # norm_pos2posref_diff = state_robot_norm[:,0,:,0] - state_robot_norm[:,0,:,5]
         posref_vel           = (state_robot[:,0,:,5] - state_robot[:,1,:,5])/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         prev_posref_vel      = (state_robot[:,1,:,5] - state_robot[:,2,:,5])/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
-        norm_posref_vel      = (state_robot_norm[:,0,:,5] - state_robot_norm[:,1,:,5])/2/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         posref_acc    = (posref_vel-prev_posref_vel)/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         # normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
         max_senseff = 1_000 # max expected sensed effort (not really a strict max)
@@ -1434,7 +1474,15 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_velocity_refs    = joint_penalty_reward(norm_velocity_refs,   max_rew=max_rew,exponent=2)
         reward_torque_refs      = joint_penalty_reward(norm_torque_refs,     max_rew=max_rew,exponent=2)
         # reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
-        # posref_threshold = 7.0
+        posref_vel_threshold = 6.5
+        posref_vel_max = 15.0
+        reward_posref_vel       = norm_penalty_flat2(posref_vel/posref_vel_max,
+                                                     norm=4,
+                                                     power=2,
+                                                     squash_max=2.0,
+                                                     squash_smoothness=2.0,
+                                                     flattening_width=1.0,
+                                                     flattening_threshold=posref_vel_threshold/posref_vel_max)
         # reward_posref_vel       = joint_penalty_reward(posref_vel/posref_threshold,     max_rew=1.0,exponent=5, presquash_factor=1)
         reward_posref_vel       = norm_penalty(posref_vel/15,     norm=4, power=2, squash_max=2.0, squash_smoothness=2.0, flattening_scale=0.005, flattening_power=4.0)
         reward_posref_acc       = norm_penalty(posref_acc/1_000,  norm=4, power=1.0, squash_max=2.0, squash_smoothness=2.0)

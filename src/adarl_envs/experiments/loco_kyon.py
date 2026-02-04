@@ -104,7 +104,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_pitchnroll_velocity_weight" : 20.0,
         "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      1.0,
-        "reward_position_weight" :            0.01,
+        "reward_position_weight" :            0.0,
         "reward_posref_vel_weight" :          1.0,
         "reward_posref_acc_weight":           5.0,
         "reward_sensed_effort_weight" :       eps,
@@ -165,7 +165,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_freq_ep" : eval_freq*train_envs,
         "eval_eps" : 100,
         "env_builder_args" : highpen_video_eval_env_builder_args,
-        "num_envs" : 100
+        "num_envs" : 100,
+        "skip_first_eval": True
     }
     eval_conf_video_stoch = {
         "name" : "video_stoch",
@@ -174,6 +175,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 100,
         "env_builder_args" : video_eval_env_builder_args,
         "num_envs" : 100,
+        "skip_first_eval": True
     }
     video_det_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
     eval_conf_video_det = {
@@ -182,7 +184,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_freq_ep" : 10*train_envs,
         "eval_eps" : 100,
         "env_builder_args" : video_det_eval_env_builder_args,
-        "num_envs" : 100
+        "num_envs" : 100,
+        "skip_first_eval": True
     }
     # run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
     # run_1ms_env_builder_args["goal_speed_minmax"] = (1,1)

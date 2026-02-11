@@ -342,7 +342,7 @@ def loco_runner_builder(seed,
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
     # ggLog.info(f"action_space = {lrenv.action_space.shape}")
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
-                        render_envs=[0], autoreset=autoreset,
+                        ui_render_envs=[0], autoreset=autoreset,
                         log_freq = max_steps)
     vrunner = EnvRunnerRecorderWrapper(vrunner,
                                     fps = 1/stepLength_sec,

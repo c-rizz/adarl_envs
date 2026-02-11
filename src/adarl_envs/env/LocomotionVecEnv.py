@@ -1850,7 +1850,7 @@ class LocomotionVecEnv(RobotVecEnv):
         return goal_abs_linvel_vec_xys, goal_abs_height, goal_heading_yaws
 
     @override
-    @th.compile(mode="max-autotune-no-cudagraphs", disable=disable_compile)
+    @th.compile(mode="max-autotune-no-cudagraphs", disable=disable_compile, dynamic=False)
     def pre_step(self):
         with th.no_grad():
             super().pre_step()

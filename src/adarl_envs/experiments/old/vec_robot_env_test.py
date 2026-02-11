@@ -130,7 +130,7 @@ def robot_env_builder(  seed,
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
     # ggLog.info(f"action_space = {lrenv.action_space.shape}")
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=log_folder+"/vec_runner.log",
-                        render_envs=[0], autoreset=True,
+                        ui_render_envs=[0], autoreset=True,
                         log_freq = max_steps)
     vrunner = EnvRunnerRecorderWrapper(vrunner,
                                     fps = 1/stepLength_sec,

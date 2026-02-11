@@ -1109,6 +1109,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def submit_actions(self, actions : th.Tensor) -> None:
         with th.no_grad():
             actions = self._thtens(actions).detach()
+            actions = th.clamp(actions, min=-1, max=1)
             dbg_check_finite(actions, async_assert=True, assert_msg="Actions contains non-finite values")
             dbg_check_size(actions, (self._adapter.vec_size(), self._action_helper.single_action_len()))
             self._last_raw_actions = actions

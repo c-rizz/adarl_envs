@@ -381,18 +381,25 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder=None,
                 vec_env_builder=named_loco_venv_builder,
                 env_builder_args=env_builder_args,
-                agent_hyperparams=PPO_hyperparams(  minibatch_size=512,
+                agent_hyperparams=PPO_hyperparams(  minibatch_size=None,
+                                                    minibatch_num=4,
                                                     th_device=th.device("cuda"),
                                                     actor_network_arch=(512,256),
                                                     critic_network_arch=(512,256),
                                                     q_lr=None,
                                                     policy_lr=3e-4,
-                                                    update_epochs=3,
+                                                    update_epochs=5,
                                                     total_steps=train_envs*max_steps_per_episode*1000,
                                                     num_envs=train_envs,
-                                                    num_steps=40,
-                                                    gamma=gammas,
+                                                    num_steps=24,
+                                                    gamma=0.99,
+                                                    loss_value_weight=1.0,
+                                                    loss_entropy_coeff=0.001,
                                                     log_freq_vstep=int(max_steps_per_episode/10),
+                                                    epsilon_policy_ratio_clip=0.2,
+                                                    epsilon_value_clip_epsilon=0.2,
+                                                    gae_lambda=0.95,
+                                                    max_grad_norm=1.0
                                                     # actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
                                                     # critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
                                                     ),
@@ -420,7 +427,7 @@ if __name__ == "__main__":
     ap.add_argument("--seedsOffset", default=0, type=int, help="Offset the used seeds by this amount")
     ap.add_argument("--maxProcs", default=int(multiprocessing.cpu_count()/2), type=int, help="Maximum number of parallel runs")
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
-    ap.add_argument("--algorithm", default="sac", type=str, help="Algorithm to use ('sac'/'ppo')")
+    ap.add_argument("--algorithm", default="ppo", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 

@@ -1348,7 +1348,8 @@ class LocomotionVecEnv(RobotVecEnv):
         dbg_check(lambda : th.all(th.stack([th.all(curr_linvelgoaldir_flatbodyframe[:,2]<eps),
                                             th.all(prev_linvelgoaldir_flatbodyframe[:,2]<eps),
                                             th.all(prevprev_linvelgoaldir_flatbodyframe[:,2]<eps)])),
-                  assert_msg="flattened goal vectors not parallel to ground", async_assert=False,
+                  assert_msg="flattened goal vectors not parallel to ground",
+                  async_assert=False,
                   build_msg=lambda : f"flattened goal vectors not parallel to ground:\n"
                                      f" envs: {th.arange(self.num_envs, device=rel_goal_linvel_dir_xyz.device)[(curr_linvelgoaldir_flatbodyframe[:,2]>=eps)|(prev_linvelgoaldir_flatbodyframe[:,2]>=eps)|(prevprev_linvelgoaldir_flatbodyframe[:,2]>=eps)]}\n"
                                      f" curr_linvelgoaldir_flatbodyframe[:,2]={curr_linvelgoaldir_flatbodyframe[:,2]}\n"

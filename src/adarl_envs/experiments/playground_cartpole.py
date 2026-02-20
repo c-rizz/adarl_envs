@@ -1,10 +1,15 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
 
+
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
+    from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams, TargetEntropyAnnealer
+    from adarl_envs.experiments.loco_builder import named_loco_venv_builder
+    from adarl_envs.env.LocomotionVecEnv import TransitionAugmentor
+    import math
     from adarl_envs.experiments.playground_builder import playground_venv_builder
     
     mode = args["mode"].lower()
@@ -13,7 +18,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 4096
+        train_envs = 2048
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -30,10 +35,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args = {
         "video_save_freq" : -1,
         "record_video" : False,
-        "env_name" : "Go1JoystickFlatTerrain",
+        "env_name" : "CartpoleBalance", #"Go1JoystickFlatTerrain",
         "quiet" : False,
         "th_device" : env_device,
-        "log_info_stats": False,
+        "log_info_stats": True,
         "randomize_step_timeout_counters": True
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
@@ -64,8 +69,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder=None,
                 vec_env_builder=playground_venv_builder,
                 env_builder_args=env_builder_args,
-                agent_hyperparams=PPO_hyperparams(  minibatch_size=None,
-                                                    minibatch_num=4,
+                agent_hyperparams=PPO_hyperparams(  minibatch_size=512,
                                                     th_device=th.device("cuda"),
                                                     actor_network_arch=(512,256),
                                                     critic_network_arch=(512,256),
@@ -81,7 +85,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=int(max_steps_per_episode/10),
                                                     epsilon_policy_ratio_clip=0.2,
                                                     epsilon_value_clip_epsilon=0.2,
-                                                    gae_lambda=0.95,
+                                                    gae_lambda=0.97, # raised to have a longer horizon (not hitting the rail ends is long horizon)
                                                     max_grad_norm=1.0
                                                     # actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
                                                     # critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
@@ -93,7 +97,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 checkpoint_freq=-1,
                 collector_device=env_device,
                 eval_configurations=eval_configurations,
-                debug_level=1)
+                debug_level=0)
     else:
         raise RuntimeError(f"Unknown algorithm '{algo}'")
 

@@ -306,7 +306,7 @@ def loco_runner_builder(seed,
                             reward_position_limit_weight = env_builder_args.pop("reward_position_limit_weight"),
                             reward_position_weight=env_builder_args.pop("reward_position_weight"),
                             reward_sensed_effort_weight = env_builder_args.pop("reward_sensed_effort_weight"),
-                            reward_scale=1000/max_steps,
+                            reward_scale=1000/max_steps * env_builder_args.pop("reward_scale_nolength"),
                             reward_slip_weight = env_builder_args.pop("reward_slip_weight"),
                             reward_stand_position_weight = env_builder_args.pop("reward_stand_position_weight"),
                             reward_torque_limit_weight = env_builder_args.pop("reward_torque_limit_weight"),
@@ -344,19 +344,20 @@ def loco_runner_builder(seed,
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
                         ui_render_envs=[0], autoreset=autoreset,
                         log_freq = max_steps)
-    vrunner = EnvRunnerRecorderWrapper(vrunner,
-                                    fps = 1/stepLength_sec,
-                                    outFolder=run_folder+"/RunnerRecorder",
-                                    env_index=0,
-                                    saveFrequency_ep=env_builder_args.pop("video_save_freq"),
-                                    publish=False,
-                                    stream=True,
-                                    vec_obs_key="base.vec", #TODO: somehow pass multiple keys and include privileged, or auto-detect which keys to save
-                                    record_video=env_builder_args["record_video"],
-                                    overlay_text_xy=(0.025,0.025),
-                                    overlay_text_height=0.035,
-                                    overlay_text_color_rgb=(255,150,0),
-                                    overlay_text_func=overlay_text_func)
+    if env_builder_args["video_save_freq"]>0:
+        vrunner = EnvRunnerRecorderWrapper(vrunner,
+                                        fps = 1/stepLength_sec,
+                                        outFolder=run_folder+"/RunnerRecorder",
+                                        env_index=0,
+                                        saveFrequency_ep=env_builder_args.pop("video_save_freq"),
+                                        publish=False,
+                                        stream=True,
+                                        vec_obs_key="base.vec", #TODO: somehow pass multiple keys and include privileged, or auto-detect which keys to save
+                                        record_video=env_builder_args["record_video"],
+                                        overlay_text_xy=(0.025,0.025),
+                                        overlay_text_height=0.035,
+                                        overlay_text_color_rgb=(255,150,0),
+                                        overlay_text_func=overlay_text_func)
     return vrunner
 
 

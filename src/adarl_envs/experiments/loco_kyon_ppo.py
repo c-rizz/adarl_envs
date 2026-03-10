@@ -107,7 +107,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_position_weight" :            eps,
         "reward_posref_vel_weight" :          0.0,
         "reward_posref_acc_weight":           0.0,
-        "reward_scale_nolength":              0.01,
+        "reward_scale_nolength":              0.1,
         "reward_sensed_effort_weight" :       eps,
         "reward_slip_weight" :                eps,
         "reward_stand_position_weight" :      1.0,
@@ -186,7 +186,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 10,
         "env_builder_args" : video_det_eval_env_builder_args,
         "num_envs" : 10,
-        "skip_first_eval": True
+        "skip_first_eval": False
     }
     # run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
     # run_1ms_env_builder_args["goal_speed_minmax"] = (1,1)

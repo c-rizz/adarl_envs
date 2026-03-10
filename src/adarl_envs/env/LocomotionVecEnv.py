@@ -809,9 +809,9 @@ class LocomotionVecEnv(RobotVecEnv):
                         )
 
         
-        example_labels : dict[str,th.Tensor] = {}
-        example_infos = self.get_infos(self._current_state, example_labels)
-        self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
+        # example_labels : dict[str,th.Tensor] = {}
+        # example_infos = self.get_infos(self._current_state, example_labels)
+        # self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
         sub_rewards = {}
         reward = self.compute_rewards(self._current_state, sub_rewards)
         ggLog.info(f"LocomotionVecEnv: reward shape = {reward.shape}")

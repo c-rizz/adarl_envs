@@ -3,22 +3,31 @@
   
   
   <xacro:arg name="mass" default="0.1" />
-  <xacro:property name="mass" value="$(arg mass)" />
   <xacro:arg name="size" default="0.06" />
-  <xacro:property name="size" value="$(arg size)" />
   <xacro:arg name="red" default="1" />
-  <xacro:property name="red" value="$(arg red)" />
   <xacro:arg name="green" default="0.0" />
-  <xacro:property name="green" value="$(arg green)" />
   <xacro:arg name="blue" default="0.0" />
-  <xacro:property name="blue" value="$(arg blue)" />
   <xacro:arg name="alpha" default="1.0" />
-  <xacro:property name="alpha" value="$(arg alpha)" />
   <xacro:arg name="gazebo" default="true" />
-  <xacro:property name="gazebo" value="$(arg gazebo)" />
   <xacro:arg name="add_floating_joint" default="true" />
+  <xacro:arg name="add_fixed_joint" default="false" />
+  <xacro:arg name="fixed_joint_xyz" default="0 0 0" />
+  <xacro:arg name="fixed_joint_rpy" default="0 0 0" />
+  <xacro:property name="mass" value="$(arg mass)" />
+  <xacro:property name="size" value="$(arg size)" />
+  <xacro:property name="red" value="$(arg red)" />
+  <xacro:property name="green" value="$(arg green)" />
+  <xacro:property name="blue" value="$(arg blue)" />
+  <xacro:property name="alpha" value="$(arg alpha)" />
+  <xacro:property name="gazebo" value="$(arg gazebo)" />
   <xacro:property name="add_floating_joint" value="$(arg add_floating_joint)" />
+  <xacro:property name="add_fixed_joint" value="$(arg add_fixed_joint)" />
+  <xacro:property name="fixed_joint_xyz" value="$(arg fixed_joint_xyz)" />
+  <xacro:property name="fixed_joint_rpy" value="$(arg fixed_joint_rpy)" />
 
+	<material name="color">
+		<color rgba="${red} ${green} ${blue} ${alpha}"/>
+	</material>
 
     <xacro:macro name="box_inertial" params="mass x y z pose_xyz pose_rpy">
         <inertial>
@@ -34,6 +43,7 @@
 			<geometry>
 				<box size="${size} ${size} ${size}"/>
 			</geometry>
+			<material name="color"/>
 	    </visual>
         <collision>
             <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -74,6 +84,16 @@
         <joint name="floating_joint" type="floating">
             <parent link="world" />
             <child link="cube" />
+        </joint>
+    </xacro:if>
+
+
+    <xacro:if value="${add_fixed_joint}">
+        <link name="world"/>
+        <joint name="fixed_joint" type="fixed">
+            <parent link="world" />
+            <child link="cube" />
+            <origin xyz="${fixed_joint_xyz}" rpy="${fixed_joint_rpy}"/>
         </joint>
     </xacro:if>
 

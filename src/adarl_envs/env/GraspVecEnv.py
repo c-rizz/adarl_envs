@@ -20,7 +20,6 @@ from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionD
 from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import adarl.utils.tensor_trees
 import traceback
-from adarl.utils.spaces import get_space_labels
 import pprint
 import dataclasses
 from pathlib import Path
@@ -57,11 +56,12 @@ class GraspVecEnv(RobotVecEnv):
         target_object_link : tuple[str,str]
         gripper_link : tuple[str,str]
         observe_object_pose : bool
-        camera_resolution_xy : tuple[int,int]
+        camera_resolution_hw : tuple[int,int]
         init_obj_area_minmax_xyz : th.Tensor
         goal_obj_area_minmax_xyz : th.Tensor
         table_link : tuple[str,str]
         manipulator_links : list[tuple[str,str]]
+        use_head_cam_as_ui_camera : bool
 
     @dataclass
     class RewardConfiguration:
@@ -77,6 +77,8 @@ class GraspVecEnv(RobotVecEnv):
         velocity_limit : th.Tensor
         velocity : th.Tensor
         failure : th.Tensor
+        object_pose : th.Tensor
+        gripper_pose : th.Tensor
 
 
 
@@ -169,16 +171,20 @@ class GraspVecEnv(RobotVecEnv):
         self._unit_3d_vector = self._thtens([1.0, 0.0, 0.0])
         self._unit_quaternion = self._thtens([0.0, 0.0, 0.0, 1.0])
         self._zero = self._thtens([0.0])
+        self._head_camera_name = "head_camera"
+        manipulation_area_minmax_xyz = [[ 0.4, -0.3, 0.75],
+                                        [ 0.8,  0.3, 0.8]]
         self._grasping_conf = GraspVecEnv.GraspingConfiguration(
                         reward_scale = self._thtens(reward_scale),
                         target_object_link=target_object_link,
                         gripper_link=gripper_link,
                         observe_object_pose=observe_object_pose,
-                        camera_resolution_xy = (64,64),
-                        init_obj_area_minmax_xyz = th.as_tensor([[-0.5, -0.5, 0.5], [0.5, 0.5, 0.5]], device=th_device),
-                        goal_obj_area_minmax_xyz = th.as_tensor([[-0.5, -0.5, 0.5], [0.5, 0.5, 1.0]], device=th_device),
-                        table_link = ground_link,
-                        manipulator_links = manipulator_links
+                        camera_resolution_hw = (64,64),
+                        init_obj_area_minmax_xyz = th.as_tensor(manipulation_area_minmax_xyz, device=th_device),
+                        goal_obj_area_minmax_xyz = th.as_tensor(manipulation_area_minmax_xyz, device=th_device),
+                        table_link = ("table","cube"),
+                        manipulator_links = manipulator_links,
+                        use_head_cam_as_ui_camera = False
                         )
         self._sub_reward_weights = GraspVecEnv.RewardConfiguration(
                         acceleration = self._thtens(reward_acceleration_weight),
@@ -192,7 +198,9 @@ class GraspVecEnv(RobotVecEnv):
                         torque_limit  = self._thtens(reward_torque_limit_weight) ,
                         torquediff = self._thtens(reward_torquediff_weight),
                         velocity = self._thtens(reward_velocity_weight),
-                        velocity_limit = self._thtens(reward_velocity_limit_weight)
+                        velocity_limit = self._thtens(reward_velocity_limit_weight),
+                        object_pose = self._thtens(1.0),
+                        gripper_pose = self._thtens(1.0)
                         )
         self._reward_weights = self._thtens([v for v in dataclasses.asdict(self._sub_reward_weights).values()])
         
@@ -201,6 +209,8 @@ class GraspVecEnv(RobotVecEnv):
         if enable_link_collisions is None:
             enable_link_collisions = []
         enable_link_collisions.append((self._grasping_conf.target_object_link, [self._grasping_conf.table_link]+self._grasping_conf.manipulator_links))
+        for link in self._grasping_conf.manipulator_links:
+            enable_link_collisions.append((link, [self._grasping_conf.table_link]))
         super().__init__(   action_delay_mustd_std = action_delay_mustd_std,
                             action_noise_mustd = action_noise_mustd, 
                             action_smoothing_halflife_sec = action_smoothing_halflife_sec,
@@ -258,10 +268,13 @@ class GraspVecEnv(RobotVecEnv):
                         )
 
         
-        example_labels : dict[str,th.Tensor] = {}
-        example_infos = self.get_infos(self._current_state, example_labels)
-        self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
-        obs_labels = self._state_helper.observation_names()
+        # example_labels : dict[str,th.Tensor] = {}
+        # example_infos = self.get_infos(self._current_state, example_labels)
+        # self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
+        # obs_labels = self._state_helper.observation_names()
+        # infolabels = get_space_labels(self.info_space)
+        # ggLog.info(f"GraspVecEnv: info_space.labels types = "+str({k:str(type(l))+f" (dtype="+str(l.dtype if isinstance(l, np.ndarray) else "nan")+")" for k,l in infolabels.items()}))
+
         # ggLog.info(f"Obs labels = \n{pprint.pformat(obs_labels)}")
         # ggLog.info(f"Env constructed")
 
@@ -310,7 +323,7 @@ class GraspVecEnv(RobotVecEnv):
         camera_state_helper = ThBoxStateHelper( field_names=[e for e in self.CAMERA_FIELDS],
                                                 dtype=self._obs_dtype,
                                                 th_device=self._th_device,
-                                                field_size=self._grasping_conf.camera_resolution_xy,
+                                                field_size=self._grasping_conf.camera_resolution_hw,
                                                 fields_minmax={ self.CAMERA_FIELDS.IMAGE : [-1,1]},
                                                 vec_size=adapter.vec_size(),
                                                 observation_definitions={"base":
@@ -345,8 +358,8 @@ class GraspVecEnv(RobotVecEnv):
         # if not self._grasping_conf.observe_object_pose:
         new_camera_state = self._thzeros((self.num_envs,
                                         1,
-                                        self._grasping_conf.camera_resolution_xy[0],
-                                        self._grasping_conf.camera_resolution_xy[1]))
+                                        self._grasping_conf.camera_resolution_hw[1],
+                                        self._grasping_conf.camera_resolution_hw[0]))
         new_inst_state[self.STATE_CAMERA] = new_camera_state
         return new_inst_state
     
@@ -451,10 +464,11 @@ class GraspVecEnv(RobotVecEnv):
         
         for k,v in sub_rewards_unscaled_dict.items():
             dbg_check_size(v, (self._adapter.vec_size(),), f"Unexpected size for sub_reward {k}")
-
+        if set(sub_rewards_unscaled_dict.keys()) != set(dataclasses.asdict(self._sub_reward_weights).keys()):
+            raise ValueError(f"Keys in sub_rewards_unscaled_dict do not match keys in sub_reward_weights. sub_rewards_unscaled_dict keys = {list(sub_rewards_unscaled_dict.keys())}, sub_reward_weights keys = {list(dataclasses.asdict(self._sub_reward_weights).keys())}")
         rewards_unscaled = th.stack([sub_rewards_unscaled_dict[rn] for rn in dataclasses.asdict(self._sub_reward_weights).keys()], dim=1)
         rewards_scaled = rewards_unscaled*self._reward_weights*self._grasping_conf.reward_scale
-        sub_rewards_return.update({rn:rewards_unscaled[:,i] for i,rn in enumerate(dataclasses.asdict(self._sub_reward_weights).keys())})
+        sub_rewards_return.update({rn:rewards_scaled[:,i] for i,rn in enumerate(dataclasses.asdict(self._sub_reward_weights).keys())})
         reward = th.sum(rewards_scaled, dim =1)
 
         dbg_check_size(reward, (self._adapter.vec_size(),), f"Unexpected reward size")
@@ -551,31 +565,36 @@ class GraspVecEnv(RobotVecEnv):
     
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
         if "goal_pose" in reset_options:
-            goal_obj_pose_v_xyzxyzw = th.as_tensor(reset_options["goal_pose"],device=self._configuration.th_device)
+            sampled_goal_obj_pose_v_xyzxyzw = th.as_tensor(reset_options["goal_pose"],device=self._configuration.th_device)
         else:
-            goal_obj_pose_v_xyzxyzw = unnormalize(self._thrand((self.num_envs,3))*2-1,
+            sampled_goal_obj_pose_v_xyzxyzw = unnormalize(self._thrand((self.num_envs,3))*2-1,
                                                 self._grasping_conf.goal_obj_area_minmax_xyz[0],
                                                 self._grasping_conf.goal_obj_area_minmax_xyz[1])
             goal_obj_quat = ros_rpy_to_quaternion_xyzw_th(self._thrand((self.num_envs,3))*math.pi*2)
-            goal_obj_pose_v_xyzxyzw = th.cat([goal_obj_pose_v_xyzxyzw, goal_obj_quat], dim=1).view((self.num_envs,7))
+            sampled_goal_obj_pose_v_xyzxyzw = th.cat([sampled_goal_obj_pose_v_xyzxyzw, goal_obj_quat], dim=1).view((self.num_envs,7))
             
-        initial_object_position = unnormalize(self._thrand((self.num_envs,3))*2-1,
+        sampled_initial_object_position = unnormalize(self._thrand((self.num_envs,3))*2-1,
                                               self._grasping_conf.init_obj_area_minmax_xyz[0],
                                               self._grasping_conf.init_obj_area_minmax_xyz[1])
-        initial_object_yaw = self._thrand((self.num_envs,))*math.pi*2
-        initial_obj_quat = ros_rpy_to_quaternion_xyzw_th(th.cat([self._thzeros((self.num_envs,2)),initial_object_yaw.unsqueeze(1)], dim=1))
-        initial_obj_pose = th.cat([initial_object_position, initial_obj_quat], dim=1).view((self.num_envs,7))
+        sampled_initial_object_yaw = self._thrand((self.num_envs,))*math.pi*2
+        sampled_initial_obj_quat = ros_rpy_to_quaternion_xyzw_th(th.cat([self._thzeros((self.num_envs,2)),sampled_initial_object_yaw.unsqueeze(1)], dim=1))
+        sampled_initial_obj_pose = th.cat([sampled_initial_object_position, 
+                                   sampled_initial_obj_quat], dim=1).view((self.num_envs,7))
         super()._set_current_ep_config(vec_mask=vec_mask, reset_options=reset_options)
-        self._grasping_episode_config = GraspVecEnv.EpisodeGraspingConfiguration(   initial_object_pose=initial_obj_pose,
-                                                                                    goal_object_pose=goal_obj_pose_v_xyzxyzw)
+        masked_assign(self._grasping_episode_config.initial_object_pose, vec_mask, sampled_initial_obj_pose)
+        # masked_assign(self._grasping_episode_config.goal_object_pose, vec_mask, sampled_goal_obj_pose_v_xyzxyzw)
         self.set_max_episode_steps(reset_options.get("reset_options",self._current_episode_config.vec_max_ep_steps))
-        self.set_goals(goal_obj_pose_v_xyzxyzw)
+        self.set_goals(sampled_goal_obj_pose_v_xyzxyzw, vec_mask=vec_mask)
 
-    def set_goals(self, goal_object_pose_vec_xyzxyzw : th.Tensor, reference_framce : Literal["absolute","relative"] = "absolute"):
+    def set_goals(self, goal_object_pose_vec_xyzxyzw : th.Tensor, reference_framce : Literal["absolute","relative"] = "absolute",
+                  vec_mask : th.Tensor | None = None):
+        if vec_mask is None:
+            vec_mask = self._all_vecs
         if reference_framce == "relative":
             goal_object_pose_vec_xyzxyzw[:,:3] = goal_object_pose_vec_xyzxyzw[:,:3] + self._grasping_episode_config.goal_object_pose[:,:3]
             goal_object_pose_vec_xyzxyzw[:,3:7] = quat_mul_xyzw(goal_object_pose_vec_xyzxyzw[:,3:7], self._grasping_episode_config.goal_object_pose[:,3:7])
-        self._grasping_episode_config.goal_object_pose = goal_object_pose_vec_xyzxyzw
+        # self._grasping_episode_config.goal_object_pose = goal_object_pose_vec_xyzxyzw
+        masked_assign(self._grasping_episode_config.goal_object_pose, vec_mask, goal_object_pose_vec_xyzxyzw)
 
     def get_goals(self):
         return self._grasping_episode_config.goal_object_pose
@@ -598,15 +617,29 @@ class GraspVecEnv(RobotVecEnv):
             obj_state = self._thzeros((self.num_envs,1,13))
             obj_state[:,0,:7] = self._grasping_episode_config.initial_object_pose[:]
             self._adapter.setLinksStateDirect(link_names=[self._grasping_conf.target_object_link],
-                                              link_states_pose_vel=obj_state)
+                                              link_states_pose_vel=obj_state,
+                                              vec_mask=vec_mask)
         else:
             raise RuntimeError(f"Cannot run simulation initialization on non-simulated adapter")
             
     @override
     def get_ui_renderings(self, vec_mask : th.Tensor) -> tuple[list[th.Tensor], th.Tensor]:
-        if isinstance(self._adapter, BaseVecSimulationAdapter):
-            self._set_goal_marker_pose(vec_mask=self._all_vecs)        
-        return super().get_ui_renderings(vec_mask=vec_mask)
+        if self._grasping_conf.use_head_cam_as_ui_camera:
+            if th.any(vec_mask[1:]):
+                raise RuntimeError(f"Can only render env #0 (because the camera can only be at one position across all sims)")
+            try:
+                head_imgs, head_times = self._adapter.getRenderings([self._head_camera_name], vec_mask=vec_mask)
+                external_imgs, external_times = super().get_ui_renderings(vec_mask=vec_mask)
+                imgs = head_imgs + external_imgs
+                times = th.cat([head_times,external_times], dim = -1)
+                return imgs, times
+            except Exception as e:
+                ggLog.warn(f"Exception getting ui image: {adarl.utils.utils.exc_to_str(e)}")
+                return [], th.empty((0,))
+        else:
+            if isinstance(self._adapter, BaseVecSimulationAdapter):
+                self._set_goal_marker_pose(vec_mask=self._all_vecs)        
+            return super().get_ui_renderings(vec_mask=vec_mask)
     
     @override
     def _get_spawn_defs(self):
@@ -635,4 +668,34 @@ class GraspVecEnv(RobotVecEnv):
             else:
                 self._goal_marker_base_link = ("goal_axes","world")
         spawn_defs.append(self._axes_spawn_def)
+        if not hasattr(self,"_table_spawn_def"):
+            self._table_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","models/cube.urdf.xacro")).read_text(),
+                                            name="table",
+                                            pose=None,
+                                            format="urdf.xacro",
+                                            kwargs={"add_world_link":str(is_pybullet),
+                                                    "size" :  1.0,
+                                                    "red" :   0.5,
+                                                    "green" : 0.5,
+                                                    "blue" :  0.5,
+                                                    "add_floating_joint" : False,
+                                                    "add_fixed_joint" : True,
+                                                    "fixed_joint_xyz" : "0.8 0.0 0.2",
+                                                    "fixed_joint_rpy" : "0 0 0"},)
+        spawn_defs.append(self._table_spawn_def)
+        if adarl.utils.utils.isinstance_noimport(self._adapter, ("MjxAdapter", "MujocoAdapter")):
+            cam_file = "models/simple_camera.mjcf.xacro"
+        else:            
+            cam_file = "models/simple_camera.sdf.xacro"
+        if not hasattr(self,"_head_camera"):
+            self._table_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
+                                            name=self._head_camera_name,
+                                            pose=None,
+                                            format="sdf.xacro",
+                                            kwargs={"camera_width":self._grasping_conf.camera_resolution_hw[0],
+                                                    "camera_height":self._grasping_conf.camera_resolution_hw[1],
+                                                    "frame_rate":1/self._intendedStepLength_sec,
+                                                    "camera_name": self._head_camera_name},
+                                            attachment_link=("centauro","D435_head_camera_link"))
+        spawn_defs.append(self._table_spawn_def)
         return spawn_defs

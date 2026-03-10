@@ -108,6 +108,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_posref_vel_weight" :          1.0,
         "reward_posref_acc_weight":           5.0,
         "reward_sensed_effort_weight" :       eps,
+        "reward_scale_nolength" :             1.0,
         "reward_slip_weight" :                eps,
         "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,

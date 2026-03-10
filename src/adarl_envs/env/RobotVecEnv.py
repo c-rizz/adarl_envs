@@ -31,6 +31,7 @@ import scipy.stats
 from adarl.utils.base_utils import record_time
 from gymnasium.vector.utils.spaces import batch_space
 import os
+from adarl.utils.spaces import get_space_labels
 
 disable_compile = os.environ.get("DISABLE_ENV_TH_COMPILE", False)
 
@@ -554,17 +555,24 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         phys_limits_minmax_pve = {(robot_name,k):self._thtens(l) 
                                     for k,l in self._robot_model.get_joint_limits([jn[1] for jn in internally_controlled_joints]).items()}
-        
         if isinstance(safety_limits_ratios_minmax_pve, dict):
             safety_limits_dict_ratios_minmax_pve = safety_limits_ratios_minmax_pve
         else:
             safety_limits_dict_ratios_minmax_pve = {k:safety_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
         safe_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) 
                                                for k,v in safety_limits_dict_ratios_minmax_pve.items()}
-        safe_limits_minmax_pve = {jn: lim_minmax_pve*safe_limits_ratios_minmax_pve_th[jn]
+        def scale_limit(jn, minmax_pve : th.Tensor, minmax_scaling : th.Tensor, center_position : float):
+            ranges = minmax_pve[1] - minmax_pve[0]
+            center = (minmax_pve[1] + minmax_pve[0])/2
+            # center = self._thtens([center_position, 0, 0])
+            scaled_ranges = ranges.expand(2,3)*minmax_scaling
+            lims = th.stack([center - scaled_ranges[0]/2, center + scaled_ranges[1]/2], dim=0)
+            return lims
+        safe_limits_minmax_pve = {jn: scale_limit(  jn,
+                                                    lim_minmax_pve,
+                                                    safe_limits_ratios_minmax_pve_th[jn], 
+                                                    safe_limits_position_offset[jn])
                                     for jn,lim_minmax_pve in phys_limits_minmax_pve.items()}
-        safe_limits_minmax_pve = {jn:minmax_pve + self._thtens([safe_limits_position_offset[jn], 0, 0]).expand(2,3) 
-                                   for jn,minmax_pve in safe_limits_minmax_pve.items()}
         safe_limits_minmax_pve = {jn:lims.clamp(min=phys_limits_minmax_pve[jn][0].expand(2,-1), 
                                                 max=phys_limits_minmax_pve[jn][1].expand(2,-1)) 
                                   for jn,lims in safe_limits_minmax_pve.items()}
@@ -595,12 +603,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if jn not in homing_joint_pose:
                 homing_joint_pose[jn] = default_homing_joint_pose[jn]
 
-        # if not quiet:
-        #     ggLog.info(f"phys_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in phys_limits_minmax_pve.items()]))
-        #     ggLog.info(f"safe_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in safe_limits_minmax_pve.items()]))
-        #     ggLog.info(f"control_limits_minmax_pve = \n"+"\n".join([str(jn_lim) for jn_lim in control_limits_minmax_pve.items()]))
-        #     ggLog.info(f"controlled_joints_rn = \n"+"\n".join([str(jn) for jn in controlled_joints_rn]))
-        #     ggLog.info(f"homing_joint_pose = "+"\n".join([f"{jn}:{p}" for jn,p in homing_joint_pose.items()]))
+        ggLog.info(f"phys_limits_minmax_pve = \n"+pprint.pformat(phys_limits_minmax_pve))
+        ggLog.info(f"safe_limits_minmax_pve = \n"+pprint.pformat(safe_limits_minmax_pve))
+        ggLog.info(f"control_limits_minmax_pve = \n"+pprint.pformat(control_limits_minmax_pve))
+        ggLog.info(f"controlled_joints_rn = \n"+pprint.pformat(controlled_joints_rn))
+        ggLog.info(f"homing_joint_pose = \n"+pprint.pformat(homing_joint_pose))
+        ggLog.info(f"held_joints = \n"+pprint.pformat(held_joints))
+        ggLog.info(f"free_joints = \n"+pprint.pformat(free_joints_rn))
+        ggLog.info(f"internally_controlled_joints = \n"+pprint.pformat(internally_controlled_joints))
 
         homing_ctrl_joints_pvesd = self._thtens([(homing_joint_pose[jn], 0, 0, safe_stiffness, safe_damping)
                                                     for jn in controlled_joints_rn]).view(-1,5)
@@ -821,7 +831,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"Built scenario")
         example_labels : dict[str,th.Tensor] = {}
         example_infos = self.get_infos(self._current_state, example_labels)
-        self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
+        self.info_space = space_from_tree(example_infos, example_labels)
+        # infolabels = get_space_labels(self.info_space)
+        # ggLog.info(f"RobotVecEnv: info_space.labels types = "+pprint.pformat({k:str(type(l))+f" (dtype="+str(l.dtype if isinstance(l, (np.ndarray, th.Tensor)) else "none")+")" for k,l in infolabels.items()}))
+
         # ggLog.info(f"Built info helper")
 
         self.set_seeds(th.as_tensor(seed))
@@ -1772,7 +1785,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"internal_states = {internal_states}")
         # ggLog.info(f"jstates_v_j_pve.device = {jstates_v_j_pve.device}")
         # ggLog.info(f"self._last_sent_v_j_pvesd.device = {self._last_sent_v_j_pvesd.device}")
-        vec_time_from_start = self._thtens(self._adapter.getEnvTimeFromStartup())
+        vec_time_from_start = self._thtens(self._adapter.getEnvTimeFromStartup()) - self._eps_start_stime
         t3_1 = time.monotonic()
 
         # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} others={t3_1-t3:.6f} tot = {t3_1-t0:.6f}s")
@@ -1880,7 +1893,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED : vec_safety_lims_state.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED : vec_safety_posref_state.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1),
-                                self.INTERNAL_FIELDS.SIM_TIME : (vec_time_from_start - self._eps_start_stime).view(self.num_envs,1),
+                                self.INTERNAL_FIELDS.SIM_TIME : vec_time_from_start.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.LAST_STEP_DT : last_step_dt.view(self.num_envs,1)}
         use_referr = False
         if use_referr:

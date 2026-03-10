@@ -1,12 +1,12 @@
 #!/usr/bin/env python3  
 from __future__ import annotations
-from adarl_envs.experiments.centgrasp_builder import centgrasp_vecenv_builder
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     import copy
     import torch as th
     from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams
+    from adarl_envs.experiments.centgrasp_builder import centgrasp_vecenv_builder
     import os
     
     mode = args["mode"].lower()
@@ -28,7 +28,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
 
-    eval_freq = 5
+    eval_freq = 10
     env_builder_args = {
         "action_delay_mustd_std" : (0.001, 0.001, 0.001),
         "action_noise_mustd" : (0.0,0.001),
@@ -56,7 +56,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_weight" :          1.0,
         "reward_height_weight" :            0.15,
         "reward_pitchnroll_weight" :        0.15,
-        "reward_position_weight" :          1.0,
+        "reward_position_weight" :          0.1,
         "reward_feet_air_time_weight" :     20.0,
         "reward_heading_weight" :           0.05,
         "safe_stiffness" : 400,
@@ -201,7 +201,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy_factor = -0.5,
-                                                    actor_log_std_init = 1.0
+                                                    actor_log_std_init = -2.0
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -210,7 +210,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_batch_size=0,
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
-                    debug_level=2)                           
+                    debug_level=0)                           
     elif algo.lower() == "sac_small":
         sac_train(  seed,
                     folderName,

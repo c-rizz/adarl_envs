@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 32
+        train_envs = 128
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -29,10 +29,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
 
     eval_freq = 10
+    r = 0.0
+    n = 0.0
     env_builder_args = {
-        "action_delay_mustd_std" : (0.001, 0.001, 0.001),
-        "action_noise_mustd" : (0.0,0.001),
-        "action_smoothing_halflife_sec" : 0.2,
+        "action_delay_mustd_std" : (0.001*n, 0.001*n, 0.001*n),
+        "action_noise_mustd" : (0.0,0.001*n),
+        "action_smoothing_halflife_sec" : 0.05,
         "control_mode" : "position",
         # "robot_model" : args["robot"],
         "enable_rendering" : False,
@@ -77,13 +79,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
         "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.02, 0.02),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05, 0.05),
+        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.02*n, 0.02*n),
+        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.05*n, 0.05*n),
         "ui_camera_resolution_hw" : (144,256),
         "log_info_stats" : True,
         "initial_pose_randomization_range" : 0.0,
-        "randomized_mass_ratios_distr" : 0.3,
-        "friction_slide_spin_roll_randomization_ratios" : (0.3,0.3,0.3),
+        "randomized_mass_ratios_distr" : 0.3*r,
+        "friction_slide_spin_roll_randomization_ratios" : (0.3*r,0.3*r,0.3*r),
         "impulse_probability_per_sec" : 0.0,
         "impulse_duration_minmax" : (0.01, 2.5),
         "impulse_mean_std" : (50.0,50.0),
@@ -91,7 +93,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "target_object_link" : ("cube","cube"),
         "gripper_link" : ("centauro","dagana_1_tcp"),
         "observe_object_pose" : True,
-        "held_joints_stiffness" : 1000.0,
+        "held_joints_stiffness" : 2000.0,
         "held_joints_damping" : 15.0
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
@@ -191,7 +193,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=4096,
-                                                    buffer_size=3_000_000,
+                                                    buffer_size=3*1024*1000,
                                                     total_steps=300_000_000,
                                                     train_freq_vstep=10,
                                                     grad_steps=40,
@@ -251,32 +253,43 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     elif algo.lower() == "ppo":
         from rreal.algorithms.ppo2 import ppo_train, PPO_hyperparams
         ppo_train(  seed=seed,
-                folderName=folderName,
-                run_id=run_id,
-                args=args,
-                env_builder=None,
-                vec_env_builder=centgrasp_vecenv_builder,
-                env_builder_args=env_builder_args,
-                agent_hyperparams=PPO_hyperparams(  minibatch_size=8192,
-                                                    th_device=th.device("cuda"),
-                                                    actor_network_arch=(64,64),
-                                                    critic_network_arch=(64,64),
-                                                    q_lr=None,
-                                                    policy_lr=3e-4,
-                                                    update_epochs=5,
-                                                    total_steps=train_envs*max_steps_per_episode*1000,
-                                                    num_envs=train_envs,
-                                                    num_steps=20,
-                                                    gamma=0.99,
-                                                    log_freq_vstep=int(max_steps_per_episode/10)),
-                max_episode_duration=max_steps_per_episode,
-                validation_batch_size=0,
-                validation_buffer_size=0,
-                validation_holdout_ratio=0,
-                checkpoint_freq=-1,
-                collector_device=th.device("cpu"),
-                eval_configurations=eval_configurations,
-                debug_level=1)
+                    folderName=folderName,
+                    run_id=run_id,
+                    args=args,
+                    env_builder=None,
+                    vec_env_builder=centgrasp_vecenv_builder,
+                    env_builder_args=env_builder_args,
+                    agent_hyperparams=PPO_hyperparams(  minibatch_size=None,
+                                                        minibatch_num=4,
+                                                        th_device=th.device("cuda"),
+                                                        actor_network_arch=(512,256),
+                                                        critic_network_arch=(512,256),
+                                                        q_lr=None,
+                                                        policy_lr=3e-4,
+                                                        update_epochs=4,
+                                                        total_steps=200_000_000,
+                                                        num_envs=train_envs,
+                                                        num_steps=24,
+                                                        gamma=0.99,
+                                                        loss_value_weight=1.0,
+                                                        loss_entropy_coeff=1e-4,
+                                                        log_freq_vstep=int(max_steps_per_episode/10),
+                                                        epsilon_policy_ratio_clip=0.2,
+                                                        epsilon_value_clip_epsilon=0.2,
+                                                        gae_lambda=0.95,
+                                                        max_grad_norm=1.0,
+                                                        init_actor_logstd=-2.0,
+                                                        # actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
+                                                        # critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
+                                                        ),
+                    max_episode_duration=max_steps_per_episode,
+                    validation_batch_size=0,
+                    validation_buffer_size=0,
+                    validation_holdout_ratio=0,
+                    checkpoint_freq=-1,
+                    collector_device=env_device,
+                    eval_configurations=eval_configurations,
+                    debug_level=1)
     else:       
         raise RuntimeError(f"Unknown algorithm '{algo}'")
 

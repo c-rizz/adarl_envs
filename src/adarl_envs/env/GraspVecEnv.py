@@ -172,19 +172,20 @@ class GraspVecEnv(RobotVecEnv):
         self._unit_quaternion = self._thtens([0.0, 0.0, 0.0, 1.0])
         self._zero = self._thtens([0.0])
         self._head_camera_name = "head_camera"
-        manipulation_area_minmax_xyz = [[ 0.4, -0.3, 0.75],
-                                        [ 0.8,  0.3, 0.8]]
+        self._table_height = 0.8
+        manipulation_area_minmax_xyz = [[ 0.4, -0.3, self._table_height+0.05],
+                                        [ 0.8,  0.3, self._table_height+0.10]]
         self._grasping_conf = GraspVecEnv.GraspingConfiguration(
                         reward_scale = self._thtens(reward_scale),
                         target_object_link=target_object_link,
                         gripper_link=gripper_link,
                         observe_object_pose=observe_object_pose,
-                        camera_resolution_hw = (64,64),
+                        camera_resolution_hw = (256,256),
                         init_obj_area_minmax_xyz = th.as_tensor(manipulation_area_minmax_xyz, device=th_device),
                         goal_obj_area_minmax_xyz = th.as_tensor(manipulation_area_minmax_xyz, device=th_device),
                         table_link = ("table","cube"),
                         manipulator_links = manipulator_links,
-                        use_head_cam_as_ui_camera = False
+                        use_head_cam_as_ui_camera = True
                         )
         self._sub_reward_weights = GraspVecEnv.RewardConfiguration(
                         acceleration = self._thtens(reward_acceleration_weight),
@@ -624,11 +625,13 @@ class GraspVecEnv(RobotVecEnv):
             
     @override
     def get_ui_renderings(self, vec_mask : th.Tensor) -> tuple[list[th.Tensor], th.Tensor]:
+        self.set_cam_pose((2.5, 30/180*3.14159, -200/180*3.14159))
         if self._grasping_conf.use_head_cam_as_ui_camera:
             if th.any(vec_mask[1:]):
                 raise RuntimeError(f"Can only render env #0 (because the camera can only be at one position across all sims)")
             try:
                 head_imgs, head_times = self._adapter.getRenderings([self._head_camera_name], vec_mask=vec_mask)
+                return head_imgs, head_times
                 external_imgs, external_times = super().get_ui_renderings(vec_mask=vec_mask)
                 imgs = head_imgs + external_imgs
                 times = th.cat([head_times,external_times], dim = -1)
@@ -680,7 +683,7 @@ class GraspVecEnv(RobotVecEnv):
                                                     "blue" :  0.5,
                                                     "add_floating_joint" : False,
                                                     "add_fixed_joint" : True,
-                                                    "fixed_joint_xyz" : "0.8 0.0 0.2",
+                                                    "fixed_joint_xyz" : f"0.8 0.0 {self._table_height-0.5}",
                                                     "fixed_joint_rpy" : "0 0 0"},)
         spawn_defs.append(self._table_spawn_def)
         if adarl.utils.utils.isinstance_noimport(self._adapter, ("MjxAdapter", "MujocoAdapter")):

@@ -1013,11 +1013,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     field_size=(1,),
                                                     fields_minmax={ self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED : [0,1],
                                                                     self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED : [0,1],
-                                                                    self.INTERNAL_FIELDS.STEP_COUNT : [-1,1000_000],
+                                                                    self.INTERNAL_FIELDS.STEP_COUNT : [-1,100_000],
                                                                     self.INTERNAL_FIELDS.SIM_TIME : [-1,1000_000],
                                                                     self.INTERNAL_FIELDS.LAST_STEP_DT : [-1,1]},
                                                     observation_definitions=ThBoxStateHelper.SimpleObsDef(
-                                                        observable_fields=[self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED, self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED],
+                                                        observable_fields=[self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,
+                                                                           self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED],
                                                         observable_subfields=None,
                                                         obs_history_length=1),
                                                     **vsize_dev_type) # type: ignore

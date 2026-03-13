@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
-        train_envs = 128
+        train_envs = 4096
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -91,7 +91,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_mean_std" : (50.0,50.0),
         "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
         "target_object_link" : ("cube","cube"),
-        "gripper_link" : ("centauro","dagana_1_tcp"),
+        "gripper_links" : [("centauro","dagana_1_fixed_palm_center"), ("centauro","dagana_1_claw_palm_center")],
         "observe_object_pose" : True,
         "held_joints_stiffness" : 2000.0,
         "held_joints_damping" : 15.0
@@ -195,6 +195,42 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     batch_size=4096,
                                                     buffer_size=3*1024*1000,
                                                     total_steps=300_000_000,
+                                                    train_freq_vstep=5,
+                                                    grad_steps=60,
+                                                    learning_starts=max_steps_per_episode*max(train_envs*1, 100),
+                                                    parallel_envs=train_envs,
+                                                    log_freq_vstep=max_steps_per_episode,
+                                                    reference_init_args =   {   "env_builder_args" : env_builder_args,
+                                                                                "eval_configuration" : eval_configurations},
+                                                    target_entropy_factor = -0.5,
+                                                    actor_log_std_init = -2.0
+                                                    ),
+                    checkpoint_freq=5,
+                    collector_device=env_device,
+                    max_episode_duration=max_steps_per_episode,
+                    validation_buffer_size=0,
+                    validation_batch_size=0,
+                    validation_holdout_ratio=0,
+                    no_wandb=args["no_wandb"],
+                    debug_level=0)
+    elif algo.lower() == "sac_small":
+        sac_train(  seed,
+                    folderName,
+                    run_id,
+                    args,
+                    vec_env_builder = centgrasp_vecenv_builder,
+                    env_builder_args = env_builder_args,
+                    eval_configurations = eval_configurations,
+                    hyperparams = SAC_init_hparams(  model_th_device = "cuda",
+                                                    q_network_arch=[512,128],
+                                                    q_lr=0.001,
+                                                    policy_lr=0.0003,
+                                                    policy_arch=[256,256],
+                                                    gamma=0.99,
+                                                    target_tau = 0.005,
+                                                    batch_size=512,
+                                                    buffer_size=300*1024,
+                                                    total_steps=300_000_000,
                                                     train_freq_vstep=10,
                                                     grad_steps=40,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
@@ -212,44 +248,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_batch_size=0,
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
-                    debug_level=0)                           
-    elif algo.lower() == "sac_small":
-        sac_train(  seed,
-                    folderName,
-                    run_id,
-                    args,
-                    vec_env_builder = centgrasp_vecenv_builder,
-                    env_builder = None,
-                    env_builder_args = env_builder_args,
-                    eval_configurations = eval_configurations,
-                    hyperparams = SAC_init_hparams(  model_th_device = "cuda",
-                                                    q_network_arch=[256,128],
-                                                    q_lr=0.001,
-                                                    policy_lr=0.0003,
-                                                    policy_arch=[128,128],
-                                                    gamma=0.99,
-                                                    target_tau = 0.005,
-                                                    batch_size=512,
-                                                    buffer_size=100_000,
-                                                    total_steps=300_000_000,
-                                                    train_freq_vstep=10,
-                                                    grad_steps=40,
-                                                    learning_starts=max_steps_per_episode*max(train_envs*1, 100),
-                                                    parallel_envs=train_envs,
-                                                    log_freq_vstep=max_steps_per_episode,
-                                                    reference_init_args =   {   "env_builder_args" : env_builder_args,
-                                                                                "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5,
-                                                    actor_log_std_init = 1.0
-                                                    ),
-                    checkpoint_freq=5,
-                    collector_device=env_device,
-                    max_episode_duration=max_steps_per_episode,
-                    validation_buffer_size=0,
-                    validation_batch_size=0,
-                    validation_holdout_ratio=0,
-                    no_wandb=args["no_wandb"],
-                    debug_level=2)                           
+                    debug_level=0)                       
     elif algo.lower() == "ppo":
         from rreal.algorithms.ppo2 import ppo_train, PPO_hyperparams
         ppo_train(  seed=seed,

@@ -450,7 +450,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         action_noise_mustd : Sequence[float] | th.Tensor, 
                         action_smoothing_halflife_sec : float,
                         adapter: BaseVecJointImpedanceAdapter,
-                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor],
                         control_mode : Literal["pvesd","pve","pt", "ps","pt","v","p"],
                         controlled_joints : Sequence[str | JOINT_FILTERS],
                         enable_dbg_checks : bool,
@@ -481,9 +480,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         robot_root_link : str,
                         robot_urdf_string : str,
                         safe_damping : float,
-                        safe_limits_position_offset : dict[tuple[str,str], float],
+                        control_limits_center : dict[tuple[str,str], float],
                         safe_stiffness : float,
                         safety_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
+                        control_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
                         seed : int,
                         stepLength_sec,
                         step_precision_tolerance : float,
@@ -532,58 +532,32 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # self._build_new_instantaneous_state = th.vmap(self._build_new_instantaneous_state_single)
         # ggLog.info("Properties:"+("\n".join([str(jp) for jp in self._robot_model.get_joint_properties(self._robot_model.get_joint_names()).items()])))
         # exit()
-        controlled_joints_str = []
-        for j in controlled_joints:
-            if isinstance(j, str):
-                controlled_joints_str.append(j)
-            elif j in self.joint_filters:
-                for jn in self._robot_model.get_joint_names():
-                    if self.joint_filters[j](jn,self._robot_model):
-                        controlled_joints_str.append(jn)
-            else:
-                raise RuntimeError(f"Unexpected controlled joint request {j} of type {type(j)} (self.joint_filters = {self.joint_filters})")
-
-        self.link_filters[LINK_FILTERS.ALL_ROBOT] = lambda link_name, robot_model: link_name[0]==robot_name
         
-        controllable_joints = [(robot_name,jn) for jn,p in self._robot_model.get_joint_properties().items() if p["type"] in [Robot.JOINT_TYPES.REVOLUTE, Robot.JOINT_TYPES.PRISMATIC,Robot.JOINT_TYPES.CONTINUOUS]]
-        controlled_joints_rn : list[tuple[str,str]] = [(robot_name,jn) for jn in controlled_joints_str]
-        free_joints_rn = [(robot_name,jn) for jn in free_joints]        
-        # Held joints will be still be controlled with a joint impedance adapter, but are not exposed to the outside
-        # they will be kept at a fixed position
-        held_joints = [jn for jn in controllable_joints if (jn not in controlled_joints_rn and jn not in free_joints_rn)]
-        internally_controlled_joints = controlled_joints_rn+held_joints
+        action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec) if action_smoothing_halflife_sec>0 else 0.0
+        goal_err_exp_smoothing_1s = 0.5**(1/goal_err_smoothing_halflife_sec) if goal_err_smoothing_halflife_sec>0 else 0.0
 
-        phys_limits_minmax_pve = {(robot_name,k):self._thtens(l) 
-                                    for k,l in self._robot_model.get_joint_limits([jn[1] for jn in internally_controlled_joints]).items()}
-        if isinstance(safety_limits_ratios_minmax_pve, dict):
-            safety_limits_dict_ratios_minmax_pve = safety_limits_ratios_minmax_pve
-        else:
-            safety_limits_dict_ratios_minmax_pve = {k:safety_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
-        safe_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) 
-                                               for k,v in safety_limits_dict_ratios_minmax_pve.items()}
-        def scale_limit(jn, minmax_pve : th.Tensor, minmax_scaling : th.Tensor, center_position : float):
-            ranges = minmax_pve[1] - minmax_pve[0]
-            center = (minmax_pve[1] + minmax_pve[0])/2
-            # center = self._thtens([center_position, 0, 0])
-            scaled_ranges = ranges.expand(2,3)*minmax_scaling
-            lims = th.stack([center - scaled_ranges[0]/2, center + scaled_ranges[1]/2], dim=0)
-            return lims
-        safe_limits_minmax_pve = {jn: scale_limit(  jn,
-                                                    lim_minmax_pve,
-                                                    safe_limits_ratios_minmax_pve_th[jn], 
-                                                    safe_limits_position_offset[jn])
-                                    for jn,lim_minmax_pve in phys_limits_minmax_pve.items()}
-        safe_limits_minmax_pve = {jn:lims.clamp(min=phys_limits_minmax_pve[jn][0].expand(2,-1), 
-                                                max=phys_limits_minmax_pve[jn][1].expand(2,-1)) 
-                                  for jn,lims in safe_limits_minmax_pve.items()}
-
-        for jn in safe_limits_minmax_pve.keys():
-            if jn not in control_limits_minmax_pve:
-                control_limits_minmax_pve[jn] = safe_limits_minmax_pve[jn]
-            if th.any(control_limits_minmax_pve[jn][0] > safe_limits_minmax_pve[jn][0]) or th.any(control_limits_minmax_pve[jn][1] < safe_limits_minmax_pve[jn][1]):
-                raise RuntimeError(f"Control limits exceed safe limits for joint {jn}, ctrl={control_limits_minmax_pve[jn]},"
-                                   f" safe={safe_limits_minmax_pve[jn]}") 
-
+        (phys_limits_minmax_pve,
+        safe_limits_minmax_pve,
+        control_limits_minmax_pve,
+        controlled_joints_rn,
+        held_joints,
+        free_joints_rn,
+        internally_controlled_joints,
+        homing_ctrl_joints_pvesd,
+        homing_held_joints_pvesd,
+        homing_held_joints_position,
+        homing_nonctrl_joints_position
+        ) = self._build_joint_limits(   robot_name=robot_name,
+                                        controlled_joints = controlled_joints,
+                                        control_limits_center = control_limits_center,
+                                        control_limits_ratios_minmax_pve = control_limits_ratios_minmax_pve,
+                                        safety_limits_ratios_minmax_pve = safety_limits_ratios_minmax_pve,
+                                        free_joints=free_joints,
+                                        homing_joint_pose = homing_joint_pose,
+                                        safe_stiffness = safe_stiffness,
+                                        safe_damping = safe_damping,
+                                        held_joints_stiffness=held_joints_stiffness,
+                                        held_joints_damping=held_joints_damping)
         if isinstance(minmax_stiffness, tuple):
             minmax_stiffness_thdict = {k:self._thtens(minmax_stiffness) for k in phys_limits_minmax_pve.keys()}
         else:
@@ -592,32 +566,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             minmax_damping_thdict = {k:self._thtens(minmax_damping) for k in phys_limits_minmax_pve.keys()}
         else:
             minmax_damping_thdict = {(robot_name,k):self._thtens(minmax) for k,minmax in minmax_damping.items()}
-        action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec) if action_smoothing_halflife_sec>0 else 0.0
-        goal_err_exp_smoothing_1s = 0.5**(1/goal_err_smoothing_halflife_sec) if goal_err_smoothing_halflife_sec>0 else 0.0
-        default_homing_joint_pose = {jn: unnormalize(0.0, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item())
-                                     for jn in internally_controlled_joints}
-        for jn in homing_joint_pose:
-            if jn not in controlled_joints_rn:
-                ggLog.warn(f"homing_joint_pose contains non-controlled joint {jn}")
-        for jn in controlled_joints_rn:
-            if jn not in homing_joint_pose:
-                homing_joint_pose[jn] = default_homing_joint_pose[jn]
 
         ggLog.info(f"phys_limits_minmax_pve = \n"+pprint.pformat(phys_limits_minmax_pve))
-        ggLog.info(f"safe_limits_minmax_pve = \n"+pprint.pformat(safe_limits_minmax_pve))
-        ggLog.info(f"control_limits_minmax_pve = \n"+pprint.pformat(control_limits_minmax_pve))
+        ggLog.info(f"safe_limits_minmax_pve = \n"+pprint.pformat({f"{k}\n":v for k,v in safe_limits_minmax_pve.items()}))
+        ggLog.info(f"control_limits_minmax_pve = \n"+pprint.pformat({f"{k}\n":v for k,v in control_limits_minmax_pve.items()}))
         ggLog.info(f"controlled_joints_rn = \n"+pprint.pformat(controlled_joints_rn))
         ggLog.info(f"homing_joint_pose = \n"+pprint.pformat(homing_joint_pose))
         ggLog.info(f"held_joints = \n"+pprint.pformat(held_joints))
         ggLog.info(f"free_joints = \n"+pprint.pformat(free_joints_rn))
         ggLog.info(f"internally_controlled_joints = \n"+pprint.pformat(internally_controlled_joints))
 
-        homing_ctrl_joints_pvesd = self._thtens([(homing_joint_pose[jn], 0, 0, safe_stiffness, safe_damping)
-                                                    for jn in controlled_joints_rn]).view(-1,5)
-        homing_held_joints_pvesd = self._thtens([(homing_joint_pose[jn], 0, 0, held_joints_stiffness, held_joints_damping)
-                                                    for jn in held_joints]).view(-1,5)
-        homing_held_joints_position = {jn:self._thtens(p) for jn,p in homing_joint_pose.items() if jn in held_joints}
-        homing_nonctrl_joints_position = {jn:self._thtens(p) for jn,p in homing_joint_pose.items() if jn not in controlled_joints_rn}
         self._configuration = self.Configuration(   action_delay_epmustd_ststd = self._thtens(action_delay_mustd_std),
                                                     action_exp_smoothing_1s = action_exp_smoothing_1s,
                                                     action_noise_mustd = self._thtens(action_noise_mustd),
@@ -838,10 +796,126 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"Built info helper")
 
         self.set_seeds(th.as_tensor(seed))
+        ggLog.info(f"Starting up adapter....")
         self._adapter.startup()
+        ggLog.info(f"Adapter started.")
         self.initialize_episodes()
         
+    def _build_joint_limits(self,   robot_name : str,
+                                    controlled_joints : Sequence[str | JOINT_FILTERS],
+                                    free_joints : Sequence[str],
+                                    control_limits_center : dict[tuple[str,str], float],
+                                    safety_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
+                                    control_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
+                                    homing_joint_pose : dict[tuple[str,str], float],
+                                    safe_stiffness : float,
+                                    safe_damping : float,
+                                    held_joints_stiffness : float,
+                                    held_joints_damping : float
+                                    ):
+        controlled_joints_str = []
+        for j in controlled_joints:
+            if isinstance(j, str):
+                controlled_joints_str.append(j)
+            elif j in self.joint_filters:
+                for jn in self._robot_model.get_joint_names():
+                    if self.joint_filters[j](jn,self._robot_model):
+                        controlled_joints_str.append(jn)
+            else:
+                raise RuntimeError(f"Unexpected controlled joint request {j} of type {type(j)} (self.joint_filters = {self.joint_filters})")
 
+        self.link_filters[LINK_FILTERS.ALL_ROBOT] = lambda link_name, robot_model: link_name[0]==robot_name
+        
+        controllable_joints = [(robot_name,jn) for jn,p in self._robot_model.get_joint_properties().items() if p["type"] in [Robot.JOINT_TYPES.REVOLUTE, Robot.JOINT_TYPES.PRISMATIC,Robot.JOINT_TYPES.CONTINUOUS]]
+        controlled_joints_rn : list[tuple[str,str]] = [(robot_name,jn) for jn in controlled_joints_str]
+        free_joints_rn = [(robot_name,jn) for jn in free_joints]        
+        # Held joints will be still be controlled with a joint impedance adapter, but are not exposed to the outside
+        # they will be kept at a fixed position
+        held_joints = [jn for jn in controllable_joints if (jn not in controlled_joints_rn and jn not in free_joints_rn)]
+        internally_controlled_joints = controlled_joints_rn+held_joints
+
+        phys_limits_minmax_pve = {(robot_name,k):self._thtens(l) 
+                                    for k,l in self._robot_model.get_joint_limits([jn[1] for jn in internally_controlled_joints]).items()}
+        if isinstance(safety_limits_ratios_minmax_pve, dict):
+            safety_limits_dict_ratios_minmax_pve = safety_limits_ratios_minmax_pve
+        else:
+            safety_limits_dict_ratios_minmax_pve = {k:safety_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
+        safe_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) 
+                                               for k,v in safety_limits_dict_ratios_minmax_pve.items()}
+        if control_limits_ratios_minmax_pve is None:
+            control_limits_ratios_minmax_pve = safety_limits_ratios_minmax_pve
+        if isinstance(control_limits_ratios_minmax_pve, dict):
+            control_limits_dict_ratios_minmax_pve = control_limits_ratios_minmax_pve
+        else:
+            control_limits_dict_ratios_minmax_pve = {k:control_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
+        safe_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) for k,v in safety_limits_dict_ratios_minmax_pve.items()}
+        control_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) for k,v in control_limits_dict_ratios_minmax_pve.items()}
+        def scale_limit(jn, minmax_pve : th.Tensor, minmax_scaling : th.Tensor, center_position_offset : float | None = None):
+            ranges_pve = minmax_pve[1] - minmax_pve[0]
+            center_pve = (minmax_pve[1] + minmax_pve[0])/2
+            if center_position_offset is not None:
+                center_pve[0] = center_position_offset
+            # center = self._thtens([center_position, 0, 0])
+            scaled_ranges = ranges_pve.expand(2,3)*minmax_scaling
+            lims = th.stack([center_pve - scaled_ranges[0]/2, center_pve + scaled_ranges[1]/2], dim=0)
+            return lims
+        safe_limits_minmax_pve = {jn: scale_limit(  jn,
+                                                    lim_minmax_pve,
+                                                    safe_limits_ratios_minmax_pve_th[jn])
+                                    for jn,lim_minmax_pve in phys_limits_minmax_pve.items()}
+        for jn in safe_limits_minmax_pve.keys():
+            if th.any(safe_limits_minmax_pve[jn][0] < phys_limits_minmax_pve[jn][0]) or th.any(phys_limits_minmax_pve[jn][1] > safe_limits_minmax_pve[jn][1]):
+                ggLog.warn( f"Safe limits exceeds physical limits for joint {jn},\n"
+                            f" safe=\n{safe_limits_minmax_pve[jn]}\n"
+                            f" physical=\n{phys_limits_minmax_pve[jn]}\n"
+                            f"The limit will be clamped.") 
+        safe_limits_minmax_pve = {jn:lims.clamp(min=phys_limits_minmax_pve[jn][0].expand(2,-1), 
+                                                max=phys_limits_minmax_pve[jn][1].expand(2,-1)) 
+                                  for jn,lims in safe_limits_minmax_pve.items()}
+
+
+        control_limits_minmax_pve = {jn: scale_limit(  jn,
+                                                    lim_minmax_pve,
+                                                    control_limits_ratios_minmax_pve_th[jn], 
+                                                    control_limits_center[jn])
+                                    for jn,lim_minmax_pve in phys_limits_minmax_pve.items()}
+        for jn in safe_limits_minmax_pve.keys():
+            if jn not in control_limits_minmax_pve:
+                control_limits_minmax_pve[jn] = safe_limits_minmax_pve[jn]
+            if th.any(control_limits_minmax_pve[jn][0] < safe_limits_minmax_pve[jn][0]) or th.any(control_limits_minmax_pve[jn][1] > safe_limits_minmax_pve[jn][1]):
+                ggLog.warn( f"Control limits exceeds safe limits for joint {jn},\n"
+                            f" ctrl=\n{control_limits_minmax_pve[jn]}\n"
+                            f" safe=\n{safe_limits_minmax_pve[jn]}\n"
+                            f"The limit will be clamped.") 
+                control_limits_minmax_pve[jn] = control_limits_minmax_pve[jn].clamp(min=safe_limits_minmax_pve[jn][0].expand(2,-1), 
+                                                                                    max=safe_limits_minmax_pve[jn][1].expand(2,-1))
+
+        default_homing_joint_pose = {jn: unnormalize(0.0, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item())
+                                     for jn in internally_controlled_joints}
+        for jn in homing_joint_pose:
+            if jn not in controlled_joints_rn:
+                ggLog.warn(f"homing_joint_pose contains non-controlled joint {jn}")
+        for jn in controlled_joints_rn:
+            if jn not in homing_joint_pose:
+                homing_joint_pose[jn] = default_homing_joint_pose[jn]
+
+        homing_ctrl_joints_pvesd = self._thtens([(homing_joint_pose[jn], 0, 0, safe_stiffness, safe_damping)
+                                                    for jn in controlled_joints_rn]).view(-1,5)
+        homing_held_joints_pvesd = self._thtens([(homing_joint_pose[jn], 0, 0, held_joints_stiffness, held_joints_damping)
+                                                    for jn in held_joints]).view(-1,5)
+        homing_held_joints_position = {jn:self._thtens(p) for jn,p in homing_joint_pose.items() if jn in held_joints}
+        homing_nonctrl_joints_position = {jn:self._thtens(p) for jn,p in homing_joint_pose.items() if jn not in controlled_joints_rn}
+        return (phys_limits_minmax_pve,
+                safe_limits_minmax_pve,
+                control_limits_minmax_pve,
+                controlled_joints_rn,
+                held_joints,
+                free_joints_rn,
+                internally_controlled_joints,
+                homing_ctrl_joints_pvesd,
+                homing_held_joints_pvesd,
+                homing_held_joints_position,
+                homing_nonctrl_joints_position)
 
     def _expand_link_filters(self, links : Sequence[tuple[str,str]]) -> list[tuple[str,str]]:
         actual_links = []
@@ -1713,7 +1787,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         return vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz
 
     @th.compiler.disable
-    def _get_adapter_data(self):
+    def _get_adapter_data_no_compile(self):
+        return self._get_adapter_data()
+
+    def _get_adapter_data_raw(self):
         t0 = time.monotonic()
         if isinstance_noimport(self._adapter, "MjxAdapter"):
             vec_jstates_j_pveae = self._adapter.getExtendedJointsState(requestedJoints=self._controlled_joints_ids)
@@ -1802,6 +1879,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 vec_body_rel_linacc_xyz,
                 vec_time_from_start,
                 vec_bodystates_13)
+
+
+    def _get_adapter_data(self):
+        if th.compiler.is_compiling():
+            return self._get_adapter_data_no_compile()
+        else:
+            return self._get_adapter_data_raw()
 
     def _get_new_instantaneous_state(self, adapter_data) -> dict[str, dict[Any, th.Tensor] | th.Tensor]:        
         

@@ -100,7 +100,7 @@ class GraspVecEnv(RobotVecEnv):
                         adapter: BaseVecJointImpedanceAdapter,
                         control_limits_position_offset : dict[tuple[str,str], float],
                         control_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
-                        control_mode : Literal["impedance","impedance_no_gains","position_and_torques", "position_and_gains","torque","velocity","position"],
+                        control_mode : Literal["velocity", "torque","position","pvesd","pve","pt","ps"],
                         controlled_joints : Sequence[str | JOINT_FILTERS],
                         enable_dbg_checks : bool,
                         fail_on_safety : bool,
@@ -152,6 +152,7 @@ class GraspVecEnv(RobotVecEnv):
                         target_object_link : tuple[str,str],
                         th_device : th.device,
                         verbose_infos : bool,
+                        offset_envs_ep_starts : bool = False,
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
                         friction_randomized_links : list[tuple[str,str]] = [],
                         friction_slide_spin_roll_randomization_ratios : tuple[float, float, float] = (0.1,0.1,0.1),
@@ -173,8 +174,8 @@ class GraspVecEnv(RobotVecEnv):
         self._zero = self._thtens([0.0])
         self._head_camera_name = "head_camera"
         self._table_height = 0.8
-        manipulation_area_minmax_xyz = [[ 0.4, -0.3, self._table_height+0.05],
-                                        [ 0.8,  0.3, self._table_height+0.10]]
+        manipulation_area_minmax_xyz = [[ 0.50,  0.0, self._table_height+0.05],
+                                        [ 0.60,  0.1, self._table_height+0.10]]
         self._grasping_conf = GraspVecEnv.GraspingConfiguration(
                         reward_scale = self._thtens(reward_scale),
                         target_object_link=target_object_link,
@@ -242,6 +243,7 @@ class GraspVecEnv(RobotVecEnv):
                             enable_dbg_checks = enable_dbg_checks,
                             initial_joint_pose_randomization_range = initial_pose_randomization_range,
                             init_on_reset_ratio = init_on_reset_ratio,
+                            offset_envs_ep_starts = offset_envs_ep_starts,
                             obs_noise_joints_pve_ep_mustd_step_std = obs_noise_joints_pve_ep_mustd_step_std,
                             obs_noise_linvel_ep_mustd_step_std = obs_noise_linvel_ep_mustd_step_std,
                             obs_noise_angvel_ep_mustd_step_std = obs_noise_angvel_ep_mustd_step_std,
@@ -290,8 +292,9 @@ class GraspVecEnv(RobotVecEnv):
     @override
     def _build(self):
         super()._build()
-        self._object_link_id = self._adapter.get_links_ids([self._grasping_conf.target_object_link])
-        self._gripper_link_ids = self._adapter.get_links_ids(self._grasping_conf.gripper_links)
+        self._object_link_id = self._adapter.get_monitored_links_ids([self._grasping_conf.target_object_link])
+        self._gripper_link_ids = self._adapter.get_monitored_links_ids(self._grasping_conf.gripper_links)
+        self._obj_and_gripper_link_ids = self._adapter.get_monitored_links_ids([self._grasping_conf.target_object_link]+self._grasping_conf.gripper_links)
 
 
 
@@ -338,15 +341,19 @@ class GraspVecEnv(RobotVecEnv):
         ggLog.info(f"Built state/obs/action helpers")
         
 
-
+    def _get_adapter_data_raw(self):
+        super_adapter_data =  super()._get_adapter_data_raw()
+        poses = self._adapter.getLinksState(self._obj_and_gripper_link_ids, use_com_pose=False)[:,:,:7]
+        current_object_pose = poses[:,0]
+        current_gripper_poses = poses[:,1:]
+        grasp_adapter_data = current_object_pose, current_gripper_poses
+        return super_adapter_data, grasp_adapter_data
 
     @override
     def _get_new_instantaneous_state(self, adapter_data):
+        super_adapter_data, (current_object_pose, current_gripper_poses) = adapter_data
+        new_inst_state = super()._get_new_instantaneous_state(super_adapter_data)
 
-        new_inst_state = super()._get_new_instantaneous_state(adapter_data)
-
-        current_object_pose = self._adapter.getLinksState(self._object_link_id, use_com_pose=False)[:,0,:7]
-        current_gripper_poses = self._adapter.getLinksState(self._gripper_link_ids, use_com_pose=False)[:,:,:7]
         current_gripper_pose = current_gripper_poses.mean(dim=1)
         # ggLog.info(f"current_object_pose = {current_object_pose}")
         # ggLog.info(f"current_gripper_pose = {current_gripper_pose}")

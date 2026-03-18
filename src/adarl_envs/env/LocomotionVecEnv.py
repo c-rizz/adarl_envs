@@ -476,8 +476,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         action_noise_mustd : Sequence[float] | th.Tensor, 
                         action_smoothing_halflife_sec : float,
                         adapter: BaseVecJointImpedanceAdapter,
-                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor],
-                        control_mode : Literal["impedance","impedance_no_gains","position_and_torques", "position_and_gains","torque","velocity","position"],
+                        control_mode : Literal["velocity", "torque","position","pvesd","pve","pt","ps"],
                         controlled_joints : Sequence[str | JOINT_FILTERS],
                         disallowed_contact_links : list[tuple[str,str]],
                         enable_dbg_checks : bool,
@@ -569,6 +568,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         just_health_reward : bool = False,
                         longterm_states_decimation_time : float = 0.0001,
                         merge_privileged : bool = False,
+                        offset_envs_ep_starts : bool = False,
                         observe_full_robot_state : bool = False,
                         posref_safety_period = 0.001,
                         randomized_armature_joints : Sequence[tuple[str,str]] = [],
@@ -738,7 +738,6 @@ class LocomotionVecEnv(RobotVecEnv):
                             action_noise_mustd = action_noise_mustd, 
                             action_smoothing_halflife_sec = action_smoothing_halflife_sec,
                             adapter = adapter,
-                            control_limits_minmax_pve = control_limits_minmax_pve,
                             control_mode = control_mode,
                             controlled_joints = controlled_joints,
                             enable_dbg_checks = enable_dbg_checks,
@@ -766,6 +765,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             merge_privileged=merge_privileged,
                             minmax_damping = minmax_damping,
                             minmax_stiffness = minmax_stiffness,
+                            offset_envs_ep_starts = offset_envs_ep_starts,
                             obs_noise_angvel_ep_mustd_step_std = obs_noise_angvel_ep_mustd_step_std,
                             obs_noise_gravity_ep_mustd_step_std = obs_noise_gravity_ep_mustd_step_std,
                             obs_noise_joints_pve_ep_mustd_step_std = obs_noise_joints_pve_ep_mustd_step_std,
@@ -842,8 +842,18 @@ class LocomotionVecEnv(RobotVecEnv):
     @override
     def _build(self):
         super()._build()
-        self._feet_link_ids = self._adapter.get_links_ids(self._loco_conf.feet_links)
-        self._ground_link_id = self._adapter.get_links_ids([self._configuration.ground_link])
+        # self._feet_link_ids = self._adapter.get_links_ids(self._loco_conf.feet_links)
+        # self._ground_link_id = self._adapter.get_links_ids([self._configuration.ground_link])
+        self._adapter.set_monitored_links(self._adapter.get_monitored_links() + self._loco_conf.feet_links)
+        self._feet_and_body_link_ids = self._adapter.get_monitored_links_ids(self._loco_conf.feet_links + [self._configuration.main_body_link])
+        
+        # Set up monitored collision pairs for MjxAdapter
+        if isinstance_noimport(self._adapter, "MjxAdapter"):
+            from adarl.adapters.MjxAdapter import MjxAdapter
+            mjx_adapter : MjxAdapter = self._adapter #type: ignore
+            # Create collision pairs: each foot vs ground
+            feet_ground_collision_pairs = [(foot, self._configuration.ground_link) for foot in self._loco_conf.feet_links]
+            mjx_adapter.set_monitored_collision_pairs(feet_ground_collision_pairs)
 
 
 
@@ -959,22 +969,23 @@ class LocomotionVecEnv(RobotVecEnv):
     @th.compiler.disable
     def _get_loco_adapter_data(self):
         if isinstance(self._adapter,BaseVecSimulationAdapter):
-            feet_linvels_vec_foot_xyz = self._adapter.getLinksState(self._feet_link_ids)[:,:,7:10]
-            borient_quat_vec_xyzw = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,3:7]
+            lstates = self._adapter.getLinksState(requestedLinks = self._feet_and_body_link_ids, use_com_pose = False)
+            feet_linvels_vec_foot_xyz = lstates[:,:4,7:10]
+            borient_quat_vec_xyzw = lstates[:,4,3:7]
         else:
             feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
             borient_quat_vec_xyzw = self._unit_quaternion.expand((self.num_envs,4))
         if isinstance_noimport(self._adapter, "MjxAdapter"):
             from adarl.adapters.MjxAdapter import MjxAdapter
             mjx_adapter : MjxAdapter = self._adapter #type: ignore
-            feet_are_touching_ground = mjx_adapter.check_colliding_links(self._feet_link_ids, self._ground_link_id)
+            feet_are_touching_ground = mjx_adapter.check_colliding_links()  # Returns all monitored pairs (feet vs ground)
         else:
             feet_are_touching_ground = self._thzeros((self.num_envs,4))
         return feet_linvels_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw
 
     @override
-    def _get_adapter_data(self):
-        super_adapter_data = super()._get_adapter_data()
+    def _get_adapter_data_raw(self):
+        super_adapter_data = super()._get_adapter_data_raw()
         loco_adapter_data = self._get_loco_adapter_data()
         return loco_adapter_data, super_adapter_data
 
@@ -1413,6 +1424,44 @@ class LocomotionVecEnv(RobotVecEnv):
         rewards, sub_rewards_dict = self._compute_rewards(state) # Avoid input mutation for compiled function
         sub_rewards_return.update(sub_rewards_dict)
         return rewards
+
+    def _compute_rewards_pg(self,   state : dict[str,th.Tensor]) -> tuple[th.Tensor, dict[str,th.Tensor]]:
+
+        sub_rewards = {
+            "tracking_lin_vel": self._pg_reward_tracking_lin_vel(state),
+            "tracking_ang_vel": self._pg_reward_tracking_ang_vel(state),
+            "lin_vel_z": self._pg_reward_lin_vel_z(state),
+            "ang_vel_xy": self._pg_reward_ang_vel_xy(state),
+            "orientation": self._pg_reward_orientation(state),
+            "posture": self._pg_reward_posture(state),
+            "termination": self._pg_reward_termination(state),
+            "torques": self._pg_reward_torques(state),
+            "action_rate": self._pg_reward_action_rate(state),
+            "energy": self._pg_reward_energy(state),
+            "feet_slip": self._pg_reward_feet_slip(state),
+            "feet_clearance": self._pg_reward_feet_clearance(state),
+            "feet_height": self._pg_reward_feet_height(state),
+            "feet_air_time": self._pg_reward_feet_air_time(state),
+        }
+        
+        weights = {
+            "tracking_lin_vel": 1.5,
+            "tracking_ang_vel": 0.8,
+            "lin_vel_z": -2.0,
+            "ang_vel_xy": -0.05,
+            "orientation": -5.0,
+            "termination": -1.0,
+            "posture": 1.0,
+            "torques": -0.0002,
+            "action_rate": -0.01,
+            "energy": -0.001,
+            "feet_slip": -0.1,
+            "feet_clearance": -2.0,
+            "feet_height": -0.1,
+            "feet_air_time": 0.1
+        }
+
+
 
     @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune", disable=disable_compile)
     def _compute_rewards(self,   state : dict[str,th.Tensor]) -> tuple[th.Tensor, dict[str,th.Tensor]]:
@@ -2030,8 +2079,8 @@ class LocomotionVecEnv(RobotVecEnv):
     @override
     def _simulation_initialization(self, vec_mask : th.Tensor):
         super()._simulation_initialization(vec_mask = vec_mask)
-        if self._configuration.show_goal:
-            self._set_arrow_pose(vec_mask=self._all_vecs)
+        # if self._configuration.show_goal:
+        #     self._set_arrow_pose(vec_mask=self._all_vecs)
             
     @override
     def get_ui_renderings(self, vec_mask : th.Tensor) -> tuple[list[th.Tensor], th.Tensor]:

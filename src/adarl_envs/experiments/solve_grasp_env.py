@@ -196,7 +196,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     buffer_size=3*1024*1000,
                                                     total_steps=300_000_000,
                                                     train_freq_vstep=5,
-                                                    grad_steps=60,
+                                                    grad_steps=80,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
                                                     parallel_envs=train_envs,
                                                     log_freq_vstep=max_steps_per_episode,

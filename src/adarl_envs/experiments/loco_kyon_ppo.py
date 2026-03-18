@@ -74,6 +74,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
         "observe_full_robot_state" : False,
+        "offset_envs_ep_starts" : True,
         "posref_safety_period" : 0.02,
         "quiet" : False,
         "randomized_armature_ratios" : 0.1*r,
@@ -175,8 +176,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_freq_ep" : eval_freq*train_envs,
         "eval_eps" : 10,
         "env_builder_args" : video_eval_env_builder_args,
+        "offset_envs_ep_starts" : False,
         "num_envs" : 10,
-        "skip_first_eval": False
+        "skip_first_eval": True
     }
     video_det_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
     eval_conf_video_det = {
@@ -185,8 +187,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_freq_ep" : eval_freq*train_envs,
         "eval_eps" : 10,
         "env_builder_args" : video_det_eval_env_builder_args,
+        "offset_envs_ep_starts" : False,
         "num_envs" : 10,
-        "skip_first_eval": False
+        "skip_first_eval": True
     }
     # run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
     # run_1ms_env_builder_args["goal_speed_minmax"] = (1,1)
@@ -391,7 +394,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     q_lr=None,
                                                     policy_lr=3e-4,
                                                     update_epochs=4,
-                                                    total_steps=200_000_000,
+                                                    total_steps=5_000_000_000,
                                                     num_envs=train_envs,
                                                     num_steps=24,
                                                     gamma=0.99,

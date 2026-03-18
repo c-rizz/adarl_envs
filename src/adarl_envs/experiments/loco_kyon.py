@@ -67,6 +67,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "merge_privileged" : True,
         "min_good_step_duration" : 0.1,
         "mode" : mode,
+        "offset_envs_ep_starts" : True,
         "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.05*n],
         "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.01*n, 0.02*n],
         "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.02*n],

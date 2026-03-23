@@ -30,8 +30,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
     
     eval_freq = 20
-    r = 1.0 # randomization strength
-    n = 1.0 # noise strength
+    r = 0.0 # randomization strength
+    n = 0.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
@@ -44,9 +44,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_rendering" : False,
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
-        "goal_err_smoothing_halflife_sec" : 0.05,
+        "goal_err_smoothing_halflife_sec" : 0.0,
         "goal_height_minmax" : [0.47,0.47],
-        "goal_resampling_probability_per_sec" : 0.1,
+        "goal_resampling_probability_per_sec" : 0.0,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "held_joints_damping" : 10.0,
@@ -54,7 +54,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
-        "init_on_reset_ratio" : 0.2,
+        "init_on_reset_ratio" : 0.5,
         "initial_height_randomization_range_meters" : 0.0,
         "initial_joint_pose_randomization_range" : 0.5,
         "just_health_reward" : False,
@@ -84,7 +84,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_gains_damping_ratio_epstd"       : 0.2*r,
         "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
-        "randomized_reference_filter_distribution" : ("uniform", (20.0, 20.0)),
+        "randomized_reference_filter_distribution" : ("uniform", (50.0, 50.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
         "reward_superweight_joint_penalties" : 1.0,
@@ -122,11 +122,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velref_weight" :              eps,
         "robot_model" : "kyon",
         "safe_damping" : 5,
-        "safe_stiffness" : 600,
+        "safe_stiffness" : 400,
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : False,
         "stepLength_sec" : step_length_sec,
-        "stop_on_failure" : False,
+        "terminate_on_safety" : False,
+        "terminate_on_crash" : True,
         "terminate_on_body_contact" : False,
         "th_device" : env_device,
         "ui_camera_resolution_hw" : [144,256],
@@ -142,6 +143,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "verbose_infos" : True,
         "video_save_freq" : 1,
         "init_on_reset_ratio" : 1.0,
+        "offset_envs_ep_starts" : False,
         # "initial_joint_pose_randomization_range" : 0.02,
         # "mass_randomization_ratio" : 0.0,
         # "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
@@ -176,9 +178,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_freq_ep" : eval_freq*train_envs,
         "eval_eps" : 10,
         "env_builder_args" : video_eval_env_builder_args,
-        "offset_envs_ep_starts" : False,
         "num_envs" : 10,
-        "skip_first_eval": True
+        "skip_first_eval": False
     }
     video_det_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
     eval_conf_video_det = {
@@ -187,9 +188,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_freq_ep" : eval_freq*train_envs,
         "eval_eps" : 10,
         "env_builder_args" : video_det_eval_env_builder_args,
-        "offset_envs_ep_starts" : False,
         "num_envs" : 10,
-        "skip_first_eval": True
+        "skip_first_eval": False
     }
     # run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
     # run_1ms_env_builder_args["goal_speed_minmax"] = (1,1)
@@ -273,7 +273,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     eval_configurations = [  
                             # video_stoch_highpen,
-                            # eval_conf_video_stoch,
+                            eval_conf_video_stoch,
                             # eval_conf_run_1ms,
                             eval_conf_video_det,
                             # #  eval_conf_feasible,
@@ -393,19 +393,19 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     critic_network_arch=(512,256),
                                                     q_lr=None,
                                                     policy_lr=3e-4,
-                                                    update_epochs=4,
+                                                    update_epochs=5,
                                                     total_steps=5_000_000_000,
                                                     num_envs=train_envs,
                                                     num_steps=24,
-                                                    gamma=0.99,
+                                                    gamma=0.97,
                                                     loss_value_weight=1.0,
-                                                    loss_entropy_coeff=1e-4,
+                                                    loss_entropy_coeff=1e-3,
                                                     log_freq_vstep=int(max_steps_per_episode/10),
                                                     epsilon_policy_ratio_clip=0.2,
                                                     epsilon_value_clip_epsilon=0.2,
                                                     gae_lambda=0.95,
                                                     max_grad_norm=1.0,
-                                                    init_actor_logstd=-2.0,
+                                                    init_actor_logstd=-1.0,
                                                     # actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
                                                     # critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
                                                     ),

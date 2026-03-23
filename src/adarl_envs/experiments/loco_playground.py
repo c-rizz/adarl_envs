@@ -30,11 +30,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args = {
         "video_save_freq" : -1,
         "record_video" : False,
-        "env_name" : "Go1JoystickFlatTerrain",
+        "env_name" : "SpotFlatTerrainJoystick",
         "quiet" : False,
         "th_device" : env_device,
         "log_info_stats": False,
-        "randomize_step_timeout_counters": True
+        "randomize_step_timeout_counters": True,
+        "playground_config_overrides": {"reward_config.scales.feet_clearance":0.0,
+                                        "reward_config.scales.feet_height":0.0
+                                        }
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({
@@ -82,7 +85,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     epsilon_policy_ratio_clip=0.2,
                                                     epsilon_value_clip_epsilon=0.2,
                                                     gae_lambda=0.95,
-                                                    max_grad_norm=1.0
+                                                    max_grad_norm=1.0,
+                                                    init_actor_logstd=-1.0,
                                                     # actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
                                                     # critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
                                                     ),
@@ -93,7 +97,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 checkpoint_freq=-1,
                 collector_device=env_device,
                 eval_configurations=eval_configurations,
-                debug_level=1)
+                debug_level=1,
+                env_checker_max_obs_value=500.0,
+                env_checker_max_rew_value=100.0,)
     else:
         raise RuntimeError(f"Unknown algorithm '{algo}'")
 

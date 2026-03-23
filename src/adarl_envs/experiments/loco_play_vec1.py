@@ -262,7 +262,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     r = 0.0
     n = 0.0
     p = 0.0
-    eps= 1e-6
+    eps= 0.0
     env_builder_args = {
         "action_delay_mustd_std" : (0.003, 0.001*n, 0.0025*n),
         "action_noise_mustd" : (0.0,   0.0),
@@ -272,7 +272,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_posref_safety" : True,
         "enable_rendering" : False,
         "fail_on_safety" : False,
-        "frame_stack_length" : 5,
+        "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
         "goal_height_minmax" : [0.47,0.47],
         "goal_resampling_probability_per_sec" : 0.1,
@@ -293,7 +293,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_goal_height_speed" : 0.1,
         "max_good_step_duration" : 0.3,
         "max_steps_per_episode" : max_steps_per_episode,
-        "merge_privileged" : False,
+        "merge_privileged" : True,
         "min_good_step_duration" : 0.1,
         "mode" : mode,
         "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.05*n],
@@ -303,6 +303,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
         "observe_full_robot_state" : False,
+        "offset_envs_ep_starts" : True,
         "posref_safety_period" : 0.02,
         "quiet" : False,
         "randomized_armature_ratios" : 0.1*r,
@@ -312,38 +313,39 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_gains_damping_ratio_epstd"       : 0.2*r,
         "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
-        "randomized_reference_filter_distribution" : ("uniform", (20.0-15*r, 20.0+15*r)),
+        "randomized_reference_filter_distribution" : ("uniform", (20.0, 20.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "reward_superweight_joint_penalties" : ["loguniform", (0.01, 1.0)],
+        "reward_superweight_joint_penalties" : 1.0,
         "reward_acceleration_weight" :        eps,
-        "reward_actacc_weight" :              eps,
-        "reward_actdiff_weight" :             eps,
+        "reward_actacc_weight" :              1.0,
+        "reward_actdiff_weight" :             1.0,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
         "reward_failure_weight" :             eps,
-        "reward_feet_air_time_weight" :       20.0,
+        "reward_feet_air_time_weight" :       10.0,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      eps,
         "reward_heading_velocity_weight" :    eps,
-        "reward_heading_weight" :             0.1,
+        "reward_heading_weight" :             eps,
         "reward_health_weight" :              eps,
-        "reward_height_position_weight" :     0.5,
+        "reward_height_position_weight" :     1.0,
         "reward_height_velocity_weight" :     eps,
-        "reward_pitchnroll_velocity_weight" : 20.0,
-        "reward_pitchnroll_weight" :          0.5,
+        "reward_pitchnroll_velocity_weight" : 1.0,
+        "reward_pitchnroll_weight" :          1.0,
         "reward_position_limit_weight" :      1.0,
-        "reward_position_weight" :            0.1,
-        "reward_posref_vel_weight" :          0.5,
-        "reward_posref_acc_weight":           2.0,
+        "reward_position_weight" :            eps,
+        "reward_posref_vel_weight" :          0.0,
+        "reward_posref_acc_weight":           0.0,
+        "reward_scale_nolength":              0.1,
         "reward_sensed_effort_weight" :       eps,
         "reward_slip_weight" :                eps,
         "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,
-        "reward_torque_weight" :              1.0,
+        "reward_torque_weight" :              0.5,
         "reward_torquediff_weight" :          eps,
         "reward_torqueref_weight" :           eps,
-        "reward_tracking_weight" :            2.0,
+        "reward_tracking_weight" :            3.0,
         "reward_velocity_limit_weight" :      eps,
         "reward_velocity_weight" :            eps,
         "reward_velref_weight" :              eps,
@@ -351,7 +353,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "safe_damping" : 5,
         "safe_stiffness" : 600,
         "saturate_jimp_ref_limits" : False,
-        "split_rewards" : True,
+        "split_rewards" : False,
         "stepLength_sec" : step_length_sec,
         "stop_on_failure" : False,
         "terminate_on_body_contact" : False,
@@ -366,6 +368,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     skip_optionals = True
     env_builder_args.update({
+        "offset_envs_ep_starts" : False,
         "enable_rendering" : True,
         "record_video" : args["mode"] not in ["xbot","xbot_zmq"],
         "verbose_infos" : (not skip_optionals) or args["record"],
@@ -449,7 +452,7 @@ def play(seed, folderName, run_id, args,
     elif control_mode=="random":
         model = build_rand_policy(env=env, robot=robot, scale=1.0, device = env_device)
     elif control_mode == "sine":
-        model = build_sin_policy(env, robot=robot, scale = 1.0, device = env_device)
+        model = build_sin_policy(env, robot=robot, scale = 2.0, device = env_device)
     else:
         raise RuntimeError(f"Unknown control mode '{control_mode}'")
 
@@ -511,9 +514,12 @@ def play(seed, folderName, run_id, args,
                 img = env.render()
                 dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
                 time.sleep(step_length_sec/rt)
+            base_env : LocomotionVecEnv = env.get_runner().get_base_env()
+            print(f"Env is of type {type(base_env)}")
 
             cmd_xys = [1.0,0.0,0.0]
             cmd_height = 0.45
+            base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height)
             while not done:
                 t0 = time.monotonic()
                 record_time("start_step")
@@ -529,8 +535,6 @@ def play(seed, folderName, run_id, args,
                 record_time("pre env step")
                 obs, reward, terminated, truncated, info = env.step(action.detach().squeeze()) #type: ignore
                 record_time("post env step")
-                # print_recorded_times()
-                clear_recorded_times()
                 record_time("post print")
                 t1_step = time.monotonic()
                 if render:
@@ -543,7 +547,6 @@ def play(seed, folderName, run_id, args,
                         f"rew = {reward}\n"+
                         f"terminated = {terminated}\n"+
                         f"truncated = {truncated}\n")
-                base_env : LocomotionVecEnv = env.get_runner().get_base_env()
                 if interactive:
                     cmd_angle = np.arctan2(cmd_xys[1],cmd_xys[0])
                     if keyboard_listener.get_key_press_count("w")>0: cmd_xys[2] +=  0.05
@@ -583,6 +586,7 @@ def play(seed, folderName, run_id, args,
                     time.sleep(max(0,step_length_sec/rt - step_wallduration))
                 record_time("step end")
                 full_step_wallduration = time.monotonic()-t0
+                print_recorded_times()
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
                            f" tstep={t1_step-t0_step:1.4f} \t"
@@ -632,7 +636,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--model", required = False, default=None, type=str, help="Model to load")
     ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use [pybullet,xbot-gazebo,mjx]")
-    ap.add_argument("--robot", default="quad", type=str, help="Robot to be used")
+    ap.add_argument("--robot", default="kyon", type=str, help="Robot to be used")
     ap.add_argument("--rt-factor", default=1.0, type=float, help="Tentative realtime factor")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
     ap.add_argument("--gui", default=False, action='store_true', help="Start the gui, instead of streaming renderings")

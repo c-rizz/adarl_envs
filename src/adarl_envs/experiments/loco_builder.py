@@ -20,6 +20,8 @@ from rreal.algorithms.sac_helpers import build_vec_env, VecEnvRunnerBuilderProto
 from math import pi
 
 def format_tensor(t, float_precision):
+    if t is None:
+        return "None"
     if isinstance(t, float) or isinstance(t, int):
         t = th.as_tensor(t)
     t = t.squeeze().cpu().tolist()
@@ -40,16 +42,17 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
     else:
         posref_safety_triggered = 'N/A'
         limits_safety_triggered = 'N/A'
-    goal_abs_linvel_xyz = info['goal_abs_xyz_vec']
+    goal_abs_linvel_xyz = info.get('goal_abs_xyz_vec', None)
+    vel_norm = f"{th.linalg.norm(goal_abs_linvel_xyz):.3f}" if goal_abs_linvel_xyz is not None else "N/A"
     return  (   f"\n"
                 f"Step    {info['ep_step_count']: .3f}\n"+
                 f"body_abs_linvel       {body_abs_linvel_str} ({th.linalg.norm(body_abs_linvel):.3f} m/s)\n"
-                f"goal_vel_abs          {format_tensor(goal_abs_linvel_xyz, 3)} ({th.linalg.norm(goal_abs_linvel_xyz):.3f} m/s)\n"
-                f"goal_vel_rel          {format_tensor(info['goal_rel_xyz_vec'], 3)}\n"
-                f"smoothed_linvel_error {format_tensor(info['smoothed_linvel_error'], 3)}\n"
-                f"linvel_error          {format_tensor(info['linvel_error'], 3)}\n"
-                f"goal_height           {format_tensor(info['goal_height'], 3)}\n"
-                f"height_error          {format_tensor(info['height_err'], 3)}\n"
+                f"goal_vel_abs          {format_tensor(goal_abs_linvel_xyz, 3)} ({vel_norm} m/s)\n"
+                f"goal_vel_rel          {format_tensor(info.get('goal_rel_xyz_vec',None), 3)}\n"
+                f"smoothed_linvel_error {format_tensor(info.get('smoothed_linvel_error',None), 3)}\n"
+                f"linvel_error          {format_tensor(info.get('linvel_error',None), 3)}\n"
+                f"goal_height           {format_tensor(info.get('goal_height',None), 3)}\n"
+                f"height_error          {format_tensor(info.get('height_err',None), 3)}\n"
                 f"log_prob              {format_tensor(extra_info.get('act_log_prob',th.as_tensor(float('nan'))), 3)}\n"
                 f"posref_safety         {posref_safety_triggered}\n"
                 f"limits_safety         {limits_safety_triggered}\n"
@@ -159,7 +162,6 @@ def loco_runner_builder(seed,
                                                                                     jpos_cmd_max_vel_default = 10.0,
                                                                                     jpos_cmd_max_acc = {},
                                                                                     jpos_cmd_max_acc_default = 10.0),
-                                                            vec_size = 1,
                                                             th_device = th_device)
     elif mode == "pybullet":
         from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
@@ -174,7 +176,6 @@ def loco_runner_builder(seed,
                                                                             global_max_torque_position_control = 100,
                                                                             real_time_factor=None,
                                                                             th_device=th_device),
-                                                            vec_size = 1,
                                                             th_device = th_device)
     elif mode == "mjx":
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
@@ -201,7 +202,7 @@ def loco_runner_builder(seed,
                                             revolute_dof_armature_override=0.1,
                                             safe_revolute_dof_armature=0.1,
                                             opt_preset={"centauro":"fastest",
-                                                        "kyon":"fast",
+                                                        "kyon":"faster",
                                                         "quad":"fastest"}.get(robot_model, "faster"),
                                             opt_override=opt_override,
                                             reference_filter_cutoff_frequency=20.0)
@@ -330,7 +331,8 @@ def loco_runner_builder(seed,
                             seed=seed,
                             stepLength_sec=stepLength_sec,
                             step_precision_tolerance=0 if isinstance(adapter, BaseSimulationAdapter) else 0.001,
-                            stop_on_failure=env_builder_args.pop("stop_on_failure"),
+                            terminate_on_safety=env_builder_args.pop("terminate_on_safety"),
+                            terminate_on_crash=env_builder_args.pop("terminate_on_crash"),
                             terminating_contact_pairs=env_builder_args.pop("terminating_contact_pairs") if env_builder_args.pop("terminate_on_body_contact") else [],
                             th_device=th_device,
                             ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw"),
@@ -519,8 +521,8 @@ def get_kyon_args():
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
                                                     [ 0.9, 0.9, 0.9]] for k,v in homing.items()},
-            "control_limits_ratios_minmax_pve" : {k:[[ 0.4, 0.9, 0.9],
-                                                     [ 0.4, 0.9, 0.9]] for k,v in homing.items()},
+            "control_limits_ratios_minmax_pve" : {k:[[ 0.25, 0.9, 0.9],
+                                                     [ 0.25, 0.9, 0.9]] for k,v in homing.items()},
             "control_limits_position_offset" : homing,
             "enable_link_collisions" : [    (('kyon', 'contact_1'),[('ground','ground_link')]),
                                             (('kyon', 'contact_2'),[('ground','ground_link')]),
@@ -629,8 +631,8 @@ def get_centauro_args():
             "randomized_friction_links" : [LINK_FILTERS.ALL],
             "randomized_com_links" : [("centauro","pelvis")],
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
-            "safety_limits_ratios_minmax_pve" : {k:[[ 0.3, 0.9, 0.9],
-                                                    [ 0.3, 0.9, 0.9]] for k,v in homing.items()},
+            "safety_limits_ratios_minmax_pve" : {k:[[ 0.2, 0.9, 0.9],
+                                                    [ 0.2, 0.9, 0.9]] for k,v in homing.items()},
             "control_limits_position_offset" : homing,
             "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_2'),[('ground','ground_link')]),

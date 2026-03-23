@@ -55,7 +55,10 @@ def loco_mujoco_playground_runner_builder(seed,
     env_cfg = registry.get_default_config(env_name)
     env_cfg.impl = impl
     print(f"Environment config:\n{env_cfg}")
-    env_cfg_overrides = json.loads(playground_config_overrides) if playground_config_overrides is not None else {}
+    if isinstance(playground_config_overrides, dict):
+        env_cfg_overrides = playground_config_overrides
+    else:
+        env_cfg_overrides = json.loads(playground_config_overrides) if playground_config_overrides is not None else {}
     print(f"Environment config overrides:\n{env_cfg_overrides}\n")
 
     # Domain randomization

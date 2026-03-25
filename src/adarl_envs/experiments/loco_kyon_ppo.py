@@ -29,9 +29,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
     
-    eval_freq = 20
-    r = 0.0 # randomization strength
-    n = 0.0 # noise strength
+    eval_freq = 40
+    r = 1.0 # randomization strength
+    n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
@@ -397,7 +397,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     total_steps=5_000_000_000,
                                                     num_envs=train_envs,
                                                     num_steps=24,
-                                                    gamma=0.97,
+                                                    gamma=0.99,
                                                     loss_value_weight=1.0,
                                                     loss_entropy_coeff=1e-3,
                                                     log_freq_vstep=int(max_steps_per_episode/10),

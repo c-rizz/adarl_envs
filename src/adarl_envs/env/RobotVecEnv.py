@@ -1583,15 +1583,19 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 raise RuntimeError(f"Model randomizations are currently only supported with MjxAdapter")
             from adarl.adapters.MjxAdapter import MjxAdapter
             mjx_adapter : MjxAdapter = self._adapter # type: ignore
-            mjx_adapter.alter_model_rel(link_masses =               (self._randomized_mass_link_ids,           self._current_episode_config.link_masses_ratios),
-                                        link_frictions =            (self._randomized_friction_links_ids,      self._current_episode_config.link_frictions_ratios),
-                                        joint_armature_ratios =     (self._randomized_armature_joints_ids,     self._current_episode_config.joint_armatures_ratios),
-                                        joint_frictionloss_ratios = (self._randomized_frictionloss_joints_ids, self._current_episode_config.joint_frictionlosses_ratios),
-                                        vec_mask = vec_mask)
-            if len(self._randomized_com_links_ids) > 0:
-                mjx_adapter.alter_model_sum(com_position_diffs =        (self._randomized_com_links_ids, self._current_episode_config.link_coms_diffs),
-                                            com_quatxyzw_diffs =        None,
-                                            vec_mask = vec_mask)
+            mjx_adapter.alter_model(link_masses =
+                                        (self._randomized_mass_link_ids, self._current_episode_config.link_masses_ratios) if len(self._randomized_mass_link_ids) > 0 else None,
+                                    link_frictions =
+                                        (self._randomized_friction_links_ids, self._current_episode_config.link_frictions_ratios) if len(self._randomized_friction_links_ids) > 0 else None,
+                                    joint_armature_ratios =
+                                        (self._randomized_armature_joints_ids,     self._current_episode_config.joint_armatures_ratios) if len(self._randomized_armature_joints_ids) > 0 else None,
+                                    joint_frictionloss_ratios = 
+                                        (self._randomized_frictionloss_joints_ids, self._current_episode_config.joint_frictionlosses_ratios) if len(self._randomized_frictionloss_joints_ids) > 0 else None,
+                                    com_position_diffs =
+                                        (self._randomized_com_links_ids, self._current_episode_config.link_coms_diffs) if len(self._randomized_com_links_ids) > 0 else None,
+                                    com_quatxyzw_diffs =
+                                        None,
+                                    vec_mask = vec_mask)
         if self._filters_randomization_enabled:
             if not isinstance_noimport(self._adapter, "MjxJointImpedanceAdapter"):
                 raise RuntimeError(f"Reference filter randomizations are currently only supported with MjxJointImpedanceAdapter")
@@ -1854,12 +1858,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_bodystates_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
             record_time("RobotVecEnv._get_adapter_data_raw: getLinksState done")
             body_abs_quat_xyzw_vec  = vec_bodystates_13[:,3:7]
-            # vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
-            # vec_body_abs_angvel_xyz = vec_bodystates_13[:,10:13]
-            vec_linkstate_stats = self._adapter.get_links_state_step_stats()
-            record_time("RobotVecEnv._get_adapter_data_raw: get_links_state_step_stats done")
-            vec_body_abs_linvel_xyz = vec_linkstate_stats[:,2,0,0:3]
-            vec_body_abs_angvel_xyz = vec_linkstate_stats[:,2,0,3:6]
+            vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
+            vec_body_abs_angvel_xyz = vec_bodystates_13[:,10:13]
+            # vec_linkstate_stats = self._adapter.get_links_state_step_stats()
+            # record_time("RobotVecEnv._get_adapter_data_raw: get_links_state_step_stats done")
+            # vec_body_abs_linvel_xyz = vec_linkstate_stats[:,2,0,0:3]
+            # vec_body_abs_angvel_xyz = vec_linkstate_stats[:,2,0,3:6]
             vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz = self._compute_extr_from_bodystate(body_abs_linvel_xyz_vec = vec_body_abs_linvel_xyz,
                                                                                                                            body_abs_angvel_xyz_vec = vec_body_abs_angvel_xyz,
                                                                                                                            body_abs_quat_xyzw_vec = body_abs_quat_xyzw_vec)
@@ -1916,7 +1920,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"internal_states = {internal_states}")
         # ggLog.info(f"jstates_v_j_pve.device = {jstates_v_j_pve.device}")
         # ggLog.info(f"self._last_sent_v_j_pvesd.device = {self._last_sent_v_j_pvesd.device}")
-        vec_time_from_start = self._thtens(self._adapter.getEnvTimeFromStartup()) - self._eps_start_stime
+        vec_time_from_start = self._adapter.getEnvTimeFromStartup() - self._eps_start_stime
         t3_1 = time.monotonic()
 
         record_region_end("RobotVecEnv._get_adapter_data_raw")

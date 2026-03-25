@@ -534,6 +534,68 @@ def get_kyon_args():
                             ('kyon', 'contact_4')]
         }
 
+def get_pgspot_args():
+    hip_pitch = -0.8727 # = -50/180*3.14159
+    hip_roll =   0.0349 # = 2/180*3.14159
+    knee =      -1.5707 # = -90/180*3.14159
+    homing = {  ("kyon","hip_roll_3") :  hip_roll,
+                ("kyon","hip_roll_4") : -hip_roll,
+                ("kyon","hip_roll_1") : -hip_roll,
+                ("kyon","hip_roll_2") :  hip_roll,
+                ("kyon","hip_pitch_3") :  hip_pitch,
+                ("kyon","hip_pitch_4") : -hip_pitch,
+                ("kyon","hip_pitch_1") :  hip_pitch,
+                ("kyon","hip_pitch_2") : -hip_pitch,
+                ("kyon","knee_pitch_3") : -knee,
+                ("kyon","knee_pitch_4") :  knee,
+                ("kyon","knee_pitch_1") : -knee,
+                ("kyon","knee_pitch_2") :  knee}
+    enable_arms = False
+    if enable_arms:
+        homing.update({ ("kyon","shoulder_yaw_1") : 0.0,
+                        ("kyon","shoulder_pitch_1") : 0.0,
+                        ("kyon","elbow_pitch_1") : 0.0,
+                        ("kyon","wrist_pitch_1") : 0.0,
+                        ("kyon","wrist_yaw_1") : 0.0,
+                        ("kyon","shoulder_yaw_2") : 0.0,
+                        ("kyon","shoulder_pitch_2") : 0.0,
+                        ("kyon","elbow_pitch_2") : 0.0,
+                        ("kyon","wrist_pitch_2") : 0.0,
+                        ("kyon","wrist_yaw_2") : 0.0,
+                        ("kyon","dagana_1_clamp_joint") : 0.1,
+                        ("kyon","dagana_2_clamp_joint") : 0.1})
+    from mujoco_playground._src import mjx_env
+    return {"model_file" : mjx_env.ROOT_PATH / "locomotion" / "spot" / "xmls" / "scene_mjx_feetonly_flat_terrain.xml",
+            "model_kwargs" : {},
+            "xacro_extra_pkg_paths" : {},
+            "homing_joint_pose" : homing,
+            "robot_name" : "kyon",
+            "robot_main_body_link" : "pelvis",
+            "robot_root_link" : "pelvis",
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.495,0.,0.,0.,1.),
+            "disallowed_contact_links" : [ ],
+            "terminating_contact_pairs" : [ ],
+            "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "randomized_armature_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "randomized_mass_links" : [LINK_FILTERS.ALL_ROBOT],
+            "randomized_com_links" : [("kyon","pelvis")],
+            "randomized_friction_links" : [LINK_FILTERS.ALL],
+            "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
+                                                    [ 0.9, 0.9, 0.9]] for k,v in homing.items()},
+            "control_limits_ratios_minmax_pve" : {k:[[ 0.25, 0.9, 0.9],
+                                                     [ 0.25, 0.9, 0.9]] for k,v in homing.items()},
+            "control_limits_position_offset" : homing,
+            "enable_link_collisions" : [    (('kyon', 'contact_1'),[('ground','ground_link')]),
+                                            (('kyon', 'contact_2'),[('ground','ground_link')]),
+                                            (('kyon', 'contact_3'),[('ground','ground_link')]),
+                                            (('kyon', 'contact_4'),[('ground','ground_link')])],
+            "feet_links" : [('kyon', 'contact_1'),
+                            ('kyon', 'contact_2'),
+                            ('kyon', 'contact_3'),
+                            ('kyon', 'contact_4')]
+        }
+
 
 def get_centauro_args():
     # # Standard homing
@@ -657,6 +719,8 @@ def named_loco_venv_builder(seed : int,
         env_builder_args.update(get_quad_args())
     elif robot_model == "kyon":
         env_builder_args.update(get_kyon_args())
+    elif robot_model == "spot":
+        env_builder_args.update(get_pgspot_args())
     elif robot_model == "centauro":
         env_builder_args.update(get_centauro_args())
     else:

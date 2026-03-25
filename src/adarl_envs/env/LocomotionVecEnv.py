@@ -1459,7 +1459,7 @@ class LocomotionVecEnv(RobotVecEnv):
             "termination": -1.0,
             "posture": 1.0,
             "torques": -0.0002,
-            "action_rate": -0.0001,
+            "action_rate": -0.1,
             "energy": -0.001,
             "feet_slip": -0.1,
             "feet_clearance": -0.0,

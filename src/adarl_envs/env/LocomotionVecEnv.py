@@ -963,12 +963,12 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                  obs_defs={"base":{"observable":True,"concatenate":False,"noise":None}})
         ggLog.info(f"Built state/obs/action helpers")
 
-    def _reset_state(self, vec_mask : th.Tensor, options = {}):
-        super()._reset_state(vec_mask)
+    def _reset_state_full(self):
+        super()._reset_state_full()
         # ggLog.info(f"LocomotionVecEnv: resetting state envs: {self._current_state[self.STATE_LOCOMOTION][vec_mask,:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR_VELOCITY]}")
-        self._current_state[self.STATE_LOCOMOTION][vec_mask,:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X] = 1.0
-        self._current_state[self.STATE_LOCOMOTION][vec_mask,:,self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X] = 1.0
-        self._current_state[self.STATE_LOCOMOTION][vec_mask,:,self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z] = -1.0
+        self._current_state[self.STATE_LOCOMOTION][:,:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X] = 1.0
+        self._current_state[self.STATE_LOCOMOTION][:,:,self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X] = 1.0
+        self._current_state[self.STATE_LOCOMOTION][:,:,self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z] = -1.0
 
         
     @th.compiler.disable
@@ -2123,7 +2123,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         vec_mask=vec_mask,
                         goal_heading_yaw=goal_heading_yaws)
         super()._set_current_ep_config(vec_mask=vec_mask, reset_options=reset_options)
-        self.set_max_episode_steps(reset_options.get("reset_options",self._current_episode_config.vec_max_ep_steps))
+        self.set_max_episode_steps(reset_options.get("max_ep_steps",self._current_episode_config.vec_max_ep_steps))
         sw = self._sample_distr((self.num_envs,1), self._loco_conf.reward_superweight_joint_penalties)
         new_reward_weight_acceleration          = sw*self._sample_distr((self.num_envs,1), self._loco_conf.reward_weight_acceleration)
         new_reward_weight_actacc                = sw*self._sample_distr((self.num_envs,1), self._loco_conf.reward_weight_actacc)
@@ -2236,9 +2236,8 @@ class LocomotionVecEnv(RobotVecEnv):
             goalvel_arrow_pose[:,2] = speed
             goalvel_arrow_pose[:,3:7] = linvel_dir_quat
             # goalvel_arrow_pose[1:] = goalvel_arrow_pose[0] # is on a fixed link, so it must be set to the same pose across all links
-            self._adapter.setLinksStateDirect(link_names=[self._arrow_base],
-                                                link_states_pose_vel=th.cat([goalvel_arrow_pose, self._thzeros((goalvel_arrow_pose.size()[0],6,))], dim = 1).unsqueeze(1),
-                                                vec_mask=vec_mask)
+            goalvel_arrow_state = th.cat([goalvel_arrow_pose, self._thzeros((goalvel_arrow_pose.size()[0],6,))], dim = 1)
+
             heading_arrow_pose = bstates_vec_13[:,:7].clone()
             heading_rpy = self._thzeros((self._adapter.vec_size(),3))
             heading_rpy[:,2] = self._locomotion_episode_config.goal_heading_rel_vec_yaw.view(self.num_envs,)
@@ -2246,8 +2245,10 @@ class LocomotionVecEnv(RobotVecEnv):
             heading_arrow_pose[:,3:7] = quat_mul_xyzw(rel_heading_quat, linvel_dir_quat)
             heading_arrow_pose[:,2] = 0.0 # Arrow is always on the ground
             # heading_arrow_pose[1:] = heading_arrow_pose[0]
-            self._adapter.setLinksStateDirect(link_names=[self._arrow_yellow],
-                                                link_states_pose_vel=th.cat([heading_arrow_pose, self._thzeros((heading_arrow_pose.size()[0],6,))], dim = 1).unsqueeze(1),
+            heading_arrow_state = th.cat([heading_arrow_pose, self._thzeros((heading_arrow_pose.size()[0],6,))], dim = 1)
+
+            self._adapter.setLinksStateDirect(link_names=[self._arrow_yellow, self._arrow_base],
+                                                link_states_pose_vel=th.stack([heading_arrow_state, goalvel_arrow_state], dim = 1),
                                                 vec_mask=vec_mask)
 
     @override

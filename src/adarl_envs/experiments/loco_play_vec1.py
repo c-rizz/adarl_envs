@@ -175,6 +175,20 @@ def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("
         act_range.view(4,3)[1] *= -1.0
         # act_range.view(4,3)[2] *= -1.0
         act_range.view(4,3)[3] *= -1.0
+    elif robot == "kyon_arms":
+        act_range = th.as_tensor([   0.0, -0.1,  0.17,
+                                    -0.0,  0.1, -0.17,
+                                     0.0, -0.1,  0.17,
+                                    -0.0,  0.1, -0.17,
+                                     0.5,  0.5,  0.5,
+                                     0.0,  0.5,  0.5,
+                                     0.0,  0.5,  0.5,
+                                     0.0,  0.5,  0.5,
+                                    ],device = device)
+        # act_range.view(4,3)[0] *= -1.0
+        act_range.view(8,3)[1] *= -1.0
+        # act_range.view(4,3)[2] *= -1.0
+        act_range.view(8,3)[3] *= -1.0
     elif robot == "centauro":
         act_range = th.as_tensor([0.1], device = device)
     else:
@@ -355,7 +369,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : False,
         "stepLength_sec" : step_length_sec,
-        "stop_on_failure" : False,
+        "terminate_on_safety" : False,
+        "terminate_on_crash" : False,
         "terminate_on_body_contact" : False,
         "th_device" : env_device,
         "ui_camera_resolution_hw" : [144,256],

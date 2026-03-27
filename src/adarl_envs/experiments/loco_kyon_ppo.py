@@ -30,8 +30,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
     
     eval_freq = 40
-    r = 1.0 # randomization strength
-    n = 1.0 # noise strength
+    r = 0.5 # randomization strength
+    n = 0.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
@@ -54,7 +54,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
-        "init_on_reset_ratio" : 0.5,
+        "init_on_reset_ratio" : 1.0,
         "initial_height_randomization_range_meters" : 0.0,
         "initial_joint_pose_randomization_range" : 0.5,
         "just_health_reward" : False,

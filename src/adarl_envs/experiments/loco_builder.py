@@ -471,7 +471,7 @@ def get_quad_args():
                             ('quad', 'foot_center_link_front_right')]
             }
 
-def get_kyon_args():
+def get_kyon_args(enable_arms : bool = False):
     hip_pitch = -0.8727 # = -50/180*3.14159
     hip_roll =   0.0349 # = 2/180*3.14159
     knee =      -1.5707 # = -90/180*3.14159
@@ -487,7 +487,6 @@ def get_kyon_args():
                 ("kyon","knee_pitch_4") :  knee,
                 ("kyon","knee_pitch_1") : -knee,
                 ("kyon","knee_pitch_2") :  knee}
-    enable_arms = False
     if enable_arms:
         homing.update({ ("kyon","shoulder_yaw_1") : 0.0,
                         ("kyon","shoulder_pitch_1") : 0.0,
@@ -719,6 +718,8 @@ def named_loco_venv_builder(seed : int,
         env_builder_args.update(get_quad_args())
     elif robot_model == "kyon":
         env_builder_args.update(get_kyon_args())
+    elif robot_model == "kyon_arms":
+        env_builder_args.update(get_kyon_args(enable_arms=True))
     elif robot_model == "spot":
         env_builder_args.update(get_pgspot_args())
     elif robot_model == "centauro":

@@ -177,6 +177,7 @@ def find_pose_np(  root_joint : str,
     jp_dict = noncontrolled_jointpos
     rng = np.random.default_rng(seed=rng_seed)
     truncnorm = scipy.stats.truncnorm(-1, 1, loc=0, scale=1/3)
+    seen_collision_pairs = {}
     for i in range(samples):
         norm_jpos = truncnorm.rvs(size=(len(controlled_joints),), random_state=rng).astype(np.float32)*initial_pose_randomization_range
         # norm_jpos = (rng.random(size=(len(controlled_joints),), dtype=np.float32)*2-1)*initial_pose_randomization_range
@@ -187,28 +188,34 @@ def find_pose_np(  root_joint : str,
         robot_model.set_joint_pose_by_names({jn[1]:jp for jn,jp in jp_dict.items()})
         if is_floating_base:
             norm_height = (rng.random(size=(1,), dtype=np.float32)*2-1)*initial_height_randomization_range
-            initial_body_pose_xyzxyzw = homing_body_pose_xyzxyzw
+            initial_body_pose_xyzxyzw = homing_body_pose_xyzxyzw.copy()
             initial_body_pose_xyzxyzw[2] += norm_height[0]
             robot_model.set_joint_pose_by_names({root_joint:initial_body_pose_xyzxyzw})
-        collisions = robot_model.get_all_collisions()
-        # all_link_poses = self._robot_model.get_frame_poses_xyzxyzw() #frames=self._robot_model.get_tree_frame_names_under_joint(self._configuration.robot_root_joint))
-        # pprint.pprint(all_link_poses)
-        # all_links_z = np.stack([pose[2] for pose in all_link_poses.values()])
-        coll_counter.update({ln:coll_counter.get(ln,0)+1 for ln in collisions})                    
-        if len(collisions) == 0: # and np.all(all_links_z>0):
-            # ggLog.info(f"joint_pose = {self._robot_model.get_joint_pose()}")
-            # ggLog.info(f"selected all_link_poses = {all_link_poses}")
+        has_collision, collision_pair = robot_model.has_collisions() # Returns True if there is any collision, and the first collision pair found (or None if no collision)
+        if not has_collision:
             found = True
             initial_jpose = initial_joint_pose
             break
+        seen_collision_pairs[collision_pair] = seen_collision_pairs.get(collision_pair, 0) + 1
+        # collisions = robot_model.get_all_collisions()
+        # # all_link_poses = self._robot_model.get_frame_poses_xyzxyzw() #frames=self._robot_model.get_tree_frame_names_under_joint(self._configuration.robot_root_joint))
+        # # pprint.pprint(all_link_poses)
+        # # all_links_z = np.stack([pose[2] for pose in all_link_poses.values()])
+        # coll_counter.update({ln:coll_counter.get(ln,0)+1 for ln in collisions})                    
+        # if len(collisions) == 0: # and np.all(all_links_z>0):
+        #     # ggLog.info(f"joint_pose = {self._robot_model.get_joint_pose()}")
+        #     # ggLog.info(f"selected all_link_poses = {all_link_poses}")
+        #     found = True
+        #     initial_jpose = initial_joint_pose
+        #     break
     t2 = time.monotonic()
     if not found:
         initial_jpose = homing_pos
-        coll_counter = {k:c/samples for k,c in coll_counter.items()}
-        ggLog.warn(f"Failed to find initial joint configuration."
-                    f" last collisions = {collisions}\n"
+        seen_collision_pairs = {k:v/samples for k,v in seen_collision_pairs.items()}
+        ggLog.warn( f"Failed to find initial joint configuration."
+                    f" last collision seen = {collision_pair}\n"
                     f" filtered collisions = {excluded_collision_pairs}\n"
-                    f" coll_ratio={coll_counter}")
+                    f" coll_ratio={seen_collision_pairs}")
     # ggLog.info(f"Model creation took {t1-t}s, pose search {t2-t1}s")
     return initial_jpose
 
@@ -1008,25 +1015,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z,
                                         self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
                                         ]
-        base_extrinsic_observable_fields = [
-                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
-                                        ]
+        
         if not self._configuration.merge_privileged:
-            extr_observation_definitions={  "base":ThBoxStateHelper.SimpleObsDef(
-                                                observable_fields=base_extrinsic_observable_fields,
-                                                obs_history_length = self._configuration.frame_stack_length,
-                                                observable_subfields=None),
-                                            "privileged":ThBoxStateHelper.SimpleObsDef(
-                                                observable_fields=privileged_extrinsic_observable_fields,
-                                                obs_history_length = self._configuration.frame_stack_length,
-                                                observable_subfields=None
-                                            )}
+            base_extrinsic_observable_fields = [
+                                            self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
+                                            ]
         else:
-            extr_observation_definitions = ThBoxStateHelper.SimpleObsDef(
-                                                observable_fields=base_extrinsic_observable_fields+privileged_extrinsic_observable_fields,
-                                                obs_history_length = self._configuration.frame_stack_length,
-                                                observable_subfields=None)
+            base_extrinsic_observable_fields = privileged_extrinsic_observable_fields
         extrinsic_state_helper =  ThBoxStateHelper(field_names=[e for e in self.EXTRINSIC_FIELDS],
                                                     field_size=(1,),
                                                     fields_minmax={ self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : [-5,5],
@@ -1046,7 +1042,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
                                                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
                                                     history_length=self._configuration.history_length,
-                                                    observation_definitions=extr_observation_definitions,
+                                                    observation_definitions={  
+                                                                            "base":ThBoxStateHelper.SimpleObsDef(
+                                                                                observable_fields=base_extrinsic_observable_fields,
+                                                                                obs_history_length = self._configuration.frame_stack_length,
+                                                                                observable_subfields=None),
+                                                                            "privileged":ThBoxStateHelper.SimpleObsDef(
+                                                                                observable_fields=privileged_extrinsic_observable_fields,
+                                                                                obs_history_length = self._configuration.frame_stack_length,
+                                                                                observable_subfields=None)},
                                                     **vsize_dev_type # type: ignore
                                                     )
         extrinsic_state_noise =  StateNoiseGenerator(extrinsic_state_helper,
@@ -1091,9 +1095,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                     "privileged": ThBoxStateHelper.SimpleObsDef(observable_fields=None,
                                                                                                                 observable_subfields=["minseff","maxseff"],
                                                                                                                 obs_history_length=1),
-                                                                    "base": ThBoxStateHelper.SimpleObsDef(observable_fields=[],
-                                                                                                          observable_subfields=[],
-                                                                                                          obs_history_length=1)})
+                                                                    "base":       ThBoxStateHelper.SimpleObsDef(observable_fields=None if self._configuration.merge_privileged else [],
+                                                                                                                observable_subfields=["minseff","maxseff"],
+                                                                                                                obs_history_length=1),
+                                                                                                                })
         joint_longterm_stats_helper = ThBoxStateHelper( field_names=[e for e in self.JOINT_LONGTERM_STATS_FIELDS],
                                                         field_size=(len(self._configuration.joints_agent_controlled),),
                                                         fields_minmax={self.JOINT_LONGTERM_STATS_FIELDS.AVG_POS : 
@@ -1101,6 +1106,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                   for jn in self._configuration.joints_agent_controlled],
                                                                                 dim = 1)},
                                                         **vsize_dev_type) # type: ignore
+        
+        
+        internal_obsdef = ThBoxStateHelper.SimpleObsDef(observable_fields=[self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,
+                                                                           self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED],
+                                                        observable_subfields=None,
+                                                        obs_history_length=1)
         internal_state_helper =   ThBoxStateHelper( field_names=[e for e in self.INTERNAL_FIELDS],
                                                     field_size=(1,),
                                                     fields_minmax={ self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED : [0,1],
@@ -1108,41 +1119,50 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                     self.INTERNAL_FIELDS.STEP_COUNT : [-1,100_000],
                                                                     self.INTERNAL_FIELDS.SIM_TIME : [-1,1000_000],
                                                                     self.INTERNAL_FIELDS.LAST_STEP_DT : [-1,1]},
-                                                    observation_definitions=ThBoxStateHelper.SimpleObsDef(
-                                                        observable_fields=[self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,
-                                                                           self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED],
-                                                        observable_subfields=None,
-                                                        obs_history_length=1),
+                                                    observation_definitions={
+                                                        "privileged" : internal_obsdef,
+                                                        "base" : internal_obsdef},
                                                     **vsize_dev_type) # type: ignore
+        
+        acthistory_obsdef = ThBoxStateHelper.SimpleObsDef(  observable_fields=None,
+                                                            observable_subfields=None,
+                                                            obs_history_length=5)
         act_history_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
                                                     field_size=(self._action_helper.single_action_len(),),
                                                     fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]},
                                                     history_length=5,
                                                     flatten_observation=True,
-                                                    observation_definitions=ThBoxStateHelper.SimpleObsDef(
-                                                        observable_fields=None,
-                                                        observable_subfields=None,
-                                                        obs_history_length=5),
+                                                    observation_definitions={
+                                                        "privileged" :acthistory_obsdef,
+                                                        "base" : acthistory_obsdef},
                                                     **vsize_dev_type) # type: ignore
+        
+        rawactihostory_obsdef = ThBoxStateHelper.SimpleObsDef(  observable_fields=None,
+                                                                observable_subfields=None,
+                                                                obs_history_length=3)
         raw_act_history_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
                                                         field_size=(self._action_helper.single_action_len(),),
                                                         fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]},
                                                         history_length=5,
                                                         flatten_observation=True,
-                                                        observation_definitions=ThBoxStateHelper.SimpleObsDef(
-                                                            observable_fields=None,
-                                                            observable_subfields=None,
-                                                            obs_history_length=3),
+                                                        observation_definitions={
+                                                            "privileged" :rawactihostory_obsdef,
+                                                            "base" : rawactihostory_obsdef
+                                                        },
                                                         **vsize_dev_type) # type: ignore
+        
+        lastrawact_obsdef = ThBoxStateHelper.SimpleObsDef(  observable_fields=None,
+                                                            observable_subfields=None,
+                                                            obs_history_length=1)
         last_raw_act_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
                                                         field_size=(self._action_helper.single_action_len(),),
                                                         fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]},
                                                         history_length=5,
                                                         flatten_observation=True,
-                                                        observation_definitions=ThBoxStateHelper.SimpleObsDef(
-                                                            observable_fields=None,
-                                                            observable_subfields=None,
-                                                            obs_history_length=1),
+                                                        observation_definitions={
+                                                            "privileged" :lastrawact_obsdef,
+                                                            "base" : lastrawact_obsdef
+                                                        },
                                                         **vsize_dev_type) # type: ignore
         
 
@@ -1155,48 +1175,69 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # randomizations_
         
 
-        all_observable_substates = [self.STATE_ROBOT,
+        all_observable_substates = [
+                                self.STATE_ROBOT,
                                 self.STATE_INTERNAL,
-                                self.STATE_ACT_RAW_HIST,
-                                self.STATE_LAST_ACT_RAW,
-                                # self.STATE_ACT_PREPROC,
-                                self.STATE_JOINT_LONGTERM_STATS,
                                 self.STATE_EXTRINSIC,
-                                self.STATE_JOINT_STEP_STATS
+                                self.STATE_ACT_RAW_HIST,
+                                # self.STATE_LAST_ACT_RAW,
+                                # self.STATE_ACT_PREPROC,
+                                # self.STATE_JOINT_LONGTERM_STATS,
+                                # self.STATE_JOINT_STEP_STATS
                                 ]
         if not self._configuration.merge_privileged:
             obs_definitions={"base" : 
-                            DictStateHelper.SimpleDictObsDef(  observable_substates=all_observable_substates, # this will only take the "base" obs inside these
-                                                                concatenable_substates=[self.STATE_ROBOT,
-                                                                                self.STATE_EXTRINSIC,
+                            DictStateHelper.SimpleDictObsDef(  observable_substates=[
+                                                                                self.STATE_ROBOT,
                                                                                 self.STATE_INTERNAL,
-                                                                                # self.STATE_LAST_ACT_RAW,
+                                                                                self.STATE_EXTRINSIC,
+                                                                                self.STATE_ACT_RAW_HIST], # this will only take the "base" obs inside these
+                                                                concatenable_substates=[
+                                                                                self.STATE_ROBOT,
+                                                                                self.STATE_INTERNAL,
+                                                                                self.STATE_EXTRINSIC,
                                                                                 self.STATE_ACT_RAW_HIST,
+                                                                                # self.STATE_LAST_ACT_RAW,
                                                                                 # self.STATE_ACT_PREPROC,
-                                                                                self.STATE_JOINT_LONGTERM_STATS,
-                                                                                self.STATE_JOINT_STEP_STATS],
+                                                                                # self.STATE_JOINT_LONGTERM_STATS,
+                                                                                # self.STATE_JOINT_STEP_STATS
+                                                                                ],
                                                                 concatenated_part_name="vec",
                                                                 noise_generators={self.STATE_ROBOT      : robot_state_noise,
                                                                                   self.STATE_EXTRINSIC  : extrinsic_state_noise}),
                             "privileged" : 
-                            DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS, self.STATE_ROBOT],
-                                                                concatenable_substates=[self.STATE_EXTRINSIC, self.STATE_JOINT_STEP_STATS, self.STATE_ROBOT],
+                            DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_ROBOT,
+                                                                                     self.STATE_INTERNAL,
+                                                                                     self.STATE_EXTRINSIC,
+                                                                                     self.STATE_ACT_RAW_HIST,
+                                                                                    #  self.STATE_JOINT_STEP_STATS,
+                                                                                     ],
+                                                                concatenable_substates=[self.STATE_ROBOT,
+                                                                                        self.STATE_EXTRINSIC,
+                                                                                        self.STATE_INTERNAL,
+                                                                                        self.STATE_ACT_RAW_HIST,
+                                                                                        # self.STATE_JOINT_STEP_STATS,
+                                                                                        ],
                                                                 concatenated_part_name="vec",
                                                                 noise_generators={})}
         else:
             obs_definitions={"base" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=all_observable_substates,
-                                                                concatenable_substates=[self.STATE_ROBOT,
-                                                                                self.STATE_EXTRINSIC,
+                                                                concatenable_substates=[
+                                                                                self.STATE_ROBOT,
                                                                                 self.STATE_INTERNAL,
-                                                                                # self.STATE_LAST_ACT_RAW,
+                                                                                self.STATE_EXTRINSIC,
                                                                                 self.STATE_ACT_RAW_HIST,
+                                                                                # self.STATE_LAST_ACT_RAW,
                                                                                 # self.STATE_ACT_PREPROC,
-                                                                                self.STATE_JOINT_LONGTERM_STATS,
-                                                                                self.STATE_JOINT_STEP_STATS],
+                                                                                # self.STATE_JOINT_LONGTERM_STATS,
+                                                                                # self.STATE_JOINT_STEP_STATS,
+                                                                                ],
                                                                 concatenated_part_name="vec",
-                                                                noise_generators={  self.STATE_ROBOT     : robot_state_noise,
-                                                                                    self.STATE_EXTRINSIC : extrinsic_state_noise})}
+                                                                noise_generators={  
+                                                                                    self.STATE_ROBOT     : robot_state_noise,
+                                                                                    self.STATE_EXTRINSIC : extrinsic_state_noise
+                                                                                    })}
         self._state_helper = DictStateHelper({  self.STATE_ROBOT : robot_state_helper,
                                                 self.STATE_JOINT_STEP_STATS : joint_step_stats_state_helper,
                                                 self.STATE_EXTRINSIC : extrinsic_state_helper,
@@ -1562,57 +1603,89 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
         record_region_start("RobotVecEnv._simulation_initialization")
         reinit_vecs = th.logical_and(self._current_episode_config.vec_init_on_reset, vec_mask)
+        use_mjx_command_sequence = isinstance_noimport(self._adapter, "MjxJointImpedanceAdapter")
                 
-        # ggLog.info(f"simulation init ({vec_mask}) (count={self._tot_init_counter},{self._init_counter_since_reset})")
-        # time.sleep(5)
-        if self._configuration.homing_body_pose_xyz_xyzw is not None and self._configuration.robot_is_floating:
-            # ggLog.info(f"setting body pose ({self._current_episode_config.vec_init_on_reset})")
-            self._adapter.setLinksStateDirect(link_names=[self._configuration.main_body_link],
-                                              link_states_pose_vel=th.cat([self._configuration.homing_body_pose_xyz_xyzw,
-                                                                           th.zeros((6,), device=self._configuration.th_device, dtype=th.float32)])
-                                                                           .expand(self._adapter.vec_size(), 1, 13),
-                                              vec_mask=reinit_vecs)
-        record_time(f"RobotVecEnv._simulation_initialization: setted main body pose")
-        self._adapter.setJointsStateDirect(joint_names=self._precomputed_sim_init.all_joints_names,
-                                           joint_states_pve=self._precomputed_sim_init.all_joints_states,
-                                           vec_mask=reinit_vecs)
-        record_time(f"RobotVecEnv._simulation_initialization: setted joint states")
-        # ggLog.info(f"Set imp cmd>")        
-        # time.sleep(5)
-        self._adapter.setJointsImpedanceCommand(self._precomputed_sim_init.full_cmd_vec_j_pvesd, vec_mask=reinit_vecs)
-        record_time(f"RobotVecEnv._simulation_initialization: setted joint impedance command")
-        # ggLog.info(f"Set current jimp>")
-        # time.sleep(5)
-        self._adapter.set_current_joint_impedance_command(self._precomputed_sim_init.full_cmd_vec_j_pvesd, vec_mask=reinit_vecs)
-        record_time(f"RobotVecEnv._simulation_initialization: setted current joint impedance command")
-        masked_assign(self._last_sent_v_j_pvesd, reinit_vecs, self._precomputed_sim_init.initial_cmd_vec_j_pvesd)
-        record_time(f"RobotVecEnv._simulation_initialization: setted last sent j_pvesd")
-
-        if self._model_randomization_enabled:
-            if not isinstance_noimport(self._adapter, "MjxAdapter"):
-                raise RuntimeError(f"Model randomizations are currently only supported with MjxAdapter")
-            from adarl.adapters.MjxAdapter import MjxAdapter
+        if use_mjx_command_sequence:
+            from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter, SetCurrentJointImpedanceCommand
+            from adarl.adapters.MjxAdapter import SetJointsStateDirectCommand, SetLinksStateDirectCommand, AlterModelCommand
             mjx_adapter : MjxAdapter = self._adapter # type: ignore
-            mjx_adapter.alter_model(link_masses =
-                                        (self._randomized_mass_link_ids, self._current_episode_config.link_masses_ratios) if len(self._randomized_mass_link_ids) > 0 else None,
-                                    link_frictions =
-                                        (self._randomized_friction_links_ids, self._current_episode_config.link_frictions_ratios) if len(self._randomized_friction_links_ids) > 0 else None,
-                                    joint_armature_ratios =
-                                        (self._randomized_armature_joints_ids,     self._current_episode_config.joint_armatures_ratios) if len(self._randomized_armature_joints_ids) > 0 else None,
-                                    joint_frictionloss_ratios = 
-                                        (self._randomized_frictionloss_joints_ids, self._current_episode_config.joint_frictionlosses_ratios) if len(self._randomized_frictionloss_joints_ids) > 0 else None,
-                                    com_position_diffs =
-                                        (self._randomized_com_links_ids, self._current_episode_config.link_coms_diffs) if len(self._randomized_com_links_ids) > 0 else None,
-                                    com_quatxyzw_diffs =
-                                        None,
-                                    vec_mask = reinit_vecs)
+            do_main_link_homing = self._configuration.homing_body_pose_xyz_xyzw is not None and self._configuration.robot_is_floating
+            command_sequence = [
+                SetLinksStateDirectCommand(
+                        link_names=[self._configuration.main_body_link],
+                        link_states_pose_vel=th.cat([
+                            self._configuration.homing_body_pose_xyz_xyzw,
+                            th.zeros((6,), device=self._configuration.th_device, dtype=th.float32),
+                        ]).expand(self._adapter.vec_size(), 1, 13),
+                        vec_mask=reinit_vecs,
+                    ) if do_main_link_homing else None,
+                SetJointsStateDirectCommand(
+                    joint_names=self._precomputed_sim_init.all_joints_names,
+                    joint_states_pve=self._precomputed_sim_init.all_joints_states,
+                    vec_mask=reinit_vecs,
+                ),
+                SetCurrentJointImpedanceCommand(
+                    joint_impedances_pvesd=self._precomputed_sim_init.full_cmd_vec_j_pvesd,
+                    vec_mask=reinit_vecs,
+                ),
+                AlterModelCommand(
+                        link_masses=(self._randomized_mass_link_ids, self._current_episode_config.link_masses_ratios) if len(self._randomized_mass_link_ids) > 0 else None,
+                        link_frictions=(self._randomized_friction_links_ids, self._current_episode_config.link_frictions_ratios) if len(self._randomized_friction_links_ids) > 0 else None,
+                        joint_armature_ratios=(self._randomized_armature_joints_ids, self._current_episode_config.joint_armatures_ratios) if len(self._randomized_armature_joints_ids) > 0 else None,
+                        joint_frictionloss_ratios=(self._randomized_frictionloss_joints_ids, self._current_episode_config.joint_frictionlosses_ratios) if len(self._randomized_frictionloss_joints_ids) > 0 else None,
+                        com_position_diffs=(self._randomized_com_links_ids, self._current_episode_config.link_coms_diffs) if len(self._randomized_com_links_ids) > 0 else None,
+                        com_quatxyzw_diffs=None,
+                        vec_mask=reinit_vecs,
+                ) if self._model_randomization_enabled else None
+            ]
+            mjx_adapter.run_command_sequence(command_sequence)
+        else:
+            if self._configuration.homing_body_pose_xyz_xyzw is not None and self._configuration.robot_is_floating:
+                # ggLog.info(f"setting body pose ({self._current_episode_config.vec_init_on_reset})")
+                self._adapter.setLinksStateDirect(link_names=[self._configuration.main_body_link],
+                                                  link_states_pose_vel=th.cat([self._configuration.homing_body_pose_xyz_xyzw,
+                                                                               th.zeros((6,), device=self._configuration.th_device, dtype=th.float32)])
+                                                                               .expand(self._adapter.vec_size(), 1, 13),
+                                                  vec_mask=reinit_vecs)
+            record_time(f"RobotVecEnv._simulation_initialization: setted main body pose")
+            self._adapter.setJointsStateDirect(joint_names=self._precomputed_sim_init.all_joints_names,
+                                               joint_states_pve=self._precomputed_sim_init.all_joints_states,
+                                               vec_mask=reinit_vecs)
+            record_time(f"RobotVecEnv._simulation_initialization: setted joint states")
+            self._adapter.set_current_joint_impedance_command(self._precomputed_sim_init.full_cmd_vec_j_pvesd, vec_mask=reinit_vecs)
+            record_time(f"RobotVecEnv._simulation_initialization: setted current joint impedance command")
+            if self._model_randomization_enabled and not use_mjx_command_sequence:
+                if not isinstance_noimport(self._adapter, "MjxAdapter"):
+                    raise RuntimeError(f"Model randomizations are currently only supported with MjxAdapter")
+                from adarl.adapters.MjxAdapter import MjxAdapter
+                mjx_adapter : MjxAdapter = self._adapter # type: ignore
+                mjx_adapter.alter_model(link_masses =
+                                            (self._randomized_mass_link_ids, self._current_episode_config.link_masses_ratios) if len(self._randomized_mass_link_ids) > 0 else None,
+                                        link_frictions =
+                                            (self._randomized_friction_links_ids, self._current_episode_config.link_frictions_ratios) if len(self._randomized_friction_links_ids) > 0 else None,
+                                        joint_armature_ratios =
+                                            (self._randomized_armature_joints_ids,     self._current_episode_config.joint_armatures_ratios) if len(self._randomized_armature_joints_ids) > 0 else None,
+                                        joint_frictionloss_ratios = 
+                                            (self._randomized_frictionloss_joints_ids, self._current_episode_config.joint_frictionlosses_ratios) if len(self._randomized_frictionloss_joints_ids) > 0 else None,
+                                        com_position_diffs =
+                                            (self._randomized_com_links_ids, self._current_episode_config.link_coms_diffs) if len(self._randomized_com_links_ids) > 0 else None,
+                                        com_quatxyzw_diffs =
+                                            None,
+                                        vec_mask = reinit_vecs)
+                record_time(f"RobotVecEnv._simulation_initialization: setted model randomization")
         if self._filters_randomization_enabled:
             if not isinstance_noimport(self._adapter, "MjxJointImpedanceAdapter"):
                 raise RuntimeError(f"Reference filter randomizations are currently only supported with MjxJointImpedanceAdapter")
             from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
             mjx_adapter : MjxJointImpedanceAdapter = self._adapter # type: ignore
             mjx_adapter.set_reference_filter(self._current_episode_config.joint_reference_filter_freqs)
-        record_time(f"RobotVecEnv._simulation_initialization: setted randomizations")
+            record_time(f"RobotVecEnv._simulation_initialization: setted reference filter randomization")
+
+        # # time.sleep(5)
+        # self._adapter.setJointsImpedanceCommand(self._precomputed_sim_init.full_cmd_vec_j_pvesd, vec_mask=reinit_vecs)
+        # record_time(f"RobotVecEnv._simulation_initialization: setted joint impedance command")
+        masked_assign(self._last_sent_v_j_pvesd, reinit_vecs, self._precomputed_sim_init.initial_cmd_vec_j_pvesd)
+        record_time(f"RobotVecEnv._simulation_initialization: setted last sent j_pvesd")
         record_region_end("RobotVecEnv._simulation_initialization")
 
 
@@ -2129,14 +2202,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def _reinit_state(self, vec_mask : th.Tensor, adapter_data):
         """Reinitialize the state for the envs specified in vec_mask. This propagates the current instanateous state into the state history,
             it is used at environment resets."""
+        record_region_start("RobotVecEnv._reinit_state")
         step_count = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT]
         masked_assign(step_count, vec_mask, -1)
+        record_time("RobotVecEnv._reinit_state: masked_assign step_count done")
         instantaneous_state = self._get_new_instantaneous_state(adapter_data)
+        record_time("RobotVecEnv._reinit_state: get_new_instantaneous_state done")
         # self._state_helper.check_size(instantaneous_state=instantaneous_state)
         instantaneous_state[self.STATE_INTERNAL][self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED].fill_(0.0)
         instantaneous_state[self.STATE_INTERNAL][self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED].fill_(0.0)
+        record_time("RobotVecEnv._reinit_state: modified instantaneous_state done")
         self._current_state = self._state_helper.reset_state(instantaneous_state, vec_mask=vec_mask, old_state=self._current_state) # This repeats the instantaneous state across the history dimension
-        
+        record_region_end("RobotVecEnv._reinit_state")
 
     def _update_state(self, adapter_data):
         # th.cuda.synchronize()
@@ -2166,53 +2243,79 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
     def _update_stats(self):
-        sub_rewards = {}
-        self.compute_rewards(self._current_state, 
-                                sub_rewards_return=sub_rewards)
-        self._stats["rewards"] = sub_rewards
+        # sub_rewards = {}
+        # self.compute_rewards(self._current_state, 
+        #                         sub_rewards_return=sub_rewards)
+        # self._stats["rewards"] = sub_rewards
+        pass
         
     @override
     def get_infos(self,state, labels : dict[str, th.Tensor] | None = None) -> dict[str, th.Tensor]:
-        i : dict[str, th.Tensor] = {}
-        i.update(self._stats)
-        i["ep_step_count"] = self._ep_step_counter
-        i["ep_count"] = self._ep_counter
-        i["joint_homing_dist"] = state[self.STATE_JOINT_LONGTERM_STATS][:,0,0,:] - self._configuration.homing_ctrl_joints_pvesd[:,0]
+        record_region_start("RobotVecEnv.get_infos")
+        sub_rews = {}
+        reward = self.compute_rewards(state, sub_rews)
+        state_internal = state[self.STATE_INTERNAL]
+        i : dict[str, th.Tensor] = {
+            "ep_step_count" : self._ep_step_counter,
+            "ep_count" : self._ep_counter,
+            "rewards" : th.stack(list(sub_rews.values()), dim = 1) ,
+            "tot_reward" : reward,
+            "safety_limits_triggered" : state_internal[:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED],
+            "safety_posref_triggered" : state_internal[:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED],
+        }
+        if labels is not None:
+            if not hasattr(self, "_sub_rew_names_th"): self._sub_rew_names_th = to_string_tensor(list(sub_rews.keys()))
+            labels["rewards"] = self._sub_rew_names_th
+        if self._configuration.minimal_infos:
+            record_region_end("RobotVecEnv.get_infos")
+            return i
+
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
+        act_raw_state = state[self.STATE_ACT_RAW_HIST]   
         normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
         smoothed_joint_pose_norm = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
                                                                                                       warn_limits_violation=False)[:,0,0]
-        joint_pose = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)[:,0,:,0]
-        i["joint_pos_error"] = th.mean(th.abs(smoothed_joint_pose_norm - normhoming), dim=1)
-        i["joint_pos_error_instant"] = th.mean(th.abs(joint_pose - normhoming), dim=1)
-        sub_rews = {}
-        i["tot_reward"] = self.compute_rewards(state, sub_rews)
-        i["tot_reward_sum"] = i["tot_reward"].sum(dim=1) if i["tot_reward"].dim()>1 else i["tot_reward"]
-        i["rewards"] = th.stack(list(sub_rews.values()), dim = 1) 
-        i["safety_limits_triggered"] = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED]
-        i["safety_posref_triggered"] = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED]
-        i.update({"ep_config."+k:v for k,v in dataclasses.asdict(self._current_episode_config).items()})
-        # ggLog.info(f"i['rewards'] = {i['rewards'].size()}")
-        act_raw_state = state[self.STATE_ACT_RAW_HIST]   
         actdiff             = th.flatten((act_raw_state[:,0] - act_raw_state[:,1])/2, start_dim=1)
         prev_actdiff        = th.flatten((act_raw_state[:,1] - act_raw_state[:,2])/2, start_dim=1)
-        i["act_diff"] = actdiff
-        i["joint_avg_act_diff"] = actdiff.abs().mean(dim=-1)
-        i["act_acc"] = (actdiff - prev_actdiff)/2
-        i["joint_avg_act_acc"] = i["act_acc"].abs().mean(dim=-1)
+        act_acc             = (actdiff - prev_actdiff)/2
+        joint_pose = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)[:,0,:,0]
+        i.update({
+            "tot_reward_sum" : reward.sum(dim=1) if reward.dim()>1 else reward,
+            "joint_homing_dist" : state[self.STATE_JOINT_LONGTERM_STATS][:,0,0,:] - self._configuration.homing_ctrl_joints_pvesd[:,0],
+            "joint_pos_error" : th.mean(th.abs(smoothed_joint_pose_norm - normhoming), dim=1),
+            "joint_pos_error_instant" : th.mean(th.abs(joint_pose - normhoming), dim=1),
+            "act_diff" : actdiff,
+            "act_acc" : act_acc,
+            "joint_avg_act_diff" : actdiff.abs().mean(dim=-1),
+            "joint_avg_act_acc" : act_acc.abs().mean(dim=-1)
+        })
+        record_time("RobotVecEnv.get_infos: built dict")
+        i.update({f"stats.{k}":v for k,v in self._stats.items()})
+        record_time("RobotVecEnv.get_infos: added stats to dict")
+        i.update({"ep_config."+k:v for k,v in dataclasses.asdict(self._current_episode_config).items()})
+        record_time("RobotVecEnv.get_infos: added ep_config to dict")
+
         if labels is not None:
             if not hasattr(self, "_joint_names_th"): self._joint_names_th = to_string_tensor([jn[1] for jn in self._configuration.joints_agent_controlled])
             labels["joint_homing_dist"] = self._joint_names_th
-            if not hasattr(self, "_sub_rew_names_th"): self._sub_rew_names_th = to_string_tensor(list(sub_rews.keys()))
-            labels["rewards"] = self._sub_rew_names_th
             labels["act_diff"] = to_string_tensor(self._state_helper.sub_helpers[self.STATE_ACT_RAW_HIST].flat_state_names()[:12])
             labels["act_acc"] = labels["act_diff"]
+        record_time("RobotVecEnv.get_infos: added labels to dict")
 
         if self._configuration.verbose_infos:
             statenorm = self._state_helper.normalize(state)
             i.update({f"obs_{k}":o for k,o in self._last_obs.items()})
             if labels is not None:
-                labels.update({f"obs_{k}":to_string_tensor([n for n in self._state_helper.observation_names()[k]]) for k in self._last_obs.keys()})
+                obs_names = self._state_helper.observation_names()
+                ggLog.info(f"obs_names = "+str({k:v.shape for k,v in obs_names.items()}))
+                all_obs_labels = {}
+                for k in self._last_obs.keys():
+                    subobs_names = obs_names[k]
+                    if len(subobs_names.shape) == 1:
+                        all_obs_labels[f"obs_{k}"] = to_string_tensor([n for n in subobs_names])
+                    else:
+                        ggLog.warn(f"Sub observation {k} has more than 1 dimension, cannot store labels")
+                labels.update(all_obs_labels)
             # i["vec_obs"] = self._last_obs["base.vec"]
             # if not self._configuration.merge_privileged:
             #     i["vec_obs_privileged"] = self._last_obs["privileged.vec"]
@@ -2237,7 +2340,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 if labels is not None:
                     labels["state_"+substate] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                     labels["statenorm_"+substate] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
-            
+            record_region_end("RobotVecEnv.get_infos")
+        record_time("RobotVecEnv.get_infos: verbose part done")
         
         return i
     

@@ -473,6 +473,10 @@ class LocomotionVecEnv(RobotVecEnv):
                                            "FEET_GROUND_DURATIONS",
                                            "FEET_VEL_X",
                                            "FEET_VEL_Y",
+                                           "FEET_POS_X",
+                                           "FEET_POS_Y",
+                                           "FEET_POS_Z",
+                                           "PEAK_POS_Z",
                                            "AVG_FEET_STEP_DURATIONS"], start=0)
 
     def __init__(self,  action_delay_mustd_std : tuple[float,float,float],
@@ -826,7 +830,8 @@ class LocomotionVecEnv(RobotVecEnv):
         ggLog.info(f"LocomotionVecEnv: single_reward_space.labels = {self.single_reward_space.labels}")
         self.vec_reward_space=batch_space(self.single_reward_space, self._configuration.vec_size)
         obs_labels = self._state_helper.observation_names()
-        # ggLog.info(f"Obs labels = \n{pprint.pformat(obs_labels)}")
+        ggLog.info(f"observation_space = {self._state_helper.get_vec_obs_space()}")
+        ggLog.info(f"Obs labels = \n{pprint.pformat(obs_labels)}")
         # ggLog.info(f"Env constructed")
 
     @override
@@ -876,11 +881,6 @@ class LocomotionVecEnv(RobotVecEnv):
                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR_VELOCITY]
-        if self._configuration.merge_privileged:
-            loco_obs_defs = {"base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields+privileged_loco_fields)}
-        else:
-            loco_obs_defs = {   "base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields),
-                                "privileged" : ThBoxStateHelper.SimpleObsDef(observable_fields=privileged_loco_fields)}
         self._locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     fields_minmax={ self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X : [-1,1],
                                                                     self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y : [-1,1], 
@@ -911,46 +911,60 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     th_device=self._th_device,
                                                     field_size=(1,),
                                                     history_length=3,
-                                                    observation_definitions=loco_obs_defs,
+                                                    observation_definitions={  
+                                                        "base" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields),
+                                                        "privileged" : ThBoxStateHelper.SimpleObsDef(observable_fields=base_loco_fields+privileged_loco_fields)},
                                                     vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_LOCOMOTION,
                                                             self._locomotion_state_helper,
-                                                            obs_defs={"base":{"observable":True,"concatenate":True,"noise":None}})
+                                                            obs_defs={"base":{"observable":True,"concatenate":True,"noise":None},
+                                                                      "privileged":{"observable":True,"concatenate":True,"noise":None}})
         self._reward_weights_state_helper = ThBoxStateHelper( field_names=self._loco_conf.enabled_rewards,
                                                     fields_minmax={n : [-1.0,1.0] for n in self._loco_conf.enabled_rewards}, # -1,1, makes it so that it does not get scaled
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=(1,),
                                                     history_length=1,
-                                                    observation_definitions={"base" : ThBoxStateHelper.SimpleObsDef()},
+                                                    observation_definitions={
+                                                        "base" : ThBoxStateHelper.SimpleObsDef.fully_observable(),
+                                                        "privileged" : ThBoxStateHelper.SimpleObsDef.fully_observable()},
                                                     flatten_observation=True,
                                                     vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_REWARDS,
                                                             self._reward_weights_state_helper,
-                                                            obs_defs={"base":{"observable":True,"concatenate":False,"noise":None}})
+                                                            obs_defs={"base":{"observable":True,"concatenate":False,"noise":None},
+                                                                      "privileged":{"observable":True,"concatenate":False,"noise":None}})
         
         feet_num = len(self._loco_conf.feet_links)
-        feet_obs_type = "privileged" if not self._configuration.merge_privileged else "base"
         self._feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET_FIELDS],
                                                     fields_minmax={ 
                                                         self.FEET_FIELDS.FEET_AIR_DURATIONS     : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_GROUND_DURATIONS  : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_VEL_X : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.FEET_VEL_Y : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num)},
+                                                        self.FEET_FIELDS.FEET_VEL_Y : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_POS_X : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_POS_Y : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_POS_Z : th.as_tensor([[-2.0],[2.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.PEAK_POS_Z : th.as_tensor([[-2.0],[2.0]]).expand(2,feet_num)},
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=(len(self._loco_conf.feet_links),),
                                                     vec_size=adapter.vec_size(),
                                                     history_length=1,
                                                     observation_definitions=
-                                                        {   feet_obs_type : ThBoxStateHelper.SimpleObsDef(observable_fields=[self.FEET_FIELDS.FEET_AIR_DURATIONS,
+                                                        {   "privileged" : ThBoxStateHelper.SimpleObsDef(observable_fields=[self.FEET_FIELDS.FEET_AIR_DURATIONS,
                                                                                                                             self.FEET_FIELDS.FEET_GROUND_DURATIONS,
                                                                                                                             self.FEET_FIELDS.FEET_VEL_X,
-                                                                                                                            self.FEET_FIELDS.FEET_VEL_Y])})
+                                                                                                                            self.FEET_FIELDS.FEET_VEL_Y,
+                                                                                                                            self.FEET_FIELDS.FEET_POS_X,
+                                                                                                                            self.FEET_FIELDS.FEET_POS_Y,
+                                                                                                                            self.FEET_FIELDS.FEET_POS_Z,
+                                                                                                                            self.FEET_FIELDS.PEAK_POS_Z])})
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_FEET,
                                                             self._feet_state_helper,
-                                                            obs_defs={feet_obs_type:{"observable":True,"concatenate":True,"noise":None}})
+                                                            obs_defs={"privileged":{"observable":True,"concatenate":True,"noise":None},
+                                                                      })
         if self._loco_conf.heightmap_resolution_xy[0] > 0:
             heightmap_state_helper = ThBoxStateHelper( field_names=["map"],
                                                     fields_minmax={"map" : self._thtens([-10.0, 10.0])},
@@ -976,9 +990,11 @@ class LocomotionVecEnv(RobotVecEnv):
         if isinstance(self._adapter,BaseVecSimulationAdapter):
             lstates = self._adapter.getLinksState(requestedLinks = self._feet_and_body_link_ids, use_com_pose = False)
             feet_linvels_vec_foot_xyz = lstates[:,:4,7:10]
+            feet_pos_vec_foot_xyz = lstates[:,:4,0:3]
             borient_quat_vec_xyzw = lstates[:,4,3:7]
         else:
             feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
+            feet_pos_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
             borient_quat_vec_xyzw = self._unit_quaternion.expand((self.num_envs,4))
         if isinstance_noimport(self._adapter, "MjxAdapter"):
             from adarl.adapters.MjxAdapter import MjxAdapter
@@ -986,7 +1002,7 @@ class LocomotionVecEnv(RobotVecEnv):
             feet_are_touching_ground = mjx_adapter.check_colliding_links()  # Returns all monitored pairs (feet vs ground)
         else:
             feet_are_touching_ground = self._thzeros((self.num_envs,4))
-        return feet_linvels_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw
+        return feet_linvels_vec_foot_xyz, feet_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw
 
     @override
     def _get_adapter_data_raw(self):
@@ -1001,7 +1017,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         nenvs = self.num_envs
         loco_adapter_data, super_adapter_data = adapter_data
-        feet_linvels_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw = loco_adapter_data
+        feet_linvels_vec_foot_xyz, feet_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw = loco_adapter_data
 
         track_support_linvel = False
 
@@ -1233,7 +1249,8 @@ class LocomotionVecEnv(RobotVecEnv):
             
             prev_feet_ground_durations_vec_foot_t = prev_feet_state[:,self.FEET_FIELDS.FEET_GROUND_DURATIONS]
             feet_were_in_air = th.logical_not(feet_were_touching_ground)
-            just_lifting_up =    th.logical_and(feet_were_touching_ground, th.logical_not(feet_are_touching_ground))
+            feet_are_in_air = th.logical_not(feet_are_touching_ground)
+            just_lifting_up =    th.logical_and(feet_were_touching_ground, feet_are_in_air)
             new_feet_ground_durations_vec_foot_t  = prev_feet_ground_durations_vec_foot_t.clone()
             th.where(condition=just_lifting_up.expand(nenv_nfeet),
                      input = -prev_feet_ground_durations_vec_foot_t, # if touching down, write negative step duration
@@ -1247,6 +1264,8 @@ class LocomotionVecEnv(RobotVecEnv):
                      input = new_feet_ground_durations_vec_foot_t+dt.unsqueeze(1).expand(nenv_nfeet), # if is on ground, increase time
                      other = new_feet_ground_durations_vec_foot_t,
                      out   = new_feet_ground_durations_vec_foot_t)
+            max_ground_time_sec = 0.5
+            new_feet_ground_durations_vec_foot_t = th.clamp(new_feet_ground_durations_vec_foot_t, max=max_ground_time_sec) # to avoid unbounded growth and limit state space
 
             # ggLog.info(f"prev_feet_step_durations_vec_foot_t = \n{prev_feet_step_durations_vec_foot_t}")
             # ggLog.info(f"new_feet_step_durations_vec_foot_t = \n{new_feet_step_durations_vec_foot_t}")
@@ -1257,15 +1276,29 @@ class LocomotionVecEnv(RobotVecEnv):
                      input = -prev_feet_air_durations_vec_foot_t*(1-a) + prev_avg_feet_step_durations*a,
                      other = new_avg_feet_step_durations,
                      out   = new_avg_feet_step_durations)
+            prev_peak_z = prev_feet_state[:,self.FEET_FIELDS.PEAK_POS_Z]
+            feet_z = feet_pos_vec_foot_xyz[:,:,2]
+            peak_feet_z = th.where(condition=just_lifting_up.expand(nenv_nfeet),
+                                    input = self._thzeros(tuple()), # if just lifted up, record the foot height as the peak height of the step
+                                    other = prev_peak_z)
+            peak_feet_z = th.where(condition=feet_are_in_air.expand(nenv_nfeet),
+                                    input = th.maximum(feet_z, peak_feet_z), # if just lifted up, record the foot height as the peak height of the step
+                                    other = peak_feet_z) # otherwise keep the previous value (which is either the
         else:
             new_feet_air_durations_vec_foot_t = self._thtens([0.0]).expand(nenv_nfeet)
             new_feet_ground_durations_vec_foot_t = self._thtens([0.0]).expand(nenv_nfeet)
             new_avg_feet_step_durations = self._thtens([0.0]).expand(nenv_nfeet)
+            peak_feet_z = self._thtens([0.0]).expand(nenv_nfeet)
         new_feet_state = {  self.FEET_FIELDS.FEET_AIR_DURATIONS : new_feet_air_durations_vec_foot_t,
                             self.FEET_FIELDS.FEET_GROUND_DURATIONS : new_feet_ground_durations_vec_foot_t,
                             self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS : new_avg_feet_step_durations,
                             self.FEET_FIELDS.FEET_VEL_X : feet_linvels_vec_foot_xyz[:,:,0],
-                            self.FEET_FIELDS.FEET_VEL_Y : feet_linvels_vec_foot_xyz[:,:,1]}
+                            self.FEET_FIELDS.FEET_VEL_Y : feet_linvels_vec_foot_xyz[:,:,1],
+                            self.FEET_FIELDS.FEET_POS_X : feet_pos_vec_foot_xyz[:,:,0],
+                            self.FEET_FIELDS.FEET_POS_Y : feet_pos_vec_foot_xyz[:,:,1],
+                            self.FEET_FIELDS.FEET_POS_Z : feet_pos_vec_foot_xyz[:,:,2],
+                            self.FEET_FIELDS.PEAK_POS_Z : peak_feet_z
+                            }
 
         new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
         new_inst_state[self.STATE_REWARDS] = new_reward_state
@@ -1462,9 +1495,9 @@ class LocomotionVecEnv(RobotVecEnv):
             "action_rate": -0.1,
             "energy": -0.001,
             "feet_slip": -0.1,
-            "feet_clearance": -0.0,
-            "feet_height": -0.0,
-            "feet_air_time": 0.1
+            "feet_clearance": 0.0, #-2.0,
+            "feet_height": 0.0, #-0.1,
+            "feet_air_time": 1.0
         }
 
         weighted_rewards = {k: v * weights[k] for k, v in sub_rewards.items()}
@@ -1584,13 +1617,9 @@ class LocomotionVecEnv(RobotVecEnv):
         feet_vel_x = feet_state[:, self.FEET_FIELDS.FEET_VEL_X]
         feet_vel_y = feet_state[:, self.FEET_FIELDS.FEET_VEL_Y]
         vel_norm = th.sqrt(th.sqrt(feet_vel_x ** 2 + feet_vel_y ** 2))
-        # Use air duration as proxy for foot height (longer in air → higher)
-        air_dur = feet_state[:, self.FEET_FIELDS.FEET_AIR_DURATIONS]
-        in_swing = (air_dur > 0).to(vel_norm.dtype)
-        # Approximate foot height from air time using ballistic model: h ≈ 0.5*g*t^2 (capped)
-        approx_height = th.clamp(0.5 * 9.81 * (air_dur * in_swing) ** 2, 0.0, 0.3)
-        delta = th.abs(approx_height - self._PG_MAX_FOOT_HEIGHT)
-        return th.sum(delta * vel_norm * in_swing, dim=1)
+        height = feet_state[:, self.FEET_FIELDS.FEET_POS_Z]
+        delta = th.abs(height - self._PG_MAX_FOOT_HEIGHT)
+        return th.sum(delta * vel_norm, dim=1)
 
     def _pg_reward_feet_height(self, state: dict[str, th.Tensor]) -> th.Tensor:
         """Penalize swing peak height deviation from desired height."""
@@ -1600,9 +1629,8 @@ class LocomotionVecEnv(RobotVecEnv):
         # Steps finishing: negative duration indicates just-finished step
         steps_finishing = (air_dur < 0).to(air_dur.dtype)
         # Approximate peak height from completed step duration
-        step_dur = th.abs(air_dur)
-        approx_peak = th.clamp(0.5 * 9.81 * (step_dur * 0.5) ** 2, 0.0, 0.3)
-        error = approx_peak / self._PG_MAX_FOOT_HEIGHT - 1.0
+        peak_z = feet_state[:, self.FEET_FIELDS.PEAK_POS_Z]
+        error = peak_z / self._PG_MAX_FOOT_HEIGHT - 1.0
         cost = th.sum(error ** 2 * steps_finishing, dim=1)
         cmd_norm = locom[:, self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED]
         cost = cost * (cmd_norm >= 0.01).to(cost.dtype)
@@ -1893,127 +1921,139 @@ class LocomotionVecEnv(RobotVecEnv):
 
 
     def _update_stats(self):
+        record_region_start("LocomotionVecEnv._update_stats")
         super()._update_stats()
+        record_time("LocomotionVecEnv._update_stats: super done")
+        if not self._configuration.minimal_infos:
+            body_rel_linvel_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
+                                                                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
+                                                                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z)) #type:ignore
+            body_rel_gravity_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
+                                                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
+                                                                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z)) #type:ignore
+            goal_vel_rel_dir_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X,
+                                                                            self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y,
+                                                                            self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z)) #type:ignore
+            goal_grav_abs_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X,
+                                                                            self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Y,
+                                                                            self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z)) #type:ignore
+            body_rel_linvel_xyz = self._current_state[self.STATE_EXTRINSIC][:,0,body_rel_linvel_xyz_idx,0]
+            gravity_rel_vec_xyz = self._current_state[self.STATE_EXTRINSIC][:,0,body_rel_gravity_xyz_idx,0]
+            goal_rel_linvel_dir_vec_xyz = self._current_state[self.STATE_LOCOMOTION][:,0,goal_vel_rel_dir_xyz_idx,0].view(self.num_envs,3)
+            goal_speed = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED,0].view(self.num_envs,1)
+            goal_rel_linvel_vec_xyz = goal_rel_linvel_dir_vec_xyz*goal_speed
+            body_speed_vec = th.linalg.norm(body_rel_linvel_xyz[:,:2], dim=-1)
+            body_height_vec = self._current_state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,0]
+            goal_height_vec = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT,0]
+            smoothed_goal_height_vec = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT,0]
+            goal_gravity_vec = self._current_state[self.STATE_LOCOMOTION][:,0, goal_grav_abs_xyz_idx,0]
+            vel_error_vec = planar_tracking_error_vec(
+                                            body_rel_linvel_vec_xyz = body_rel_linvel_xyz,
+                                            gravity_rel_vec_xyz = gravity_rel_vec_xyz,
+                                            goal_rel_linvel_vec_xyz = goal_rel_linvel_vec_xyz)
+            dbg_check_size(vel_error_vec, (self._adapter.vec_size(),))
+            height_error_vec = th.abs(body_height_vec-smoothed_goal_height_vec)
+            pitchnroll_err_vec = th.linalg.norm(gravity_rel_vec_xyz-goal_gravity_vec, dim = -1)
+            step_counts = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT,0].to(th.long)
+            dbg_check_size(pitchnroll_err_vec, (self._adapter.vec_size(),))
+            dbg_check_size(step_counts, (self._adapter.vec_size(),))
+            
+            # Update episode averages
+            self._stats["ep_avg_vel_err_vec"]          = (self._stats["ep_avg_vel_err_vec"]*(step_counts-1) + vel_error_vec)/step_counts # Elements with step_count == 0 will be inf
+            self._stats["ep_avg_height_err_vec"]       = (self._stats["ep_avg_height_err_vec"]*(step_counts-1) + height_error_vec)/step_counts # Elements with step_count == 0 will be inf
+            self._stats["ep_avg_pitchnroll_err_vec"]   = (self._stats["ep_avg_pitchnroll_err_vec"]*(step_counts-1) + pitchnroll_err_vec)/step_counts # Elements with step_count == 0 will be inf
+            self._stats["ep_avg_bodyspeed_vec"]        = (self._stats["ep_avg_bodyspeed_vec"]*(step_counts-1) + body_speed_vec)/step_counts # Elements with step_count == 0 will be inf
+            # Correct the episode averages for episodes that have just started
+            starting_eps = step_counts==0
+            masked_assign(self._stats["ep_avg_vel_err_vec"],starting_eps,vel_error_vec)
+            masked_assign(self._stats["ep_avg_height_err_vec"],starting_eps,height_error_vec)
+            masked_assign(self._stats["ep_avg_pitchnroll_err_vec"],starting_eps,pitchnroll_err_vec)
+            masked_assign(self._stats["ep_avg_bodyspeed_vec"],starting_eps,body_speed_vec)
 
-        body_rel_linvel_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
-                                                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
-                                                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z)) #type:ignore
-        body_rel_gravity_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
-                                                                                                    self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
-                                                                                                    self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z)) #type:ignore
-        goal_vel_rel_dir_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X,
-                                                                        self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y,
-                                                                        self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z)) #type:ignore
-        goal_grav_abs_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X,
-                                                                         self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Y,
-                                                                         self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z)) #type:ignore
-        body_rel_linvel_xyz = self._current_state[self.STATE_EXTRINSIC][:,0,body_rel_linvel_xyz_idx,0]
-        gravity_rel_vec_xyz = self._current_state[self.STATE_EXTRINSIC][:,0,body_rel_gravity_xyz_idx,0]
-        goal_rel_linvel_dir_vec_xyz = self._current_state[self.STATE_LOCOMOTION][:,0,goal_vel_rel_dir_xyz_idx,0].view(self.num_envs,3)
-        goal_speed = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED,0].view(self.num_envs,1)
-        goal_rel_linvel_vec_xyz = goal_rel_linvel_dir_vec_xyz*goal_speed
-        body_speed_vec = th.linalg.norm(body_rel_linvel_xyz[:,:2], dim=-1)
-        body_height_vec = self._current_state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,0]
-        goal_height_vec = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT,0]
-        smoothed_goal_height_vec = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT,0]
-        goal_gravity_vec = self._current_state[self.STATE_LOCOMOTION][:,0, goal_grav_abs_xyz_idx,0]
-        vel_error_vec = planar_tracking_error_vec(
-                                        body_rel_linvel_vec_xyz = body_rel_linvel_xyz,
-                                        gravity_rel_vec_xyz = gravity_rel_vec_xyz,
-                                        goal_rel_linvel_vec_xyz = goal_rel_linvel_vec_xyz)
-        dbg_check_size(vel_error_vec, (self._adapter.vec_size(),))
-        height_error_vec = th.abs(body_height_vec-smoothed_goal_height_vec)
-        pitchnroll_err_vec = th.linalg.norm(gravity_rel_vec_xyz-goal_gravity_vec, dim = -1)
-        step_counts = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT,0].to(th.long)
-        dbg_check_size(pitchnroll_err_vec, (self._adapter.vec_size(),))
-        dbg_check_size(step_counts, (self._adapter.vec_size(),))
-        
-        # Update episode averages
-        self._stats["ep_avg_vel_err_vec"]          = (self._stats["ep_avg_vel_err_vec"]*(step_counts-1) + vel_error_vec)/step_counts # Elements with step_count == 0 will be inf
-        self._stats["ep_avg_height_err_vec"]       = (self._stats["ep_avg_height_err_vec"]*(step_counts-1) + height_error_vec)/step_counts # Elements with step_count == 0 will be inf
-        self._stats["ep_avg_pitchnroll_err_vec"]   = (self._stats["ep_avg_pitchnroll_err_vec"]*(step_counts-1) + pitchnroll_err_vec)/step_counts # Elements with step_count == 0 will be inf
-        self._stats["ep_avg_bodyspeed_vec"]        = (self._stats["ep_avg_bodyspeed_vec"]*(step_counts-1) + body_speed_vec)/step_counts # Elements with step_count == 0 will be inf
-        # Correct the episode averages for episodes that have just started
-        starting_eps = step_counts==0
-        masked_assign(self._stats["ep_avg_vel_err_vec"],starting_eps,vel_error_vec)
-        masked_assign(self._stats["ep_avg_height_err_vec"],starting_eps,height_error_vec)
-        masked_assign(self._stats["ep_avg_pitchnroll_err_vec"],starting_eps,pitchnroll_err_vec)
-        masked_assign(self._stats["ep_avg_bodyspeed_vec"],starting_eps,body_speed_vec)
+            # Fill the buffers for episodes that have just staretd
+            masked_assign(self._stats["vel_errs_vec"],        starting_eps, vel_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
+            masked_assign(self._stats["height_errs_vec"],     starting_eps, height_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
+            masked_assign(self._stats["pitchnroll_errs_vec"], starting_eps, pitchnroll_err_vec.unsqueeze(1).expand(-1, self._buff_sizes))
+            masked_assign(self._stats["body_speeds_vec"],     starting_eps, body_speed_vec.unsqueeze(1).expand(-1, self._buff_sizes))
+            # Update the buffers
+            # idxs = step_counts%self._buff_sizes
+            idx : th.Tensor = self._th_tot_step_counter.view(tuple())%self._stats["vel_errs_vec"].size()[1]
+            set_column(self._stats["vel_errs_vec"],     idx, vel_error_vec.view(self.num_envs,))
+            set_column(self._stats["height_errs_vec"],  idx, height_error_vec.view(self.num_envs,))
+            set_column(self._stats["pitchnroll_errs_vec"], idx, pitchnroll_err_vec.view(self.num_envs,))
+            set_column(self._stats["body_speeds_vec"],  idx, body_speed_vec.view(self.num_envs,))
 
-        # Fill the buffers for episodes that have just staretd
-        masked_assign(self._stats["vel_errs_vec"],        starting_eps, vel_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
-        masked_assign(self._stats["height_errs_vec"],     starting_eps, height_error_vec.unsqueeze(1).expand(-1, self._buff_sizes))
-        masked_assign(self._stats["pitchnroll_errs_vec"], starting_eps, pitchnroll_err_vec.unsqueeze(1).expand(-1, self._buff_sizes))
-        masked_assign(self._stats["body_speeds_vec"],     starting_eps, body_speed_vec.unsqueeze(1).expand(-1, self._buff_sizes))
-        # Update the buffers
-        # idxs = step_counts%self._buff_sizes
-        idx : th.Tensor = self._th_tot_step_counter.view(tuple())%self._stats["vel_errs_vec"].size()[1]
-        set_column(self._stats["vel_errs_vec"],     idx, vel_error_vec.view(self.num_envs,))
-        set_column(self._stats["height_errs_vec"],  idx, height_error_vec.view(self.num_envs,))
-        set_column(self._stats["pitchnroll_errs_vec"], idx, pitchnroll_err_vec.view(self.num_envs,))
-        set_column(self._stats["body_speeds_vec"],  idx, body_speed_vec.view(self.num_envs,))
-
-        state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = self._current_state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
-        masked_assign(self._stats["ep_max_javg_sensed_effort"], starting_eps, 0)
-        masked_assign(self._stats["ep_max_peak_sensed_effort"], starting_eps, 0)
-        self._stats["ep_max_javg_sensed_effort"] = th.maximum(self._stats["ep_max_javg_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1)).view((self.num_envs,)) 
-        self._stats["ep_max_peak_sensed_effort"] = th.maximum(self._stats["ep_max_peak_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=[1,2])).view((self.num_envs,))
-
+            state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = self._current_state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
+            masked_assign(self._stats["ep_max_javg_sensed_effort"], starting_eps, 0)
+            masked_assign(self._stats["ep_max_peak_sensed_effort"], starting_eps, 0)
+            self._stats["ep_max_javg_sensed_effort"] = th.maximum(self._stats["ep_max_javg_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1)).view((self.num_envs,)) 
+            self._stats["ep_max_peak_sensed_effort"] = th.maximum(self._stats["ep_max_peak_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=[1,2])).view((self.num_envs,))
+        record_region_end("LocomotionVecEnv._update_stats")
    
     @override
     def get_infos(self,state, labels : dict[str, th.Tensor] | None = None) -> dict[Any,Any]:
-        if self._configuration.minimal_infos:
-            return super().get_infos(state=state, labels=labels)
-        i = super().get_infos(state=state, labels=labels)
+        record_region_start("LocomotionVecEnv.get_infos")
+        
+        goal_vel_abs_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X,
+                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Y,
+                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z)) #type:ignore 
+        body_linvel_abs_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X,
+                                                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y,
+                                                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z)) #type: ignore
         curr_locom_state = state[self.STATE_LOCOMOTION][:,0]
-        curr_rewar_state = state[self.STATE_REWARDS][:,0]
+        smooth_track_err_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,)) #type: ignore
+        smoothed_linvel_error = curr_locom_state[:,smooth_track_err_idx].view(self.num_envs)
         curr_extri_state = state[self.STATE_EXTRINSIC][:,0]
+        goal_abs = curr_locom_state[:,goal_vel_abs_xyz_idx]
+        abs_linvel = curr_extri_state[:,body_linvel_abs_xyz_idx]
+        i = super().get_infos(state=state, labels=labels)
+        i["smoothed_linvel_error"] = smoothed_linvel_error
+        i["goal_abs_xyz_vec"] = goal_abs
+        i["body_abs_linvel"] = abs_linvel
+
+        if self._configuration.minimal_infos:
+            record_region_end("LocomotionVecEnv.get_infos")
+            return i
+        curr_rewar_state = state[self.STATE_REWARDS][:,0]
         prev_extri_state = state[self.STATE_EXTRINSIC][:,1]
         curr_inter_state = state[self.STATE_INTERNAL][:,0]
         
         goal_vel_rel_dir_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X,
                                                                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y,
                                                                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z)) #type:ignore
-        goal_vel_abs_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_X,
-                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Y,
-                                                                        self.LOCOMOTION_FIELDS.GOAL_VELOCITY_ABS_Z)) #type:ignore 
-        smooth_track_err_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,)) #type: ignore
-        body_linvel_abs_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X,
-                                                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y,
-                                                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z)) #type: ignore
         body_linvel_rel_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z)) #type: ignore
         
         goal_dir = curr_locom_state[:,goal_vel_rel_dir_xyz_idx].view(self.num_envs,3)
         goal_speed = curr_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED].view(self.num_envs,1)
-        i["goal_rel_xyz_vec"] = goal_dir*goal_speed
-        i["goal_height"] = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
-        i["height"] = curr_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]
-        i["height_err"] = th.abs(i["goal_height"] - i["height"])
-        goal_abs = curr_locom_state[:,goal_vel_abs_xyz_idx]
-        i["goal_abs_speed_vec"] = th.linalg.norm(goal_abs,dim=1)
-        i["goal_abs_yaw_vec"] = th.atan2(goal_abs[:,1],goal_abs[:,0])
-        i["goal_abs_xyz_vec"] = goal_abs
-        i["smoothed_linvel_error"] = curr_locom_state[:,smooth_track_err_idx].view(self.num_envs)
-        i["body_abs_linvel"] = curr_extri_state[:,body_linvel_abs_xyz_idx]
-        i["body_rel_linvel"] = curr_extri_state[:,body_linvel_rel_xyz_idx]
-        i["linvel_error"] = i["goal_abs_xyz_vec"] - i["body_abs_linvel"]
-        i["ep_avg_vel_err_vec"] = self._stats["ep_avg_vel_err_vec"]
-        i["ep_avg_height_err_vec"] = self._stats["ep_avg_height_err_vec"]
-        i["ep_avg_pitchnroll_err_vec"] = self._stats["ep_avg_pitchnroll_err_vec"]
-        i["ep_avg_bodyspeed_vec"] = self._stats["ep_avg_bodyspeed_vec"]
-        i["avg10_vel_errs_vec"] = th.mean(self._stats["vel_errs_vec"], dim = 1).view(self.num_envs)
-        i["avg10_height_errs_vec"] = th.mean(self._stats["height_errs_vec"], dim = 1).view(self.num_envs)
-        i["avg10_pitchnroll_errs_vec"] = th.mean(self._stats["pitchnroll_errs_vec"], dim = 1).view(self.num_envs)
-        i["avg10_body_speeds_vec"] = th.mean(self._stats["body_speeds_vec"], dim = 1).view(self.num_envs)
-        i["success_vec"] = i["avg10_vel_errs_vec"] < 0.05
         state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
-        i["joint_pos_safenorm"] = state_robot_safenorm[:,0,:,0]
         state_stats_v_h_j_minmaxavgstd_pvaee : th.Tensor = state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 5)
-        i["avg_sensed_effort"] = state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1)
-        i["avg_peak_sensed_effort"] = state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=2).amax(dim=1)
-        
+        avg10_vel_errs_vec = th.mean(self._stats["vel_errs_vec"], dim = 1).view(self.num_envs)
+        goal_height = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
+        height = curr_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]
+        loco_info = {
+            "goal_rel_xyz_vec" : goal_dir*goal_speed,
+            "goal_height" : goal_height,
+            "height" : height,
+            "height_err" : th.abs(goal_height - height),
+            "goal_abs_speed_vec" : th.linalg.norm(goal_abs,dim=1),
+            "goal_abs_yaw_vec" : th.atan2(goal_abs[:,1],goal_abs[:,0]),
+            "body_rel_linvel" : curr_extri_state[:,body_linvel_rel_xyz_idx],
+            "linvel_error" : goal_abs - abs_linvel,
+            "ep_avg_vel_err_vec" : self._stats["ep_avg_vel_err_vec"],
+            "ep_avg_height_err_vec" : self._stats["ep_avg_height_err_vec"],
+            "ep_avg_pitchnroll_err_vec" : self._stats["ep_avg_pitchnroll_err_vec"],
+            "ep_avg_bodyspeed_vec" : self._stats["ep_avg_bodyspeed_vec"],
+            "avg10_vel_errs_vec" : avg10_vel_errs_vec,
+            "avg10_height_errs_vec" : th.mean(self._stats["height_errs_vec"], dim = 1).view(self.num_envs),
+            "avg10_pitchnroll_errs_vec" : th.mean(self._stats["pitchnroll_errs_vec"], dim = 1).view(self.num_envs),
+            "avg10_body_speeds_vec" : th.mean(self._stats["body_speeds_vec"], dim = 1).view(self.num_envs),
+            "success_vec" : avg10_vel_errs_vec < 0.05,
+            "joint_pos_safenorm" : state_robot_safenorm[:,0,:,0],
+            "avg_sensed_effort" : state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,2,4].mean(dim=1),
+            "avg_peak_sensed_effort" : state_stats_v_h_j_minmaxavgstd_pvaee[:,0,:,0:2,4].abs().amax(dim=2).amax(dim=1)
+        }
         rew_weights_needed = (   "actdiff", "actacc", "posref_vel", "posref_acc")
         enabled_needed_weights  = tuple([w for w in rew_weights_needed if w in self._loco_conf.enabled_rewards])
         disabled_needed_weights = tuple([w for w in rew_weights_needed if w not in self._loco_conf.enabled_rewards])
@@ -2031,6 +2071,7 @@ class LocomotionVecEnv(RobotVecEnv):
         _, i["heading_vel"], i["goal_heading_vel"], i["heading_vel_err"], i["heading_err"] = self._heading_velocity_reward(state=state, dt=last_dt)
         _, i["pitchnroll_velocity"], i["goal_pitchnroll_velocity"], i["pitchnroll_vel_err"], i["pitchnroll_err"] = self._pitchnroll_velocity_reward(state=state,
                                                                                                                                                     dt=last_dt)
+        i.update(loco_info)
 
         if labels is not None: # Generate at least some labels
             for k in i:
@@ -2051,7 +2092,7 @@ class LocomotionVecEnv(RobotVecEnv):
                     labels["state_"+substate] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                     labels["statenorm_"+substate] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
 
-
+        record_region_end("LocomotionVecEnv.get_infos")
         return i
     
     def _sample_abs_goals(self):

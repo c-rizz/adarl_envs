@@ -641,7 +641,7 @@ state.info['command'] = the_command
 rollout = [state.pipeline_state]
 
 # grab a trajectory
-n_steps = 500
+n_steps = 1000
 render_every = 2
 
 from tqdm import tqdm

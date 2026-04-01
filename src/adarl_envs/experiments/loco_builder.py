@@ -34,8 +34,10 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
     if 'state_extrinsic' in info:
         body_abs_linvel : th.Tensor = info['state_extrinsic'][[LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z]]
         body_abs_linvel_str = format_tensor(body_abs_linvel, 3)
+        body_abs_linvel_norm_str = f"{th.linalg.norm(body_abs_linvel):.3f}"
     else:
         body_abs_linvel_str = 'N/A'
+        body_abs_linvel_norm_str = 'N/A'
     if 'state_internal' in info:
         posref_safety_triggered = info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED] if 'state_internal' in info else 'N/A'
         limits_safety_triggered = info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED] if 'state_internal' in info else 'N/A'
@@ -46,7 +48,7 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
     vel_norm = f"{th.linalg.norm(goal_abs_linvel_xyz):.3f}" if goal_abs_linvel_xyz is not None else "N/A"
     return  (   f"\n"
                 f"Step    {info['ep_step_count']: .3f}\n"+
-                f"body_abs_linvel       {body_abs_linvel_str} ({th.linalg.norm(body_abs_linvel):.3f} m/s)\n"
+                f"body_abs_linvel       {body_abs_linvel_str} ({body_abs_linvel_norm_str} m/s)\n"
                 f"goal_vel_abs          {format_tensor(goal_abs_linvel_xyz, 3)} ({vel_norm} m/s)\n"
                 f"goal_vel_rel          {format_tensor(info.get('goal_rel_xyz_vec',None), 3)}\n"
                 f"smoothed_linvel_error {format_tensor(info.get('smoothed_linvel_error',None), 3)}\n"
@@ -205,7 +207,8 @@ def loco_runner_builder(seed,
                                                         "kyon":"faster",
                                                         "quad":"fastest"}.get(robot_model, "faster"),
                                             opt_override=opt_override,
-                                            reference_filter_cutoff_frequency=20.0)
+                                            reference_filter_cutoff_frequency=20.0,
+                                            reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none")
     elif mode == "mujoco":
         from adarl.adapters.MujocoJointImpedanceAdapter import MujocoJointImpedanceAdapter
         from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
@@ -520,8 +523,8 @@ def get_kyon_args(enable_arms : bool = False):
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
                                                     [ 0.9, 0.9, 0.9]] for k,v in homing.items()},
-            "control_limits_ratios_minmax_pve" : {k:[[ 0.25, 0.9, 0.9],
-                                                     [ 0.25, 0.9, 0.9]] for k,v in homing.items()},
+            "control_limits_ratios_minmax_pve" : {k:[[ 0.125, 0.9, 0.9],
+                                                     [ 0.125, 0.9, 0.9]] for k,v in homing.items()},
             "control_limits_position_offset" : homing,
             "enable_link_collisions" : [    (('kyon', 'contact_1'),[('ground','ground_link')]),
                                             (('kyon', 'contact_2'),[('ground','ground_link')]),

@@ -30,8 +30,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
     
     eval_freq = 40
-    r = 0.5 # randomization strength
-    n = 0.0 # noise strength
+    r = 0.0 # randomization strength
+    n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
@@ -42,6 +42,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
         "enable_rendering" : False,
+        "enable_reference_filter" : False,
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.0,
@@ -56,7 +57,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 1.0,
         "initial_height_randomization_range_meters" : 0.0,
-        "initial_joint_pose_randomization_range" : 0.5,
+        "initial_joint_pose_randomization_range" : 0.1,
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 0.05, # Averaging of the joint pose for the position reward
@@ -64,12 +65,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_goal_height_speed" : 0.1,
         "max_good_step_duration" : 0.3,
         "max_steps_per_episode" : max_steps_per_episode,
-        "merge_privileged" : True,
+        "merge_privileged" : False,
         "min_good_step_duration" : 0.1,
         "mode" : mode,
         "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.05*n],
-        "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.01*n, 0.02*n],
-        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.02*n],
+        "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.001*n, 0.05*n],
+        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.05*n],
         "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
@@ -121,8 +122,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_weight" :            eps,
         "reward_velref_weight" :              eps,
         "robot_model" : "kyon",
-        "safe_damping" : 5,
-        "safe_stiffness" : 400,
+        "safe_damping" : 10,
+        "safe_stiffness" : 500,
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : False,
         "stepLength_sec" : step_length_sec,
@@ -135,7 +136,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "verbose_infos" : False,
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
-        "minimal_infos" : False
+        "minimal_infos" : True
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({        
@@ -144,6 +145,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : 1,
         "init_on_reset_ratio" : 1.0,
         "offset_envs_ep_starts" : False,
+        "minimal_infos" : False,
         # "initial_joint_pose_randomization_range" : 0.02,
         # "mass_randomization_ratio" : 0.0,
         # "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
@@ -406,8 +408,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     gae_lambda=0.95,
                                                     max_grad_norm=1.0,
                                                     init_actor_logstd=-1.0,
-                                                    # actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
-                                                    # critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
+                                                    actor_observation_filter=["base.vec", "base.reward_weights"],
+                                                    critic_observation_filter=["privileged.vec", "base.reward_weights"],
                                                     ),
                 max_episode_duration=max_steps_per_episode,
                 validation_batch_size=0,

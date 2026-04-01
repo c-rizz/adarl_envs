@@ -9,7 +9,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=1000 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
@@ -33,8 +33,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "env_name" : "SpotFlatTerrainJoystick",
         "quiet" : False,
         "th_device" : env_device,
-        "log_info_stats": False,
+        "log_info_stats": True,
         "randomize_step_timeout_counters": True,
+        "camera" : "track",
+        "episode_length" : max_steps_per_episode,
         "playground_config_overrides": {"reward_config.scales.feet_clearance":0.0,
                                         "reward_config.scales.feet_height":0.0
                                         }

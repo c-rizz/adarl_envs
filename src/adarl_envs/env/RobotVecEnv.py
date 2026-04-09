@@ -319,7 +319,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         longterm_stats_alpha : th.Tensor
         main_body_link : tuple[str,str]
         merge_privileged : bool
-        model_urdf_string : str
+        robot_description_string : str
+        robot_description_format : Literal["urdf", "sdf", "mjcf"]
         noise_angvel_ep_mustdstd : th.Tensor
         noise_gravity_ep_mustdstd : th.Tensor
         noise_joints_pve_mustdstd : th.Tensor
@@ -393,6 +394,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     STATE_EXTRINSIC = "extrinsic"
     STATE_INTERNAL = "internal"
     STATE_RANDOMIZATIONS = "randomizations"
+    STATE_POS_REF_ERR = "pos_ref_err"
     
     
     INTERNAL_FIELDS = IntEnum("INTERNAL_FIELDS", [  "SAFETY_LIMITS_TRIGGERED",
@@ -422,6 +424,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     JOINT_LONGTERM_STATS_FIELDS = IntEnum("LONGTERM_STATS_FIELDS", ["AVG_POS"])
 
     RANDOMIZATIONS_FIELDS = IntEnum("RANDOMIZATIONS_FIELDS", [  "FULL_RANDOMIZATION_STATE"]) # Right now put everything together as there are randomizations of different dimensionality
+
+    POS_REF_ERR_FIELDS = IntEnum("POS_REF_ERRS", ["POS_ERR"], start=0)
 
     joint_filters = {JOINT_FILTERS.ALL : lambda joint_name, robot_model: True,
                      JOINT_FILTERS.ALL_REVOLUTE : _is_joint_revolute}
@@ -491,7 +495,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         robot_main_body_link : str,
                         robot_name : str,
                         robot_root_link : str,
-                        robot_urdf_string : str,
+                        robot_description_string : str,
+                        robot_description_format : Literal["urdf", "sdf", "mjcf"],
                         safe_damping : float,
                         control_limits_center : dict[tuple[str,str], float],
                         safe_stiffness : float,
@@ -540,7 +545,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._rng.manual_seed(seed)
         self._th_device = th_device
         self._obs_dtype = th.float32
-        self._robot_model = Robot(model_urdf_string=robot_urdf_string)
+        self._robot_model = Robot(robot_description_string=robot_description_string,
+                                    robot_description_format=robot_description_format)
+        ggLog.info(f"Robot has links: {self._robot_model.get_frame_names()}")
+        ggLog.info(f"Robot has joints: {self._robot_model.get_joint_names()}")
         root_joint_name = self._robot_model.get_parent_joint(robot_root_link)
         is_floating = self._robot_model.get_joint_properties([root_joint_name])[root_joint_name]["type"] == Robot.JOINT_TYPES.FLOATING
         ggLog.info(f"Robot root joint {root_joint_name} is floating: {is_floating}")
@@ -621,7 +629,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     longterm_stats_alpha = self._thtens(0.1**(stepLength_sec/longterm_states_decimation_time)), # alpha so that the contribution of a sample longterm_states_decimation_time seconds ago is 0.1
                                                     main_body_link=(robot_name,robot_main_body_link),
                                                     merge_privileged = merge_privileged,
-                                                    model_urdf_string=robot_urdf_string,
+                                                    robot_description_string=robot_description_string,
+                                                    robot_description_format=robot_description_format,
                                                     noise_angvel_ep_mustdstd =  self._thtens(obs_noise_angvel_ep_mustd_step_std),
                                                     noise_gravity_ep_mustdstd = self._thtens(obs_noise_gravity_ep_mustd_step_std),
                                                     noise_joints_pve_mustdstd = self._thtens(obs_noise_joints_pve_ep_mustd_step_std),
@@ -860,12 +869,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             control_limits_dict_ratios_minmax_pve = {k:control_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
         safe_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) for k,v in safety_limits_dict_ratios_minmax_pve.items()}
         control_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) for k,v in control_limits_dict_ratios_minmax_pve.items()}
-        def scale_limit(jn, minmax_pve : th.Tensor, minmax_scaling : th.Tensor, center_position_offset : float | None = None):
+        def scale_limit(jn, minmax_pve : th.Tensor, minmax_scaling : th.Tensor):
             ranges_pve = minmax_pve[1] - minmax_pve[0]
             center_pve = (minmax_pve[1] + minmax_pve[0])/2
-            if center_position_offset is not None:
-                center_pve[0] = center_position_offset
-            # center = self._thtens([center_position, 0, 0])
             scaled_ranges = ranges_pve.expand(2,3)*minmax_scaling
             lims = th.stack([center_pve - scaled_ranges[0]/2, center_pve + scaled_ranges[1]/2], dim=0)
             return lims
@@ -874,7 +880,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     safe_limits_ratios_minmax_pve_th[jn])
                                     for jn,lim_minmax_pve in phys_limits_minmax_pve.items()}
         for jn in safe_limits_minmax_pve.keys():
-            if th.any(safe_limits_minmax_pve[jn][0] < phys_limits_minmax_pve[jn][0]) or th.any(phys_limits_minmax_pve[jn][1] > safe_limits_minmax_pve[jn][1]):
+            if th.any(safe_limits_minmax_pve[jn][0] < phys_limits_minmax_pve[jn][0]) or th.any(phys_limits_minmax_pve[jn][1] < safe_limits_minmax_pve[jn][1]):
                 ggLog.warn( f"Safe limits exceeds physical limits for joint {jn},\n"
                             f" safe=\n{safe_limits_minmax_pve[jn]}\n"
                             f" physical=\n{phys_limits_minmax_pve[jn]}\n"
@@ -885,14 +891,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
         control_limits_minmax_pve = {jn: scale_limit(  jn,
-                                                    lim_minmax_pve,
-                                                    control_limits_ratios_minmax_pve_th[jn], 
-                                                    control_limits_center[jn])
-                                    for jn,lim_minmax_pve in phys_limits_minmax_pve.items()}
+                                                    phys_limits_minmax_pve[jn],
+                                                    control_limits_ratios_minmax_pve_th[jn])
+                                    for jn in phys_limits_minmax_pve.keys()}
         for jn in safe_limits_minmax_pve.keys():
             if jn not in control_limits_minmax_pve:
                 control_limits_minmax_pve[jn] = safe_limits_minmax_pve[jn]
-            if th.any(control_limits_minmax_pve[jn][0] < safe_limits_minmax_pve[jn][0]) or th.any(control_limits_minmax_pve[jn][1] > safe_limits_minmax_pve[jn][1]):
+            if th.any(control_limits_minmax_pve[jn][0] < safe_limits_minmax_pve[jn][0]) or th.any(safe_limits_minmax_pve[jn][1] < control_limits_minmax_pve[jn][1]):
                 ggLog.warn( f"Control limits exceeds safe limits for joint {jn},\n"
                             f" ctrl=\n{control_limits_minmax_pve[jn]}\n"
                             f" safe=\n{safe_limits_minmax_pve[jn]}\n"
@@ -985,7 +990,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if self._configuration.observe_full_robot_state:
             observable_robot_state = ["pos","vel","cmdeff","refpos","refvel","refeff","stiff","damp"] 
         else:
-            observable_robot_state = ["pos","refpos"]
+            observable_robot_state = ["pos"]
 
         robot_state_helper = RobotStateHelper(joint_limit_minmax_pveae={jn:self._configuration.joint_physical_limits_minmax_pve[jn] for jn in self._configuration.joints_agent_controlled},
                                               stiffness_minmax={jn:self._configuration.joint_safe_limits_minmax_stiffness[jn] for jn in self._configuration.joints_agent_controlled},
@@ -994,111 +999,131 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                               th_device=self._configuration.th_device,
                                               history_length=self._configuration.history_length,
                                               vec_size=adapter.vec_size(),
-                                              observation_definitions={ "base":ThBoxStateHelper.SimpleObsDef(
-                                                                                    observable_fields=None,
-                                                                                    obs_history_length = self._configuration.frame_stack_length,
-                                                                                    observable_subfields=observable_robot_state),
-                                                                        "privileged":ThBoxStateHelper.SimpleObsDef(
-                                                                                    observable_fields=None,
-                                                                                    obs_history_length = self._configuration.frame_stack_length,
-                                                                                    observable_subfields=observable_robot_state)})
+                                              observation_definitions={ 
+                                                            "base":ThBoxStateHelper.SimpleObsDef(
+                                                                        observable_fields=None,
+                                                                        obs_history_length = 1,
+                                                                        observable_subfields=observable_robot_state),
+                                                            "privileged":ThBoxStateHelper.SimpleObsDef(
+                                                                        observable_fields=None,
+                                                                        obs_history_length = self._configuration.frame_stack_length,
+                                                                        observable_subfields=observable_robot_state)})
         robot_state_noise =  StateNoiseGenerator(robot_state_helper,
                                                 self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
                                                 episode_mu_std = self._configuration.noise_joints_pve_mustdstd[:2],
                                                 step_std = self._configuration.noise_joints_pve_mustdstd[2])
         
+        joints_range = robot_state_helper.get_limits()[1,:,0] - robot_state_helper.get_limits()[0,:,0]
+        max_error = th.stack([-joints_range*2, joints_range*2], dim=0) 
+        joint_pos_ref_error_state_helper = ThBoxStateHelper(
+                                                        field_names=[e for e in self.POS_REF_ERR_FIELDS],
+                                                        field_size=(self._action_helper.single_action_len(),),
+                                                        fields_minmax = {self.POS_REF_ERR_FIELDS.POS_ERR : max_error},
+                                                        history_length=5,
+                                                        flatten_observation=True,
+                                                        observation_definitions={
+                                                            "privileged" : ThBoxStateHelper.SimpleObsDef.fully_observable(3),
+                                                            "base" : ThBoxStateHelper.SimpleObsDef.fully_observable(3)
+                                                        },
+                                                        **vsize_dev_type # type: ignore
+                                                        )
+        joint_pos_error_noise = StateNoiseGenerator(joint_pos_ref_error_state_helper,
+                                            self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
+                                            episode_mu_std = self._configuration.noise_joints_pve_mustdstd[:2],
+                                            step_std = self._configuration.noise_joints_pve_mustdstd[2])
+
 
         privileged_extrinsic_observable_fields = [
-                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
-                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z,
-                                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
-                                        ]
+                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                    self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
+                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
+                                    self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z,
+                                    self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
+                                    ]
         
         if not self._configuration.merge_privileged:
             base_extrinsic_observable_fields = [
-                                            self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
-                                            self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
-                                            ]
+                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                    self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
+                                    ]
         else:
             base_extrinsic_observable_fields = privileged_extrinsic_observable_fields
-        extrinsic_state_helper =  ThBoxStateHelper(field_names=[e for e in self.EXTRINSIC_FIELDS],
-                                                    field_size=(1,),
-                                                    fields_minmax={ self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : [-5,5],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : [-5,5],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : [-5,5],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : [-20,20],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : [-20,20],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : [-20,20],
-                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : [-5,5],
-                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : [-5,5],
-                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : [-5,5],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : [-1000,1000],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : [-1000,1000],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : [-1000,1000],
-                                                                    self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z : [-1,1],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : [-1,1],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
-                                                                    self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
-                                                    history_length=self._configuration.history_length,
-                                                    observation_definitions={  
-                                                                            "base":ThBoxStateHelper.SimpleObsDef(
-                                                                                observable_fields=base_extrinsic_observable_fields,
-                                                                                obs_history_length = self._configuration.frame_stack_length,
-                                                                                observable_subfields=None),
-                                                                            "privileged":ThBoxStateHelper.SimpleObsDef(
-                                                                                observable_fields=privileged_extrinsic_observable_fields,
-                                                                                obs_history_length = self._configuration.frame_stack_length,
-                                                                                observable_subfields=None)},
-                                                    **vsize_dev_type # type: ignore
-                                                    )
-        extrinsic_state_noise =  StateNoiseGenerator(extrinsic_state_helper,
+        extrinsic_state_helper =  ThBoxStateHelper(
+                                                field_names=[e for e in self.EXTRINSIC_FIELDS],
+                                                field_size=(1,),
+                                                fields_minmax={ self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : [-5,5],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : [-5,5],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : [-5,5],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : [-20,20],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : [-20,20],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : [-20,20],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : [-5,5],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : [-5,5],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : [-5,5],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : [-1000,1000],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : [-1000,1000],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : [-1000,1000],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z : [-1,1],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : [-1,1],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
+                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
+                                                history_length=self._configuration.history_length,
+                                                observation_definitions={  
+                                                                "base":ThBoxStateHelper.SimpleObsDef(
+                                                                    observable_fields=base_extrinsic_observable_fields,
+                                                                    obs_history_length = 1,
+                                                                    observable_subfields=None),
+                                                                "privileged":ThBoxStateHelper.SimpleObsDef(
+                                                                    observable_fields=privileged_extrinsic_observable_fields,
+                                                                    obs_history_length = self._configuration.frame_stack_length,
+                                                                    observable_subfields=None)},
+                                                **vsize_dev_type # type: ignore
+                                                )
+        extrinsic_state_noise =  StateNoiseGenerator(
+                                            extrinsic_state_helper,
                                             self._rng, dtype=self._configuration.obs_dtype, device=self._configuration.th_device,
-                                            episode_mu_std = {  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : self._configuration.noise_angvel_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : self._configuration.noise_angvel_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : self._configuration.noise_angvel_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : self._configuration.noise_linacc_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : self._configuration.noise_linacc_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : self._configuration.noise_linacc_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : self._configuration.noise_posz_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : self._configuration.noise_gravity_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : self._configuration.noise_gravity_ep_mustdstd[:2],
-                                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : self._configuration.noise_gravity_ep_mustdstd[:2]},
-                                            step_std = {self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : self._configuration.noise_angvel_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : self._configuration.noise_angvel_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : self._configuration.noise_angvel_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : self._configuration.noise_linacc_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : self._configuration.noise_linacc_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : self._configuration.noise_linacc_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : self._configuration.noise_posz_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : self._configuration.noise_gravity_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : self._configuration.noise_gravity_ep_mustdstd[2],
-                                                        self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : self._configuration.noise_gravity_ep_mustdstd[2]})
+                                            episode_mu_std = {
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : self._configuration.noise_angvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : self._configuration.noise_angvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : self._configuration.noise_angvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : self._configuration.noise_linacc_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : self._configuration.noise_linacc_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : self._configuration.noise_linacc_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : self._configuration.noise_posz_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : self._configuration.noise_gravity_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : self._configuration.noise_gravity_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : self._configuration.noise_gravity_ep_mustdstd[:2]},
+                                            step_std = {
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : self._configuration.noise_angvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : self._configuration.noise_angvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : self._configuration.noise_angvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : self._configuration.noise_linacc_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : self._configuration.noise_linacc_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : self._configuration.noise_linacc_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : self._configuration.noise_posz_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : self._configuration.noise_gravity_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : self._configuration.noise_gravity_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : self._configuration.noise_gravity_ep_mustdstd[2]})
         joint_step_stats_state_helper = RobotStatsStateHelper(  joint_limit_minmax_pve={jn:self._configuration.joint_physical_limits_minmax_pve[jn] for jn in self._configuration.joints_agent_controlled},
                                                                 **vsize_dev_type,
-                                                                include_senseff=True,
+                                                                include_senseff_and_power=True,
                                                                 flatten_observation=True,
                                                                 observation_definitions={
-                                                                    "privileged": ThBoxStateHelper.SimpleObsDef(observable_fields=None,
-                                                                                                                observable_subfields=["minseff","maxseff"],
-                                                                                                                obs_history_length=1),
-                                                                    "base":       ThBoxStateHelper.SimpleObsDef(observable_fields=None if self._configuration.merge_privileged else [],
-                                                                                                                observable_subfields=["minseff","maxseff"],
-                                                                                                                obs_history_length=1),
-                                                                                                                })
+                                                                    "privileged": ThBoxStateHelper.SimpleObsDef.not_observable(),
+                                                                    "base":       ThBoxStateHelper.SimpleObsDef.not_observable(),
+                                                                                        })
         joint_longterm_stats_helper = ThBoxStateHelper( field_names=[e for e in self.JOINT_LONGTERM_STATS_FIELDS],
                                                         field_size=(len(self._configuration.joints_agent_controlled),),
                                                         fields_minmax={self.JOINT_LONGTERM_STATS_FIELDS.AVG_POS : 
@@ -1126,7 +1151,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
         acthistory_obsdef = ThBoxStateHelper.SimpleObsDef(  observable_fields=None,
                                                             observable_subfields=None,
-                                                            obs_history_length=5)
+                                                            obs_history_length=1)
         act_history_state_helper = ThBoxStateHelper(field_names=[a for a in self.ACT_FIELDS],
                                                     field_size=(self._action_helper.single_action_len(),),
                                                     fields_minmax = {self.ACT_FIELDS.ACTION : [-1.0,1.0]},
@@ -1174,70 +1199,78 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         #                                 len(self._current_episode_config.joint_reference_filter_freqs))
         # randomizations_
         
-
-        all_observable_substates = [
-                                self.STATE_ROBOT,
-                                self.STATE_INTERNAL,
-                                self.STATE_EXTRINSIC,
-                                self.STATE_ACT_RAW_HIST,
-                                # self.STATE_LAST_ACT_RAW,
-                                # self.STATE_ACT_PREPROC,
-                                # self.STATE_JOINT_LONGTERM_STATS,
-                                # self.STATE_JOINT_STEP_STATS
-                                ]
         if not self._configuration.merge_privileged:
             obs_definitions={"base" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=[
-                                                                                self.STATE_ROBOT,
-                                                                                self.STATE_INTERNAL,
-                                                                                self.STATE_EXTRINSIC,
-                                                                                self.STATE_ACT_RAW_HIST], # this will only take the "base" obs inside these
+                                                                    self.STATE_ROBOT,
+                                                                    self.STATE_INTERNAL,
+                                                                    self.STATE_EXTRINSIC,
+                                                                    self.STATE_ACT_RAW_HIST,
+                                                                    self.STATE_POS_REF_ERR,
+                                                                    self.STATE_ACT_PREPROC
+                                                                    ], # this will only take the "base" obs inside these
                                                                 concatenable_substates=[
-                                                                                self.STATE_ROBOT,
-                                                                                self.STATE_INTERNAL,
-                                                                                self.STATE_EXTRINSIC,
-                                                                                self.STATE_ACT_RAW_HIST,
-                                                                                # self.STATE_LAST_ACT_RAW,
-                                                                                # self.STATE_ACT_PREPROC,
-                                                                                # self.STATE_JOINT_LONGTERM_STATS,
-                                                                                # self.STATE_JOINT_STEP_STATS
-                                                                                ],
+                                                                    self.STATE_ROBOT,
+                                                                    self.STATE_INTERNAL,
+                                                                    self.STATE_EXTRINSIC,
+                                                                    self.STATE_ACT_RAW_HIST,
+                                                                    self.STATE_POS_REF_ERR,
+                                                                    self.STATE_ACT_PREPROC,
+                                                                    # self.STATE_LAST_ACT_RAW,
+                                                                    # self.STATE_JOINT_LONGTERM_STATS,
+                                                                    # self.STATE_JOINT_STEP_STATS
+                                                                    ],
                                                                 concatenated_part_name="vec",
-                                                                noise_generators={self.STATE_ROBOT      : robot_state_noise,
-                                                                                  self.STATE_EXTRINSIC  : extrinsic_state_noise}),
+                                                                noise_generators={
+                                                                    self.STATE_ROBOT       : robot_state_noise,
+                                                                    self.STATE_EXTRINSIC   : extrinsic_state_noise,
+                                                                    self.STATE_POS_REF_ERR : joint_pos_error_noise}),
                             "privileged" : 
-                            DictStateHelper.SimpleDictObsDef(  observable_substates=[self.STATE_ROBOT,
-                                                                                     self.STATE_INTERNAL,
-                                                                                     self.STATE_EXTRINSIC,
-                                                                                     self.STATE_ACT_RAW_HIST,
-                                                                                    #  self.STATE_JOINT_STEP_STATS,
-                                                                                     ],
-                                                                concatenable_substates=[self.STATE_ROBOT,
-                                                                                        self.STATE_EXTRINSIC,
-                                                                                        self.STATE_INTERNAL,
-                                                                                        self.STATE_ACT_RAW_HIST,
-                                                                                        # self.STATE_JOINT_STEP_STATS,
-                                                                                        ],
+                            DictStateHelper.SimpleDictObsDef(  observable_substates=[
+                                                                    self.STATE_ROBOT,
+                                                                    self.STATE_INTERNAL,
+                                                                    self.STATE_EXTRINSIC,
+                                                                    self.STATE_ACT_RAW_HIST,
+                                                                    self.STATE_ACT_PREPROC
+                                                                    #  self.STATE_JOINT_STEP_STATS,
+                                                                    ],
+                                                                concatenable_substates=[
+                                                                    self.STATE_ROBOT,
+                                                                    self.STATE_EXTRINSIC,
+                                                                    self.STATE_INTERNAL,
+                                                                    self.STATE_ACT_RAW_HIST,
+                                                                    self.STATE_ACT_PREPROC
+                                                                    # self.STATE_JOINT_STEP_STATS,
+                                                                    ],
                                                                 concatenated_part_name="vec",
                                                                 noise_generators={})}
         else:
             obs_definitions={"base" : 
-                            DictStateHelper.SimpleDictObsDef(  observable_substates=all_observable_substates,
+                            DictStateHelper.SimpleDictObsDef(  observable_substates=[
+                                                                    self.STATE_ROBOT,
+                                                                    self.STATE_INTERNAL,
+                                                                    self.STATE_EXTRINSIC,
+                                                                    self.STATE_ACT_RAW_HIST,
+                                                                    # self.STATE_LAST_ACT_RAW,
+                                                                    # self.STATE_ACT_PREPROC,
+                                                                    # self.STATE_JOINT_LONGTERM_STATS,
+                                                                    # self.STATE_JOINT_STEP_STATS
+                                                                    ],
                                                                 concatenable_substates=[
-                                                                                self.STATE_ROBOT,
-                                                                                self.STATE_INTERNAL,
-                                                                                self.STATE_EXTRINSIC,
-                                                                                self.STATE_ACT_RAW_HIST,
-                                                                                # self.STATE_LAST_ACT_RAW,
-                                                                                # self.STATE_ACT_PREPROC,
-                                                                                # self.STATE_JOINT_LONGTERM_STATS,
-                                                                                # self.STATE_JOINT_STEP_STATS,
-                                                                                ],
+                                                                    self.STATE_ROBOT,
+                                                                    self.STATE_INTERNAL,
+                                                                    self.STATE_EXTRINSIC,
+                                                                    self.STATE_ACT_RAW_HIST,
+                                                                    # self.STATE_LAST_ACT_RAW,
+                                                                    # self.STATE_ACT_PREPROC,
+                                                                    # self.STATE_JOINT_LONGTERM_STATS,
+                                                                    # self.STATE_JOINT_STEP_STATS,
+                                                                    ],
                                                                 concatenated_part_name="vec",
                                                                 noise_generators={  
-                                                                                    self.STATE_ROBOT     : robot_state_noise,
-                                                                                    self.STATE_EXTRINSIC : extrinsic_state_noise
-                                                                                    })}
+                                                                    self.STATE_ROBOT     : robot_state_noise,
+                                                                    self.STATE_EXTRINSIC : extrinsic_state_noise
+                                                                    })}
         self._state_helper = DictStateHelper({  self.STATE_ROBOT : robot_state_helper,
                                                 self.STATE_JOINT_STEP_STATS : joint_step_stats_state_helper,
                                                 self.STATE_EXTRINSIC : extrinsic_state_helper,
@@ -1245,7 +1278,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                 self.STATE_ACT_PREPROC: act_history_state_helper,
                                                 self.STATE_ACT_RAW_HIST : raw_act_history_state_helper,
                                                 self.STATE_LAST_ACT_RAW : last_raw_act_state_helper,
-                                                self.STATE_JOINT_LONGTERM_STATS : joint_longterm_stats_helper},
+                                                self.STATE_JOINT_LONGTERM_STATS : joint_longterm_stats_helper,
+                                                self.STATE_POS_REF_ERR : joint_pos_ref_error_state_helper},
                                             obs_definitions=obs_definitions)
 
     
@@ -1322,10 +1356,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             robot_pose = None #build_pose(*self._configuration.spawn_root_pose_xyz_xyzw)
             arrow_pose = robot_pose
             camera_pose = None #build_pose(0,0.0,0.0,    0.0, 0.0, 0.0,   1.0)
-            robot_spawn_def = ModelSpawnDef(definition_string=self._configuration.model_urdf_string,
+            robot_spawn_def = ModelSpawnDef(definition_string=self._configuration.robot_description_string,
                                             name=self._configuration.robot_name,
                                             pose=robot_pose,
-                                            format="urdf",
+                                            format=self._configuration.robot_description_format,
                                             kwargs={})
             if adarl.utils.utils.isinstance_noimport(self._adapter, ("MjxAdapter", "MujocoAdapter")):
                 cam_file = "models/simple_camera.mjcf.xacro"
@@ -1375,13 +1409,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
     def _reset_state_full(self):
         resetted_state = self._state_helper.reset_state()
-        # ggLog.info(f"resetted_state = {resetted_state}")
         if not hasattr(self, "_current_state") or self._current_state is None:
             self._current_state = resetted_state
         self._current_state = resetted_state
         self._current_state[self.STATE_INTERNAL][:,:,self.INTERNAL_FIELDS.STEP_COUNT] = -1
+        self._current_state[self.STATE_INTERNAL][:,:,self.INTERNAL_FIELDS.LAST_STEP_DT] = self._configuration.stepLength_sec
         self._current_state[self.STATE_EXTRINSIC][:,:,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z] = -1 # Should always have norm 1
-
 
         
 
@@ -1936,7 +1969,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_jstates_j_pveae = states.joint_state_pveae
         vec_bodystates_13 = states.link_state[:,0,:]
         vec_body_rel_linacc_xyz = states.link_linacc[:,0,:]
-        vec_stats_minmaxavgstd_j_pvaee = states.joint_stats_pvaee
+        vec_stats_minmaxavgstdsumsum_j_pvaeep = states.joint_stats_pvaeep
         
         body_abs_quat_xyzw_vec  = vec_bodystates_13[:,3:7]
         vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
@@ -1950,7 +1983,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_time_from_start = self._adapter.getEnvTimeFromStartup() - self._eps_start_stime
 
         record_region_end("RobotVecEnv._get_adapter_data_raw_mjx")
-        return (vec_stats_minmaxavgstd_j_pvaee,
+        return (vec_stats_minmaxavgstdsumsum_j_pvaeep,
                 vec_jstates_j_pveae,
                 self._last_sent_v_j_pvesd,
                 vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
@@ -2007,13 +2040,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # th.cuda.synchronize()
         try:
-            vec_stats_minmaxavgstd_j_pvaee = self._adapter.get_joints_state_step_stats_extended()
+            vec_stats_minmaxavgstdsumsum_j_pvaeep = self._adapter.get_joints_state_step_stats_extended()
             record_time("RobotVecEnv._get_adapter_data_raw: get_joints_state_step_stats_extended done")
             if self._configuration.enable_dbg_checks:
-                dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvaee)),
-                        lambda: (f"non finite values in joint stats at indexes:\n{th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvaee)).nonzero()}\n"
-                                f"nonfinite values =\n{vec_stats_minmaxavgstd_j_pvaee[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvaee))]}\n"
-                                f"all values =\n{vec_stats_minmaxavgstd_j_pvaee}"),
+                dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstdsumsum_j_pvaeep)),
+                        lambda: (f"non finite values in joint stats at indexes:\n{th.logical_not(th.isfinite(vec_stats_minmaxavgstdsumsum_j_pvaeep)).nonzero()}\n"
+                                f"nonfinite values =\n{vec_stats_minmaxavgstdsumsum_j_pvaeep[th.logical_not(th.isfinite(vec_stats_minmaxavgstdsumsum_j_pvaeep))]}\n"
+                                f"all values =\n{vec_stats_minmaxavgstdsumsum_j_pvaeep}"),
                         just_warn=True,
                         async_assert=True,
                         assert_msg="non finite values in joint stats")
@@ -2027,10 +2060,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 f" model.body_mass = {mjx_adapter._sim_state.mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(mjx_adapter._sim_state.mjx_model.body_mass, axis=0)})"
                                 f" model.dof_frictionloss = {mjx_adapter._sim_state.mjx_model.dof_frictionloss[bad_sim_id]} (avg = {jnp.mean(mjx_adapter._sim_state.mjx_model.dof_frictionloss, axis=0)})"
                                 f" model.dof_armature = {mjx_adapter._sim_state.mjx_model.dof_armature[bad_sim_id]} (avg = {jnp.mean(mjx_adapter._sim_state.mjx_model.dof_armature, axis=0)})")
-                    dbg_check(lambda : th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvaee)), th.all(th.isfinite(vec_bodystates_13))),
+                    dbg_check(lambda : th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstdsumsum_j_pvaeep)), th.all(th.isfinite(vec_bodystates_13))),
                             build_error_msg, just_warn = True, async_assert=True, assert_msg="diverging sim")
         except NotImplementedError:
-            vec_stats_minmaxavgstd_j_pvaee = self._thfull(float("nan"), (self.num_envs,4,len(self._configuration.joints_agent_controlled),5))
+            vec_stats_minmaxavgstdsumsum_j_pvaeep = self._thfull(float("nan"), (self.num_envs,6,len(self._configuration.joints_agent_controlled),6))
         # th.cuda.synchronize()
         # ggLog.info(f"vec_stats_minmaxavgstd_j_pvae = {vec_stats_minmaxavgstd_j_pvae}")
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
@@ -2041,7 +2074,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         record_region_end("RobotVecEnv._get_adapter_data_raw")
         # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} others={t3_1-t3:.6f} tot = {t3_1-t0:.6f}s")
-        return (vec_stats_minmaxavgstd_j_pvaee,
+        return (vec_stats_minmaxavgstdsumsum_j_pvaeep,
                 vec_jstates_j_pveae,
                 self._last_sent_v_j_pvesd,
                 vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
@@ -2062,7 +2095,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     def _get_new_instantaneous_state(self, adapter_data) -> dict[str, dict[Any, th.Tensor] | th.Tensor]:        
         
-        (   vec_stats_minmaxavgstd_j_pvaee,
+        (   vec_stats_minmaxavgstd_j_pvaeep,
             vec_jstates_j_pveae,
             self._last_sent_v_j_pvesd,
             vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
@@ -2086,7 +2119,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     prev_lims_safety_triggered=prev_lims_safety_triggered,
                                     prev_posref_safety_triggered=prev_posref_safety_triggered,
                                     prev_vec_time_from_start=prev_vec_time_from_start,
-                                    vec_stats_minmaxavgstd_j_pvaee = vec_stats_minmaxavgstd_j_pvaee,
+                                    vec_stats_minmaxavgstd_j_pvaeep = vec_stats_minmaxavgstd_j_pvaeep,
                                     vec_jstates_j_pveae = vec_jstates_j_pveae,
                                     vec_last_sent_refs_j_pvesd = self._last_sent_v_j_pvesd,
                                     vec_body_abs_linvel_xyz = vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
@@ -2111,7 +2144,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     prev_posref_safety_triggered : th.Tensor,
                                                     prev_vec_joint_posrefs : th.Tensor,
                                                     prev_vec_time_from_start : th.Tensor,
-                                                    vec_stats_minmaxavgstd_j_pvaee : th.Tensor,
+                                                    vec_stats_minmaxavgstd_j_pvaeep : th.Tensor,
                                                     vec_jstates_j_pveae : th.Tensor,
                                                     vec_last_sent_refs_j_pvesd : th.Tensor,
                                                     vec_body_abs_linvel_xyz : th.Tensor,
@@ -2126,10 +2159,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # prev_vec_time_from_start = prev_vec_internal_state[:,self.INTERNAL_FIELDS.SIM_TIME]
         # vec_prev_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")
-        pveidx = th.as_tensor([0,1,3]).to(device=vec_stats_minmaxavgstd_j_pvaee.device, non_blocking=True)
+        pveidx = th.as_tensor([0,1,3]).to(device=vec_stats_minmaxavgstd_j_pvaeep.device, non_blocking=True)
         if self._configuration.enable_limits_safety:
-            vec_triggered_limits = th.logical_or(   vec_stats_minmaxavgstd_j_pvaee[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
-                                                    vec_stats_minmaxavgstd_j_pvaee[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
+            vec_triggered_limits = th.logical_or(   vec_stats_minmaxavgstd_j_pvaeep[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
+                                                    vec_stats_minmaxavgstd_j_pvaeep[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
             vec_limits_safety_triggered = th.any(vec_triggered_limits, dim=(1,2))
             triggered = th.logical_and(vec_limits_safety_triggered, has_settled)
             vec_safety_lims_state = th.logical_or(prev_lims_safety_triggered,triggered)*1.0
@@ -2153,16 +2186,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.INTERNAL_FIELDS.STEP_COUNT : (vec_step_count+1).view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.SIM_TIME : vec_time_from_start.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.LAST_STEP_DT : last_step_dt.view(self.num_envs,1)}
-        use_referr = False
-        if use_referr:
-            jreferrs_vec_j_pve = vec_jstates_j_pveae[:,:,:3] - vec_last_sent_refs_j_pvesd[:,:,:3]
-            new_robot_state = th.cat([vec_jstates_j_pveae[:,:,:3], jreferrs_vec_j_pve, vec_last_sent_refs_j_pvesd], dim = -1)
-        else:
-            new_robot_state = th.cat([vec_jstates_j_pveae, vec_last_sent_refs_j_pvesd], dim = -1)
+        jreferrs_vec_p_j = (vec_jstates_j_pveae[:,:,0] - vec_last_sent_refs_j_pvesd[:,:,0]).view(self.num_envs, 1, len(self._configuration.joints_agent_controlled))
+        new_robot_state = th.cat([vec_jstates_j_pveae, vec_last_sent_refs_j_pvesd], dim = -1)
         # build stats:
         # with permute the first dimension becomes the joint (ordered as in set_monitored_joints)
         # with flatten the second dimension becomes minp,minv,mina,mmine,maxp,maxv,...
-        new_robot_stats_state_pvaee = vec_stats_minmaxavgstd_j_pvaee.permute(0,2,1,3).flatten(start_dim=2) # exchange minmaxavgstd and joint dim, then flatten minmaxavgstd into one dim
+        new_robot_stats_state_pvaeep = vec_stats_minmaxavgstd_j_pvaeep.permute(0,2,1,3).flatten(start_dim=2) # exchange minmaxavgstd and joint dim, then flatten minmaxavgstd into one dim
         # ggLog.info(f"new_robot_stats_state_pvaee = {new_robot_stats_state_pvaee.size()}, expected {(self.num_envs, len(self._configuration.controlled_joints), 4*5)}")
         new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : vec_body_rel_linvel_xyz[:,0].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : vec_body_rel_linvel_xyz[:,1].view(self.num_envs,1),
@@ -2190,10 +2219,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 step_avg_pos*(1-self._configuration.longterm_stats_alpha) + prev_step_avg_pos*self._configuration.longterm_stats_alpha)
         new_longterm_stats_state = {self.JOINT_LONGTERM_STATS_FIELDS.AVG_POS : step_avg_pos}
 
+
         return {    self.STATE_EXTRINSIC    : new_extrinsic_state,
                     self.STATE_INTERNAL     : new_internal_state,
                     self.STATE_ROBOT        : new_robot_state,
-                    self.STATE_JOINT_STEP_STATS  : new_robot_stats_state_pvaee,
+                    self.STATE_POS_REF_ERR  : jreferrs_vec_p_j,
+                    self.STATE_JOINT_STEP_STATS  : new_robot_stats_state_pvaeep,
                     self.STATE_JOINT_LONGTERM_STATS : new_longterm_stats_state,
                     self.STATE_ACT_PREPROC : {self.ACT_FIELDS.ACTION : self._last_preprocessed_actions},
                     self.STATE_ACT_RAW_HIST : {self.ACT_FIELDS.ACTION : self._last_raw_actions},
@@ -2323,7 +2354,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             #     labels["vec_obs"] = to_string_tensor([n for n in self._state_helper.observation_names()["base.vec"]])
             #     if not self._configuration.merge_privileged:
             #         labels["vec_obs_privileged"] = to_string_tensor([n for n in self._state_helper.observation_names()["privileged.vec"]])
-            posref_diff = state[self.STATE_ROBOT][:,0,:,5] - state[self.STATE_ROBOT][:,1,:,5]
+            posref_diff =      state[self.STATE_ROBOT][:,0,:,5] - state[self.STATE_ROBOT][:,1,:,5]
             prev_posref_diff = state[self.STATE_ROBOT][:,1,:,5] - state[self.STATE_ROBOT][:,2,:,5]
             posref_vel = posref_diff/self._configuration.stepLength_sec
             prev_posref_vel = prev_posref_diff/self._configuration.stepLength_sec

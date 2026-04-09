@@ -30,14 +30,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
     
     eval_freq = 40
-    r = 0.0 # randomization strength
-    n = 1.0 # noise strength
+    r = 1.0 # randomization strength
+    n = 0.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "action_delay_mustd_std" : (0.003, 0.001*n, 0.0025*n),
+        "action_delay_mustd_std" : (0.001, 0.001*n, 0.001*n),
         "action_noise_mustd" : (0.0,   0.0),
-        "action_smoothing_halflife_sec" : 0.0,
+        "action_smoothing_halflife_sec" : 0.005,
         "control_mode" : "position",
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
@@ -45,11 +45,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_reference_filter" : False,
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
-        "goal_err_smoothing_halflife_sec" : 0.0,
+        "goal_err_smoothing_halflife_sec" : 0.05,
         "goal_height_minmax" : [0.47,0.47],
         "goal_resampling_probability_per_sec" : 0.0,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
+        "goal_yaw_vel_minmax" : (-1.0, 1.0),
         "held_joints_damping" : 10.0,
         "held_joints_stiffness" : 500.0,
         "impulse_duration_minmax" : [0.01, 2.5],
@@ -66,11 +67,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_good_step_duration" : 0.3,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
-        "min_good_step_duration" : 0.1,
+        "min_good_step_duration" : 0.2,
         "mode" : mode,
-        "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.05*n],
-        "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.001*n, 0.05*n],
-        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.05*n],
+        "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.2*n],
+        "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.01*n, 0.2*n],
+        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.01*n, 0.2*n],
         "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
@@ -89,16 +90,18 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "record_video" : True,
         "recycle_pose_randomization" : True,
         "reward_superweight_joint_penalties" : 1.0,
-        "reward_acceleration_weight" :        eps,
-        "reward_actacc_weight" :              1.0,
-        "reward_actdiff_weight" :             1.0,
+        "reward_acceleration_weight" :        0.0,
+        "reward_acc_on_vel_weight" :          0.0,
+        "reward_actacc_weight" :              0.0,
+        "reward_actdiff_weight" :             0.0,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
+        "reward_power_weight" :               1.0,
         "reward_failure_weight" :             eps,
-        "reward_feet_air_time_weight" :       10.0,
+        "reward_feet_air_time_weight" :       20.0,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      eps,
-        "reward_heading_velocity_weight" :    eps,
+        "reward_heading_velocity_weight" :    0.0,
         "reward_heading_weight" :             eps,
         "reward_health_weight" :              eps,
         "reward_height_position_weight" :     1.0,
@@ -121,6 +124,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_limit_weight" :      eps,
         "reward_velocity_weight" :            eps,
         "reward_velref_weight" :              eps,
+        "reward_yaw_vel_tracking_weight" :    1.0,
         "robot_model" : "kyon",
         "safe_damping" : 10,
         "safe_stiffness" : 500,
@@ -230,48 +234,48 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "num_envs" : 1
     # }
 
-    if env_builder_args["split_rewards"]:
-        gamma_long = 0.99
-        gamma_short = 0.0
-        gammas = {
-            "acceleration" :        gamma_long,
-            "actacc" :              gamma_short,
-            "actdiff" :             gamma_short,
-            "contacts" :            gamma_long,
-            "failure" :             gamma_long,
-            "feet_air_time" :       gamma_long,
-            "feet_ground_time" :    gamma_long,
-            "feet_on_ground" :      gamma_long,
-            "heading" :             gamma_long,
-            "heading_velocity" :    gamma_long,
-            "health" :              gamma_long,
-            "height_position" :     gamma_long,
-            "height_velocity" :     gamma_long,
-            "pitchnroll" :          gamma_long,
-            "pitchnroll_velocity" : gamma_long,
-            "position" :            gamma_long,
-            "position_limit" :      gamma_long,
-            "posref_vel" :          gamma_short,
-            "posref_acc" :          gamma_short,
-            "sensed_effort" :       gamma_long,
-            "slip" :                gamma_long,
-            "stand_position" :      gamma_long,
-            "torque" :              gamma_long,
-            "torque_limit" :        gamma_long,
-            "torque_refs" :         gamma_short,
-            "torquediff" :          gamma_short,
-            "tracking" :            gamma_long,
-            "velocity" :            gamma_long,
-            "velocity_refs" :       gamma_short,
-            "velocity_limit" :      gamma_long
-        }
-        def transition_augmentor_builder(observation_space, action_space, reward_space):
-            return TransitionAugmentor(reward_space=reward_space,
-                                    reward_weights_distr=("uniform", (0.01, 1.0)),
-                                    augmented_samples=4096).augment_transition
-    else:
-        gammas = 0.98
-        transition_augmentor_builder = None
+    # if env_builder_args["split_rewards"]:
+    #     gamma_long = 0.99
+    #     gamma_short = 0.0
+    #     gammas = {
+    #         "acceleration" :        gamma_long,
+    #         "actacc" :              gamma_short,
+    #         "actdiff" :             gamma_short,
+    #         "contacts" :            gamma_long,
+    #         "failure" :             gamma_long,
+    #         "feet_air_time" :       gamma_long,
+    #         "feet_ground_time" :    gamma_long,
+    #         "feet_on_ground" :      gamma_long,
+    #         "heading" :             gamma_long,
+    #         "heading_velocity" :    gamma_long,
+    #         "health" :              gamma_long,
+    #         "height_position" :     gamma_long,
+    #         "height_velocity" :     gamma_long,
+    #         "pitchnroll" :          gamma_long,
+    #         "pitchnroll_velocity" : gamma_long,
+    #         "position" :            gamma_long,
+    #         "position_limit" :      gamma_long,
+    #         "posref_vel" :          gamma_short,
+    #         "posref_acc" :          gamma_short,
+    #         "sensed_effort" :       gamma_long,
+    #         "slip" :                gamma_long,
+    #         "stand_position" :      gamma_long,
+    #         "torque" :              gamma_long,
+    #         "torque_limit" :        gamma_long,
+    #         "torque_refs" :         gamma_short,
+    #         "torquediff" :          gamma_short,
+    #         "tracking" :            gamma_long,
+    #         "velocity" :            gamma_long,
+    #         "velocity_refs" :       gamma_short,
+    #         "velocity_limit" :      gamma_long
+    #     }
+    #     def transition_augmentor_builder(observation_space, action_space, reward_space):
+    #         return TransitionAugmentor(reward_space=reward_space,
+    #                                 reward_weights_distr=("uniform", (0.01, 1.0)),
+    #                                 augmented_samples=4096).augment_transition
+    # else:
+    #     gammas = 0.98
+    #     transition_augmentor_builder = None
 
     eval_configurations = [  
                             # video_stoch_highpen,
@@ -283,10 +287,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                             # #  eval_conf_video_jump_feasible
                         ]
     
-    annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
-                                     start_target=-2.0,
-                                     end_target=-5.0,
-                                     start_reference_threshold=0.5)
+    # annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
+    #                                  start_target=-2.0,
+    #                                  end_target=-5.0,
+    #                                  start_reference_threshold=0.5)
     
 
     if algo.lower() == "sac":
@@ -396,12 +400,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     q_lr=None,
                                                     policy_lr=3e-4,
                                                     update_epochs=5,
-                                                    total_steps=5_000_000_000,
+                                                    total_steps=2_500_000_000,
                                                     num_envs=train_envs,
                                                     num_steps=24,
                                                     gamma=0.99,
                                                     loss_value_weight=1.0,
-                                                    loss_entropy_coeff=1e-3,
+                                                    loss_entropy_coeff=1e-4,
                                                     log_freq_vstep=int(max_steps_per_episode/10),
                                                     epsilon_policy_ratio_clip=0.2,
                                                     epsilon_value_clip_epsilon=0.2,

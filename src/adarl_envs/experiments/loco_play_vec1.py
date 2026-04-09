@@ -285,6 +285,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
         "enable_rendering" : False,
+        "enable_reference_filter" : False,
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
@@ -292,6 +293,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_resampling_probability_per_sec" : 0.1,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
+        "goal_yaw_vel_minmax" : (-1.0, 1.0),
         "held_joints_damping" : 10.0,
         "held_joints_stiffness" : 500.0,
         "impulse_duration_minmax" : [0.01, 2.5],
@@ -332,10 +334,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "recycle_pose_randomization" : True,
         "reward_superweight_joint_penalties" : 1.0,
         "reward_acceleration_weight" :        eps,
+        "reward_acc_on_vel_weight" :          0.0,
         "reward_actacc_weight" :              1.0,
         "reward_actdiff_weight" :             1.0,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
+        "reward_power_weight" :               1.0,
         "reward_failure_weight" :             eps,
         "reward_feet_air_time_weight" :       10.0,
         "reward_feet_ground_time_weight" :    eps,
@@ -363,7 +367,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_velocity_limit_weight" :      eps,
         "reward_velocity_weight" :            eps,
         "reward_velref_weight" :              eps,
-        "robot_model" : "kyon",
+        "reward_yaw_vel_tracking_weight" :    1.0,
+        "robot_model" : args["robot"],
         "safe_damping" : 5,
         "safe_stiffness" : 600,
         "saturate_jimp_ref_limits" : False,
@@ -650,7 +655,7 @@ if __name__ == "__main__":
     ap.add_argument("--seedsOffset", default=0, type=int, help="Offset the used seeds by this amount")
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--model", required = False, default=None, type=str, help="Model to load")
-    ap.add_argument("--mode", default="pybullet", type=str, help="Adapter to use [pybullet,xbot-gazebo,mjx]")
+    ap.add_argument("--mode", default="mjx", type=str, help="Adapter to use [pybullet,xbot-gazebo,mjx]")
     ap.add_argument("--robot", default="kyon", type=str, help="Robot to be used")
     ap.add_argument("--rt-factor", default=1.0, type=float, help="Tentative realtime factor")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")

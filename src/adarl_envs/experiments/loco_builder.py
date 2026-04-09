@@ -18,6 +18,47 @@ import gymnasium as gym
 import copy
 from rreal.algorithms.sac_helpers import build_vec_env, VecEnvRunnerBuilderProtocol
 from math import pi
+import xml.etree.ElementTree as ET
+
+def set_asset_texture_paths(mjcf_string: str, meshdir: str, texturedir: str) -> str:
+    """Set meshdir and texturedir in <compiler> to the given paths. If <compiler> doesn't exist, it is created."""
+    root = ET.fromstring(mjcf_string)
+
+    compiler = root.find(".//compiler")
+    if compiler is None:
+        compiler = ET.SubElement(root, "compiler")
+
+    if meshdir is not None:
+        compiler.attrib["meshdir"] = meshdir
+    if texturedir is not None:
+        compiler.attrib["texturedir"] = texturedir
+
+    return ET.tostring(root, encoding="unicode")
+
+def make_asset_texture_paths_absolute(mjcf_string: str, model_file_path: str) -> str:
+    """Set meshdir and texturedir in <compiler> to absolute paths based on the model file's directory.
+    
+    If <compiler> doesn't exist, it is created. Existing meshdir/texturedir are resolved
+    relative to the model file's directory if they are not already absolute.
+    """
+    model_dir = str(Path(model_file_path).resolve().parent)
+    root = ET.fromstring(mjcf_string)
+
+    compiler = root.find(".//compiler")
+    if compiler is None:
+        compiler = ET.SubElement(root, "compiler")
+
+    meshdir = compiler.attrib.get("meshdir", ".")
+    if not Path(meshdir).is_absolute():
+        meshdir = str(Path(model_dir, meshdir).resolve())
+    compiler.attrib["meshdir"] = meshdir
+
+    texturedir = compiler.attrib.get("texturedir", ".")
+    if not Path(texturedir).is_absolute():
+        texturedir = str(Path(model_dir, texturedir).resolve())
+    compiler.attrib["texturedir"] = texturedir
+
+    return ET.tostring(root, encoding="unicode")
 
 def format_tensor(t, float_precision):
     if t is None:
@@ -86,10 +127,24 @@ def loco_runner_builder(seed,
     mode = env_builder_args["mode"]
     walltime_factor = env_builder_args.pop("walltime_factor")
 
-    robot_urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(env_builder_args.pop("model_file")).read_text(),
-                                                            model_kwargs=env_builder_args.pop("model_kwargs"),
-                                                            extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
-    
+    robot_description_format = env_builder_args["robot_description_format"]
+    model_file_path = env_builder_args.pop("model_file", None)
+    if model_file_path is None:
+        robot_description_string = env_builder_args.pop("robot_description_string", None)
+        if robot_description_string is None:
+            raise ValueError("Either model_file or robot_description_string must be provided in env_builder_args")
+    else:
+        raw_model_string = Path(model_file_path).read_text()
+        if robot_description_format in ["xacro"]:
+            robot_description_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=raw_model_string,
+                                                                    model_kwargs=env_builder_args.pop("model_kwargs"),
+                                                                    extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
+        elif robot_description_format == "mjcf":
+            robot_description_string = make_asset_texture_paths_absolute(raw_model_string, model_file_path)
+        else:
+            robot_description_string = raw_model_string
+
+
     if mode == "gz":
         raise NotImplementedError()
     elif mode == "gazebo":
@@ -143,7 +198,7 @@ def loco_runner_builder(seed,
                                                                         remote_port = 5557,
                                                                         remote_joint_state_port = 5556,
                                                                         remote_cmd_port = 5558,
-                                                                        robot_urdf=robot_urdf_string),
+                                                                        robot_urdf=robot_description_string),
                                                 vec_size = 1,
                                                 th_device = th_device)
     elif mode == "xbot-gazebo":
@@ -290,10 +345,12 @@ def loco_runner_builder(seed,
                             recycle_pose_randomization=env_builder_args.pop("recycle_pose_randomization"),
                             reward_superweight_joint_penalties = env_builder_args.pop("reward_superweight_joint_penalties"),    
                             reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
+                            reward_acc_on_vel_weight = env_builder_args.pop("reward_acc_on_vel_weight"),
                             reward_actacc_weight = env_builder_args.pop("reward_actacc_weight"),
                             reward_actdiff_weight = env_builder_args.pop("reward_actdiff_weight"),
                             reward_contacts_weight = env_builder_args.pop("reward_contacts_weight"),
                             reward_energy_weight = env_builder_args.pop("reward_energy_weight"),
+                            reward_power_weight = env_builder_args.pop("reward_power_weight"),
                             reward_failure_weight = env_builder_args.pop("reward_failure_weight"),
                             reward_feet_air_time_weight = env_builder_args.pop("reward_feet_air_time_weight"),
                             reward_feet_ground_time_weight = env_builder_args.pop("reward_feet_ground_time_weight"),
@@ -321,10 +378,12 @@ def loco_runner_builder(seed,
                             reward_velocity_limit_weight = env_builder_args.pop("reward_velocity_limit_weight"),
                             reward_velocity_weight = env_builder_args.pop("reward_velocity_weight"),
                             reward_velref_weight = env_builder_args.pop("reward_velref_weight"),
+                            reward_yaw_vel_tracking_weight=env_builder_args.pop("reward_yaw_vel_tracking_weight"),
                             robot_main_body_link=env_builder_args.pop("robot_main_body_link"),
                             robot_name=robot_name,
                             robot_root_link=env_builder_args.pop("robot_root_link"),
-                            robot_urdf_string=robot_urdf_string,
+                            robot_description_string=robot_description_string,
+                            robot_description_format=robot_description_format,
                             safe_damping=env_builder_args.pop("safe_damping"),
                             control_limits_position_offset=env_builder_args.pop("control_limits_position_offset"),
                             safe_stiffness=env_builder_args.pop("safe_stiffness"),
@@ -342,7 +401,8 @@ def loco_runner_builder(seed,
                             use_contacts=env_builder_args.pop("use_contacts"),
                             verbose_infos=env_builder_args.pop("verbose_infos"),
                             split_rewards=env_builder_args.pop("split_rewards"),
-                            minimal_infos=env_builder_args.pop("minimal_infos")
+                            minimal_infos=env_builder_args.pop("minimal_infos"),
+                            goal_yaw_vel_minmax=env_builder_args.pop("goal_yaw_vel_minmax")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -536,51 +596,55 @@ def get_kyon_args(enable_arms : bool = False):
                             ('kyon', 'contact_4')]
         }
 
-def get_pgspot_args():
-    hip_pitch = -0.8727 # = -50/180*3.14159
-    hip_roll =   0.0349 # = 2/180*3.14159
-    knee =      -1.5707 # = -90/180*3.14159
-    homing = {  ("kyon","hip_roll_3") :  hip_roll,
-                ("kyon","hip_roll_4") : -hip_roll,
-                ("kyon","hip_roll_1") : -hip_roll,
-                ("kyon","hip_roll_2") :  hip_roll,
-                ("kyon","hip_pitch_3") :  hip_pitch,
-                ("kyon","hip_pitch_4") : -hip_pitch,
-                ("kyon","hip_pitch_1") :  hip_pitch,
-                ("kyon","hip_pitch_2") : -hip_pitch,
-                ("kyon","knee_pitch_3") : -knee,
-                ("kyon","knee_pitch_4") :  knee,
-                ("kyon","knee_pitch_1") : -knee,
-                ("kyon","knee_pitch_2") :  knee}
-    enable_arms = False
-    if enable_arms:
-        homing.update({ ("kyon","shoulder_yaw_1") : 0.0,
-                        ("kyon","shoulder_pitch_1") : 0.0,
-                        ("kyon","elbow_pitch_1") : 0.0,
-                        ("kyon","wrist_pitch_1") : 0.0,
-                        ("kyon","wrist_yaw_1") : 0.0,
-                        ("kyon","shoulder_yaw_2") : 0.0,
-                        ("kyon","shoulder_pitch_2") : 0.0,
-                        ("kyon","elbow_pitch_2") : 0.0,
-                        ("kyon","wrist_pitch_2") : 0.0,
-                        ("kyon","wrist_yaw_2") : 0.0,
-                        ("kyon","dagana_1_clamp_joint") : 0.1,
-                        ("kyon","dagana_2_clamp_joint") : 0.1})
-    from mujoco_playground._src import mjx_env
-    return {"model_file" : mjx_env.ROOT_PATH / "locomotion" / "spot" / "xmls" / "scene_mjx_feetonly_flat_terrain.xml",
+def get_go1_args():
+    rname = "go1"
+    hip_pitch =  1.91
+    hip_roll =   0.0 
+    knee =      -1.84
+    homing = {  (rname,"RL_hip_joint") :  hip_roll,
+                (rname,"RR_hip_joint") :  hip_roll,
+                (rname,"FL_hip_joint") :  hip_roll,
+                (rname,"FR_hip_joint") :  hip_roll,
+                (rname,"RL_thigh_joint") :  hip_pitch,
+                (rname,"RR_thigh_joint") :  hip_pitch,
+                (rname,"FL_thigh_joint") :  hip_pitch,
+                (rname,"FR_thigh_joint") :  hip_pitch,
+                (rname,"RL_calf_joint") :  knee,
+                (rname,"RR_calf_joint") :  knee,
+                (rname,"FL_calf_joint") :  knee,
+                (rname,"FR_calf_joint") :  knee}
+    from robot_descriptions import go1_mj_description
+    # go1_description_path = "unitree_ros/robots/go1_description"
+    # go1_file_path = adarl.utils.utils.pkgutil_get_path("pyunitree_ros", go1_description_path+"/xacro/robot.xacro")
+    # xacro_extr_pkg_paths = {"go1_description" : adarl.utils.utils.pkgutil_get_path("pyunitree_ros", go1_description_path)}
+    
+    # go1_file_path = go1_mj_description.MJCF_PATH
+    # xacro_extr_pkg_paths = {}
+
+    go1_file_path = adarl.utils.utils.pkgutil_get_path("mujoco_playground","_src/locomotion/go1/xmls/go1_mjx.xml")
+    xacro_extra_pkg_paths = {}
+    raw_model_string = Path(go1_file_path).read_text()
+
+    menagerie_go1_assets_folder = adarl.utils.utils.pkgutil_get_path("mujoco_playground", "external_deps/mujoco_menagerie/unitree_go1/assets")
+    go1_string = set_asset_texture_paths(raw_model_string,
+                            menagerie_go1_assets_folder,
+                            menagerie_go1_assets_folder)
+    ggLog.info(f"Using go1 model string: \n{go1_string}")
+    return {"robot_description_string" : go1_string,
+            "robot_description_format" : "mjcf",
             "model_kwargs" : {},
-            "xacro_extra_pkg_paths" : {},
+            "xacro_extra_pkg_paths" : xacro_extra_pkg_paths,
             "homing_joint_pose" : homing,
-            "robot_name" : "kyon",
-            "robot_main_body_link" : "pelvis",
-            "robot_root_link" : "pelvis",
+            "robot_name" : rname,
+            "robot_main_body_link" : "trunk",
+            "robot_root_link" : "trunk",
             "homing_body_pose_xyz_xyzw" : (0.,0.,0.495,0.,0.,0.,1.),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "randomized_armature_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "randomized_mass_links" : [LINK_FILTERS.ALL_ROBOT],
-            "randomized_com_links" : [("kyon","pelvis")],
+            "randomized_com_links" : [(rname,"trunk")],
             "randomized_friction_links" : [LINK_FILTERS.ALL],
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
@@ -588,14 +652,14 @@ def get_pgspot_args():
             "control_limits_ratios_minmax_pve" : {k:[[ 0.25, 0.9, 0.9],
                                                      [ 0.25, 0.9, 0.9]] for k,v in homing.items()},
             "control_limits_position_offset" : homing,
-            "enable_link_collisions" : [    (('kyon', 'contact_1'),[('ground','ground_link')]),
-                                            (('kyon', 'contact_2'),[('ground','ground_link')]),
-                                            (('kyon', 'contact_3'),[('ground','ground_link')]),
-                                            (('kyon', 'contact_4'),[('ground','ground_link')])],
-            "feet_links" : [('kyon', 'contact_1'),
-                            ('kyon', 'contact_2'),
-                            ('kyon', 'contact_3'),
-                            ('kyon', 'contact_4')]
+            "enable_link_collisions" : [    ((rname, 'FL_foot'),[('ground','ground_link')]),
+                                            ((rname, 'FR_foot'),[('ground','ground_link')]),
+                                            ((rname, 'RL_foot'),[('ground','ground_link')]),
+                                            ((rname, 'RR_foot'),[('ground','ground_link')])],
+            "feet_links" : [(rname, 'FL_foot'),
+                            (rname, 'FR_foot'),
+                            (rname, 'RL_foot'),
+                            (rname, 'RR_foot')]
         }
 
 
@@ -695,8 +759,8 @@ def get_centauro_args():
             "randomized_friction_links" : [LINK_FILTERS.ALL],
             "randomized_com_links" : [("centauro","pelvis")],
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
-            "safety_limits_ratios_minmax_pve" : {k:[[ 0.2, 0.9, 0.9],
-                                                    [ 0.2, 0.9, 0.9]] for k,v in homing.items()},
+            "safety_limits_ratios_minmax_pve" : {k:[[ 0.3, 0.9, 0.9],
+                                                    [ 0.3, 0.9, 0.9]] for k,v in homing.items()},
             "control_limits_position_offset" : homing,
             "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_2'),[('ground','ground_link')]),
@@ -709,26 +773,25 @@ def get_centauro_args():
         }
 
 
-
-
-def named_loco_venv_builder(seed : int,
-                    run_folder : str,
-                    num_envs : int, 
-                    env_builder_args : dict,
-                    env_name : str = "") -> gym.vector.VectorEnv:
-    robot_model = env_builder_args["robot_model"]
+def _add_robot_args(robot_model: str, env_builder_args: dict):
     if robot_model == "quad":
         env_builder_args.update(get_quad_args())
     elif robot_model == "kyon":
         env_builder_args.update(get_kyon_args())
     elif robot_model == "kyon_arms":
         env_builder_args.update(get_kyon_args(enable_arms=True))
-    elif robot_model == "spot":
-        env_builder_args.update(get_pgspot_args())
+    elif robot_model == "go1":
+        env_builder_args.update(get_go1_args())
     elif robot_model == "centauro":
         env_builder_args.update(get_centauro_args())
-    else:
-        raise RuntimeError(f"Unknown robot_model {robot_model}")
+    return env_builder_args
+
+def named_loco_venv_builder(seed : int,
+                    run_folder : str,
+                    num_envs : int, 
+                    env_builder_args : dict,
+                    env_name : str = "") -> gym.vector.VectorEnv:
+    _add_robot_args(env_builder_args["robot_model"], env_builder_args)
     return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
@@ -739,15 +802,7 @@ def named_loco_single_env_builder(seed : int,
                     log_folder : str,
                     is_eval : bool, 
                     env_builder_args : dict) -> tuple[gym.Env,float]:
-    robot_model = env_builder_args["robot_model"]
-    if robot_model == "quad":
-        env_builder_args.update(get_quad_args())
-    elif robot_model == "kyon":
-        env_builder_args.update(get_kyon_args())
-    elif robot_model == "centauro":
-        env_builder_args.update(get_centauro_args())
-    else:
-        raise RuntimeError(f"Unknown robot_model {robot_model}")
+    _add_robot_args(env_builder_args["robot_model"], env_builder_args)
     return loco_env_builder(seed = seed,
                             log_folder = log_folder,
                             env_builder_args = env_builder_args,

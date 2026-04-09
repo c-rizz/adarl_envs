@@ -224,7 +224,7 @@ class GraspVecEnv(RobotVecEnv):
                             robot_main_body_link = robot_main_body_link,
                             robot_name = robot_name,
                             robot_root_link = robot_root_link,
-                            robot_urdf_string = robot_urdf_string,
+                            robot_description_string = robot_urdf_string,
                             safe_damping = safe_damping,
                             safe_stiffness = safe_stiffness,
                             safety_limits_ratios_minmax_pve = safety_limits_ratios_minmax_pve,

@@ -890,9 +890,21 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                   for jn,lims in safe_limits_minmax_pve.items()}
 
 
-        control_limits_minmax_pve = {jn: scale_limit(  jn,
+        def scale_limit_centered(jn, minmax_pve : th.Tensor, minmax_scaling : th.Tensor, center_pos : float | None):
+            ranges_pve = minmax_pve[1] - minmax_pve[0]
+            if center_pos is not None:
+                center_pve = (minmax_pve[1] + minmax_pve[0]) / 2
+                center_pve = center_pve.clone()
+                center_pve[0] = center_pos  # override position center
+            else:
+                center_pve = (minmax_pve[1] + minmax_pve[0]) / 2
+            scaled_ranges = ranges_pve.expand(2,3) * minmax_scaling
+            lims = th.stack([center_pve - scaled_ranges[0]/2, center_pve + scaled_ranges[1]/2], dim=0)
+            return lims
+        control_limits_minmax_pve = {jn: scale_limit_centered(jn,
                                                     phys_limits_minmax_pve[jn],
-                                                    control_limits_ratios_minmax_pve_th[jn])
+                                                    control_limits_ratios_minmax_pve_th[jn],
+                                                    control_limits_center.get(jn, None))
                                     for jn in phys_limits_minmax_pve.keys()}
         for jn in safe_limits_minmax_pve.keys():
             if jn not in control_limits_minmax_pve:

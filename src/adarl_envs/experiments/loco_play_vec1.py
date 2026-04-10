@@ -18,7 +18,7 @@ import adarl.utils.dbg.dbg_img as dbg_img
 from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
-from adarl_envs.experiments.loco_builder import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args
+from adarl_envs.experiments.loco_builder import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args, get_go1_args
 from adarl_envs.env.LocomotionVecEnv import LocomotionVecEnv
 from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
 from adarl.utils.base_utils import record_time, clear_recorded_times, print_recorded_times
@@ -155,6 +155,8 @@ def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("
         home_jpose = get_quad_args()["homing_joint_pose"]
     elif robot == "kyon":
         home_jpose = get_kyon_args()["homing_joint_pose"]
+    elif robot == "go1":
+        home_jpose = get_go1_args()["homing_joint_pose"]
     elif robot == "centauro":
         home_jpose = get_centauro_args()["homing_joint_pose"]
     else:
@@ -167,6 +169,15 @@ def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("
                                   0.0, 0.1, 0.2,
                                   0.0, 0.1, 0.2], device = device)
     elif robot == "kyon":
+        act_range = th.as_tensor([   0.0, -0.1,  0.17,
+                                    -0.0,  0.1, -0.17,
+                                     0.0, -0.1,  0.17,
+                                    -0.0,  0.1, -0.17],device = device)
+        # act_range.view(4,3)[0] *= -1.0
+        act_range.view(4,3)[1] *= -1.0
+        # act_range.view(4,3)[2] *= -1.0
+        act_range.view(4,3)[3] *= -1.0
+    elif robot == "go1":
         act_range = th.as_tensor([   0.0, -0.1,  0.17,
                                     -0.0,  0.1, -0.17,
                                      0.0, -0.1,  0.17,
@@ -192,7 +203,7 @@ def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("
     elif robot == "centauro":
         act_range = th.as_tensor([0.1], device = device)
     else:
-        raise RuntimeError(f"Unknown robot '{robot}")
+        raise RuntimeError(f"Unknown robot '{robot}'")
     model = SinPolicy(  act_scale=act_range*scale,
                         act_offset=home_action,
                         act_speed=th.as_tensor([0.8], device = device),

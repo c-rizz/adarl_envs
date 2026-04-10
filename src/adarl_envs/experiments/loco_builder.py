@@ -139,6 +139,7 @@ def loco_runner_builder(seed,
             robot_description_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=raw_model_string,
                                                                     model_kwargs=env_builder_args.pop("model_kwargs"),
                                                                     extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
+            robot_description_format = "urdf"
         elif robot_description_format == "mjcf":
             robot_description_string = make_asset_texture_paths_absolute(raw_model_string, model_file_path)
         else:
@@ -564,6 +565,7 @@ def get_kyon_args(enable_arms : bool = False):
                         ("kyon","dagana_1_clamp_joint") : 0.1,
                         ("kyon","dagana_2_clamp_joint") : 0.1})
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro"),
+            "robot_description_format" : "xacro",
             "model_kwargs" : {"upper_body" : f"{enable_arms}",
                               "footonly_collision" : "true",
                               "varta" : "true"},
@@ -652,14 +654,14 @@ def get_go1_args():
             "control_limits_ratios_minmax_pve" : {k:[[ 0.25, 0.9, 0.9],
                                                      [ 0.25, 0.9, 0.9]] for k,v in homing.items()},
             "control_limits_position_offset" : homing,
-            "enable_link_collisions" : [    ((rname, 'FL_foot'),[('ground','ground_link')]),
-                                            ((rname, 'FR_foot'),[('ground','ground_link')]),
-                                            ((rname, 'RL_foot'),[('ground','ground_link')]),
-                                            ((rname, 'RR_foot'),[('ground','ground_link')])],
-            "feet_links" : [(rname, 'FL_foot'),
-                            (rname, 'FR_foot'),
-                            (rname, 'RL_foot'),
-                            (rname, 'RR_foot')]
+            "enable_link_collisions" : [    ((rname, 'FL_calf'),[('ground','ground_link')]),
+                                            ((rname, 'FR_calf'),[('ground','ground_link')]),
+                                            ((rname, 'RL_calf'),[('ground','ground_link')]),
+                                            ((rname, 'RR_calf'),[('ground','ground_link')])],
+            "feet_links" : [(rname, 'FL'),
+                            (rname, 'FR'),
+                            (rname, 'RL'),
+                            (rname, 'RR')]
         }
 
 

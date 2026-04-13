@@ -251,10 +251,11 @@ def loco_runner_builder(seed,
                                             step_length_sec=stepLength_sec,
                                             realtime_factor=-1.0,
                                             gui_env_index=0,
-                                            default_max_joint_impedance_ctrl_torque=100.0,
+                                            default_max_joint_impedance_ctrl_torque=env_builder_args.pop("default_max_joint_impedance_ctrl_torque", 100.0),
+                                            max_joint_impedance_ctrl_torques=env_builder_args.pop("max_joint_impedance_ctrl_torques", {}),
                                             show_gui=show_gui,
                                             log_freq=iterations_per_ep,
-                                            record_whole_joint_trajectories = False,
+                                            record_whole_joint_trajectories = env_builder_args.get("record_whole_joint_trajectories", False),
                                             log_freq_joints_trajectories = iterations_per_ep,
                                             log_folder=run_folder,
                                             revolute_dof_armature_override=0.1,
@@ -265,6 +266,39 @@ def loco_runner_builder(seed,
                                             opt_override=opt_override,
                                             reference_filter_cutoff_frequency=20.0,
                                             reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none")
+    elif mode == "mjx-act":
+        from adarl.adapters.MjxActuatedAdapter import MjxActuatedAdapter
+        import jax
+        ground_link = ("ground","ground_link")
+        robot_model = env_builder_args["robot_model"]
+        sim_dt = 2/1024 if robot_model=="centauro" else 4/1024 
+        iterations_per_ep = int(max_steps*stepLength_sec/sim_dt)
+        opt_override = {}
+        if env_builder_args.pop("enable_reference_filter", False):
+            raise NotImplementedError("Reference filter not implemented for MjxActuatedAdapter yet")
+        adapter = MjxActuatedAdapter(   vec_size=num_envs,
+                                        enable_rendering=env_builder_args.pop("enable_rendering"),
+                                        jax_device=jax.devices("gpu")[th_device.index] if th_device.type == "cuda" else jax.devices("cpu")[0],
+                                        output_th_device = th_device,
+                                        sim_step_dt=sim_dt,
+                                        step_length_sec=stepLength_sec,
+                                        realtime_factor=-1.0,
+                                        gui_env_index=0,
+                                        show_gui=show_gui,
+                                        log_freq=iterations_per_ep,
+                                        record_whole_joint_trajectories = env_builder_args.get("record_whole_joint_trajectories", False),
+                                        log_freq_joints_trajectories = iterations_per_ep,
+                                        log_folder=run_folder,
+                                        revolute_dof_armature_override=0.1,
+                                        safe_revolute_dof_armature=0.1,
+                                        opt_preset={"centauro":"fastest",
+                                                    "kyon":"faster",
+                                                    "quad":"fastest"}.get(robot_model, "faster"),
+                                        opt_override=opt_override,
+                                        default_actuator_kp=env_builder_args.get("safe_stiffness", 100.0),
+                                        default_actuator_kv=env_builder_args.get("safe_damping", 10.0),
+                                        default_max_actuator_force=env_builder_args.pop("default_max_joint_impedance_ctrl_torque", 100.0),
+                                        max_actuator_forces=env_builder_args.get("max_joint_impedance_ctrl_torques", {}))
     elif mode == "mujoco":
         from adarl.adapters.MujocoJointImpedanceAdapter import MujocoJointImpedanceAdapter
         from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
@@ -585,8 +619,8 @@ def get_kyon_args(enable_arms : bool = False):
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
                                                     [ 0.9, 0.9, 0.9]] for k,v in homing.items()},
-            "control_limits_ratios_minmax_pve" : {k:[[ 0.125, 0.9, 0.9],
-                                                     [ 0.125, 0.9, 0.9]] for k,v in homing.items()},
+            "control_limits_ratios_minmax_pve" : {k:[[ 0.25, 0.9, 0.9],
+                                                     [ 0.25, 0.9, 0.9]] for k,v in homing.items()},
             "control_limits_position_offset" : homing,
             "enable_link_collisions" : [    (('kyon', 'contact_1'),[('ground','ground_link')]),
                                             (('kyon', 'contact_2'),[('ground','ground_link')]),
@@ -595,14 +629,22 @@ def get_kyon_args(enable_arms : bool = False):
             "feet_links" : [('kyon', 'contact_1'),
                             ('kyon', 'contact_2'),
                             ('kyon', 'contact_3'),
-                            ('kyon', 'contact_4')]
+                            ('kyon', 'contact_4')],
+            "safe_stiffness" : 500.0,
+            "safe_damping" : 10.0,
+            "default_max_joint_impedance_ctrl_torque" : 150.0
         }
 
 def get_go1_args():
+
+    # physical limits are:
+    #  hip:   -0.863 +0.863 (midpoint = 0.0)
+    #  thigh: -0.686 +4.501 (midpoint = 1.9075) (0.0 points straight down, positive points backward)
+    #  knee:  -2.818 -0.888 (midpoint = -1.853)
     rname = "go1"
-    hip_pitch =  1.91
     hip_roll =   0.0 
-    knee =      -1.84
+    hip_pitch =   1.0 # 1.0
+    knee =       -1.8 #-1.84
     homing = {  (rname,"RL_hip_joint") :  hip_roll,
                 (rname,"RR_hip_joint") :  hip_roll,
                 (rname,"FL_hip_joint") :  hip_roll,
@@ -615,7 +657,29 @@ def get_go1_args():
                 (rname,"RR_calf_joint") :  knee,
                 (rname,"FL_calf_joint") :  knee,
                 (rname,"FR_calf_joint") :  knee}
-    from robot_descriptions import go1_mj_description
+    max_calf_torque = 35.55
+    max_thigh_torque = 23.7
+    max_hip_torque = 23.7
+
+    calf_ctrl_limits = [[ 0.8, 0.9, 0.9],
+                        [ 0.8, 0.9, 0.9]]
+    thigh_ctrl_limits = [[ 0.5, 0.9, 0.9],
+                        [ 0.5, 0.9, 0.9]]
+    hip_ctrl_limits = [[ 0.5, 0.9, 0.9],
+                        [ 0.5, 0.9, 0.9]]
+    ctrl_lims = {  (rname,"RL_hip_joint") : hip_ctrl_limits,
+                    (rname,"RR_hip_joint") : hip_ctrl_limits,
+                    (rname,"FL_hip_joint") : hip_ctrl_limits,
+                    (rname,"FR_hip_joint") : hip_ctrl_limits,
+                    (rname,"RL_thigh_joint") : thigh_ctrl_limits,
+                    (rname,"RR_thigh_joint") : thigh_ctrl_limits,
+                    (rname,"FL_thigh_joint") : thigh_ctrl_limits,
+                    (rname,"FR_thigh_joint") : thigh_ctrl_limits,
+                    (rname,"RL_calf_joint") : calf_ctrl_limits,
+                    (rname,"RR_calf_joint") : calf_ctrl_limits,
+                    (rname,"FL_calf_joint") : calf_ctrl_limits,
+                    (rname,"FR_calf_joint") : calf_ctrl_limits}
+    # from robot_descriptions import go1_mj_description
     # go1_description_path = "unitree_ros/robots/go1_description"
     # go1_file_path = adarl.utils.utils.pkgutil_get_path("pyunitree_ros", go1_description_path+"/xacro/robot.xacro")
     # xacro_extr_pkg_paths = {"go1_description" : adarl.utils.utils.pkgutil_get_path("pyunitree_ros", go1_description_path)}
@@ -627,6 +691,7 @@ def get_go1_args():
     xacro_extra_pkg_paths = {}
     raw_model_string = Path(go1_file_path).read_text()
 
+    # Need to have mujoco_playground with the already downloaded menagerie inside it
     menagerie_go1_assets_folder = adarl.utils.utils.pkgutil_get_path("mujoco_playground", "external_deps/mujoco_menagerie/unitree_go1/assets")
     go1_string = set_asset_texture_paths(raw_model_string,
                             menagerie_go1_assets_folder,
@@ -640,7 +705,7 @@ def get_go1_args():
             "robot_name" : rname,
             "robot_main_body_link" : "trunk",
             "robot_root_link" : "trunk",
-            "homing_body_pose_xyz_xyzw" : (0.,0.,0.495,0.,0.,0.,1.),
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.4,0.,0.,0.,1.),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
@@ -651,17 +716,30 @@ def get_go1_args():
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
                                                     [ 0.9, 0.9, 0.9]] for k,v in homing.items()},
-            "control_limits_ratios_minmax_pve" : {k:[[ 0.25, 0.9, 0.9],
-                                                     [ 0.25, 0.9, 0.9]] for k,v in homing.items()},
+            "control_limits_ratios_minmax_pve" : ctrl_lims,
             "control_limits_position_offset" : homing,
             "enable_link_collisions" : [    ((rname, 'FL_calf'),[('ground','ground_link')]),
                                             ((rname, 'FR_calf'),[('ground','ground_link')]),
                                             ((rname, 'RL_calf'),[('ground','ground_link')]),
                                             ((rname, 'RR_calf'),[('ground','ground_link')])],
+            "max_joint_impedance_ctrl_torques" : {  (rname,"RL_hip_joint") :  max_hip_torque,
+                                                    (rname,"RR_hip_joint") :  max_hip_torque,
+                                                    (rname,"FL_hip_joint") :  max_hip_torque,
+                                                    (rname,"FR_hip_joint") :  max_hip_torque,
+                                                    (rname,"RL_thigh_joint") :  max_thigh_torque,
+                                                    (rname,"RR_thigh_joint") :  max_thigh_torque,
+                                                    (rname,"FL_thigh_joint") :  max_thigh_torque,
+                                                    (rname,"FR_thigh_joint") :  max_thigh_torque,
+                                                    (rname,"RL_calf_joint") :  max_calf_torque,
+                                                    (rname,"RR_calf_joint") :  max_calf_torque,
+                                                    (rname,"FL_calf_joint") :  max_calf_torque,
+                                                    (rname,"FR_calf_joint") :  max_calf_torque},
             "feet_links" : [(rname, 'FL'),
                             (rname, 'FR'),
                             (rname, 'RL'),
-                            (rname, 'RR')]
+                            (rname, 'RR')],
+            "safe_stiffness" : 50.0,
+            "safe_damping" : 2.5
         }
 
 
@@ -771,7 +849,9 @@ def get_centauro_args():
             "feet_links" : [('centauro', 'wheel_1'),
                             ('centauro', 'wheel_2'),
                             ('centauro', 'wheel_3'),
-                            ('centauro', 'wheel_4')]
+                            ('centauro', 'wheel_4')],
+            "safe_stiffness" : 600.0,
+            "safe_damping" : 10.0
         }
 
 

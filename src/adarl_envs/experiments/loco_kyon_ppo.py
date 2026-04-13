@@ -24,18 +24,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     if mode == "pybullet":
         env_device = th.device("cpu",0)
-    elif mode == "mjx":
-        env_device = th.device("cuda",0)
     else:
-        raise RuntimeError(f"Unknown mode '{mode}'")
+        env_device = th.device("cuda",0)
     
     eval_freq = 40
-    r = 1.0 # randomization strength
+    r = 0.0 # randomization strength
     n = 0.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "action_delay_mustd_std" : (0.001, 0.001*n, 0.001*n),
+        "action_delay_mustd_std" : (0,0,0), #(0.001, 0.001*n, 0.001*n),
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.005,
         "control_mode" : "position",
@@ -46,7 +44,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : [0.47,0.47],
+        "goal_height_minmax" : [0.47,0.47] if args["robot"] == "kyon" else [0.30,0.30],
         "goal_resampling_probability_per_sec" : 0.0,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
@@ -90,10 +88,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "record_video" : True,
         "recycle_pose_randomization" : True,
         "reward_superweight_joint_penalties" : 1.0,
-        "reward_acceleration_weight" :        0.0,
-        "reward_acc_on_vel_weight" :          0.0,
-        "reward_actacc_weight" :              0.0,
-        "reward_actdiff_weight" :             0.0,
+        "reward_acceleration_weight" :        eps,
+        "reward_acc_on_vel_weight" :          eps,
+        "reward_actacc_weight" :              0.1,
+        "reward_actdiff_weight" :             0.1,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
         "reward_power_weight" :               1.0,
@@ -101,17 +99,17 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_feet_air_time_weight" :       20.0,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      eps,
-        "reward_heading_velocity_weight" :    0.0,
+        "reward_heading_velocity_weight" :    eps,
         "reward_heading_weight" :             eps,
         "reward_health_weight" :              eps,
-        "reward_height_position_weight" :     1.0,
-        "reward_height_velocity_weight" :     eps,
+        "reward_height_position_weight" :     2.0,
+        "reward_height_velocity_weight" :     0.1,
         "reward_pitchnroll_velocity_weight" : 1.0,
         "reward_pitchnroll_weight" :          1.0,
         "reward_position_limit_weight" :      1.0,
         "reward_position_weight" :            eps,
-        "reward_posref_vel_weight" :          0.0,
-        "reward_posref_acc_weight":           0.0,
+        "reward_posref_vel_weight" :          eps,
+        "reward_posref_acc_weight":           eps,
         "reward_scale_nolength":              0.1,
         "reward_sensed_effort_weight" :       eps,
         "reward_slip_weight" :                eps,
@@ -120,14 +118,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_torque_weight" :              0.5,
         "reward_torquediff_weight" :          eps,
         "reward_torqueref_weight" :           eps,
-        "reward_tracking_weight" :            3.0,
+        "reward_tracking_weight" :            2.0,
         "reward_velocity_limit_weight" :      eps,
         "reward_velocity_weight" :            eps,
         "reward_velref_weight" :              eps,
         "reward_yaw_vel_tracking_weight" :    1.0,
-        "robot_model" : "kyon",
-        "safe_damping" : 10,
-        "safe_stiffness" : 500,
+        "robot_model" : args["robot"],
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : False,
         "stepLength_sec" : step_length_sec,
@@ -441,6 +437,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--algorithm", default="ppo", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
+    ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

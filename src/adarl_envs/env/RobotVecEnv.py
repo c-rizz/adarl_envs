@@ -687,7 +687,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
         self._always_present_collisions : set[tuple[str,str]] = set()
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
-        self._posref_safety_minmmax_diff = self._safe_limits_minmax_j_pve[:,:,1]*self._configuration.posref_safety_period
+        self._posref_safety_minmmax_diff = self._safe_limits_minmax_j_pve[:,:,1]*self._configuration.stepLength_sec
         self._posref_saturation_minmmax_diff = self._posref_safety_minmmax_diff*0.999
         self._impulse_disturbances_enabled = impulse_probability_per_sec > 0
         self._homing_held_joints_vec_pvesd = self._configuration.homing_held_joints_pvesd.expand(adapter.vec_size(),len(self._configuration.joints_env_held),5)
@@ -855,6 +855,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         phys_limits_minmax_pve = {(robot_name,k):self._thtens(l) 
                                     for k,l in self._robot_model.get_joint_limits([jn[1] for jn in all_controlled_joints]).items()}
+        default_effort_lim = 1000.0
+        default_vel_lim = 100.0
+        for jn, minmax_pve in phys_limits_minmax_pve.items():
+            if not th.isfinite(minmax_pve).all():
+                 ggLog.warn(f"Physical limits for joint {jn} contains non-finite values {minmax_pve}, using defaults (effort_lim={default_effort_lim}, vel_lim={default_vel_lim})")
+            minmax_pve[0,2][minmax_pve[0,2]==float("-inf")] = -default_effort_lim
+            minmax_pve[1,2][minmax_pve[1,2]==float("inf")] = default_effort_lim
+            minmax_pve[0,1][minmax_pve[0,1]==float("-inf")] = -default_vel_lim
+            minmax_pve[1,1][minmax_pve[1,1]==float("inf")] = default_vel_lim
+
         if isinstance(safety_limits_ratios_minmax_pve, dict):
             safety_limits_dict_ratios_minmax_pve = safety_limits_ratios_minmax_pve
         else:
@@ -1875,7 +1885,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._last_obs = self._state_helper.observe(state)
         if self._configuration.enable_dbg_checks:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
-                dbg_check_finite(state, async_assert=True, assert_msg="Nonfinite state detected in RobotVecEnv")
+                dbg_check_finite(state, async_assert=False, assert_msg="Nonfinite state detected in RobotVecEnv")
                 dbg_check_finite(self._last_obs, async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
             else:
                 dbg_check_finite(self._last_obs["base.vec"], async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
@@ -2383,9 +2393,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 if labels is not None:
                     labels["state_"+substate] =  to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
                     labels["statenorm_"+substate] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
-            record_region_end("RobotVecEnv.get_infos")
         record_time("RobotVecEnv.get_infos: verbose part done")
-        
+        record_region_end("RobotVecEnv.get_infos")
         return i
     
     @override

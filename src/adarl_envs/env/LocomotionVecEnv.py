@@ -387,6 +387,8 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_yaw_vel_goal_relative_width : th.Tensor
         reward_yaw_vel_goal_relative_width_offset : th.Tensor
         reward_yaw_vel_goal_relative_weight : th.Tensor
+        is_jumping_alpha_1s : float
+        """ Smoothing factor for the is_jumping signal, expressed as the alpha of an exponential moving average with a time dt of 1 second."""
 
     @dataclass
     class EpisodeLocomConfiguration:
@@ -469,7 +471,10 @@ class LocomotionVecEnv(RobotVecEnv):
                                                         "CRASHED",
                                                         "SUPPORT_POLYGON_LINVEL_X",
                                                         "SUPPORT_POLYGON_LINVEL_Y",
-                                                        "SUPPORT_POLYGON_LINVEL_Z"], start=0)
+                                                        "SUPPORT_POLYGON_LINVEL_Z",
+                                                        "SMOOTHED_IS_JUMPING",
+                                                        "SMOOTHED_NUM_FEET_ON_GROUND"
+                                                        ], start=0)
     
     REWARD_WEIGHTS_FIELDS = IntEnum("REWARD_FIELDS", [  # Important! keep sorted alphabetically
                                                 "ACCELERATION",
@@ -731,7 +736,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_yaw_vel_goal_absolute_width = self._thtens(0.3),
                         reward_yaw_vel_goal_relative_width = self._thtens(1.5),
                         reward_yaw_vel_goal_relative_width_offset = self._thtens(0.1),
-                        reward_yaw_vel_goal_relative_weight = self._thtens(0.25)
+                        reward_yaw_vel_goal_relative_weight = self._thtens(0.25),
+                        is_jumping_alpha_1s = 0.8
                         )
         self._loco_conf.enabled_rewards = []
         prefix = "reward_weight_"
@@ -968,7 +974,9 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.CRASHED : [0,1],
                                                                     self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_X : [-10,10],
                                                                     self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Y : [-10,10],
-                                                                    self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : [-10,10]},
+                                                                    self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : [-10,10],
+                                                                    self.LOCOMOTION_FIELDS.SMOOTHED_IS_JUMPING : [0,1],
+                                                                    self.LOCOMOTION_FIELDS.SMOOTHED_NUM_FEET_ON_GROUND : [0,4]},
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=(1,),
@@ -1051,9 +1059,15 @@ class LocomotionVecEnv(RobotVecEnv):
     def _get_loco_adapter_data(self):
         if isinstance(self._adapter,BaseVecSimulationAdapter):
             lstates = self._adapter.getLinksState(requestedLinks = self._feet_and_body_link_ids, use_com_pose = False)
+            nfeet = lstates.shape[1] - 1  # number of feet links
             feet_linvels_vec_foot_xyz = lstates[:,:4,7:10]
-            feet_pos_vec_foot_xyz = lstates[:,:4,0:3]
-            borient_quat_vec_xyzw = lstates[:,4,3:7]
+            bstate = lstates[:,4]
+            borient_quat_vec_xyzw = bstate[:,3:7] # (nenvs,4)
+            body_pos_vec_xyz = bstate[:,0:3].unsqueeze(1)  # (nenvs,1,3)
+            abs_feet_pos = lstates[:,:nfeet,0:3] # (nenvs,nfeet,3)
+            feet_pos_vec_foot_xyz = abs_feet_pos
+            # feet_pos_vec_foot_xyz = th_quat_rotate(abs_feet_pos - body_pos_vec_xyz,
+            #                                        th_quat_conj(borient_quat_vec_xyzw).unsqueeze(1).expand(-1,nfeet,-1)) # (nenvs,nfeet,3)
         else:
             feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
             feet_pos_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
@@ -1188,20 +1202,28 @@ class LocomotionVecEnv(RobotVecEnv):
         abs_yaw_vel = -th.sum(body_rel_angvel_xyz * g_normalized, dim=-1, keepdim=True)  # negate because gravity points down
         yaw_vel_error_vec = (goal_yaw_vel - abs_yaw_vel).view((nenvs,1))
 
-        a = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.stepLength_sec)
-        smoothed_tracking_err_vec =         tracking_err_vec*(1-a) +        prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]*a
-        smoothed_height_error =             height_err_vec*(1-a) +          prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR]*a
-        smoothed_pitchnroll_error =         pitchnroll_err_vec*(1-a) +      prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR]*a
-        smoothed_pitchnroll_error_vel_vec = pitchnroll_err_vel_vec*(1-a) +  prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR_VELOCITY]*a
-        smoothed_heading_error_vec =        heading_error_vec*(1-a) +       prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR]*a
-        smoothed_yaw_vel_error_vec =        yaw_vel_error_vec*(1-a) +       prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_YAW_VEL_ERROR]*a
+        num_feet_on_ground = feet_are_touching_ground.sum(dim=1, keepdim=True)
+        is_jumping = (num_feet_on_ground == 0).float()
+
+        a_g = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.stepLength_sec)
+        smoothed_tracking_err_vec =         tracking_err_vec*(1-a_g) +        prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]*a_g
+        smoothed_height_error =             height_err_vec*(1-a_g) +          prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR]*a_g
+        smoothed_pitchnroll_error =         pitchnroll_err_vec*(1-a_g) +      prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR]*a_g
+        smoothed_pitchnroll_error_vel_vec = pitchnroll_err_vel_vec*(1-a_g) +  prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR_VELOCITY]*a_g
+        smoothed_heading_error_vec =        heading_error_vec*(1-a_g) +       prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR]*a_g
+        smoothed_yaw_vel_error_vec =        yaw_vel_error_vec*(1-a_g) +       prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_YAW_VEL_ERROR]*a_g
+        a_j = self._loco_conf.is_jumping_alpha_1s**(self._configuration.stepLength_sec)
+        smoothed_is_jumping =               is_jumping*(1-a_j) +              prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_IS_JUMPING]*a_j
+        smoothed_num_feet_on_ground =       num_feet_on_ground*(1-a_j) +      prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_NUM_FEET_ON_GROUND]*a_j
 
         masked_assign(smoothed_tracking_err_vec,            eps_resetting,   tracking_err_vec)
         masked_assign(smoothed_height_error,                eps_resetting,   height_err_vec)
         masked_assign(smoothed_pitchnroll_error,            eps_resetting,   pitchnroll_err_vec)
         masked_assign(smoothed_heading_error_vec,           eps_resetting,   heading_error_vec)
         masked_assign(smoothed_pitchnroll_error_vel_vec,    eps_resetting,   pitchnroll_err_vel_vec)
-        masked_assign(smoothed_yaw_vel_error_vec,            eps_resetting,   yaw_vel_error_vec)
+        masked_assign(smoothed_yaw_vel_error_vec,           eps_resetting,   yaw_vel_error_vec)
+        masked_assign(smoothed_is_jumping,                  eps_resetting,   is_jumping)
+        masked_assign(smoothed_num_feet_on_ground,          eps_resetting,   num_feet_on_ground)
 
         if self._loco_conf.use_contacts:
             if not isinstance_noimport(self._adapter, "PyBulletAdapter"):
@@ -1273,6 +1295,8 @@ class LocomotionVecEnv(RobotVecEnv):
             self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR : smoothed_pitchnroll_error.view(nenvs,1),
             self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR : smoothed_heading_error_vec.view(nenvs,1),
             self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR_VELOCITY : smoothed_pitchnroll_error_vel_vec.view(nenvs,1),
+            self.LOCOMOTION_FIELDS.SMOOTHED_IS_JUMPING : smoothed_is_jumping.view(nenvs,1),
+            self.LOCOMOTION_FIELDS.SMOOTHED_NUM_FEET_ON_GROUND : smoothed_num_feet_on_ground.view(nenvs,1),
             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X : rel_goal_linvel_dir_xyz[:,0].view(nenvs,1),
             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Y : rel_goal_linvel_dir_xyz[:,1].view(nenvs,1),
             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z : rel_goal_linvel_dir_xyz[:,2].view(nenvs,1),
@@ -1300,8 +1324,26 @@ class LocomotionVecEnv(RobotVecEnv):
         # feet_lifted = fstates_vec_13[:,:,2] > self._feet_radius + 0.001
         nenv_nfeet = (nenvs,len(self._loco_conf.feet_links))
         if isinstance_noimport(self._adapter, "MjxAdapter"):
-            dt = new_internal_state[self.INTERNAL_FIELDS.LAST_STEP_DT].view((nenvs,))
             prev_feet_air_durations_vec_foot_t = prev_feet_state[:,self.FEET_FIELDS.FEET_AIR_DURATIONS]
+            prev_feet_ground_durations_vec_foot_t = prev_feet_state[:,self.FEET_FIELDS.FEET_GROUND_DURATIONS]
+            prev_avg_feet_step_durations = prev_feet_state[:,self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS]
+            prev_peak_z = prev_feet_state[:,self.FEET_FIELDS.PEAK_POS_Z]
+
+            eps_resetting_ext = eps_resetting.unsqueeze(1).expand(nenv_nfeet)
+            prev_feet_air_durations_vec_foot_t    = th.where(condition=eps_resetting_ext, 
+                                                          input=self._thzeros(nenv_nfeet), 
+                                                          other=prev_feet_air_durations_vec_foot_t)
+            prev_feet_ground_durations_vec_foot_t = th.where(condition=eps_resetting_ext,
+                                                            input=self._thzeros(nenv_nfeet),
+                                                            other=prev_feet_ground_durations_vec_foot_t)
+            prev_avg_feet_step_durations          = th.where(condition=eps_resetting_ext,
+                                                            input=self._thzeros(nenv_nfeet),
+                                                            other=prev_avg_feet_step_durations)
+            prev_peak_z                           = th.where(condition=eps_resetting_ext,
+                                                            input=self._thzeros(nenv_nfeet),
+                                                            other=prev_peak_z)
+
+            dt = new_internal_state[self.INTERNAL_FIELDS.LAST_STEP_DT].view((nenvs,))
             feet_were_touching_ground = prev_feet_air_durations_vec_foot_t <= 0
             # if foot is just lifting off, mark the time in the state
             # if foot is already up, and stays up, leave the time there
@@ -1314,20 +1356,19 @@ class LocomotionVecEnv(RobotVecEnv):
             # ggLog.info(f"feet_were_touching_ground = \n{feet_were_touching_ground}")
             # ggLog.info(f"feet_are_touching_ground = \n{feet_are_touching_ground}")
             new_feet_air_durations_vec_foot_t  = prev_feet_air_durations_vec_foot_t.clone()
-            th.where(condition=just_touching_down.expand(nenv_nfeet),
+            th.where(condition=just_touching_down, #.expand(nenv_nfeet),
                      input = -prev_feet_air_durations_vec_foot_t, # if touching down, write negative step duration
                      other = new_feet_air_durations_vec_foot_t,
                      out   = new_feet_air_durations_vec_foot_t)
-            th.where(condition=feet_were_touching_ground.expand(nenv_nfeet),
+            th.where(condition=feet_were_touching_ground, #.expand(nenv_nfeet),
                      input = self._thtens(0.0), # if was touching ground already in the previous step, write zero
                      other = new_feet_air_durations_vec_foot_t,
                      out   = new_feet_air_durations_vec_foot_t)
-            th.where(condition=th.logical_not(feet_are_touching_ground).expand(nenv_nfeet),
+            th.where(condition=th.logical_not(feet_are_touching_ground), #.expand(nenv_nfeet),
                      input = new_feet_air_durations_vec_foot_t+dt.unsqueeze(1).expand(nenv_nfeet), # if is up, increase time
                      other = new_feet_air_durations_vec_foot_t,
                      out   = new_feet_air_durations_vec_foot_t)
             
-            prev_feet_ground_durations_vec_foot_t = prev_feet_state[:,self.FEET_FIELDS.FEET_GROUND_DURATIONS]
             feet_were_in_air = th.logical_not(feet_were_touching_ground)
             feet_are_in_air = th.logical_not(feet_are_touching_ground)
             just_lifting_up =    th.logical_and(feet_were_touching_ground, feet_are_in_air)
@@ -1349,14 +1390,12 @@ class LocomotionVecEnv(RobotVecEnv):
 
             # ggLog.info(f"prev_feet_step_durations_vec_foot_t = \n{prev_feet_step_durations_vec_foot_t}")
             # ggLog.info(f"new_feet_step_durations_vec_foot_t = \n{new_feet_step_durations_vec_foot_t}")
-            prev_avg_feet_step_durations = prev_feet_state[:,self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS]
             new_avg_feet_step_durations = prev_avg_feet_step_durations.clone()
             a = self._loco_conf.feet_air_time_avg_alpha
             th.where(condition=just_touching_down.expand(nenv_nfeet),
                      input = prev_feet_air_durations_vec_foot_t*(1-a) + prev_avg_feet_step_durations*a,
                      other = new_avg_feet_step_durations,
                      out   = new_avg_feet_step_durations)
-            prev_peak_z = prev_feet_state[:,self.FEET_FIELDS.PEAK_POS_Z]
             feet_z = feet_pos_vec_foot_xyz[:,:,2]
             peak_feet_z = th.where(condition=just_lifting_up.expand(nenv_nfeet),
                                     input = self._thzeros(tuple()), # if just lifted up, record the foot height as the peak height of the step
@@ -1729,7 +1768,7 @@ class LocomotionVecEnv(RobotVecEnv):
         rew_air_time = rew_air_time * (cmd_norm >= 0.01).to(rew_air_time.dtype)
         return rew_air_time
 
-    @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune", disable=disable_compile)
+    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune", disable=disable_compile)
     def _compute_rewards(self,   state : dict[str,th.Tensor]) -> tuple[th.Tensor, dict[str,th.Tensor]]:
         if self._loco_conf.playground_style_reward:
             return self._compute_rewards_pg(state)
@@ -1737,7 +1776,10 @@ class LocomotionVecEnv(RobotVecEnv):
         sub_rewards_return = {}
         if self._configuration.fixed_reward:
             sub_rewards_return = {k:th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype) for k in self._loco_conf.enabled_rewards}
-            reward = th.ones((self.num_envs, len(sub_rewards_return)), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)*len(sub_rewards_return)
+            if self._loco_conf.split_rewards:
+                reward = th.ones((self.num_envs, len(sub_rewards_return)), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
+            else:
+                reward = th.ones((self.num_envs,1), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
             return reward, sub_rewards_return
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
@@ -1779,7 +1821,8 @@ class LocomotionVecEnv(RobotVecEnv):
         # normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
         max_senseff = 1_000 # max expected sensed effort (not really a strict max)
         max_jacc = 1_000 # max expected joint acceleration (not really a strict max)
-        norm_senseff        = th.clamp(state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,0:2,4].abs().amax(dim=2)/max_senseff, -1, 1) # normalized max abs sensed effort
+        max_sensed_effort = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,0:2,4].abs().amax(dim=2)
+        norm_senseff        = th.clamp(max_sensed_effort/max_senseff, -1, 1) # normalized max abs sensed effort
         normaccelerations   = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,2,2]/max_jacc # normalized average accelearation
         normtorquediff      = state_robot_norm[:,0,:,2] - state_robot_norm[:,1,:,2]
         actdiff             = th.flatten((state_action_raw_vec[:,0] - state_action_raw_vec[:,1])/2, start_dim=1) # divide by 2 to keep it in [-1,1]
@@ -1790,7 +1833,9 @@ class LocomotionVecEnv(RobotVecEnv):
         velocities_safenorm = state_robot_safenorm[:,0,:,1]
         torque_safenorm     = state_robot_safenorm[:,0,:,2]
 
-        reward_sensed_effort    = joint_penalty_reward(norm_senseff,     max_rew=1.0, exponent=8.0, reduction="max")
+        bad_effort_threshold = 200.0
+        flattened_max_sensed_effort = max_sensed_effort*smoothclip_flattener(max_sensed_effort, bad_effort_threshold, bad_effort_threshold/10)
+        reward_sensed_effort    = norm_penalty(flattened_max_sensed_effort, norm=4, power=2, squash_max=1.0, squash_smoothness=4.0)
         reward_cmdtorque        = norm_penalty(normcmdtorques,   norm=4, power=2, squash_max=1.0, squash_smoothness=4.0)
         reward_velocity         = joint_penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
         # reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=8.0, flattening_scale=0.1)
@@ -1873,9 +1918,10 @@ class LocomotionVecEnv(RobotVecEnv):
         # subtracting 0.1 from the durations makes it so that very short steps are actually penalized with a negative reward
         # this makes doing small steps worse than doing nothing
         # squash the durations to max_good step, and offset it o that steps shorter than min_good_step are negative
-        corrected_air_durations = smooth_clip(feet_air_durations_secs - self._loco_conf.min_good_step_air_duration, 
+        clipped_feet_air_durations_secs = smooth_clip(feet_air_durations_secs, 
                                               self._loco_conf.max_good_step_duration,
-                                              softness=4.0)
+                                              softness=8.0)
+        corrected_air_durations = clipped_feet_air_durations_secs - self._loco_conf.min_good_step_air_duration
         # corrected_air_durations = th.tanh((feet_air_durations_secs - self._loco_conf.min_good_step_air_duration)/self._loco_conf.max_good_step_duration)*self._loco_conf.max_good_step_duration
         # # only keep the reward for finishing steps, and use reward quadratic in the duration (so two small steps are worse than one long one).
         # # But keep the sign of the reward
@@ -2109,6 +2155,8 @@ class LocomotionVecEnv(RobotVecEnv):
         smooth_track_err_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,)) #type: ignore
         smoothed_linvel_error = curr_locom_state[:,smooth_track_err_idx].view(self.num_envs)
         smoothed_yawvel_error = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_YAW_VEL_ERROR].view(self.num_envs)
+        smoothed_is_jumping = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_IS_JUMPING].view(self.num_envs)
+        smoothed_num_feet_on_ground = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_NUM_FEET_ON_GROUND].view(self.num_envs)
         curr_extri_state = state[self.STATE_EXTRINSIC][:,0]
         goal_abs = curr_locom_state[:,goal_vel_abs_xyz_idx]
         abs_linvel = curr_extri_state[:,body_linvel_abs_xyz_idx]
@@ -2121,6 +2169,8 @@ class LocomotionVecEnv(RobotVecEnv):
         i["goal_abs_xyz_vec"] = goal_abs
         i["body_abs_linvel"] = abs_linvel
         i["avg_air_duration"] = avg_air_duration
+        i["smoothed_is_jumping"] = smoothed_is_jumping
+        i["smoothed_num_feet_on_ground"] = smoothed_num_feet_on_ground
 
         if self._configuration.minimal_infos:
             record_region_end("LocomotionVecEnv.get_infos")

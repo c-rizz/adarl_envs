@@ -178,10 +178,10 @@ def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("
         # act_range.view(4,3)[2] *= -1.0
         act_range.view(4,3)[3] *= -1.0
     elif robot == "go1":
-        act_range = th.as_tensor([   0.0, -0.1,  0.17,
-                                    -0.0,  0.1, -0.17,
-                                     0.0, -0.1,  0.17,
-                                    -0.0,  0.1, -0.17],device = device)
+        act_range = th.as_tensor([   0.0, -0.4,  0.8,
+                                    -0.0,  0.4, -0.8,
+                                     0.0, -0.4,  0.8,
+                                    -0.0,  0.4, -0.8],device = device)
         # act_range.view(4,3)[0] *= -1.0
         act_range.view(4,3)[1] *= -1.0
         # act_range.view(4,3)[2] *= -1.0
@@ -253,6 +253,10 @@ def build_fixed_policy(env, robot : str, scale : float = 0.0):
     elif robot == "centauro":
         home_jpose = get_centauro_args()["homing_joint_pose"]
         stiffness = 1000
+        damping = 10
+    elif robot == "go1":
+        home_jpose = get_go1_args()["homing_joint_pose"]
+        stiffness = 400
         damping = 10
     else:
         raise RuntimeError(f"Unknown robot '{robot}")
@@ -381,7 +385,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_yaw_vel_tracking_weight" :    1.0,
         "robot_model" : args["robot"],
         "safe_damping" : 5,
-        "safe_stiffness" : 600,
+        "safe_stiffness" : 300,
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : False,
         "stepLength_sec" : step_length_sec,
@@ -414,7 +418,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : (not skip_optionals) or args["record"],
-        "minimal_infos" : skip_optionals or not args["record"],
+        # "minimal_infos" : skip_optionals or not args["record"],
         "initial_joint_pose_randomization_range" : 0.0,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.0,0.0,0.0])),
         "randomized_friction_slide_spin_roll_ratios" : (0.0,0.0,0.0),
@@ -425,7 +429,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "show_gui" : args["gui"],
         "just_health_reward" : skip_optionals,
         "goal_resampling_probability_per_sec" : 0.0,
-        "walltime_factor" : args["rt_factor"]})
+        "walltime_factor" : args["rt_factor"],
+        "record_whole_joint_trajectories" : True
+        })
     return play(seed,
                 folderName,
                 run_id, args,
@@ -483,7 +489,7 @@ def play(seed, folderName, run_id, args,
     elif control_mode=="random":
         model = build_rand_policy(env=env, robot=robot, scale=1.0, device = env_device)
     elif control_mode == "sine":
-        model = build_sin_policy(env, robot=robot, scale = 2.0, device = env_device)
+        model = build_sin_policy(env, robot=robot, scale = 1.0, device = env_device)
     else:
         raise RuntimeError(f"Unknown control mode '{control_mode}'")
 

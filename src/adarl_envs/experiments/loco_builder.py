@@ -437,7 +437,8 @@ def loco_runner_builder(seed,
                             verbose_infos=env_builder_args.pop("verbose_infos"),
                             split_rewards=env_builder_args.pop("split_rewards"),
                             minimal_infos=env_builder_args.pop("minimal_infos"),
-                            goal_yaw_vel_minmax=env_builder_args.pop("goal_yaw_vel_minmax")
+                            goal_yaw_vel_minmax=env_builder_args.pop("goal_yaw_vel_minmax"),
+                            playground_style_reward=env_builder_args.pop("playground_style_reward")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")

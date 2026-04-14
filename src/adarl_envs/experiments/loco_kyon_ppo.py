@@ -90,7 +90,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_superweight_joint_penalties" : 1.0,
         "reward_acceleration_weight" :        eps,
         "reward_acc_on_vel_weight" :          eps,
-        "reward_actacc_weight" :              0.1,
+        "reward_actacc_weight" :              1.0,
         "reward_actdiff_weight" :             0.1,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
@@ -115,7 +115,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_slip_weight" :                eps,
         "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,
-        "reward_torque_weight" :              0.5,
+        "reward_torque_weight" :              2.0,
         "reward_torquediff_weight" :          eps,
         "reward_torqueref_weight" :           eps,
         "reward_tracking_weight" :            2.0,
@@ -136,7 +136,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "verbose_infos" : False,
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
-        "minimal_infos" : True
+        "minimal_infos" : True,
+        "playground_style_reward" : False
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({        
@@ -401,7 +402,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     num_steps=24,
                                                     gamma=0.99,
                                                     loss_value_weight=1.0,
-                                                    loss_entropy_coeff=1e-4,
+                                                    loss_entropy_coeff=1e-3,
                                                     log_freq_vstep=int(max_steps_per_episode/10),
                                                     epsilon_policy_ratio_clip=0.2,
                                                     epsilon_value_clip_epsilon=0.2,

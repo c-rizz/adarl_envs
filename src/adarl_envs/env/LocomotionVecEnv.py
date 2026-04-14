@@ -648,7 +648,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         feet_air_time_avg_alpha = 0.8,
                         split_rewards : bool = False,
                         minimal_infos : bool = False,
-                        terminate_on_crash : bool = True
+                        terminate_on_crash : bool = True,
+                        playground_style_reward : bool = False
                         ):
         num_envs = adapter.vec_size()
         self._th_device = th_device
@@ -732,7 +733,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         split_rewards = split_rewards,
                         enabled_rewards = None, #type: ignore Will be set below,
                         terminate_on_crash = terminate_on_crash,
-                        playground_style_reward = False,
+                        playground_style_reward = playground_style_reward,
                         reward_yaw_vel_goal_absolute_width = self._thtens(0.3),
                         reward_yaw_vel_goal_relative_width = self._thtens(1.5),
                         reward_yaw_vel_goal_relative_width_offset = self._thtens(0.1),
@@ -2152,13 +2153,13 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                                                     self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y,
                                                                                                     self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z)) #type: ignore
         curr_locom_state = state[self.STATE_LOCOMOTION][:,0]
-        smooth_track_err_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,)) #type: ignore
-        smoothed_linvel_error = curr_locom_state[:,smooth_track_err_idx].view(self.num_envs)
-        smoothed_yawvel_error = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_YAW_VEL_ERROR].view(self.num_envs)
-        smoothed_is_jumping = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_IS_JUMPING].view(self.num_envs)
+        smoothed_linvel_error =       curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR].view(self.num_envs)
+        smoothed_yawvel_error =       curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_YAW_VEL_ERROR].view(self.num_envs)
+        smoothed_is_jumping =         curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_IS_JUMPING].view(self.num_envs)
         smoothed_num_feet_on_ground = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_NUM_FEET_ON_GROUND].view(self.num_envs)
+        smoothed_height_error =       curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR].view(self.num_envs)
+        goal_abs =                    curr_locom_state[:,goal_vel_abs_xyz_idx]
         curr_extri_state = state[self.STATE_EXTRINSIC][:,0]
-        goal_abs = curr_locom_state[:,goal_vel_abs_xyz_idx]
         abs_linvel = curr_extri_state[:,body_linvel_abs_xyz_idx]
         i = super().get_infos(state=state, labels=labels)
         avg_air_duration_idx = self._state_helper.sub_helpers[self.STATE_FEET].field_idx(self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS) #type: ignore
@@ -2171,6 +2172,7 @@ class LocomotionVecEnv(RobotVecEnv):
         i["avg_air_duration"] = avg_air_duration
         i["smoothed_is_jumping"] = smoothed_is_jumping
         i["smoothed_num_feet_on_ground"] = smoothed_num_feet_on_ground
+        i["smoothed_height_error"] = smoothed_height_error
 
         if self._configuration.minimal_infos:
             record_region_end("LocomotionVecEnv.get_infos")

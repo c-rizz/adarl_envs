@@ -15,29 +15,29 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
-    if algo == "sac" or algo == "ppo":
-        train_envs = 1024
-    elif algo == "sac_small":
+    if algo == "sac":
+        train_envs = 2048
+    elif algo == "ppo":
+        train_envs = 4096
+    elif algo == "sac_small" or algo == "ppo_small":
         train_envs = 8
     else:
         raise RuntimeError(f"Unexpected algo '{algo}'")
     
     if mode == "pybullet":
         env_device = th.device("cpu",0)
-    elif mode == "mjx":
-        env_device = th.device("cuda",0)
     else:
-        raise RuntimeError(f"Unknown mode '{mode}'")
+        env_device = th.device("cuda",0)
     
-    eval_freq = 40
-    r = 1.0 # randomization strength
-    n = 1.0 # noise strength
+    eval_freq = 5 if algo=="sac" else 40
+    r = 0.0 # randomization strength
+    n = 0.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "action_delay_mustd_std" : (0.001, 0.001*n, 0.001*n),
+        "action_delay_mustd_std" : (0.001, 0.001*n, 0.005*n),
         "action_noise_mustd" : (0.0,   0.0),
-        "action_smoothing_halflife_sec" : 0.0,
+        "action_smoothing_halflife_sec" : 0.01,
         "control_mode" : "position",
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
@@ -46,10 +46,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : [0.47,0.47],
+        "goal_height_minmax" : [0.47,0.47] if args["robot"] == "kyon" else [0.30,0.30],
         "goal_resampling_probability_per_sec" : 0.0,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
+        "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
         "held_joints_damping" : 10.0,
         "held_joints_stiffness" : 500.0,
@@ -57,79 +58,77 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 1.0,
-        "initial_height_randomization_range_meters" : 0.0,
+        "initial_height_randomization_range_meters" : 0.1,
         "initial_joint_pose_randomization_range" : 0.1,
         "just_health_reward" : False,
         "log_info_stats" : True,
-        "longterm_states_decimation_time" : 0.05, # Averaging of the joint pose for the position reward
+        "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,
         "max_goal_height_speed" : 0.1,
         "max_good_step_duration" : 0.3,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
-        "min_good_step_duration" : 0.1,
+        "min_good_step_duration" : 0.2,
         "mode" : mode,
-        "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.2*n],
-        "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.01*n, 0.2*n],
-        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.01*n, 0.2*n],
-        "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
-        "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
-        "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
+        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.2*n],
+        "obs_abs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.0*n, 0.0*n],
+        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.005*n, 0.05*n],
+        "obs_abs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
+        "obs_abs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
+        "obs_abs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
         "observe_full_robot_state" : False,
-        "offset_envs_ep_starts" : True,
+        "offset_envs_ep_starts" : False,
         "posref_safety_period" : 0.02,
         "quiet" : False,
         "randomized_armature_ratios" : 0.1*r,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
-        "randomized_frictionloss_ratios"             : 0.2*r,
-        "randomized_gains_damping_ratio_epstd"       : 0.2*r,
-        "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
+        "randomized_frictionloss_ratios"             : 0.0*r,
+        "randomized_gains_damping_ratio_epstd"       : 0.0*r,
+        "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
         "randomized_reference_filter_distribution" : ("uniform", (50.0, 50.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "reward_superweight_joint_penalties" : 1.0, #["loguniform", (0.01, 1.0)],
-        "reward_acceleration_weight" :        0.0,
-        "reward_acc_on_vel_weight" :          0.0,
-        "reward_actacc_weight" :              1.0,
-        "reward_actdiff_weight" :             1.0,
+        "reward_superweight_joint_penalties" : 1.0,
+        "reward_acceleration_weight" :        eps,
+        "reward_acc_on_vel_weight" :          eps,
+        "reward_actacc_weight" :              0.01,
+        "reward_actdiff_weight" :             0.01,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
-        "reward_power_weight" :               1.0,
+        "reward_power_weight" :               0.002,
         "reward_failure_weight" :             eps,
-        "reward_feet_air_time_weight" :       10.0,
+        "reward_feet_air_time_weight" :       1.0,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      eps,
-        "reward_heading_velocity_weight" :    0.0,
+        "reward_heading_velocity_weight" :    eps,
         "reward_heading_weight" :             eps,
         "reward_health_weight" :              eps,
         "reward_height_position_weight" :     1.0,
-        "reward_height_velocity_weight" :     eps,
+        "reward_height_velocity_weight" :     0.1,
         "reward_pitchnroll_velocity_weight" : 1.0,
         "reward_pitchnroll_weight" :          1.0,
         "reward_position_limit_weight" :      1.0,
         "reward_position_weight" :            eps,
-        "reward_posref_vel_weight" :          0.0,
-        "reward_posref_acc_weight":           0.0,
+        "reward_posref_vel_weight" :          eps,
+        "reward_posref_acc_weight":           eps,
         "reward_scale_nolength":              0.1,
         "reward_sensed_effort_weight" :       eps,
         "reward_slip_weight" :                eps,
         "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,
-        "reward_torque_weight" :              0.5,
-        "reward_torquediff_weight" :          eps,
+        "reward_torque_weight" :              0.001,
+        "reward_torquediff_weight" :          0.001,
         "reward_torqueref_weight" :           eps,
         "reward_tracking_weight" :            3.0,
         "reward_velocity_limit_weight" :      eps,
         "reward_velocity_weight" :            eps,
         "reward_velref_weight" :              eps,
         "reward_yaw_vel_tracking_weight" :    1.0,
-        "robot_model" : "kyon",
-        "safe_damping" : 10,
-        "safe_stiffness" : 500,
+        "robot_model" : args["robot"],
         "saturate_jimp_ref_limits" : False,
-        "split_rewards" : True,
+        "split_rewards" : True if algo=="sac" else False,
         "stepLength_sec" : step_length_sec,
         "terminate_on_safety" : False,
         "terminate_on_crash" : True,
@@ -140,7 +139,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "verbose_infos" : False,
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
-        "minimal_infos" : True
+        "minimal_infos" : True,
+        "playground_style_reward" : False
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({        
@@ -185,7 +185,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 10,
         "env_builder_args" : video_eval_env_builder_args,
         "num_envs" : 10,
-        "skip_first_eval": True
+        "skip_first_eval": False
     }
     video_det_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
     eval_conf_video_det = {
@@ -195,7 +195,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 10,
         "env_builder_args" : video_det_eval_env_builder_args,
         "num_envs" : 10,
-        "skip_first_eval": True
+        "skip_first_eval": False
     }
     # run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
     # run_1ms_env_builder_args["goal_speed_minmax"] = (1,1)
@@ -236,42 +236,44 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     gamma_long = 0.99
     gamma_short = 0.95
-    # gammas = {
-    #     "acceleration" :        gamma_long,
-    #     "acc_on_vel" :          gamma_short,
-    #     "actacc" :              gamma_short,
-    #     "actdiff" :             gamma_short,
-    #     "contacts" :            gamma_long,
-    #     "failure" :             gamma_long,
-    #     "feet_air_time" :       gamma_long,
-    #     "feet_ground_time" :    gamma_long,
-    #     "feet_on_ground" :      gamma_long,
-    #     "heading" :             gamma_long,
-    #     "heading_velocity" :    gamma_long,
-    #     "health" :              gamma_long,
-    #     "height_position" :     gamma_long,
-    #     "height_velocity" :     gamma_long,
-    #     "pitchnroll" :          gamma_long,
-    #     "pitchnroll_velocity" : gamma_long,
-    #     "position" :            gamma_long,
-    #     "position_limit" :      gamma_long,
-    #     "posref_vel" :          gamma_short,
-    #     "posref_acc" :          gamma_short,
-    #     "power" :               gamma_short,
-    #     "sensed_effort" :       gamma_long,
-    #     "slip" :                gamma_long,
-    #     "stand_position" :      gamma_long,
-    #     "torque" :              gamma_long,
-    #     "torque_limit" :        gamma_long,
-    #     "torque_refs" :         gamma_short,
-    #     "torquediff" :          gamma_short,
-    #     "tracking" :            gamma_long,
-    #     "velocity" :            gamma_long,
-    #     "velocity_refs" :       gamma_short,
-    #     "velocity_limit" :      gamma_long,
-    #     "yaw_vel_tracking" :    gamma_long
-    # }
-    gammas = gamma_long
+    if env_builder_args["split_rewards"]:
+        gammas = {
+            "acceleration" :        gamma_long,
+            "acc_on_vel" :          gamma_short,
+            "actacc" :              gamma_short,
+            "actdiff" :             gamma_short,
+            "contacts" :            gamma_long,
+            "failure" :             gamma_long,
+            "feet_air_time" :       gamma_long,
+            "feet_ground_time" :    gamma_long,
+            "feet_on_ground" :      gamma_long,
+            "heading" :             gamma_long,
+            "heading_velocity" :    gamma_long,
+            "health" :              gamma_long,
+            "height_position" :     gamma_long,
+            "height_velocity" :     gamma_long,
+            "pitchnroll" :          gamma_long,
+            "pitchnroll_velocity" : gamma_long,
+            "position" :            gamma_long,
+            "position_limit" :      gamma_long,
+            "posref_vel" :          gamma_short,
+            "posref_acc" :          gamma_short,
+            "power" :               gamma_short,
+            "sensed_effort" :       gamma_long,
+            "slip" :                gamma_long,
+            "stand_position" :      gamma_long,
+            "torque" :              gamma_long,
+            "torque_limit" :        gamma_long,
+            "torque_refs" :         gamma_short,
+            "torquediff" :          gamma_short,
+            "tracking" :            gamma_long,
+            "velocity" :            gamma_long,
+            "velocity_refs" :       gamma_short,
+            "velocity_limit" :      gamma_long,
+            "yaw_vel_tracking" :    gamma_long
+        }
+    else:
+        gammas = gamma_long
 
     # disabled_rewards = []
     # for k, v in env_builder_args.items():
@@ -292,9 +294,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         ]
     
     annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
-                                     start_target=-2.0,
+                                     start_target=-0.5,
                                      end_target=-5.0,
-                                     start_reference_threshold=0.5)
+                                     start_reference_threshold=0.4,
+                                     end_reference_threshold=0.05)
     
     def transition_augmentor_builder(observation_space, action_space, reward_space):
         return TransitionAugmentor(reward_space=reward_space,
@@ -310,15 +313,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_init_hparams( model_th_device = "cuda",
-                                                    q_network_arch=[1024,512],
+                                                    q_network_arch=[512,512,512],
                                                     q_lr=0.0005,
                                                     policy_lr=0.0005,
-                                                    policy_arch=[512,256],
+                                                    policy_arch=[512,256,256],
                                                     gamma=gammas,
                                                     target_tau = 0.001,
-                                                    batch_size=4096,
+                                                    batch_size=16384,
                                                     buffer_size=(5*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
-                                                    total_steps=5_000_000_000,
+                                                    total_steps=2_000_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=50,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
@@ -338,7 +341,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     deterministic_collection_ratio=0.00,
                                                     actor_mean_bounds_ratio = 0.8,
                                                     alpha_lr_factor = 1.0,
-                                                    independent_entropy_q=True
+                                                    independent_entropy_q=True,
+                                                    max_grad_norm=0.5,
+                                                    log_alpha_grad_clip=0.1
                                                     ),
                     checkpoint_freq=20,
                     collector_device=env_device,
@@ -398,20 +403,28 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder=None,
                 vec_env_builder=named_loco_venv_builder,
                 env_builder_args=env_builder_args,
-                agent_hyperparams=PPO_hyperparams(  minibatch_size=1024,
+                agent_hyperparams=PPO_hyperparams(  minibatch_size=None,
+                                                    minibatch_num=4,
                                                     th_device=th.device("cuda"),
                                                     actor_network_arch=(512,256),
                                                     critic_network_arch=(512,256),
                                                     q_lr=None,
                                                     policy_lr=3e-4,
-                                                    update_epochs=3,
-                                                    total_steps=train_envs*max_steps_per_episode*1000,
+                                                    update_epochs=5,
+                                                    total_steps=2_500_000_000,
                                                     num_envs=train_envs,
-                                                    num_steps=10,
-                                                    gamma=0.98,
+                                                    num_steps=24,
+                                                    gamma=0.99,
+                                                    loss_value_weight=1.0,
+                                                    loss_entropy_coeff=1e-3,
                                                     log_freq_vstep=int(max_steps_per_episode/10),
-                                                    # actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
-                                                    # critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
+                                                    epsilon_policy_ratio_clip=0.2,
+                                                    epsilon_value_clip_epsilon=0.2,
+                                                    gae_lambda=0.95,
+                                                    max_grad_norm=1.0,
+                                                    init_actor_logstd=-1.0,
+                                                    actor_observation_filter=["base.vec", "base.reward_weights"],
+                                                    critic_observation_filter=["privileged.vec", "base.reward_weights"],
                                                     ),
                 max_episode_duration=max_steps_per_episode,
                 validation_batch_size=0,
@@ -439,6 +452,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--algorithm", default="sac", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
+    ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

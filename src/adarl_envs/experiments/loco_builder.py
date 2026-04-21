@@ -94,6 +94,8 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
                 f"goal_vel_rel          {format_tensor(info.get('goal_rel_xyz_vec',None), 3)}\n"
                 f"smoothed_linvel_error {format_tensor(info.get('smoothed_linvel_error',None), 3)}\n"
                 f"linvel_error          {format_tensor(info.get('linvel_error',None), 3)}\n"
+                f"goal_yaw_vel          {format_tensor(info.get('goal_yaw_vel',None), 3)}\n"
+                f"smoothed_yawvel_error {format_tensor(info.get('smoothed_yawvel_error',None), 3)}\n"
                 f"goal_height           {format_tensor(info.get('goal_height',None), 3)}\n"
                 f"height_error          {format_tensor(info.get('height_err',None), 3)}\n"
                 f"log_prob              {format_tensor(extra_info.get('act_log_prob',th.as_tensor(float('nan'))), 3)}\n"
@@ -338,7 +340,8 @@ def loco_runner_builder(seed,
                             held_joints_damping=env_builder_args.pop("held_joints_damping"),
                             held_joints_stiffness=env_builder_args.pop("held_joints_stiffness"),
                             homing_body_pose_xyz_xyzw=env_builder_args.pop("homing_body_pose_xyz_xyzw"),
-                            homing_joint_pose=env_builder_args.pop("homing_joint_pose"),
+                            homing_joint_position=env_builder_args.pop("homing_joint_position"),
+                            homing_joint_position_references=env_builder_args.pop("homing_joint_position_references"),
                             impulse_duration_minmax=env_builder_args.pop("impulse_duration_minmax"),
                             impulse_mean_std=env_builder_args.pop("impulse_mean_std"),
                             impulse_probability_per_sec=env_builder_args.pop("impulse_probability_per_sec"),
@@ -354,12 +357,12 @@ def loco_runner_builder(seed,
                             min_good_step_duration=env_builder_args.pop("min_good_step_duration"),
                             minmax_damping=(1.0,30.0),
                             minmax_stiffness=(50.0,1000.0),
-                            obs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_angvel_ep_mustd_step_std"),
-                            obs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_noise_gravity_ep_mustd_step_std"),
-                            obs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_noise_joints_pve_ep_mustd_step_std"),
-                            obs_noise_linacc_ep_mustd_step_std = env_builder_args.pop("obs_noise_linacc_ep_mustd_step_std"),
-                            obs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),
-                            obs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_noise_posz_ep_mustd_step_std"),
+                            obs_abs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_angvel_ep_mustd_step_std"),
+                            obs_abs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_gravity_ep_mustd_step_std"),
+                            obs_abs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_joints_pve_ep_mustd_step_std"),
+                            obs_abs_noise_linacc_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_linacc_ep_mustd_step_std"),
+                            obs_abs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_linvel_ep_mustd_step_std"),
+                            obs_abs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_posz_ep_mustd_step_std"),
                             observe_full_robot_state = env_builder_args.pop("observe_full_robot_state"),
                             offset_envs_ep_starts = env_builder_args.pop("offset_envs_ep_starts"),
                             posref_safety_period = env_builder_args.pop("posref_safety_period"),
@@ -438,6 +441,7 @@ def loco_runner_builder(seed,
                             split_rewards=env_builder_args.pop("split_rewards"),
                             minimal_infos=env_builder_args.pop("minimal_infos"),
                             goal_yaw_vel_minmax=env_builder_args.pop("goal_yaw_vel_minmax"),
+                            goal_yaw_vel_zero_ratio=env_builder_args.pop("goal_yaw_vel_zero_ratio"),
                             playground_style_reward=env_builder_args.pop("playground_style_reward")
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
@@ -445,7 +449,8 @@ def loco_runner_builder(seed,
     # ggLog.info(f"action_space = {lrenv.action_space.shape}")
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
                         ui_render_envs=[0], autoreset=autoreset,
-                        log_freq = max_steps)
+                        log_freq = max_steps,
+                        sync_on_reinit = env_builder_args.pop("sync_on_reinit", False))
     if env_builder_args["video_save_freq"]>0:
         vrunner = EnvRunnerRecorderWrapper(vrunner,
                                         fps = 1/stepLength_sec,
@@ -454,7 +459,7 @@ def loco_runner_builder(seed,
                                         saveFrequency_ep=env_builder_args.pop("video_save_freq"),
                                         publish=False,
                                         stream=True,
-                                        vec_obs_key="base.vec", #TODO: somehow pass multiple keys and include privileged, or auto-detect which keys to save
+                                        vec_obs_keys=["base.vec","privileged.vec"], #TODO: somehow pass multiple keys and include privileged, or auto-detect which keys to save
                                         record_video=env_builder_args["record_video"],
                                         overlay_text_xy=(0.025,0.025),
                                         overlay_text_height=0.035,
@@ -539,7 +544,8 @@ def get_quad_args():
             "model_kwargs" : {  "use_cylinders" : "false",
                                 "all_collisions" : "false"},
             "xacro_extra_pkg_paths" : {"adarl_envs" : adarl.utils.utils.pkgutil_get_path("adarl_envs")},
-            "homing_joint_pose" : homing,
+            "homing_joint_position" : homing,
+            "homing_joint_position_references" : None,
             "robot_name" : "quad",
             "robot_main_body_link" : "body_link",
             "robot_root_link" : "body_link",
@@ -574,7 +580,7 @@ def get_kyon_args(enable_arms : bool = False):
     hip_pitch = -0.8727 # = -50/180*3.14159
     hip_roll =   0.0349 # = 2/180*3.14159
     knee =      -1.5707 # = -90/180*3.14159
-    homing = {  ("kyon","hip_roll_3") :  hip_roll,
+    homing_ref = {  ("kyon","hip_roll_3") :  hip_roll,
                 ("kyon","hip_roll_4") : -hip_roll,
                 ("kyon","hip_roll_1") : -hip_roll,
                 ("kyon","hip_roll_2") :  hip_roll,
@@ -586,8 +592,21 @@ def get_kyon_args(enable_arms : bool = False):
                 ("kyon","knee_pitch_4") :  knee,
                 ("kyon","knee_pitch_1") : -knee,
                 ("kyon","knee_pitch_2") :  knee}
+    # These are correct for stifness=500
+    homing = {  ("kyon","hip_roll_3") :    0.0930,
+                ("kyon","hip_roll_4") :   -0.0930,
+                ("kyon","hip_roll_1") :   -0.1115,
+                ("kyon","hip_roll_2") :    0.1115,
+                ("kyon","hip_pitch_3") :  -0.8795,
+                ("kyon","hip_pitch_4") :   0.8795,
+                ("kyon","hip_pitch_1") :  -0.8840,
+                ("kyon","hip_pitch_2") :   0.8840,
+                ("kyon","knee_pitch_3") :  1.6330,
+                ("kyon","knee_pitch_4") : -1.6330,
+                ("kyon","knee_pitch_1") :  1.6495,
+                ("kyon","knee_pitch_2") : -1.6495}
     if enable_arms:
-        homing.update({ ("kyon","shoulder_yaw_1") : 0.0,
+        homing_ref.update({ ("kyon","shoulder_yaw_1") : 0.0,
                         ("kyon","shoulder_pitch_1") : 0.0,
                         ("kyon","elbow_pitch_1") : 0.0,
                         ("kyon","wrist_pitch_1") : 0.0,
@@ -605,11 +624,12 @@ def get_kyon_args(enable_arms : bool = False):
                               "footonly_collision" : "true",
                               "varta" : "true"},
             "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf")},
-            "homing_joint_pose" : homing,
+            "homing_joint_position" : homing,
+            "homing_joint_position_references" : homing_ref,
             "robot_name" : "kyon",
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
-            "homing_body_pose_xyz_xyzw" : (0.,0.,0.495,0.,0.,0.,1.),
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.45,0.,0.,0.,1.),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
@@ -619,10 +639,10 @@ def get_kyon_args(enable_arms : bool = False):
             "randomized_friction_links" : [LINK_FILTERS.ALL],
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
-                                                    [ 0.9, 0.9, 0.9]] for k,v in homing.items()},
+                                                    [ 0.9, 0.9, 0.9]] for k,v in homing_ref.items()},
             "control_limits_ratios_minmax_pve" : {k:[[ 0.25, 0.9, 0.9],
-                                                     [ 0.25, 0.9, 0.9]] for k,v in homing.items()},
-            "control_limits_position_offset" : homing,
+                                                     [ 0.25, 0.9, 0.9]] for k,v in homing_ref.items()},
+            "control_limits_position_offset" : homing_ref,
             "enable_link_collisions" : [    (('kyon', 'contact_1'),[('ground','ground_link')]),
                                             (('kyon', 'contact_2'),[('ground','ground_link')]),
                                             (('kyon', 'contact_3'),[('ground','ground_link')]),
@@ -702,7 +722,8 @@ def get_go1_args():
             "robot_description_format" : "mjcf",
             "model_kwargs" : {},
             "xacro_extra_pkg_paths" : xacro_extra_pkg_paths,
-            "homing_joint_pose" : homing,
+            "homing_joint_position" : homing,
+            "homing_joint_position_references" : None,
             "robot_name" : rname,
             "robot_main_body_link" : "trunk",
             "robot_root_link" : "trunk",
@@ -827,7 +848,8 @@ def get_centauro_args():
                                 "small_sphere_wheel_collision":"true"
                                 },
             "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf")},
-            "homing_joint_pose" : homing,
+            "homing_joint_position" : homing,
+            "homing_joint_position_references" : None,
             "robot_name" : "centauro",
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",

@@ -113,6 +113,7 @@ class GraspVecEnv(RobotVecEnv):
                         held_joints_stiffness : float,
                         homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
                         homing_joint_pose : dict[tuple[str,str], float],
+                        homing_references : dict[tuple[str,str], float] | None = None,
                         init_on_reset_ratio : float,
                         initial_pose_randomization_range : float,
                         manipulator_links : list[tuple[str,str]],
@@ -237,6 +238,7 @@ class GraspVecEnv(RobotVecEnv):
                             th_device = th_device,
                             homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
                             homing_joint_pose = homing_joint_pose,
+                            homing_references = homing_references,
                             frame_stack_length=frame_stack_length,
                             verbose_infos = verbose_infos,
                             quiet = quiet,
@@ -244,11 +246,11 @@ class GraspVecEnv(RobotVecEnv):
                             initial_joint_pose_randomization_range = initial_pose_randomization_range,
                             init_on_reset_ratio = init_on_reset_ratio,
                             offset_envs_ep_starts = offset_envs_ep_starts,
-                            obs_noise_joints_pve_ep_mustd_step_std = obs_noise_joints_pve_ep_mustd_step_std,
-                            obs_noise_linvel_ep_mustd_step_std = obs_noise_linvel_ep_mustd_step_std,
-                            obs_noise_angvel_ep_mustd_step_std = obs_noise_angvel_ep_mustd_step_std,
-                            obs_noise_posz_ep_mustd_step_std = obs_noise_posz_ep_mustd_step_std,
-                            obs_noise_gravity_ep_mustd_step_std = obs_noise_gravity_ep_mustd_step_std,
+                            obs_abs_noise_joints_pve_ep_mustd_step_std = obs_noise_joints_pve_ep_mustd_step_std,
+                            obs_abs_noise_linvel_ep_mustd_step_std = obs_noise_linvel_ep_mustd_step_std,
+                            obs_abs_noise_angvel_ep_mustd_step_std = obs_noise_angvel_ep_mustd_step_std,
+                            obs_abs_noise_posz_ep_mustd_step_std = obs_noise_posz_ep_mustd_step_std,
+                            obs_abs_noise_gravity_ep_mustd_step_std = obs_noise_gravity_ep_mustd_step_std,
                             ui_camera_resolution_hw = ui_camera_resolution_hw,
                             enable_link_collisions = enable_link_collisions,
                             randomized_mass_links=mass_randomized_links,
@@ -265,7 +267,7 @@ class GraspVecEnv(RobotVecEnv):
                             held_joints_stiffness = held_joints_stiffness,
                             held_joints_damping = held_joints_damping,
                             initial_height_randomization_range_meters=0.0,
-                            obs_noise_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
+                            obs_abs_noise_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
                         )
 
         
@@ -407,7 +409,7 @@ class GraspVecEnv(RobotVecEnv):
         state_stats = state[self.STATE_JOINT_STEP_STATS]
 
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
-        normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
+        normhoming = normalize(self._configuration.homing_ctrl_joints_position, lims[0,:,0], lims[1,:,0])
         state_robot_norm     = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)
         longterm_stats_pos_norm     = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
                                                                                                       warn_limits_violation=False)

@@ -301,6 +301,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         held_joints_stiffness : float
         history_length : int
         homing_body_pose_xyz_xyzw : th.Tensor
+        homing_ctrl_joints_position : th.Tensor
+        """Actual homing positions for agent-controlled joints (may differ from references in homing_ctrl_joints_pvesd)"""
         homing_ctrl_joints_pvesd : th.Tensor
         homing_held_joints_position : dict[tuple[str,str],th.Tensor]
         homing_held_joints_pvesd : th.Tensor
@@ -316,7 +318,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         joint_safe_limits_minmax_pve : dict[tuple[str,str],th.Tensor]
         joint_safe_limits_minmax_stiffness : dict[tuple[str,str],th.Tensor]
         fixed_reward : bool
-        longterm_stats_alpha : th.Tensor
+        longterm_exp_smoothing_1s : th.Tensor
         main_body_link : tuple[str,str]
         merge_privileged : bool
         robot_description_string : str
@@ -485,12 +487,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         maxStepsPerEpisode : int,
                         minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
                         minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
-                        obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_joints_pve_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_linacc_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_joints_pve_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_linacc_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         quiet : bool,
                         robot_main_body_link : str,
                         robot_name : str,
@@ -508,6 +510,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         stop_on_failure : bool,
                         th_device : th.device,
                         verbose_infos : bool,
+                        homing_references : dict[tuple[str,str], float] | None = None,
                         enable_limits_safety : bool = True,
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
                         enable_posref_safety : bool = True,
@@ -558,6 +561,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
         action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec) if action_smoothing_halflife_sec>0 else 0.0
         goal_err_exp_smoothing_1s = 0.5**(1/goal_err_smoothing_halflife_sec) if goal_err_smoothing_halflife_sec>0 else 0.0
+        longterm_exp_smoothing_1s = 0.1**(1/longterm_states_decimation_time) if longterm_states_decimation_time>0 else 0.0
 
         (phys_limits_minmax_pve,
         safe_limits_minmax_pve,
@@ -566,6 +570,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         held_joints,
         free_joints_rn,
         all_controlled_joints,
+        homing_ctrl_joints_position,
         homing_ctrl_joints_pvesd,
         homing_held_joints_pvesd,
         homing_held_joints_position,
@@ -577,6 +582,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         safety_limits_ratios_minmax_pve = safety_limits_ratios_minmax_pve,
                                         free_joints=free_joints,
                                         homing_joint_pose = homing_joint_pose,
+                                        homing_references = homing_references,
                                         safe_stiffness = safe_stiffness,
                                         safe_damping = safe_damping,
                                         held_joints_stiffness=held_joints_stiffness,
@@ -609,6 +615,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     held_joints_stiffness = held_joints_stiffness,
                                                     history_length = max(2,frame_stack_length),
                                                     homing_body_pose_xyz_xyzw = self._thtens(homing_body_pose_xyz_xyzw),
+                                                    homing_ctrl_joints_position = homing_ctrl_joints_position,
                                                     homing_ctrl_joints_pvesd = homing_ctrl_joints_pvesd,
                                                     homing_held_joints_position = homing_held_joints_position,
                                                     homing_held_joints_pvesd = homing_held_joints_pvesd,
@@ -626,17 +633,17 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     joints_all_env_controlled = all_controlled_joints,
                                                     joints_agent_controlled = controlled_joints_rn,
                                                     joints_env_held = held_joints,
-                                                    longterm_stats_alpha = self._thtens(0.1**(stepLength_sec/longterm_states_decimation_time)), # alpha so that the contribution of a sample longterm_states_decimation_time seconds ago is 0.1
+                                                    longterm_exp_smoothing_1s = longterm_exp_smoothing_1s, # alpha so that the contribution of a sample longterm_states_decimation_time seconds ago is 0.1
                                                     main_body_link=(robot_name,robot_main_body_link),
                                                     merge_privileged = merge_privileged,
                                                     robot_description_string=robot_description_string,
                                                     robot_description_format=robot_description_format,
-                                                    noise_angvel_ep_mustdstd =  self._thtens(obs_noise_angvel_ep_mustd_step_std),
-                                                    noise_gravity_ep_mustdstd = self._thtens(obs_noise_gravity_ep_mustd_step_std),
-                                                    noise_joints_pve_mustdstd = self._thtens(obs_noise_joints_pve_ep_mustd_step_std),
-                                                    noise_linacc_ep_mustdstd =  self._thtens(obs_noise_linacc_ep_mustd_step_std),
-                                                    noise_linvel_ep_mustdstd =  self._thtens(obs_noise_linvel_ep_mustd_step_std),
-                                                    noise_posz_ep_mustdstd =    self._thtens(obs_noise_posz_ep_mustd_step_std),
+                                                    noise_angvel_ep_mustdstd =  self._thtens(obs_abs_noise_angvel_ep_mustd_step_std),
+                                                    noise_gravity_ep_mustdstd = self._thtens(obs_abs_noise_gravity_ep_mustd_step_std),
+                                                    noise_joints_pve_mustdstd = self._thtens(obs_abs_noise_joints_pve_ep_mustd_step_std),
+                                                    noise_linacc_ep_mustdstd =  self._thtens(obs_abs_noise_linacc_ep_mustd_step_std),
+                                                    noise_linvel_ep_mustdstd =  self._thtens(obs_abs_noise_linvel_ep_mustd_step_std),
+                                                    noise_posz_ep_mustdstd =    self._thtens(obs_abs_noise_posz_ep_mustd_step_std),
                                                     obs_dtype = self._obs_dtype,
                                                     observe_full_robot_state = observe_full_robot_state,
                                                     original_max_epsteps = maxStepsPerEpisode,
@@ -764,7 +771,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     damping_minmax={jn: self._configuration.joint_safe_limits_minmax_damping[jn] for jn in self._configuration.joints_agent_controlled})
 
         self._current_episode_config = RobotVecEnv.EpisodeConfiguration(
-                                                    vec_initial_ctrl_joint_pose = self._configuration.homing_ctrl_joints_pvesd[:,0].expand(adapter.vec_size(), len(self._configuration.joints_agent_controlled)).clone(),
+                                                    vec_initial_ctrl_joint_pose = th.stack([self._configuration.homing_ctrl_joints_position,
+                                                                                             self._configuration.homing_ctrl_joints_pvesd[:,0]
+                                                                                            ], dim=-1).unsqueeze(0).expand(adapter.vec_size(), -1, -1).clone(),
                                                     vec_init_on_reset = th.ones(size=(adapter.vec_size(),), dtype=th.bool).to(device=th_device, non_blocking=th_device.type=="cuda"),
                                                     vec_max_ep_steps = self._thfull(size=(adapter.vec_size(),), fill_value=self._configuration.original_max_epsteps, dtype=th.long),
                                                     randomized_damping_factor=self._thtens(1.0).expand(adapter.vec_size(),len(self._configuration.joints_agent_controlled)).clone(),
@@ -827,6 +836,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     safety_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
                                     control_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
                                     homing_joint_pose : dict[tuple[str,str], float],
+                                    homing_references : dict[tuple[str,str], float] | None,
                                     safe_stiffness : float,
                                     safe_damping : float,
                                     held_joints_stiffness : float,
@@ -930,15 +940,25 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         default_homing_joint_pose = {jn: unnormalize(0.0, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item())
                                      for jn in all_controlled_joints}
         for jn in homing_joint_pose:
-            if jn not in agent_controlled_joints_rn:
+            if jn not in all_controlled_joints:
                 ggLog.warn(f"homing_joint_pose contains non-controlled joint {jn}")
-        for jn in agent_controlled_joints_rn:
+        for jn in all_controlled_joints:
             if jn not in homing_joint_pose:
                 homing_joint_pose[jn] = default_homing_joint_pose[jn]
 
-        homing_ctrl_joints_pvesd = self._thtens([(homing_joint_pose[jn], 0, 0, safe_stiffness, safe_damping)
+        # If homing_references is provided, use it for position references in impedance commands (the p in pvesd).
+        # This allows specifying references that differ from actual positions, e.g. to account for gravity.
+        homing_ref = dict(homing_joint_pose)
+        if homing_references is not None:
+            for jn in homing_references:
+                if jn not in homing_ref:
+                    ggLog.warn(f"homing_references contains unknown joint {jn}")
+            homing_ref.update(homing_references)
+
+        homing_ctrl_joints_position = self._thtens([homing_joint_pose[jn] for jn in agent_controlled_joints_rn])
+        homing_ctrl_joints_pvesd = self._thtens([(homing_ref[jn], 0, 0, safe_stiffness, safe_damping)
                                                     for jn in agent_controlled_joints_rn]).view(-1,5)
-        homing_held_joints_pvesd = self._thtens([(homing_joint_pose[jn], 0, 0, held_joints_stiffness, held_joints_damping)
+        homing_held_joints_pvesd = self._thtens([(homing_ref[jn], 0, 0, held_joints_stiffness, held_joints_damping)
                                                     for jn in held_joints]).view(-1,5)
         homing_held_joints_position = {jn:self._thtens(p) for jn,p in homing_joint_pose.items() if jn in held_joints}
         homing_nonctrl_joints_position = {jn:self._thtens(p) for jn,p in homing_joint_pose.items() if jn not in agent_controlled_joints_rn}
@@ -956,6 +976,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         ggLog.info(f"free_joints = \n"+pprint.pformat(free_joints_rn)) # Joints that are not controlled at all
         ggLog.info(f"all_controlled_joints = \n"+pprint.pformat(all_controlled_joints)) # All the joints that the env controls (env held + agent controleld)
         ggLog.info(f"homing_joint_pose = \n"+pprint.pformat(homing_joint_pose)) # Homing position, it can include agent controlled, held and free joints
+        if homing_references is not None:
+            ggLog.info(f"homing_references = \n"+pprint.pformat(homing_references)) # Position references for impedance commands, may differ from actual positions
 
         return (phys_limits_minmax_pve,
                 safe_limits_minmax_pve,
@@ -964,6 +986,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 held_joints,
                 free_joints_rn,
                 all_controlled_joints,
+                homing_ctrl_joints_position,
                 homing_ctrl_joints_pvesd,
                 homing_held_joints_pvesd,
                 homing_held_joints_position,
@@ -1293,15 +1316,17 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                     self.STATE_ROBOT     : robot_state_noise,
                                                                     self.STATE_EXTRINSIC : extrinsic_state_noise
                                                                     })}
-        self._state_helper = DictStateHelper({  self.STATE_ROBOT : robot_state_helper,
-                                                self.STATE_JOINT_STEP_STATS : joint_step_stats_state_helper,
+        self._state_helper = DictStateHelper({  
                                                 self.STATE_EXTRINSIC : extrinsic_state_helper,
+                                                self.STATE_ROBOT : robot_state_helper,
+                                                self.STATE_POS_REF_ERR : joint_pos_ref_error_state_helper,
+                                                self.STATE_JOINT_STEP_STATS : joint_step_stats_state_helper,
                                                 self.STATE_INTERNAL : internal_state_helper,
                                                 self.STATE_ACT_PREPROC: act_history_state_helper,
                                                 self.STATE_ACT_RAW_HIST : raw_act_history_state_helper,
                                                 self.STATE_LAST_ACT_RAW : last_raw_act_state_helper,
                                                 self.STATE_JOINT_LONGTERM_STATS : joint_longterm_stats_helper,
-                                                self.STATE_POS_REF_ERR : joint_pos_ref_error_state_helper},
+                                                },
                                             obs_definitions=obs_definitions)
 
     
@@ -1503,7 +1528,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # if selected_vecs_num == 0:
         #     return
         
-        homing_pos = self._configuration.homing_ctrl_joints_pvesd[:,0]
+        homing_pos = self._configuration.homing_ctrl_joints_position
         t0 = time.monotonic()
         recomputed_pose_randomization = False
         if self._configuration.initial_joint_pose_randomization_range > 0 or self._configuration.initial_height_randomization_range_meters > 0:
@@ -1514,22 +1539,25 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 jp_dict = {k:v for k,v in self._configuration.homing_nonctrl_joints_position.items()}
                 jp_dict.update({k:v for k,v in self._configuration.homing_held_joints_position.items()})
                 recomputed_pose_randomization = True
-                self._last_pose_randomization = find_poses(
+                _rand_poses = find_poses(
                                                         root_joint = self._configuration.robot_root_joint,
                                                         homing_body_pose_xyzxyzw = self._pinocchio_corrected_homing_body_pose_xyzxyzw,
                                                         controlled_joints = self._configuration.joints_agent_controlled,
                                                         initial_pose_randomization_range = self._configuration.initial_joint_pose_randomization_range,
                                                         initial_height_randomization_range = self._configuration.initial_height_randomization_range_meters,
                                                         limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.joints_agent_controlled], dim = 1),
-                                                        homing_pos = self._configuration.homing_ctrl_joints_pvesd[:,0],
+                                                        homing_pos = homing_pos,
                                                         noncontrolled_jointpos = jp_dict,
                                                         robot_model = self._robot_model,
                                                         is_floating_base = self._configuration.robot_is_floating,
                                                         rng = self._rng,
                                                         excluded_collision_pairs = self._always_present_collisions,
                                                         num_envs=self.num_envs).to(device=self._configuration.th_device, non_blocking=True)
+                # For randomized poses, set references equal to positions (for now)
+                self._last_pose_randomization = th.stack([_rand_poses, _rand_poses], dim=2)
         else:
-            self._last_pose_randomization = homing_pos.expand(self.num_envs, len(self._configuration.joints_agent_controlled))
+            homing_ref = self._configuration.homing_ctrl_joints_pvesd[:,0]
+            self._last_pose_randomization = th.stack([homing_pos, homing_ref], dim=-1).unsqueeze(0).expand(self.num_envs, -1, -1)
         initial_ctrl_jposes = self._last_pose_randomization
         rand_time = time.monotonic()-t0
         if rand_time > 1.0:
@@ -1576,12 +1604,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     def _realworld_robot_init_move(self, vec_mask : th.Tensor):
         if isinstance_noimport(self._adapter,["VecRosXBotAdapterWrapper","VecZmqXbotAdapter"]):
-            vjpose = self._current_episode_config.vec_initial_ctrl_joint_pose
-            initial_cmd_vec_j_pvesd = th.stack([vjpose,
-                                        th.zeros_like(vjpose),
-                                        th.zeros_like(vjpose),
-                                        th.full_like(vjpose, self._configuration.safe_stiffness),
-                                        th.full_like(vjpose, self._configuration.safe_damping)], dim = 2)
+            vjposref = self._current_episode_config.vec_initial_ctrl_joint_pose[:,:,1]  # references
+            initial_cmd_vec_j_pvesd = th.stack([vjposref,
+                                        th.zeros_like(vjposref),
+                                        th.zeros_like(vjposref),
+                                        th.full_like(vjposref, self._configuration.safe_stiffness),
+                                        th.full_like(vjposref, self._configuration.safe_damping)], dim = 2)
             # initial_state_pve = th.zeros(size=(self.num_envs, len(self._configuration.controlled_joints), 3))
             not_resetting_sims = th.logical_not(self._current_episode_config.vec_init_on_reset)
             # if th.any(not_resetting_sims):
@@ -1626,14 +1654,25 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 return
         raise NotImplementedError()
     
-    def _precompute_init_tensors(self, vec_initial_ctrl_joint_pose):
-        initial_cmd_vec_j_pvesd = th.stack([vec_initial_ctrl_joint_pose,
-                                    th.zeros_like(vec_initial_ctrl_joint_pose),
-                                    th.zeros_like(vec_initial_ctrl_joint_pose),
-                                    th.full_like(vec_initial_ctrl_joint_pose, self._configuration.safe_stiffness),
-                                    th.full_like(vec_initial_ctrl_joint_pose, self._configuration.safe_damping)], dim = 2)
+    def _precompute_init_tensors(self, vec_initial_ctrl_joint_posposref):
+        """vec_initial_ctrl_joint_posref: (envs, joints, 2) where [:,:,0]=positions, [:,:,1]=references"""
+        vec_initial_ctrl_joint_pose = vec_initial_ctrl_joint_posposref[:,:,0]
+        initial_ctrl_posref = vec_initial_ctrl_joint_posposref[:,:,1]
+        initial_cmd_vec_j_pvesd = th.stack([initial_ctrl_posref,
+                                    th.zeros_like(initial_ctrl_posref),
+                                    th.zeros_like(initial_ctrl_posref),
+                                    th.full_like(initial_ctrl_posref, self._configuration.safe_stiffness),
+                                    th.full_like(initial_ctrl_posref, self._configuration.safe_damping)], dim = 2)
         full_cmd_vec_j_pvesd = th.concat([initial_cmd_vec_j_pvesd, self._homing_held_joints_vec_pvesd], dim = 1)
-        ctrl_joint_states = full_cmd_vec_j_pvesd[:,:,:3]
+
+        # Sim state uses actual positions, not references
+        num_ctrl = len(self._configuration.joints_agent_controlled)
+        ctrl_joint_states = full_cmd_vec_j_pvesd[:,:,:3].clone()
+        ctrl_joint_states[:,:num_ctrl,0] = vec_initial_ctrl_joint_pose
+        # Held joints: use actual positions from homing_held_joints_position
+        for i, jn in enumerate(self._configuration.joints_env_held):
+            if jn in self._configuration.homing_held_joints_position:
+                ctrl_joint_states[:,num_ctrl+i,0] = self._configuration.homing_held_joints_position[jn]
 
 
         
@@ -1674,13 +1713,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         ]).expand(self._adapter.vec_size(), 1, 13),
                         vec_mask=reinit_vecs,
                     ) if do_main_link_homing else None,
+                SetCurrentJointImpedanceCommand(
+                    joint_impedances_pvesd=self._precomputed_sim_init.full_cmd_vec_j_pvesd,
+                    vec_mask=reinit_vecs,
+                ),
                 SetJointsStateDirectCommand(
                     joint_names=self._precomputed_sim_init.all_joints_names,
                     joint_states_pve=self._precomputed_sim_init.all_joints_states,
-                    vec_mask=reinit_vecs,
-                ),
-                SetCurrentJointImpedanceCommand(
-                    joint_impedances_pvesd=self._precomputed_sim_init.full_cmd_vec_j_pvesd,
                     vec_mask=reinit_vecs,
                 ),
                 AlterModelCommand(
@@ -1703,12 +1742,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                .expand(self._adapter.vec_size(), 1, 13),
                                                   vec_mask=reinit_vecs)
             record_time(f"RobotVecEnv._simulation_initialization: setted main body pose")
+            self._adapter.set_current_joint_impedance_command(self._precomputed_sim_init.full_cmd_vec_j_pvesd, vec_mask=reinit_vecs)
+            record_time(f"RobotVecEnv._simulation_initialization: setted current joint impedance command")
             self._adapter.setJointsStateDirect(joint_names=self._precomputed_sim_init.all_joints_names,
                                                joint_states_pve=self._precomputed_sim_init.all_joints_states,
                                                vec_mask=reinit_vecs)
             record_time(f"RobotVecEnv._simulation_initialization: setted joint states")
-            self._adapter.set_current_joint_impedance_command(self._precomputed_sim_init.full_cmd_vec_j_pvesd, vec_mask=reinit_vecs)
-            record_time(f"RobotVecEnv._simulation_initialization: setted current joint impedance command")
             if self._model_randomization_enabled and not use_mjx_command_sequence:
                 if not isinstance_noimport(self._adapter, "MjxAdapter"):
                     raise RuntimeError(f"Model randomizations are currently only supported with MjxAdapter")
@@ -2236,9 +2275,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         step_avg_pos = vec_jstates_j_pveae[:,:,0]
         prev_step_avg_pos = self._current_state[self.STATE_JOINT_LONGTERM_STATS][:,0,0]
         # print(f"vec_step_count={vec_step_count} step_avg_pos={step_avg_pos}")
+        long_alpha = self._configuration.longterm_exp_smoothing_1s**self._configuration.stepLength_sec
         step_avg_pos = th.where(is_resetting.view((self.num_envs,1)),
                                 step_avg_pos,
-                                step_avg_pos*(1-self._configuration.longterm_stats_alpha) + prev_step_avg_pos*self._configuration.longterm_stats_alpha)
+                                step_avg_pos*(1-long_alpha) + prev_step_avg_pos*long_alpha)
         new_longterm_stats_state = {self.JOINT_LONGTERM_STATS_FIELDS.AVG_POS : step_avg_pos}
 
 
@@ -2325,7 +2365,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
         act_raw_state = state[self.STATE_ACT_RAW_HIST]   
-        normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
+        homing_ctrl_pos = self._configuration.homing_ctrl_joints_position
+        normhoming = normalize(homing_ctrl_pos, lims[0,:,0], lims[1,:,0])
         smoothed_joint_pose_norm = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
                                                                                                       warn_limits_violation=False)[:,0,0]
         actdiff             = th.flatten((act_raw_state[:,0] - act_raw_state[:,1])/2, start_dim=1)
@@ -2334,7 +2375,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         joint_pose = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)[:,0,:,0]
         i.update({
             "tot_reward_sum" : reward.sum(dim=1) if reward.dim()>1 else reward,
-            "joint_homing_dist" : state[self.STATE_JOINT_LONGTERM_STATS][:,0,0,:] - self._configuration.homing_ctrl_joints_pvesd[:,0],
+            "joint_homing_dist" : state[self.STATE_JOINT_LONGTERM_STATS][:,0,0,:] - homing_ctrl_pos,
             "joint_pos_error" : th.mean(th.abs(smoothed_joint_pose_norm - normhoming), dim=1),
             "joint_pos_error_instant" : th.mean(th.abs(joint_pose - normhoming), dim=1),
             "act_diff" : actdiff,
@@ -2449,7 +2490,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         max_rew = 100
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
-        normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
+        normhoming = normalize(self._configuration.homing_ctrl_joints_position, lims[0,:,0], lims[1,:,0])
 
         robot_state_norm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)
         # dbg_run(lambda: self._warn_out_of_bounds(robot_state_norm))

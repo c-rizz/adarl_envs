@@ -105,7 +105,7 @@ def loco_mujoco_playground_runner_builder(seed,
                                     saveFrequency_ep=video_save_freq,
                                     publish=False,
                                     stream=True,
-                                    vec_obs_key= None, #"base.vec", #TODO: somehow pass multiple keys and include privileged, or auto-detect which keys to save
+                                    vec_obs_keys = ["state","privileged_state"], #"base.vec", #TODO: somehow pass multiple keys and include privileged, or auto-detect which keys to save
                                     record_video=record_video,
                                     overlay_text_xy=(0.025,0.025),
                                     overlay_text_height=0.035,

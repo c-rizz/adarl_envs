@@ -119,11 +119,11 @@ def robot_env_builder(  seed,
                         enable_dbg_checks=True,
                         initial_joint_pose_randomization_range = env_builder_args.pop("initial_pose_randomization_range"),
                         init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
-                        obs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_noise_joints_pve_ep_mustd_step_std"),
-                        obs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),
-                        obs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_angvel_ep_mustd_step_std"),
-                        obs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_noise_posz_ep_mustd_step_std"),
-                        obs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_noise_gravity_ep_mustd_step_std"),
+                        obs_abs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_noise_joints_pve_ep_mustd_step_std"),
+                        obs_abs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),
+                        obs_abs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_angvel_ep_mustd_step_std"),
+                        obs_abs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_noise_posz_ep_mustd_step_std"),
+                        obs_abs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_noise_gravity_ep_mustd_step_std"),
                         ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw")
                         )
     # ggLog.info(f"state_space = {lrenv.state_space}")

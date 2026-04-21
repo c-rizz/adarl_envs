@@ -134,7 +134,7 @@ def norm_penalty(x : th.Tensor,
                  squash_smoothness : float = 4.0,
                  flattening_scale : float = 0.0,
                  flattening_power : float = 2.0,
-                 scale : float = 1.0) -> th.Tensor:
+                 scale : float | None = None) -> th.Tensor:
     """ A joint penalty applied to the norm of the vectors in x. The penalty is computed as the norm raised to the power of 'power',
         and then flattened using a smooth clipping function.
 
@@ -146,7 +146,7 @@ def norm_penalty(x : th.Tensor,
         Norm to use for the penalty
     power : float
         Power to raise the norm to
-    max_val : float
+    squash_max : float
         Maximum value for the penalty
     squash_smoothness : float
         Smoothness parameter for the clipping (lower is smoother, see smooth_clip)
@@ -154,8 +154,8 @@ def norm_penalty(x : th.Tensor,
         Scale parameter for the flattening, see flattener()
     flattening_power : float
         Power parameter for the flattening, see flattener()
-    scaling : float
-        Output will be scaled to be maximum this value
+    scale : float | None
+        Output will be scaled to be maximum this value, if not None. If None, no scaling is applied.
 
     Returns
     -------
@@ -170,7 +170,8 @@ def norm_penalty(x : th.Tensor,
         penalties = flattened_penalties
     else:
         penalties = squashed_penalties
-    penalties = penalties/squash_max * scale
+    if scale is not None:
+        penalties = penalties/squash_max * scale
     return -penalties
 
 def smoothclip_flattener(x : th.Tensor, t : float, w : float) -> th.Tensor:
@@ -300,6 +301,7 @@ class LocomotionVecEnv(RobotVecEnv):
         goal_speed_minmax : th.Tensor
         goal_abs_yaw_minmax : th.Tensor
         goal_yaw_vel_minmax : th.Tensor
+        goal_yaw_vel_zero_ratio : th.Tensor
         reward_scale : th.Tensor
         reward_superweight_joint_penalties : DistributionDefTh
         reward_weight_acceleration : DistributionDefTh
@@ -539,23 +541,24 @@ class LocomotionVecEnv(RobotVecEnv):
                         goal_speed_minmax : tuple[float, float],
                         goal_yaw_minmax : tuple[float, float],
                         goal_yaw_vel_minmax : tuple[float, float],
+                        goal_yaw_vel_zero_ratio : float,
                         ground_link : tuple[str,str],
                         held_joints_damping : float,
                         held_joints_stiffness : float,
                         homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
-                        homing_joint_pose : dict[tuple[str,str], float],
+                        homing_joint_position : dict[tuple[str,str], float],
                         init_on_reset_ratio : float,
                         initial_height_randomization_range_meters : float,
                         initial_joint_pose_randomization_range : float,
                         maxStepsPerEpisode : int,
                         minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
                         minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
-                        obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_joints_pve_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_linacc_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_joints_pve_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_linacc_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
+                        obs_abs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
                         quiet : bool,
                         reward_superweight_joint_penalties : DistributionDef,
                         reward_acceleration_weight : DistributionDef,
@@ -613,6 +616,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         verbose_infos : bool,
                         max_good_step_duration : float,
                         min_good_step_duration : float,
+                        homing_joint_position_references : dict[tuple[str,str], float] | None = None,
                         enable_limits_safety : bool = True,
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
                         enable_posref_safety : bool = True,
@@ -621,7 +625,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         impulse_mean_std : tuple[float,float ]= (50.0, 50.0),
                         impulse_probability_per_sec : float = 0.0,
                         just_health_reward : bool = False,
-                        longterm_states_decimation_time : float = 0.0001,
+                        longterm_states_decimation_time : float = 0.8,
                         merge_privileged : bool = False,
                         offset_envs_ep_starts : bool = False,
                         observe_full_robot_state : bool = False,
@@ -702,6 +706,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         goal_speed_minmax = th.as_tensor(goal_speed_minmax, device=th_device, dtype=th.float32),
                         goal_abs_yaw_minmax = th.as_tensor(goal_yaw_minmax, device=th_device, dtype=th.float32),
                         goal_yaw_vel_minmax = th.as_tensor(goal_yaw_vel_minmax, device=th_device, dtype=th.float32),
+                        goal_yaw_vel_zero_ratio = self._thtens(goal_yaw_vel_zero_ratio),
                         height_reward_settle_point=self._thtens(0.025), # A narrow reward bell
                         height_reward_2_settle_point=self._thtens(0.3), # A wider reward bell
                         height_reward_2_weight=self._thtens(0.5), # weight of the wide reward bell over the narrow one
@@ -738,7 +743,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_yaw_vel_goal_relative_width = self._thtens(1.5),
                         reward_yaw_vel_goal_relative_width_offset = self._thtens(0.1),
                         reward_yaw_vel_goal_relative_weight = self._thtens(0.25),
-                        is_jumping_alpha_1s = 0.8
+                        is_jumping_alpha_1s = 0.7
                         )
         self._loco_conf.enabled_rewards = []
         prefix = "reward_weight_"
@@ -825,7 +830,8 @@ class LocomotionVecEnv(RobotVecEnv):
                             held_joints_damping = held_joints_damping,
                             held_joints_stiffness = held_joints_stiffness,
                             homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
-                            homing_joint_pose = homing_joint_pose,
+                            homing_joint_pose = homing_joint_position,
+                            homing_references = homing_joint_position_references,
                             impulse_duration_minmax = impulse_duration_minmax,
                             impulse_mean_std = impulse_mean_std,
                             impulse_probability_per_sec = impulse_probability_per_sec,
@@ -839,12 +845,12 @@ class LocomotionVecEnv(RobotVecEnv):
                             minmax_damping = minmax_damping,
                             minmax_stiffness = minmax_stiffness,
                             offset_envs_ep_starts = offset_envs_ep_starts,
-                            obs_noise_angvel_ep_mustd_step_std = obs_noise_angvel_ep_mustd_step_std,
-                            obs_noise_gravity_ep_mustd_step_std = obs_noise_gravity_ep_mustd_step_std,
-                            obs_noise_joints_pve_ep_mustd_step_std = obs_noise_joints_pve_ep_mustd_step_std,
-                            obs_noise_linacc_ep_mustd_step_std = obs_noise_linacc_ep_mustd_step_std,
-                            obs_noise_linvel_ep_mustd_step_std = obs_noise_linvel_ep_mustd_step_std,
-                            obs_noise_posz_ep_mustd_step_std = obs_noise_posz_ep_mustd_step_std,
+                            obs_abs_noise_angvel_ep_mustd_step_std = obs_abs_noise_angvel_ep_mustd_step_std,
+                            obs_abs_noise_gravity_ep_mustd_step_std = obs_abs_noise_gravity_ep_mustd_step_std,
+                            obs_abs_noise_joints_pve_ep_mustd_step_std = obs_abs_noise_joints_pve_ep_mustd_step_std,
+                            obs_abs_noise_linacc_ep_mustd_step_std = obs_abs_noise_linacc_ep_mustd_step_std,
+                            obs_abs_noise_linvel_ep_mustd_step_std = obs_abs_noise_linvel_ep_mustd_step_std,
+                            obs_abs_noise_posz_ep_mustd_step_std = obs_abs_noise_posz_ep_mustd_step_std,
                             observe_full_robot_state = observe_full_robot_state,
                             posref_safety_period = posref_safety_period,
                             quiet = quiet,
@@ -1066,9 +1072,9 @@ class LocomotionVecEnv(RobotVecEnv):
             borient_quat_vec_xyzw = bstate[:,3:7] # (nenvs,4)
             body_pos_vec_xyz = bstate[:,0:3].unsqueeze(1)  # (nenvs,1,3)
             abs_feet_pos = lstates[:,:nfeet,0:3] # (nenvs,nfeet,3)
-            feet_pos_vec_foot_xyz = abs_feet_pos
-            # feet_pos_vec_foot_xyz = th_quat_rotate(abs_feet_pos - body_pos_vec_xyz,
-            #                                        th_quat_conj(borient_quat_vec_xyzw).unsqueeze(1).expand(-1,nfeet,-1)) # (nenvs,nfeet,3)
+            # feet_pos_vec_foot_xyz = abs_feet_pos
+            feet_pos_vec_foot_xyz = th_quat_rotate(abs_feet_pos - body_pos_vec_xyz,
+                                                   th_quat_conj(borient_quat_vec_xyzw).unsqueeze(1).expand(-1,nfeet,-1)) # (nenvs,nfeet,3)
         else:
             feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
             feet_pos_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
@@ -1769,7 +1775,9 @@ class LocomotionVecEnv(RobotVecEnv):
         rew_air_time = rew_air_time * (cmd_norm >= 0.01).to(rew_air_time.dtype)
         return rew_air_time
 
-    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune", disable=disable_compile)
+    @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",
+                                    #   skip_eval_unsafe_warmup=100, skip_eval_unsafe_manual_arg_guard=0,
+                                      disable=disable_compile)
     def _compute_rewards(self,   state : dict[str,th.Tensor]) -> tuple[th.Tensor, dict[str,th.Tensor]]:
         if self._loco_conf.playground_style_reward:
             return self._compute_rewards_pg(state)
@@ -1799,7 +1807,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                          goal_yaw_speed.view((self.num_envs,1)).abs() > 10/180*th.pi)
 
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
-        normhoming = normalize(self._configuration.homing_ctrl_joints_pvesd[:,0], lims[0,:,0], lims[1,:,0])
+        normhoming = normalize(self._configuration.homing_ctrl_joints_position, lims[0,:,0], lims[1,:,0])
         state_robot = state[self.STATE_ROBOT]
         state_robot_norm        = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state_robot, warn_limits_violation=False)
         longterm_stats_pos_norm = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
@@ -1837,14 +1845,14 @@ class LocomotionVecEnv(RobotVecEnv):
         bad_effort_threshold = 200.0
         flattened_max_sensed_effort = max_sensed_effort*smoothclip_flattener(max_sensed_effort, bad_effort_threshold, bad_effort_threshold/10)
         reward_sensed_effort    = norm_penalty(flattened_max_sensed_effort, norm=4, power=2, squash_max=1.0, squash_smoothness=4.0)
-        reward_cmdtorque        = norm_penalty(normcmdtorques,   norm=4, power=2, squash_max=1.0, squash_smoothness=4.0)
+        # reward_cmdtorque        = norm_penalty(normcmdtorques,   norm=4, power=2, squash_max=1.0, squash_smoothness=4.0)
         reward_velocity         = joint_penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
         # reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=8.0, flattening_scale=0.1)
         # reward_acceleration     = flattened_joint_penalty_reward(normaccelerations, max_rew=max_rew, exponent=2.0, flattening_scale=0.1)
         reward_acceleration     = norm_penalty(normaccelerations, norm=4.0, power=2.0, squash_max=1.0, squash_smoothness=4.0)
         reward_stand_position   = joint_penalty_reward(normposhomingdiff,    max_rew=max_rew, exponent=1.0)*(th.logical_not(should_be_moving.view((self.num_envs,))))
         reward_position         = flattened_joint_penalty_reward(normposstathomingdiff,max_rew=max_rew, exponent=2.0, flattening_scale=0.02)
-        reward_torquediff       = joint_penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
+        # reward_torquediff       = joint_penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
         reward_actdiff          = joint_penalty_reward(actdiff,max_rew=1, exponent=2, presquash_factor=10)
         reward_actacc           = joint_penalty_reward(act_acc,max_rew=1, exponent=2, presquash_factor=100)
         reward_torque_limit     = joint_penalty_reward(torque_safenorm,max_rew=1,exponent=50)
@@ -1853,9 +1861,26 @@ class LocomotionVecEnv(RobotVecEnv):
 
         acc_on_vel = normaccelerations/(normvelocities+0.1)
         reward_acc_on_vel = norm_penalty(acc_on_vel, norm=4.0, power=2.0, squash_max=1.0, squash_smoothness=4.0)
-        avg_power = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,2,5]
-        reward_power = norm_penalty(avg_power/1000, norm=1.0, power=1.0, squash_max=1.0, squash_smoothness=4.0)
-        
+        avg_cmd_torque = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,2,3] # average torque of each joint over the simulation substeps
+        avg_mechanical_power = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,2,5] # average power of each joint over the simulation substeps
+        reward_power = norm_penalty(avg_mechanical_power, norm=1.0, power=1.0, squash_max=100000.0, 
+                                    squash_smoothness=4.0)/joints_num
+        # We try to make it so that the cmdtorque reward expresses roughly the 
+        # motor copper power losses.
+        # Following this logic 
+        # - K_t represents the "motor torque constant", in Nm/A, the ratio between torque and current, tau = K_t * I
+        # - R   represents the "motor resistance", in Ohms, the ratio between voltage and current, so Power = I^2*R = (tau/K_t)^2 * R
+        # - K_m represents the "motor constant", in Nm/sqrt(W), K_m = K_t/sqrt(R), so Power = (tau/K_m)^2
+        # With this the L2 norm becomes the total copper loss of the motors, in W, same scale as the power reward
+        K_m = 2.5 # reasonable froma B1-kyon sized quadruped, maybe, can be compensated by the reward weight
+        reward_cmdtorque = norm_penalty(avg_cmd_torque/K_m, norm=2.0, power=2.0, squash_max=100000.0, 
+                                        squash_smoothness=4.0)/joints_num
+
+        torque_diff = state_robot[:,0,:,2] - state_robot[:,1,:,2]
+        reward_torquediff = norm_penalty(torque_diff, norm=2.0, power=2.0, squash_max=100000.0,
+                                        squash_smoothness=4.0)/joints_num
+
+
         reward_velocity_refs    = joint_penalty_reward(norm_velocity_refs,   max_rew=max_rew,exponent=2)
         reward_torque_refs      = joint_penalty_reward(norm_torque_refs,     max_rew=max_rew,exponent=2)
         # reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
@@ -1872,6 +1897,10 @@ class LocomotionVecEnv(RobotVecEnv):
         flattened_posref_vels = posref_vel*smoothclip_flattener(posref_vel, posref_vel_threshold, 1.0)
         reward_posref_vel       = norm_penalty(flattened_posref_vels/15,     norm=4, power=2, squash_max=1.0, squash_smoothness=4.0, flattening_scale=0.005, flattening_power=4.0)
         reward_posref_acc       = norm_penalty(posref_acc/1_000,  norm=4, power=1.0, squash_max=2.0, squash_smoothness=2.0)
+        
+        
+        # ---------------- TRACKING REWARDS ----------------
+        
         # reward_posref_acc = flattened_joint_penalty_reward(posref_acc/1_000, max_rew=1.0, exponent=2.0, presquash_factor=100, flattening_scale=0.01)
 
         # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
@@ -1911,7 +1940,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                   yaw_vel_relative_weight)
         reward_contacts = - th.clamp(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 
-        # FEET AIR TIME REWARD
+        # ---------------- FEET AIR TIME REWARD ----------------
         feet_state = state[self.STATE_FEET][:,0] # vec_size*history*fields*nfeet -> vec_size*fields*nfeet
         feet_air_durations_secs = feet_state[:,self.FEET_FIELDS.FEET_AIR_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
         steps_finishing = feet_air_durations_secs < 0
@@ -1935,7 +1964,7 @@ class LocomotionVecEnv(RobotVecEnv):
         feet_air_rewards = feet_air_rewards*(th.logical_or(should_be_moving, step_air_time_is_bad)) # Only enable if speed is > 0.05 or the reward is a small step penalty
         reward_feet_air_time = th.mean(feet_air_rewards, dim=1) # average across the feet
 
-        # FEET GROUND TIME REWARD
+        # ---------------- FEET GROUND TIME REWARD ----------------
         feet_ground_durations_secs = feet_state[:,self.FEET_FIELDS.FEET_GROUND_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
         steps_starting = feet_ground_durations_secs < 0
         feet_ground_durations = -feet_ground_durations_secs # When the value is positive then it is the duration of a currently ongoing step, which we dont consider
@@ -1945,20 +1974,20 @@ class LocomotionVecEnv(RobotVecEnv):
         feet_ground_rewards = feet_ground_rewards*(th.logical_or(should_be_moving, step_ground_time_is_bad))
         reward_feet_ground_time = th.mean(feet_ground_rewards, dim=1) # average across the feet
 
-        # FEET AIR UNIFORMITY REWARD
+        # ---------------- FEET AIR UNIFORMITY REWARD ----------------
         avg_feet_step_durations = feet_state[:,self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
         avg_all_feet_step_duration = th.mean(avg_feet_step_durations, dim=1) # vec_size*nfeet -> vec_size
         step_duration_difformity = steps_finishing*(feet_air_durations_secs-avg_all_feet_step_duration.unsqueeze(1).expand_as(feet_air_durations_secs)) # vec_size*nfeet
         reward_feet_air_time_uniformity = joint_penalty_reward(step_duration_difformity, max_rew=1, exponent=2)
         
-        # FEET SLIP REWARD
+        # ---------------- FEET SLIP REWARD ----------------
         feet_linvels_xy = feet_state[:,1:3] # vec_size*fields*nfeet -> vec_size*2*nfeet
         feet_linvels = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*fields*nfeet -> vec_size*nfeet
         feet_touching_ground = feet_state[:,self.FEET_FIELDS.FEET_AIR_DURATIONS] <= 0
         feet_sliding_linvel = feet_linvels*feet_touching_ground
         reward_slip = joint_penalty_reward(feet_sliding_linvel, max_rew=1, exponent=2)
 
-        # FEET ON GROUND REWARD
+        # ---------------- FEET ON GROUND REWARD ----------------
         feet_touching_ground = feet_state[:,0] <= 0
         reward_feet_on_ground = th.mean(feet_touching_ground.to(th.float32), dim=1) * th.logical_not(should_be_moving.view((self.num_envs,)))
 
@@ -2198,6 +2227,7 @@ class LocomotionVecEnv(RobotVecEnv):
         loco_info = {
             "goal_rel_xyz_vec" : goal_dir*goal_speed,
             "goal_height" : goal_height,
+            "goal_yaw_vel" : curr_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_YAW_VEL],
             "height" : height,
             "height_err" : th.abs(goal_height - height),
             "goal_abs_speed_vec" : th.linalg.norm(goal_abs,dim=1),
@@ -2276,6 +2306,9 @@ class LocomotionVecEnv(RobotVecEnv):
         goal_yaw_vels = unnormalize(self._thrand(size=(self.num_envs,))*2-1,
                                     min=self._loco_conf.goal_yaw_vel_minmax[0],
                                     max=self._loco_conf.goal_yaw_vel_minmax[1])
+        goal_yaw_vels = th.where(self._thrand(size=(self.num_envs,)) < self._loco_conf.goal_yaw_vel_zero_ratio,
+                                 0.0,
+                                 goal_yaw_vels)
         return goal_abs_linvel_vec_xys, goal_abs_height, goal_heading_yaws, goal_yaw_vels
 
     @override
@@ -2303,8 +2336,7 @@ class LocomotionVecEnv(RobotVecEnv):
         record_region_start("LocomotionVecEnv.post_step")
         super().post_step()
         record_time("LocomotionVecEnv.post_step super done")
-        smooth_track_err_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,)) #type: ignore
-        linvel_err = self._current_state[self.STATE_LOCOMOTION][:,0][:,smooth_track_err_idx].view(self.num_envs)
+        linvel_err = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,0]
         async_cuda2cpu_queue.run_async_job({"linvel_err": linvel_err},
                                            self._set_linvel_global_stats)
         record_region_end("LocomotionVecEnv.post_step")

@@ -152,13 +152,13 @@ class RandPolicy(RLAgent):
         
 def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("cpu")):
     if robot == "quad":
-        home_jpose = get_quad_args()["homing_joint_pose"]
+        home_jpose = get_quad_args()["homing_joint_position"]
     elif robot == "kyon":
-        home_jpose = get_kyon_args()["homing_joint_pose"]
+        home_jpose = get_kyon_args()["homing_joint_position"]
     elif robot == "go1":
-        home_jpose = get_go1_args()["homing_joint_pose"]
+        home_jpose = get_go1_args()["homing_joint_position"]
     elif robot == "centauro":
-        home_jpose = get_centauro_args()["homing_joint_pose"]
+        home_jpose = get_centauro_args()["homing_joint_position"]
     else:
         raise RuntimeError(f"Unknown robot '{robot}")
     home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
@@ -213,11 +213,11 @@ def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("
 
 def build_rand_policy(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
     if robot == "quad":
-        home_jpose = get_quad_args()["homing_joint_pose"]
+        home_jpose = get_quad_args()["homing_joint_position"]
     elif robot == "kyon":
-        home_jpose = get_kyon_args()["homing_joint_pose"]
+        home_jpose = get_kyon_args()["homing_joint_position"]
     elif robot == "centauro":
-        home_jpose = get_centauro_args()["homing_joint_pose"]
+        home_jpose = get_centauro_args()["homing_joint_position"]
     else:
         raise RuntimeError(f"Unknown robot '{robot}")
     home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
@@ -243,19 +243,19 @@ def build_rand_policy(env, robot : str, scale : float = 0.0, device : th.device 
 
 def build_fixed_policy(env, robot : str, scale : float = 0.0):
     if robot == "quad":
-        home_jpose = get_quad_args()["homing_joint_pose"]
+        home_jpose = get_quad_args()["homing_joint_position_references"]
         stiffness = 400
         damping = 10
     elif robot == "kyon":
-        home_jpose = get_kyon_args()["homing_joint_pose"]
+        home_jpose = get_kyon_args()["homing_joint_position_references"]
         stiffness = 400
         damping = 10
     elif robot == "centauro":
-        home_jpose = get_centauro_args()["homing_joint_pose"]
+        home_jpose = get_centauro_args()["homing_joint_position_references"]
         stiffness = 1000
         damping = 10
     elif robot == "go1":
-        home_jpose = get_go1_args()["homing_joint_pose"]
+        home_jpose = get_go1_args()["homing_joint_position_references"]
         stiffness = 400
         damping = 10
     else:
@@ -309,6 +309,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
+        "goal_yaw_vel_zero_ratio" : 1.0,
         "held_joints_damping" : 10.0,
         "held_joints_stiffness" : 500.0,
         "impulse_duration_minmax" : [0.01, 2.5],
@@ -327,12 +328,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "merge_privileged" : True,
         "min_good_step_duration" : 0.1,
         "mode" : mode,
-        "obs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.05*n],
-        "obs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.01*n, 0.02*n],
-        "obs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.02*n],
-        "obs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
-        "obs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
-        "obs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
+        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.05*n],
+        "obs_abs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.01*n, 0.02*n],
+        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.02*n],
+        "obs_abs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
+        "obs_abs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
+        "obs_abs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
         "observe_full_robot_state" : False,
         "offset_envs_ep_starts" : True,
         "posref_safety_period" : 0.02,
@@ -398,7 +399,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "verbose_infos" : False,
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
-        "minimal_infos" : False
+        "minimal_infos" : False,
+        "playground_style_reward" : False
     }
 
     skip_optionals = True
@@ -410,12 +412,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : True if args["record"] else 0,
         "action_delay_mustd_std" : (0.0,0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
-        "obs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
-        "obs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_linacc_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
-        "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
+        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
+        "obs_abs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_abs_noise_linacc_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_abs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_abs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
+        "obs_abs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : (not skip_optionals) or args["record"],
         # "minimal_infos" : skip_optionals or not args["record"],

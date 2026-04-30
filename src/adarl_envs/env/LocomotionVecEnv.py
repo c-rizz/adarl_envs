@@ -518,9 +518,10 @@ class LocomotionVecEnv(RobotVecEnv):
                                            "FEET_GROUND_DURATIONS",
                                            "FEET_VEL_X",
                                            "FEET_VEL_Y",
-                                           "FEET_POS_X",
-                                           "FEET_POS_Y",
-                                           "FEET_POS_Z",
+                                           "FEET_REL_POS_X",
+                                           "FEET_REL_POS_Y",
+                                           "FEET_REL_POS_Z",
+                                           "FEET_ABS_POS_Z",
                                            "PEAK_POS_Z",
                                            "AVG_FEET_STEP_DURATIONS"], start=0)
 
@@ -1018,11 +1019,12 @@ class LocomotionVecEnv(RobotVecEnv):
                                                         self.FEET_FIELDS.FEET_AIR_DURATIONS     : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_GROUND_DURATIONS  : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.FEET_VEL_X : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.FEET_VEL_Y : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.FEET_POS_X : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.FEET_POS_Y : th.as_tensor([[-100.0],[100.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.FEET_POS_Z : th.as_tensor([[-2.0],[2.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_VEL_X : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_VEL_Y : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_REL_POS_X : th.as_tensor([[-1.0],[1.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_REL_POS_Y : th.as_tensor([[-1.0],[1.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_REL_POS_Z : th.as_tensor([[-1.0],[1.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_ABS_POS_Z : th.as_tensor([[-1.0],[1.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.PEAK_POS_Z : th.as_tensor([[-2.0],[2.0]]).expand(2,feet_num)},
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
@@ -1034,14 +1036,19 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                                                                             self.FEET_FIELDS.FEET_GROUND_DURATIONS,
                                                                                                                             self.FEET_FIELDS.FEET_VEL_X,
                                                                                                                             self.FEET_FIELDS.FEET_VEL_Y,
-                                                                                                                            self.FEET_FIELDS.FEET_POS_X,
-                                                                                                                            self.FEET_FIELDS.FEET_POS_Y,
-                                                                                                                            self.FEET_FIELDS.FEET_POS_Z,
-                                                                                                                            self.FEET_FIELDS.PEAK_POS_Z])})
+                                                                                                                            self.FEET_FIELDS.FEET_REL_POS_X,
+                                                                                                                            self.FEET_FIELDS.FEET_REL_POS_Y,
+                                                                                                                            self.FEET_FIELDS.FEET_REL_POS_Z,
+                                                                                                                            self.FEET_FIELDS.FEET_ABS_POS_Z,
+                                                                                                                            self.FEET_FIELDS.PEAK_POS_Z]),
+                                                            "base" : ThBoxStateHelper.SimpleObsDef(observable_fields=[  self.FEET_FIELDS.FEET_REL_POS_X,
+                                                                                                                        self.FEET_FIELDS.FEET_REL_POS_Y,
+                                                                                                                        self.FEET_FIELDS.FEET_REL_POS_Z])})
+        feet_noise = None #TODO add noise
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_FEET,
                                                             self._feet_state_helper,
                                                             obs_defs={"privileged":{"observable":True,"concatenate":True,"noise":None},
-                                                                      })
+                                                                      "base":{"observable":True,"concatenate":True,"noise":feet_noise}})
         if self._loco_conf.heightmap_resolution_xy[0] > 0:
             heightmap_state_helper = ThBoxStateHelper( field_names=["map"],
                                                     fields_minmax={"map" : self._thtens([-10.0, 10.0])},
@@ -1052,6 +1059,22 @@ class LocomotionVecEnv(RobotVecEnv):
             self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_HEIGHTMAP,
                                                                  heightmap_state_helper,
                                                                  obs_defs={"base":{"observable":True,"concatenate":False,"noise":None}})
+            
+        # Just to match playground's order:
+        self._state_helper = self._state_helper.reorder_substates([
+            self.STATE_EXTRINSIC,
+            self.STATE_ROBOT,
+            self.STATE_POS_REF_ERR,
+            self.STATE_FEET,
+            self.STATE_ACT_RAW_HIST,
+            self.STATE_LOCOMOTION,
+            self.STATE_JOINT_STEP_STATS,
+            self.STATE_INTERNAL,
+            self.STATE_ACT_PREPROC,
+            self.STATE_JOINT_LONGTERM_STATS,
+            self.STATE_LAST_ACT_RAW,
+            self.STATE_REWARDS
+        ])
         ggLog.info(f"Built state/obs/action helpers")
 
     def _reset_state_full(self):
@@ -1071,13 +1094,14 @@ class LocomotionVecEnv(RobotVecEnv):
             bstate = lstates[:,4]
             borient_quat_vec_xyzw = bstate[:,3:7] # (nenvs,4)
             body_pos_vec_xyz = bstate[:,0:3].unsqueeze(1)  # (nenvs,1,3)
-            abs_feet_pos = lstates[:,:nfeet,0:3] # (nenvs,nfeet,3)
+            feet_abs_pos_vec_foot_xyz = lstates[:,:nfeet,0:3] # (nenvs,nfeet,3)
             # feet_pos_vec_foot_xyz = abs_feet_pos
-            feet_pos_vec_foot_xyz = th_quat_rotate(abs_feet_pos - body_pos_vec_xyz,
+            feet_rel_pos_vec_foot_xyz = th_quat_rotate(feet_abs_pos_vec_foot_xyz - body_pos_vec_xyz,
                                                    th_quat_conj(borient_quat_vec_xyzw).unsqueeze(1).expand(-1,nfeet,-1)) # (nenvs,nfeet,3)
         else:
             feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
-            feet_pos_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
+            feet_rel_pos_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
+            feet_abs_pos_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
             borient_quat_vec_xyzw = self._unit_quaternion.expand((self.num_envs,4))
         if isinstance_noimport(self._adapter, "MjxAdapter"):
             from adarl.adapters.MjxAdapter import MjxAdapter
@@ -1085,7 +1109,7 @@ class LocomotionVecEnv(RobotVecEnv):
             feet_are_touching_ground = mjx_adapter.check_colliding_links()  # Returns all monitored pairs (feet vs ground)
         else:
             feet_are_touching_ground = self._thzeros((self.num_envs,4))
-        return feet_linvels_vec_foot_xyz, feet_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw
+        return feet_linvels_vec_foot_xyz, feet_rel_pos_vec_foot_xyz, feet_abs_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw
 
     @override
     def _get_adapter_data_raw(self):
@@ -1100,7 +1124,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         nenvs = self.num_envs
         loco_adapter_data, super_adapter_data = adapter_data
-        feet_linvels_vec_foot_xyz, feet_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw = loco_adapter_data
+        feet_linvels_vec_foot_xyz, feet_rel_pos_vec_foot_xyz, feet_abs_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw = loco_adapter_data
 
         track_support_linvel = False
 
@@ -1403,7 +1427,7 @@ class LocomotionVecEnv(RobotVecEnv):
                      input = prev_feet_air_durations_vec_foot_t*(1-a) + prev_avg_feet_step_durations*a,
                      other = new_avg_feet_step_durations,
                      out   = new_avg_feet_step_durations)
-            feet_z = feet_pos_vec_foot_xyz[:,:,2]
+            feet_z = feet_rel_pos_vec_foot_xyz[:,:,2]
             peak_feet_z = th.where(condition=just_lifting_up.expand(nenv_nfeet),
                                     input = self._thzeros(tuple()), # if just lifted up, record the foot height as the peak height of the step
                                     other = prev_peak_z)
@@ -1420,9 +1444,10 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS : new_avg_feet_step_durations,
                             self.FEET_FIELDS.FEET_VEL_X : feet_linvels_vec_foot_xyz[:,:,0],
                             self.FEET_FIELDS.FEET_VEL_Y : feet_linvels_vec_foot_xyz[:,:,1],
-                            self.FEET_FIELDS.FEET_POS_X : feet_pos_vec_foot_xyz[:,:,0],
-                            self.FEET_FIELDS.FEET_POS_Y : feet_pos_vec_foot_xyz[:,:,1],
-                            self.FEET_FIELDS.FEET_POS_Z : feet_pos_vec_foot_xyz[:,:,2],
+                            self.FEET_FIELDS.FEET_REL_POS_X : feet_rel_pos_vec_foot_xyz[:,:,0],
+                            self.FEET_FIELDS.FEET_REL_POS_Y : feet_rel_pos_vec_foot_xyz[:,:,1],
+                            self.FEET_FIELDS.FEET_REL_POS_Z : feet_rel_pos_vec_foot_xyz[:,:,2],
+                            self.FEET_FIELDS.FEET_ABS_POS_Z : feet_abs_pos_vec_foot_xyz[:,:,2],
                             self.FEET_FIELDS.PEAK_POS_Z : peak_feet_z
                             }
 
@@ -1743,7 +1768,7 @@ class LocomotionVecEnv(RobotVecEnv):
         feet_vel_x = feet_state[:, self.FEET_FIELDS.FEET_VEL_X]
         feet_vel_y = feet_state[:, self.FEET_FIELDS.FEET_VEL_Y]
         vel_norm = th.sqrt(th.sqrt(feet_vel_x ** 2 + feet_vel_y ** 2))
-        height = feet_state[:, self.FEET_FIELDS.FEET_POS_Z]
+        height = feet_state[:, self.FEET_FIELDS.FEET_ABS_POS_Z]
         delta = th.abs(height - self._PG_MAX_FOOT_HEIGHT)
         return th.sum(delta * vel_norm, dim=1)
 

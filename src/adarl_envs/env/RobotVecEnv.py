@@ -414,6 +414,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                    "BODY_ABS_LINVEL_X",
                                                    "BODY_ABS_LINVEL_Y",
                                                    "BODY_ABS_LINVEL_Z",
+                                                   "BODY_ABS_ANGVEL_X",
+                                                   "BODY_ABS_ANGVEL_Y",
+                                                   "BODY_ABS_ANGVEL_Z",
                                                    "BODY_ABS_POS_Z",
                                                    "BODY_REL_GRAVITY_X",
                                                    "BODY_REL_GRAVITY_Y",
@@ -1080,6 +1083,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         privileged_extrinsic_observable_fields = [
                                     self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z,
+                                    self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_X, self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Y, self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Z,
                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
                                     self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z,
@@ -1105,6 +1109,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : [-5,5],
                                                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : [-5,5],
                                                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : [-5,5],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_X : [-20,20],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Y : [-20,20],
+                                                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Z : [-20,20],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : [-1000,1000],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : [-1000,1000],
                                                                 self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : [-1000,1000],
@@ -1137,6 +1144,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[:2],
                                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[:2],
                                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_X : self._configuration.noise_angvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Y : self._configuration.noise_angvel_ep_mustdstd[:2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Z : self._configuration.noise_angvel_ep_mustdstd[:2],
                                                 self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : self._configuration.noise_linacc_ep_mustdstd[:2],
                                                 self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : self._configuration.noise_linacc_ep_mustdstd[:2],
                                                 self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : self._configuration.noise_linacc_ep_mustdstd[:2],
@@ -1154,6 +1164,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : self._configuration.noise_linvel_ep_mustdstd[2],
                                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : self._configuration.noise_linvel_ep_mustdstd[2],
                                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : self._configuration.noise_linvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_X : self._configuration.noise_angvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Y : self._configuration.noise_angvel_ep_mustdstd[2],
+                                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Z : self._configuration.noise_angvel_ep_mustdstd[2],
                                                 self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : self._configuration.noise_linacc_ep_mustdstd[2],
                                                 self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : self._configuration.noise_linacc_ep_mustdstd[2],
                                                 self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : self._configuration.noise_linacc_ep_mustdstd[2],
@@ -1178,8 +1191,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                         **vsize_dev_type) # type: ignore
         
         
-        internal_obsdef = ThBoxStateHelper.SimpleObsDef(observable_fields=[self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,
-                                                                           self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED],
+        internal_obsdef = ThBoxStateHelper.SimpleObsDef(observable_fields=[
+                                                                            self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,
+                                                                            self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED
+                                                                            ],
                                                         observable_subfields=None,
                                                         obs_history_length=1)
         internal_state_helper =   ThBoxStateHelper( field_names=[e for e in self.INTERNAL_FIELDS],
@@ -1320,12 +1335,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                 self.STATE_EXTRINSIC : extrinsic_state_helper,
                                                 self.STATE_ROBOT : robot_state_helper,
                                                 self.STATE_POS_REF_ERR : joint_pos_ref_error_state_helper,
+                                                self.STATE_LAST_ACT_RAW : last_raw_act_state_helper,
+                                                
                                                 self.STATE_JOINT_STEP_STATS : joint_step_stats_state_helper,
                                                 self.STATE_INTERNAL : internal_state_helper,
                                                 self.STATE_ACT_PREPROC: act_history_state_helper,
                                                 self.STATE_ACT_RAW_HIST : raw_act_history_state_helper,
-                                                self.STATE_LAST_ACT_RAW : last_raw_act_state_helper,
-                                                self.STATE_JOINT_LONGTERM_STATS : joint_longterm_stats_helper,
+                                                self.STATE_JOINT_LONGTERM_STATS : joint_longterm_stats_helper
                                                 },
                                             obs_definitions=obs_definitions)
 
@@ -1872,8 +1888,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def close(self):
         self._adapter.destroy_scenario()
 
-    def set_cam_pose(self, pose_dist_pitch_roll : tuple[float,float,float] | th.Tensor):
-        self._configuration.ui_rel_camera_pose_dist_pitch_yaw = self._thtens(pose_dist_pitch_roll)
+    def set_cam_pose(self, pose_dist_pitch_yaw : tuple[float,float,float] | th.Tensor):
+        self._configuration.ui_rel_camera_pose_dist_pitch_yaw = self._thtens(pose_dist_pitch_yaw)
 
     def get_cam_pose(self):
         return self._configuration.ui_rel_camera_pose_dist_pitch_yaw    
@@ -2048,6 +2064,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 vec_jstates_j_pveae,
                 self._last_sent_v_j_pvesd,
                 vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
+                vec_body_abs_angvel_xyz,
                 vec_body_ground_dist,
                 vec_body_rel_gravity_dir,
                 vec_body_rel_linvel_xyz,
@@ -2094,6 +2111,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_body_rel_angvel_xyz = self._adapter.get_link_relative_angular_velocity(self._main_body_link_ids)[:,0,:]
             example_vec_3d_tens = vec_jstates_j_pveae[:,0,:3]
             vec_body_abs_linvel_xyz = th.zeros_like(example_vec_3d_tens)
+            vec_body_abs_angvel_xyz = th.zeros_like(example_vec_3d_tens)
             vec_body_rel_linvel_xyz = th.zeros_like(example_vec_3d_tens)
             vec_body_rel_linacc_xyz = th.zeros_like(example_vec_3d_tens)
             vec_body_ground_dist    = th.zeros_like(example_vec_3d_tens[:,0])
@@ -2139,6 +2157,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 vec_jstates_j_pveae,
                 self._last_sent_v_j_pvesd,
                 vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
+                vec_body_abs_angvel_xyz,
                 vec_body_ground_dist,
                 vec_body_rel_gravity_dir,
                 vec_body_rel_linvel_xyz,
@@ -2160,6 +2179,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_jstates_j_pveae,
             self._last_sent_v_j_pvesd,
             vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
+            vec_body_abs_angvel_xyz,
             vec_body_ground_dist,
             vec_body_rel_gravity_dir,
             vec_body_rel_linvel_xyz,
@@ -2184,6 +2204,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     vec_jstates_j_pveae = vec_jstates_j_pveae,
                                     vec_last_sent_refs_j_pvesd = self._last_sent_v_j_pvesd,
                                     vec_body_abs_linvel_xyz = vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
+                                    vec_body_abs_angvel_xyz = vec_body_abs_angvel_xyz,
                                     vec_body_ground_dist = vec_body_ground_dist,
                                     vec_body_rel_gravity_dir = vec_body_rel_gravity_dir,
                                     vec_body_rel_linvel_xyz = vec_body_rel_linvel_xyz,
@@ -2209,6 +2230,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_jstates_j_pveae : th.Tensor,
                                                     vec_last_sent_refs_j_pvesd : th.Tensor,
                                                     vec_body_abs_linvel_xyz : th.Tensor,
+                                                    vec_body_abs_angvel_xyz : th.Tensor,
                                                     vec_body_ground_dist : th.Tensor,
                                                     vec_body_rel_gravity_dir : th.Tensor,
                                                     vec_body_rel_linvel_xyz : th.Tensor,
@@ -2266,6 +2288,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : vec_body_abs_linvel_xyz[:,0].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : vec_body_abs_linvel_xyz[:,1].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : vec_body_abs_linvel_xyz[:,2].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_X : vec_body_abs_angvel_xyz[:,0].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Y : vec_body_abs_angvel_xyz[:,1].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Z : vec_body_abs_angvel_xyz[:,2].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : vec_body_ground_dist.view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : vec_body_rel_gravity_dir[:,0].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : vec_body_rel_gravity_dir[:,1].view(self.num_envs,1),

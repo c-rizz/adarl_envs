@@ -242,9 +242,10 @@ def loco_runner_builder(seed,
         import jax
         ground_link = ("ground","ground_link")
         robot_model = env_builder_args["robot_model"]
-        sim_dt = 2/1024 if robot_model=="centauro" else 4/1024 
+        sim_dt = {"centauro" : 2/1024, "spot" : 0.004}.get(robot_model, 2/1024)
         iterations_per_ep = int(max_steps*stepLength_sec/sim_dt)
         opt_override = {}
+        opt_override.update(env_builder_args.pop("mjx_opt_override", {}))
         adapter = MjxJointImpedanceAdapter( vec_size=num_envs,
                                             enable_rendering=env_builder_args.pop("enable_rendering"),
                                             jax_device=jax.devices("gpu")[th_device.index] if th_device.type == "cuda" else jax.devices("cpu")[0],
@@ -262,6 +263,7 @@ def loco_runner_builder(seed,
                                             log_folder=run_folder,
                                             revolute_dof_armature_override=0.1,
                                             safe_revolute_dof_armature=0.1,
+                                            revolute_dof_damping_override=env_builder_args.get("revolute_dof_damping_override", None),
                                             opt_preset={"centauro":"fastest",
                                                         "kyon":"faster",
                                                         "quad":"fastest"}.get(robot_model, "faster"),
@@ -355,8 +357,8 @@ def loco_runner_builder(seed,
                             max_good_step_duration=env_builder_args.pop("max_good_step_duration"),
                             merge_privileged = env_builder_args.pop("merge_privileged"),
                             min_good_step_duration=env_builder_args.pop("min_good_step_duration"),
-                            minmax_damping=(1.0,30.0),
-                            minmax_stiffness=(50.0,1000.0),
+                            minmax_damping=(0.0,30.0),
+                            minmax_stiffness=(0.0,1000.0),
                             obs_abs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_angvel_ep_mustd_step_std"),
                             obs_abs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_gravity_ep_mustd_step_std"),
                             obs_abs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_joints_pve_ep_mustd_step_std"),
@@ -468,19 +470,20 @@ def loco_runner_builder(seed,
     return vrunner
 
 
-def loco_env_builder(   seed : int,
+def single_env_builder(   seed : int,
                         log_folder : str,
                         is_eval : bool, 
                         env_builder_args : dict,
                         runner_builder : VecEnvRunnerBuilderProtocol):
     quiet = env_builder_args["quiet"]
     stepLength_sec = env_builder_args["stepLength_sec"]
+    autoreset = env_builder_args.get("autoreset", False)
     vrunner = runner_builder( seed = seed,
                                 run_folder = log_folder,
                                 env_builder_args = env_builder_args,
                                 num_envs = 1,
                                 quiet=quiet,
-                                autoreset = False)
+                                autoreset = autoreset)
     return Runner2GymWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
         
 
@@ -500,7 +503,7 @@ def loco_venv_builder(  seed,
                             log_folder : str,
                             is_eval : bool, 
                             env_builder_args : dict):
-                return loco_env_builder(seed=seed, log_folder=log_folder,is_eval=is_eval,env_builder_args=env_builder_args,runner_builder=runner_builder)
+                return single_env_builder(seed=seed, log_folder=log_folder,is_eval=is_eval,env_builder_args=env_builder_args,runner_builder=runner_builder)
             env = build_vec_env(env_builder=env_builder,
                                 env_builder_args=env_builder_args,
                                 log_folder=log_folder,
@@ -526,6 +529,9 @@ def loco_venv_builder(  seed,
         #     ggLog.warn(f"Unused env_builder_args: {env_builder_args}")
     return env, 1/stepLength_sec
 
+
+
+robot_args_registry = {}
 
 def get_quad_args():
     homing = {  ("quad","hip_joint_x_back_left") : -3.14159*0.4,
@@ -575,6 +581,8 @@ def get_quad_args():
                             ('quad', 'foot_center_link_front_left'),
                             ('quad', 'foot_center_link_front_right')]
             }
+robot_args_registry["quad"] = get_quad_args
+
 
 def get_kyon_args(enable_arms : bool = False):
     hip_pitch = -0.8727 # = -50/180*3.14159
@@ -655,6 +663,8 @@ def get_kyon_args(enable_arms : bool = False):
             "safe_damping" : 10.0,
             "default_max_joint_impedance_ctrl_torque" : 150.0
         }
+robot_args_registry["kyon"] = get_kyon_args
+robot_args_registry["kyon_arms"] = lambda : get_kyon_args(enable_arms=True)
 
 def get_go1_args():
 
@@ -723,7 +733,7 @@ def get_go1_args():
             "model_kwargs" : {},
             "xacro_extra_pkg_paths" : xacro_extra_pkg_paths,
             "homing_joint_position" : homing,
-            "homing_joint_position_references" : None,
+            "homing_joint_position_references" : homing,
             "robot_name" : rname,
             "robot_main_body_link" : "trunk",
             "robot_root_link" : "trunk",
@@ -763,6 +773,135 @@ def get_go1_args():
             "safe_stiffness" : 50.0,
             "safe_damping" : 2.5
         }
+robot_args_registry["go1"] = get_go1_args
+
+def get_spot_args():
+    # physical limits are (on the xml actually they are not all the same, these are the tighter ones):
+    #  hipx:   -0.78 +0.78  (midpoint = 0.0, range 1.56)
+    #  hipy:   -0.89 +2.24  (midpoint = 0.675, range 3.13) (0.0 points straight down? positive points backward?)
+    #  knee:   -2.79 -0.245 (midpoint = -1.5175, range 2.545)
+    hipx_lims = (-0.78, 0.78)
+    hipy_lims = (-0.89, 2.24)
+    knee_lims = (-2.79, -0.245)
+
+    rname = "spot"
+    hip_roll =    0.0 
+    hip_pitch =   1.04 # 1.0
+    knee =       -1.8  #-1.84
+    homing = {  (rname,"fl_hx") :  hip_roll,
+                (rname,"fr_hx") :  hip_roll,
+                (rname,"hl_hx") :  hip_roll,
+                (rname,"hr_hx") :  hip_roll,
+                (rname,"fl_hy") :  hip_pitch,
+                (rname,"fr_hy") :  hip_pitch,
+                (rname,"hl_hy") :  hip_pitch,
+                (rname,"hr_hy") :  hip_pitch,
+                (rname,"fr_kn") :  knee,
+                (rname,"fl_kn") :  knee,
+                (rname,"hl_kn") :  knee,
+                (rname,"hr_kn") :  knee}
+    max_knee_torque = 100
+    max_hipy_torque = 100
+    max_hipx_torque = 100
+
+    # Ratios set so that the range is 0.3 radians from homing
+    hxr = 0.3/((hipx_lims[1]-hipx_lims[0])/2)
+    hyr = 0.3/((hipy_lims[1]-hipy_lims[0])/2)
+    knr = 0.3/((knee_lims[1]-knee_lims[0])/2)
+
+    hip_ctrl_limits =   [[ hxr, 0.9, 0.9],
+                         [ hxr, 0.9, 0.9]]
+    thigh_ctrl_limits = [[ hyr, 0.9, 0.9],
+                         [ hyr, 0.9, 0.9]]
+    calf_ctrl_limits =  [[ knr, 0.9, 0.9],
+                         [ knr, 0.9, 0.9]]
+    ctrl_lims = {   (rname,"fl_hx") : hip_ctrl_limits,
+                    (rname,"fr_hx") : hip_ctrl_limits,
+                    (rname,"hl_hx") : hip_ctrl_limits,
+                    (rname,"hr_hx") : hip_ctrl_limits,
+                    
+                    (rname,"fl_hy") : thigh_ctrl_limits,
+                    (rname,"fr_hy") : thigh_ctrl_limits,
+                    (rname,"hl_hy") : thigh_ctrl_limits,
+                    (rname,"hr_hy") : thigh_ctrl_limits,
+                    
+                    (rname,"fl_kn") : calf_ctrl_limits,
+                    (rname,"fr_kn") : calf_ctrl_limits,
+                    (rname,"hl_kn") : calf_ctrl_limits,
+                    (rname,"hr_kn") : calf_ctrl_limits}
+    # from robot_descriptions import go1_mj_description
+    # go1_description_path = "unitree_ros/robots/go1_description"
+    # go1_file_path = adarl.utils.utils.pkgutil_get_path("pyunitree_ros", go1_description_path+"/xacro/robot.xacro")
+    # xacro_extr_pkg_paths = {"go1_description" : adarl.utils.utils.pkgutil_get_path("pyunitree_ros", go1_description_path)}
+    
+    # go1_file_path = go1_mj_description.MJCF_PATH
+    # xacro_extr_pkg_paths = {}
+
+    spot_file_path = adarl.utils.utils.pkgutil_get_path("mujoco_playground","_src/locomotion/spot/xmls/spot_mjx_feetonly.xml")
+    xacro_extra_pkg_paths = {}
+    raw_model_string = Path(spot_file_path).read_text()
+
+    # Need to have mujoco_playground with the already downloaded menagerie inside it
+    from mujoco_playground._src.mjx_env import ensure_menagerie_exists
+    ensure_menagerie_exists()
+    menagerie_spot_assets_folder = adarl.utils.utils.pkgutil_get_path("mujoco_playground", "external_deps/mujoco_menagerie/boston_dynamics_spot/assets")
+    spot_string = set_asset_texture_paths(raw_model_string,
+                            menagerie_spot_assets_folder,
+                            menagerie_spot_assets_folder)
+    ggLog.info(f"Using spot model string: \n{spot_string}")
+    return {"robot_description_string" : spot_string,
+            "robot_description_format" : "mjcf",
+            "model_kwargs" : {},
+            "xacro_extra_pkg_paths" : xacro_extra_pkg_paths,
+            "homing_joint_position" : homing,
+            "homing_joint_position_references" : homing,
+            "robot_name" : rname,
+            "robot_main_body_link" : "body",
+            "robot_root_link" : "body",
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.460915,0.,0.,0.,1.),
+            "disallowed_contact_links" : [ ],
+            "terminating_contact_pairs" : [ ],
+            "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "randomized_armature_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "randomized_mass_links" : [LINK_FILTERS.ALL_ROBOT],
+            "randomized_com_links" : [(rname,"body")],
+            "randomized_friction_links" : [LINK_FILTERS.ALL],
+            "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "safety_limits_ratios_minmax_pve" : {k:[[ 1.0, 0.9, 0.9],
+                                                    [ 1.0, 0.9, 0.9]] for k,v in homing.items()},
+            "control_limits_ratios_minmax_pve" : ctrl_lims,
+            "control_limits_position_offset" : homing,
+            "enable_link_collisions" : [    ((rname, 'fr_lleg'),[('ground','ground_link')]),
+                                            ((rname, 'fl_lleg'),[('ground','ground_link')]),
+                                            ((rname, 'hr_lleg'),[('ground','ground_link')]),
+                                            ((rname, 'hl_lleg'),[('ground','ground_link')])],
+            "max_joint_impedance_ctrl_torques" : {  (rname,"fl_hx") :  max_hipx_torque,
+                                                    (rname,"fr_hx") :  max_hipx_torque,
+                                                    (rname,"hr_hx") :  max_hipx_torque,
+                                                    (rname,"hl_hx") :  max_hipx_torque,
+                                                    (rname,"fl_hy") :  max_hipy_torque,
+                                                    (rname,"fr_hy") :  max_hipy_torque,
+                                                    (rname,"hr_hy") :  max_hipy_torque,
+                                                    (rname,"hl_hy") :  max_hipy_torque,
+                                                    (rname,"fl_kn") :  max_knee_torque,
+                                                    (rname,"fr_kn") :  max_knee_torque,
+                                                    (rname,"hr_kn") :  max_knee_torque,
+                                                    (rname,"hl_kn") :  max_knee_torque},
+            "default_max_joint_impedance_ctrl_torque" : 100.0,
+            "feet_links" : [(rname, 'fl_lleg'),
+                            (rname, 'fr_lleg'),
+                            (rname, 'hl_lleg'),
+                            (rname, 'hr_lleg')],
+            "safe_stiffness" : 300.0,
+            "safe_damping" : 20.0,
+            "mjx_opt_override" : {"impratio" : 1.0,
+                                  "iterations" : 1,
+                                  "ls_iterations" : 5,
+                                  "noslip_iterations" : 0},
+            "revolute_dof_damping_override" : 1.0
+        }
+robot_args_registry["spot"] = get_spot_args
+
 
 
 def get_centauro_args():
@@ -876,27 +1015,14 @@ def get_centauro_args():
             "safe_stiffness" : 600.0,
             "safe_damping" : 10.0
         }
-
-
-def _add_robot_args(robot_model: str, env_builder_args: dict):
-    if robot_model == "quad":
-        env_builder_args.update(get_quad_args())
-    elif robot_model == "kyon":
-        env_builder_args.update(get_kyon_args())
-    elif robot_model == "kyon_arms":
-        env_builder_args.update(get_kyon_args(enable_arms=True))
-    elif robot_model == "go1":
-        env_builder_args.update(get_go1_args())
-    elif robot_model == "centauro":
-        env_builder_args.update(get_centauro_args())
-    return env_builder_args
+robot_args_registry["centauro"] = get_centauro_args
 
 def named_loco_venv_builder(seed : int,
                     run_folder : str,
                     num_envs : int, 
                     env_builder_args : dict,
                     env_name : str = "") -> gym.vector.VectorEnv:
-    _add_robot_args(env_builder_args["robot_model"], env_builder_args)
+    env_builder_args.update(robot_args_registry[env_builder_args["robot_model"]]())
     return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
                             env_builder_args = env_builder_args,
@@ -907,8 +1033,8 @@ def named_loco_single_env_builder(seed : int,
                     log_folder : str,
                     is_eval : bool, 
                     env_builder_args : dict) -> tuple[gym.Env,float]:
-    _add_robot_args(env_builder_args["robot_model"], env_builder_args)
-    return loco_env_builder(seed = seed,
+    env_builder_args.update(robot_args_registry[env_builder_args["robot_model"]]())
+    return single_env_builder(seed = seed,
                             log_folder = log_folder,
                             env_builder_args = env_builder_args,
                             is_eval=is_eval,

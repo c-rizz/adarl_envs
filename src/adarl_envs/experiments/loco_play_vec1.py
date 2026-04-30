@@ -18,10 +18,10 @@ import adarl.utils.dbg.dbg_img as dbg_img
 from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
-from adarl_envs.experiments.loco_builder import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args, get_go1_args
+from adarl_envs.experiments.loco_builder import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args, get_go1_args, robot_args_registry
 from adarl_envs.env.LocomotionVecEnv import LocomotionVecEnv
 from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
-from adarl.utils.base_utils import record_time, clear_recorded_times, print_recorded_times
+from adarl.utils.base_utils import record_time, clear_recorded_times, print_recorded_times, isinstance_noimport
 
 import adarl.utils.dbg
 from typing import Any
@@ -151,18 +151,16 @@ class RandPolicy(RLAgent):
         return self._a_scale.device
         
 def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("cpu")):
-    if robot == "quad":
-        home_jpose = get_quad_args()["homing_joint_position"]
-    elif robot == "kyon":
-        home_jpose = get_kyon_args()["homing_joint_position"]
-    elif robot == "go1":
-        home_jpose = get_go1_args()["homing_joint_position"]
-    elif robot == "centauro":
-        home_jpose = get_centauro_args()["homing_joint_position"]
-    else:
-        raise RuntimeError(f"Unknown robot '{robot}")
+    home_jpose = robot_args_registry[robot]()["homing_joint_position"]
     home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
-    home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_pvesd)
+    base_env = env.get_runner().get_base_env()
+    if isinstance_noimport(base_env, "RobotVecEnv"):
+        home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
+        action_len = base_env._action_helper.single_action_len()
+    else:
+        action_len = 12
+        home_action = th.zeros((action_len,), device=device)
+    speed = 0.8
     if robot == "quad":
         act_range = th.as_tensor([0.0, 0.1, 0.2,
                                   0.0, 0.1, 0.2,
@@ -177,6 +175,17 @@ def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("
         act_range.view(4,3)[1] *= -1.0
         # act_range.view(4,3)[2] *= -1.0
         act_range.view(4,3)[3] *= -1.0
+    elif robot == "spot":
+        hx,hy,k = 0.0, 1.0, 1.0
+        act_range = th.as_tensor([   hx, -hy,  k,
+                                    -hx,  hy, -k,
+                                     hx, -hy,  k,
+                                    -hx,  hy, -k],device = device)
+        # act_range.view(4,3)[0] *= -1.0
+        act_range.view(4,3)[1] *= -1.0
+        # act_range.view(4,3)[2] *= -1.0
+        act_range.view(4,3)[3] *= -1.0
+        speed = 0.5
     elif robot == "go1":
         act_range = th.as_tensor([   0.0, -0.4,  0.8,
                                     -0.0,  0.4, -0.8,
@@ -206,8 +215,8 @@ def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("
         raise RuntimeError(f"Unknown robot '{robot}'")
     model = SinPolicy(  act_scale=act_range*scale,
                         act_offset=home_action,
-                        act_speed=th.as_tensor([0.8], device = device),
-                        action_size=env.get_runner().get_base_env()._action_helper.single_action_len(),
+                        act_speed=th.as_tensor([speed], device = device),
+                        action_size=action_len,
                         dt=0.05)
     return model
 
@@ -241,13 +250,17 @@ def build_rand_policy(env, robot : str, scale : float = 0.0, device : th.device 
     return model
 
 
-def build_fixed_policy(env, robot : str, scale : float = 0.0):
+def build_fixed_policy(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
     if robot == "quad":
         home_jpose = get_quad_args()["homing_joint_position_references"]
         stiffness = 400
         damping = 10
     elif robot == "kyon":
         home_jpose = get_kyon_args()["homing_joint_position_references"]
+        stiffness = 400
+        damping = 10
+    elif robot == "spot":
+        home_jpose = robot_args_registry["spot"]()["homing_joint_position_references"]
         stiffness = 400
         damping = 10
     elif robot == "centauro":
@@ -260,8 +273,16 @@ def build_fixed_policy(env, robot : str, scale : float = 0.0):
         damping = 10
     else:
         raise RuntimeError(f"Unknown robot '{robot}")
+    
     home_pvesd = {k:[v, 0.0, 0.0, stiffness, damping] for k,v in home_jpose.items()}
-    home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_pvesd)
+    base_env = env.get_runner().get_base_env()
+    if isinstance_noimport(base_env, "RobotVecEnv"):
+        home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
+        action_len = base_env._action_helper.single_action_len()
+    else:
+        action_len = 12
+        home_action = th.zeros((action_len,), device=device)
+
     model = Fixedpolicy(  cmd = home_action)
     return model
 
@@ -279,9 +300,15 @@ def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
     # print(f"Recorder found: {recorder}")
     return recorder
 
-def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
-    step_length_sec = 20/1024 
+
+
+
+
+
+
+def adarl_builder_and_args():
+    step_length_sec = 0.02 #20/1024 
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     mode = args["mode"]
     env_device = th.device("cuda") if mode == "mjx" else th.device("cpu")
@@ -325,7 +352,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_goal_height_speed" : 0.1,
         "max_good_step_duration" : 0.3,
         "max_steps_per_episode" : max_steps_per_episode,
-        "merge_privileged" : True,
+        "merge_privileged" : False,
         "min_good_step_duration" : 0.1,
         "mode" : mode,
         "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.05*n],
@@ -410,14 +437,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "record_video" : args["mode"] not in ["xbot","xbot_zmq"],
         "verbose_infos" : (not skip_optionals) or args["record"],
         "video_save_freq" : True if args["record"] else 0,
-        "action_delay_mustd_std" : (0.0,0.0,0.0),
-        "action_noise_mustd" : (0.0,0.0),
-        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
-        "obs_abs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_abs_noise_linacc_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_abs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_abs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
-        "obs_abs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
+        # "action_delay_mustd_std" : (0.0,0.0,0.0),
+        # "action_noise_mustd" : (0.0,0.0),
+        # "obs_abs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
+        # "obs_abs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        # "obs_abs_noise_linacc_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        # "obs_abs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        # "obs_abs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
+        # "obs_abs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : (not skip_optionals) or args["record"],
         # "minimal_infos" : skip_optionals or not args["record"],
@@ -434,10 +461,58 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "walltime_factor" : args["rt_factor"],
         "record_whole_joint_trajectories" : True
         })
+    return named_loco_single_env_builder, env_builder_args, step_length_sec
+
+def pg_builder_and_args():
+    from adarl_envs.experiments.playground_builder import playground_single_env_builder
+    
+    step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
+    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
+    
+    env_builder_args = {
+        "video_save_freq" : 1,
+        "record_video" : True,
+        "env_name" : "SpotFlatTerrainJoystick",
+        "quiet" : False,
+        "th_device" : th.device("cuda",0),
+        "log_info_stats": True,
+        "randomize_step_timeout_counters": True,
+        "camera" : "track",
+        "episode_length" : max_steps_per_episode,
+        "autoreset" : True,
+        "playground_config_overrides": {"reward_config.scales.feet_clearance":0.0,
+                                        "reward_config.scales.feet_height":0.0,
+                                        "obs_noise.scales.joint_pos": 0.0,
+                                        "obs_noise.scales.gyro" : 0.0,
+                                        "obs_noise.scales.gravity" : 0.0,
+                                        "obs_noise.scales.feet_pos" : [0.0, 0.0, 0.0],
+                                        }
+    }
+    return playground_single_env_builder, env_builder_args, step_length_sec
+
+
+
+
+
+
+
+
+
+
+
+
+
+def runFunction(seed, folderName, resumeModelFile, run_id, args):
+
+    if args["pg"]:
+        builder, env_builder_args, step_length_sec = pg_builder_and_args()
+    else:
+        builder, env_builder_args, step_length_sec = adarl_builder_and_args()
+
     return play(seed,
                 folderName,
                 run_id, args,
-                env_builder = named_loco_single_env_builder,
+                env_builder = builder,
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
                 render=not args["gui"] and not args["norender"],
@@ -487,7 +562,7 @@ def play(seed, folderName, run_id, args,
         except Exception as e: 
             ggLog.warn(f"Could not compare env args with trained model: {type(e)}: {e}")
     elif control_mode=="fixed":
-        model = build_fixed_policy(env = env, robot=robot)
+        model = build_fixed_policy(env = env, robot=robot, device= env_device)
     elif control_mode=="random":
         model = build_rand_policy(env=env, robot=robot, scale=1.0, device = env_device)
     elif control_mode == "sine":
@@ -538,6 +613,10 @@ def play(seed, folderName, run_id, args,
             if not play:
                 break
             obs : TensorTree[th.Tensor]
+
+            cmd_xys = [1.0,0.0,0.0]
+            cmd_height = 0.45
+            options["goal_velocity_xy"] = [cmd_xys[0]*cmd_xys[2], cmd_xys[1]*cmd_xys[2]]
             obs, info = env.reset(options = options)  #type: ignore
             ggLog.info(f"env resetted")
             # ggLog.info(f"ep_config = {info['ep_config']}")
@@ -556,9 +635,9 @@ def play(seed, folderName, run_id, args,
             base_env : LocomotionVecEnv = env.get_runner().get_base_env()
             print(f"Env is of type {type(base_env)}")
 
-            cmd_xys = [1.0,0.0,0.0]
-            cmd_height = 0.45
-            base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height)
+            if isinstance(base_env, LocomotionVecEnv):
+                base_env.set_cam_pose((1.583, 0.201, 2.149))
+                base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height)
             while not done:
                 t0 = time.monotonic()
                 record_time("start_step")
@@ -607,12 +686,20 @@ def play(seed, folderName, run_id, args,
                     if keyboard_listener.get_key_press_count("l")>0: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
 
                     if keyboard_listener.get_key_press_count("t")>0: truncated = True
-                    base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
                     if flip:
                         cmd_xys = [-cmd_xys[0],-cmd_xys[1],-cmd_xys[2]]
-                    base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height)
                     keyboard_listener.reset_key_press_counters()
-                goals = base_env.get_goals()
+
+                    if isinstance(base_env, LocomotionVecEnv):
+                        base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
+                        base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height)
+                if isinstance(base_env, LocomotionVecEnv):
+                    goals = base_env.get_goals()
+                    goal_rel_linvel_xys = goals["rel_linvel_xys"][0].tolist()
+                    goal_height = goals["abs_height"][0].item()
+                else:
+                    goal_rel_linvel_xys = [0.0, 0.0, 0.0]
+                    goal_height = 0.0
                 step_count += 1
 
                 done = terminated or truncated
@@ -629,9 +716,9 @@ def play(seed, folderName, run_id, args,
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
                            f" tstep={t1_step-t0_step:1.4f} \t"
-                           f" rgoal_dir={goals['rel_linvel_xys'][0,:2].tolist()} \t"
-                           f" rgoal_speed={goals['rel_linvel_xys'][0,2]} \t"
-                           f" goal_height={goals['abs_height'][0].item()} \t")
+                           f" rgoal_dir={goal_rel_linvel_xys[:2]} \t"
+                           f" rgoal_speed={goal_rel_linvel_xys[2]} \t"
+                           f" goal_height={goal_height} \t")
                 # print_recorded_times()
             if step_count>0:
                 rewards.append(th.as_tensor(ep_reward,device="cpu").sum().item())
@@ -684,6 +771,7 @@ if __name__ == "__main__":
     ap.add_argument("--resolution", default=240, type=int, help="Vertical video resolution")
     ap.add_argument("--deterministic", default=False, action='store_true', help="Force the policy to be deterministic")
     ap.add_argument("--norender", default=False, action='store_true', help="Force disable the rendering")
+    ap.add_argument("--pg", default=False, action='store_true', help="Use playground env")
     
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())

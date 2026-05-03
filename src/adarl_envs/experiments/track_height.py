@@ -321,7 +321,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 validation_batch_size=0,
                 validation_buffer_size=0,
                 validation_holdout_ratio=0,
-                checkpoint_freq=-1,
+                checkpoint_freq_vec_ep=-1,
                 collector_device=env_device,
                 eval_configurations=eval_configurations,
                 debug_level=1)

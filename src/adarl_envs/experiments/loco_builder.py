@@ -264,9 +264,7 @@ def loco_runner_builder(seed,
                                             revolute_dof_armature_override=0.1,
                                             safe_revolute_dof_armature=0.1,
                                             revolute_dof_damping_override=env_builder_args.get("revolute_dof_damping_override", None),
-                                            opt_preset={"centauro":"fastest",
-                                                        "kyon":"faster",
-                                                        "quad":"fastest"}.get(robot_model, "faster"),
+                                            opt_preset=env_builder_args.pop("mjx_opt_preset"),
                                             opt_override=opt_override,
                                             reference_filter_cutoff_frequency=20.0,
                                             reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none")
@@ -295,9 +293,7 @@ def loco_runner_builder(seed,
                                         log_folder=run_folder,
                                         revolute_dof_armature_override=0.1,
                                         safe_revolute_dof_armature=0.1,
-                                        opt_preset={"centauro":"fastest",
-                                                    "kyon":"faster",
-                                                    "quad":"fastest"}.get(robot_model, "faster"),
+                                        opt_preset=env_builder_args.pop("mjx_opt_preset"),
                                         opt_override=opt_override,
                                         default_actuator_kp=env_builder_args.get("safe_stiffness", 100.0),
                                         default_actuator_kv=env_builder_args.get("safe_damping", 10.0),
@@ -660,8 +656,10 @@ def get_kyon_args(enable_arms : bool = False):
                             ('kyon', 'contact_3'),
                             ('kyon', 'contact_4')],
             "safe_stiffness" : 500.0,
-            "safe_damping" : 10.0,
-            "default_max_joint_impedance_ctrl_torque" : 150.0
+            "safe_damping" : 20.0,
+            "default_max_joint_impedance_ctrl_torque" : 150.0,
+            "revolute_dof_damping_override" : 1.0,
+            "mjx_opt_preset" : "faster"
         }
 robot_args_registry["kyon"] = get_kyon_args
 robot_args_registry["kyon_arms"] = lambda : get_kyon_args(enable_arms=True)
@@ -842,6 +840,7 @@ def get_spot_args():
     raw_model_string = Path(spot_file_path).read_text()
 
     # Need to have mujoco_playground with the already downloaded menagerie inside it
+    os.environ["MUJOCO_GL"] = "egl" # Need to set this before importing mujoco
     from mujoco_playground._src.mjx_env import ensure_menagerie_exists
     ensure_menagerie_exists()
     menagerie_spot_assets_folder = adarl.utils.utils.pkgutil_get_path("mujoco_playground", "external_deps/mujoco_menagerie/boston_dynamics_spot/assets")

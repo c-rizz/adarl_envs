@@ -33,7 +33,7 @@ def load_model(model_path):
     return SAC.load(model_path)
 
 
-class Fixedpolicy(RLAgent):
+class FixedPolicy(RLAgent):
     def __init__(self, cmd : th.Tensor):
         self._cmd = cmd.detach().clone()
 
@@ -64,6 +64,44 @@ class Fixedpolicy(RLAgent):
     
     def input_device(self):
         return self._a_offset.device
+    
+    @staticmethod
+    def build(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
+        if robot == "quad":
+            home_jpose = get_quad_args()["homing_joint_position_references"]
+            stiffness = 400
+            damping = 10
+        elif robot == "kyon":
+            home_jpose = get_kyon_args()["homing_joint_position_references"]
+            stiffness = 400
+            damping = 10
+        elif robot == "spot":
+            home_jpose = robot_args_registry["spot"]()["homing_joint_position_references"]
+            stiffness = 400
+            damping = 10
+        elif robot == "centauro":
+            home_jpose = get_centauro_args()["homing_joint_position_references"]
+            stiffness = 1000
+            damping = 10
+        elif robot == "go1":
+            home_jpose = get_go1_args()["homing_joint_position_references"]
+            stiffness = 400
+            damping = 10
+        else:
+            raise RuntimeError(f"Unknown robot '{robot}")
+        
+        home_pvesd = {k:[v, 0.0, 0.0, stiffness, damping] for k,v in home_jpose.items()}
+        base_env = env.get_runner().get_base_env()
+        if isinstance_noimport(base_env, "RobotVecEnv"):
+            home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
+            action_len = base_env._action_helper.single_action_len()
+        else:
+            action_len = 12
+            home_action = th.zeros((action_len,), device=device)
+
+        model = FixedPolicy(  cmd = home_action)
+        return model
+
 
 class SinPolicy(RLAgent):
     def __init__(self,  act_scale : th.Tensor,
@@ -116,6 +154,77 @@ class SinPolicy(RLAgent):
     def input_device(self):
         return self._a_offset.device
     
+    @staticmethod
+    def build(env, robot : str, scale : float = 0.0, device = th.device("cpu")):
+        home_jpose = robot_args_registry[robot]()["homing_joint_position"]
+        home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
+        base_env = env.get_runner().get_base_env()
+        if isinstance_noimport(base_env, "RobotVecEnv"):
+            home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
+            action_len = base_env._action_helper.single_action_len()
+        else:
+            action_len = 12
+            home_action = th.zeros((action_len,), device=device)
+        speed = 0.8
+        if robot == "quad":
+            act_range = th.as_tensor([0.0, 0.1, 0.2,
+                                    0.0, 0.1, 0.2,
+                                    0.0, 0.1, 0.2,
+                                    0.0, 0.1, 0.2], device = device)
+        elif robot == "kyon":
+            act_range = th.as_tensor([   0.0, -0.1,  0.17,
+                                        -0.0,  0.1, -0.17,
+                                        0.0, -0.1,  0.17,
+                                        -0.0,  0.1, -0.17],device = device)
+            # act_range.view(4,3)[0] *= -1.0
+            act_range.view(4,3)[1] *= -1.0
+            # act_range.view(4,3)[2] *= -1.0
+            act_range.view(4,3)[3] *= -1.0
+        elif robot == "spot":
+            hx,hy,k = 0.0, 1.0, 1.0
+            act_range = th.as_tensor([   hx, -hy,  k,
+                                        -hx,  hy, -k,
+                                        hx, -hy,  k,
+                                        -hx,  hy, -k],device = device)
+            # act_range.view(4,3)[0] *= -1.0
+            act_range.view(4,3)[1] *= -1.0
+            # act_range.view(4,3)[2] *= -1.0
+            act_range.view(4,3)[3] *= -1.0
+            speed = 0.5
+        elif robot == "go1":
+            act_range = th.as_tensor([   0.0, -0.4,  0.8,
+                                        -0.0,  0.4, -0.8,
+                                        0.0, -0.4,  0.8,
+                                        -0.0,  0.4, -0.8],device = device)
+            # act_range.view(4,3)[0] *= -1.0
+            act_range.view(4,3)[1] *= -1.0
+            # act_range.view(4,3)[2] *= -1.0
+            act_range.view(4,3)[3] *= -1.0
+        elif robot == "kyon_arms":
+            act_range = th.as_tensor([   0.0, -0.1,  0.17,
+                                        -0.0,  0.1, -0.17,
+                                        0.0, -0.1,  0.17,
+                                        -0.0,  0.1, -0.17,
+                                        0.5,  0.5,  0.5,
+                                        0.0,  0.5,  0.5,
+                                        0.0,  0.5,  0.5,
+                                        0.0,  0.5,  0.5,
+                                        ],device = device)
+            # act_range.view(4,3)[0] *= -1.0
+            act_range.view(8,3)[1] *= -1.0
+            # act_range.view(4,3)[2] *= -1.0
+            act_range.view(8,3)[3] *= -1.0
+        elif robot == "centauro":
+            act_range = th.as_tensor([0.1], device = device)
+        else:
+            raise RuntimeError(f"Unknown robot '{robot}'")
+        model = SinPolicy(  act_scale=act_range*scale,
+                            act_offset=home_action,
+                            act_speed=th.as_tensor([speed], device = device),
+                            action_size=action_len,
+                            dt=0.05)
+        return model
+    
 class RandPolicy(RLAgent):
     def __init__(self,  act_scale : th.Tensor,
                         action_size : int):
@@ -149,142 +258,38 @@ class RandPolicy(RLAgent):
     
     def input_device(self):
         return self._a_scale.device
-        
-def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("cpu")):
-    home_jpose = robot_args_registry[robot]()["homing_joint_position"]
-    home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
-    base_env = env.get_runner().get_base_env()
-    if isinstance_noimport(base_env, "RobotVecEnv"):
-        home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
-        action_len = base_env._action_helper.single_action_len()
-    else:
-        action_len = 12
-        home_action = th.zeros((action_len,), device=device)
-    speed = 0.8
-    if robot == "quad":
-        act_range = th.as_tensor([0.0, 0.1, 0.2,
-                                  0.0, 0.1, 0.2,
-                                  0.0, 0.1, 0.2,
-                                  0.0, 0.1, 0.2], device = device)
-    elif robot == "kyon":
-        act_range = th.as_tensor([   0.0, -0.1,  0.17,
-                                    -0.0,  0.1, -0.17,
-                                     0.0, -0.1,  0.17,
-                                    -0.0,  0.1, -0.17],device = device)
-        # act_range.view(4,3)[0] *= -1.0
-        act_range.view(4,3)[1] *= -1.0
-        # act_range.view(4,3)[2] *= -1.0
-        act_range.view(4,3)[3] *= -1.0
-    elif robot == "spot":
-        hx,hy,k = 0.0, 1.0, 1.0
-        act_range = th.as_tensor([   hx, -hy,  k,
-                                    -hx,  hy, -k,
-                                     hx, -hy,  k,
-                                    -hx,  hy, -k],device = device)
-        # act_range.view(4,3)[0] *= -1.0
-        act_range.view(4,3)[1] *= -1.0
-        # act_range.view(4,3)[2] *= -1.0
-        act_range.view(4,3)[3] *= -1.0
-        speed = 0.5
-    elif robot == "go1":
-        act_range = th.as_tensor([   0.0, -0.4,  0.8,
-                                    -0.0,  0.4, -0.8,
-                                     0.0, -0.4,  0.8,
-                                    -0.0,  0.4, -0.8],device = device)
-        # act_range.view(4,3)[0] *= -1.0
-        act_range.view(4,3)[1] *= -1.0
-        # act_range.view(4,3)[2] *= -1.0
-        act_range.view(4,3)[3] *= -1.0
-    elif robot == "kyon_arms":
-        act_range = th.as_tensor([   0.0, -0.1,  0.17,
-                                    -0.0,  0.1, -0.17,
-                                     0.0, -0.1,  0.17,
-                                    -0.0,  0.1, -0.17,
-                                     0.5,  0.5,  0.5,
-                                     0.0,  0.5,  0.5,
-                                     0.0,  0.5,  0.5,
-                                     0.0,  0.5,  0.5,
-                                    ],device = device)
-        # act_range.view(4,3)[0] *= -1.0
-        act_range.view(8,3)[1] *= -1.0
-        # act_range.view(4,3)[2] *= -1.0
-        act_range.view(8,3)[3] *= -1.0
-    elif robot == "centauro":
-        act_range = th.as_tensor([0.1], device = device)
-    else:
-        raise RuntimeError(f"Unknown robot '{robot}'")
-    model = SinPolicy(  act_scale=act_range*scale,
-                        act_offset=home_action,
-                        act_speed=th.as_tensor([speed], device = device),
-                        action_size=action_len,
-                        dt=0.05)
-    return model
-
-def build_rand_policy(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
-    if robot == "quad":
-        home_jpose = get_quad_args()["homing_joint_position"]
-    elif robot == "kyon":
-        home_jpose = get_kyon_args()["homing_joint_position"]
-    elif robot == "centauro":
-        home_jpose = get_centauro_args()["homing_joint_position"]
-    else:
-        raise RuntimeError(f"Unknown robot '{robot}")
-    home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
-    home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_pvesd)
-    if robot == "quad":
-        act_range = th.as_tensor([0.0, 0.1, 0.2,
-                                  0.0, 0.1, 0.2,
-                                  0.0, 0.1, 0.2,
-                                  0.0, 0.1, 0.2], device = device)
-    elif robot == "kyon":
-        act_range = th.as_tensor([   0.0, -0.1,  0.17,
-                                    -0.0,  0.1, -0.17,
-                                     0.0, -0.1,  0.17,
-                                    -0.0,  0.1, -0.17], device = device )
-    elif robot == "centauro":
-        act_range = th.as_tensor([0.1], device = device)
-    else:
-        raise RuntimeError(f"Unknown robot '{robot}")
-    model = RandPolicy(  act_scale=act_range*scale,
-                        action_size=env.get_runner().get_base_env()._action_helper.single_action_len())
-    return model
-
-
-def build_fixed_policy(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
-    if robot == "quad":
-        home_jpose = get_quad_args()["homing_joint_position_references"]
-        stiffness = 400
-        damping = 10
-    elif robot == "kyon":
-        home_jpose = get_kyon_args()["homing_joint_position_references"]
-        stiffness = 400
-        damping = 10
-    elif robot == "spot":
-        home_jpose = robot_args_registry["spot"]()["homing_joint_position_references"]
-        stiffness = 400
-        damping = 10
-    elif robot == "centauro":
-        home_jpose = get_centauro_args()["homing_joint_position_references"]
-        stiffness = 1000
-        damping = 10
-    elif robot == "go1":
-        home_jpose = get_go1_args()["homing_joint_position_references"]
-        stiffness = 400
-        damping = 10
-    else:
-        raise RuntimeError(f"Unknown robot '{robot}")
     
-    home_pvesd = {k:[v, 0.0, 0.0, stiffness, damping] for k,v in home_jpose.items()}
-    base_env = env.get_runner().get_base_env()
-    if isinstance_noimport(base_env, "RobotVecEnv"):
-        home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
-        action_len = base_env._action_helper.single_action_len()
-    else:
-        action_len = 12
-        home_action = th.zeros((action_len,), device=device)
+    @staticmethod
+    def build(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
+        if robot == "quad":
+            home_jpose = get_quad_args()["homing_joint_position"]
+        elif robot == "kyon":
+            home_jpose = get_kyon_args()["homing_joint_position"]
+        elif robot == "centauro":
+            home_jpose = get_centauro_args()["homing_joint_position"]
+        else:
+            raise RuntimeError(f"Unknown robot '{robot}")
+        home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
+        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_pvesd)
+        if robot == "quad":
+            act_range = th.as_tensor([0.0, 0.1, 0.2,
+                                    0.0, 0.1, 0.2,
+                                    0.0, 0.1, 0.2,
+                                    0.0, 0.1, 0.2], device = device)
+        elif robot == "kyon":
+            act_range = th.as_tensor([   0.0, -0.1,  0.17,
+                                        -0.0,  0.1, -0.17,
+                                        0.0, -0.1,  0.17,
+                                        -0.0,  0.1, -0.17], device = device )
+        elif robot == "centauro":
+            act_range = th.as_tensor([0.1], device = device)
+        else:
+            raise RuntimeError(f"Unknown robot '{robot}")
+        model = RandPolicy(  act_scale=act_range*scale,
+                            action_size=env.get_runner().get_base_env()._action_helper.single_action_len())
+        return model
 
-    model = Fixedpolicy(  cmd = home_action)
-    return model
+
 
 from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
 def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
@@ -562,11 +567,11 @@ def play(seed, folderName, run_id, args,
         except Exception as e: 
             ggLog.warn(f"Could not compare env args with trained model: {type(e)}: {e}")
     elif control_mode=="fixed":
-        model = build_fixed_policy(env = env, robot=robot, device= env_device)
+        model = FixedPolicy.build(env = env, robot=robot, device= env_device)
     elif control_mode=="random":
-        model = build_rand_policy(env=env, robot=robot, scale=1.0, device = env_device)
+        model = RandPolicy.build(env=env, robot=robot, scale=1.0, device = env_device)
     elif control_mode == "sine":
-        model = build_sin_policy(env, robot=robot, scale = 1.0, device = env_device)
+        model = SinPolicy.build(env, robot=robot, scale = 1.0, device = env_device)
     else:
         raise RuntimeError(f"Unknown control mode '{control_mode}'")
 

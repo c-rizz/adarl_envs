@@ -27,13 +27,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         env_device = th.device("cuda",0)
     
-    eval_freq = 40
+    eval_freq = 20
     r = 0.0 # randomization strength
-    n = 0.0 # noise strength
+    n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "action_delay_mustd_std" : (0.001, 0.001*n, 0.005*n),
+        "action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n),
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
@@ -63,14 +63,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,
         "max_goal_height_speed" : 0.1,
-        "max_good_step_duration" : 0.3,
+        "max_good_step_duration" : 0.5,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
-        "min_good_step_duration" : 0.2,
+        "min_good_step_duration" : 0.1,
         "mode" : mode,
-        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.2*n],
+        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.1*n],
         "obs_abs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.0*n, 0.0*n],
-        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.005*n, 0.05*n],
+        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.1*n],
         "obs_abs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_abs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_abs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
@@ -91,13 +91,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_superweight_joint_penalties" : 1.0,
         "reward_acceleration_weight" :        eps,
         "reward_acc_on_vel_weight" :          eps,
-        "reward_actacc_weight" :              1.0,
-        "reward_actdiff_weight" :             0.1,
+        "reward_actacc_weight" :              0.5*p,
+        "reward_actdiff_weight" :             0.5*p,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
-        "reward_power_weight" :               0.002,
+        "reward_power_weight" :               0.002*p,
         "reward_failure_weight" :             eps,
-        "reward_feet_air_time_weight" :       20.0,
+        "reward_feet_air_time_weight" :       10.0,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      eps,
         "reward_heading_velocity_weight" :    eps,
@@ -113,11 +113,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_posref_acc_weight":           eps,
         "reward_scale_nolength":              0.01,
         "reward_sensed_effort_weight" :       eps,
-        "reward_slip_weight" :                eps,
+        "reward_slip_weight" :                1.0,
         "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,
-        "reward_torque_weight" :              0.001,
-        "reward_torquediff_weight" :          0.001,
+        "reward_torque_weight" :              0.0001*p,
+        "reward_torquediff_weight" :          0.0001*p,
         "reward_torqueref_weight" :           eps,
         "reward_tracking_weight" :            2.0,
         "reward_velocity_limit_weight" :      eps,
@@ -138,7 +138,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
         "minimal_infos" : True,
-        "playground_style_reward" : True
+        "playground_style_reward" : False
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({        
@@ -421,7 +421,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 validation_batch_size=0,
                 validation_buffer_size=0,
                 validation_holdout_ratio=0,
-                checkpoint_freq=-1,
+                checkpoint_freq_vec_ep=10,
                 collector_device=env_device,
                 eval_configurations=eval_configurations,
                 debug_level=1)

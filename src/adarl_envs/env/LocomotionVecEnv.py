@@ -617,6 +617,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         verbose_infos : bool,
                         max_good_step_duration : float,
                         min_good_step_duration : float,
+                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] | None = None,
                         homing_joint_position_references : dict[tuple[str,str], float] | None = None,
                         enable_limits_safety : bool = True,
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
@@ -879,6 +880,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             safe_stiffness = safe_stiffness,
                             safety_limits_ratios_minmax_pve = safety_limits_ratios_minmax_pve,
                             control_limits_ratios_minmax_pve= control_limits_ratios_minmax_pve,
+                            control_limits_minmax_pve= control_limits_minmax_pve,
                             saturate_jimp_ref_limits = saturate_jimp_ref_limits,
                             seed = seed,
                             stepLength_sec = stepLength_sec,
@@ -1682,7 +1684,7 @@ class LocomotionVecEnv(RobotVecEnv):
         heading_err = locom[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR]
         ang_vel_z = extr[:, self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z]
         # Desired angular velocity ~ -kp * heading_error (negative feedback)
-        desired_ang_vel = 0.0 #-2.0 * heading_err
+        desired_ang_vel = locom[:, self.LOCOMOTION_FIELDS.GOAL_YAW_VEL]
         ang_vel_error = (desired_ang_vel - ang_vel_z) ** 2
         return th.exp(-ang_vel_error / self._PG_TRACKING_SIGMA)
 

@@ -513,6 +513,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         stop_on_failure : bool,
                         th_device : th.device,
                         verbose_infos : bool,
+                        control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] | None = None,
                         homing_references : dict[tuple[str,str], float] | None = None,
                         enable_limits_safety : bool = True,
                         enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
@@ -582,6 +583,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         controlled_joints = controlled_joints,
                                         control_limits_center = control_limits_center,
                                         control_limits_ratios_minmax_pve = control_limits_ratios_minmax_pve,
+                                        control_limits_minmax_pve = control_limits_minmax_pve,
                                         safety_limits_ratios_minmax_pve = safety_limits_ratios_minmax_pve,
                                         free_joints=free_joints,
                                         homing_joint_pose = homing_joint_pose,
@@ -838,6 +840,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     control_limits_center : dict[tuple[str,str], float],
                                     safety_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
                                     control_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
+                                    control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] | None,
                                     homing_joint_pose : dict[tuple[str,str], float],
                                     homing_references : dict[tuple[str,str], float] | None,
                                     safe_stiffness : float,
@@ -845,6 +848,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     held_joints_stiffness : float,
                                     held_joints_damping : float
                                     ):
+        
+        # ----- DEFINE JOINT GROUPS ------------------------------------------
+
         controlled_joints_str = []
         for j in controlled_joints:
             if isinstance(j, str):
@@ -866,6 +872,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         held_joints = [jn for jn in controllable_joints if (jn not in agent_controlled_joints_rn and jn not in free_joints_rn)]
         all_controlled_joints = agent_controlled_joints_rn+held_joints
 
+        # ----- DEFINE PHYSICAL LIMITS ------------------------------------------
+
         phys_limits_minmax_pve = {(robot_name,k):self._thtens(l) 
                                     for k,l in self._robot_model.get_joint_limits([jn[1] for jn in all_controlled_joints]).items()}
         default_effort_lim = 1000.0
@@ -878,20 +886,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             minmax_pve[0,1][minmax_pve[0,1]==float("-inf")] = -default_vel_lim
             minmax_pve[1,1][minmax_pve[1,1]==float("inf")] = default_vel_lim
 
+        # ----- DEFINE SAFETY LIMITS ------------------------------------------
+
         if isinstance(safety_limits_ratios_minmax_pve, dict):
             safety_limits_dict_ratios_minmax_pve = safety_limits_ratios_minmax_pve
         else:
             safety_limits_dict_ratios_minmax_pve = {k:safety_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
-        safe_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) 
-                                               for k,v in safety_limits_dict_ratios_minmax_pve.items()}
-        if control_limits_ratios_minmax_pve is None:
-            control_limits_ratios_minmax_pve = safety_limits_ratios_minmax_pve
-        if isinstance(control_limits_ratios_minmax_pve, dict):
-            control_limits_dict_ratios_minmax_pve = control_limits_ratios_minmax_pve
-        else:
-            control_limits_dict_ratios_minmax_pve = {k:control_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
         safe_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) for k,v in safety_limits_dict_ratios_minmax_pve.items()}
-        control_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) for k,v in control_limits_dict_ratios_minmax_pve.items()}
         def scale_limit(jn, minmax_pve : th.Tensor, minmax_scaling : th.Tensor):
             ranges_pve = minmax_pve[1] - minmax_pve[0]
             center_pve = (minmax_pve[1] + minmax_pve[0])/2
@@ -912,23 +913,46 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                 max=phys_limits_minmax_pve[jn][1].expand(2,-1)) 
                                   for jn,lims in safe_limits_minmax_pve.items()}
 
+        # ----- DEFINE CONTROL LIMITS ------------------------------------------
 
-        def scale_limit_centered(jn, minmax_pve : th.Tensor, minmax_scaling : th.Tensor, center_pos : float | None):
-            ranges_pve = minmax_pve[1] - minmax_pve[0]
-            if center_pos is not None:
-                center_pve = (minmax_pve[1] + minmax_pve[0]) / 2
-                center_pve = center_pve.clone()
-                center_pve[0] = center_pos  # override position center
+        if control_limits_minmax_pve is None:
+            if control_limits_ratios_minmax_pve is None:
+                control_limits_ratios_minmax_pve = safety_limits_ratios_minmax_pve
+            if isinstance(control_limits_ratios_minmax_pve, dict):
+                control_limits_dict_ratios_minmax_pve = control_limits_ratios_minmax_pve
             else:
-                center_pve = (minmax_pve[1] + minmax_pve[0]) / 2
-            scaled_ranges = ranges_pve.expand(2,3) * minmax_scaling
-            lims = th.stack([center_pve - scaled_ranges[0]/2, center_pve + scaled_ranges[1]/2], dim=0)
-            return lims
-        control_limits_minmax_pve = {jn: scale_limit_centered(jn,
-                                                    phys_limits_minmax_pve[jn],
-                                                    control_limits_ratios_minmax_pve_th[jn],
-                                                    control_limits_center.get(jn, None))
-                                    for jn in phys_limits_minmax_pve.keys()}
+                control_limits_dict_ratios_minmax_pve = {k:control_limits_ratios_minmax_pve for k in phys_limits_minmax_pve}
+            control_limits_ratios_minmax_pve_th = {k:self._thtens(v).expand((2,3,)) for k,v in control_limits_dict_ratios_minmax_pve.items()}
+            def scale_limit_centered(jn, minmax_pve : th.Tensor, minmax_scaling : th.Tensor, center_pos : float | None):
+                ranges_pve = minmax_pve[1] - minmax_pve[0]
+                if center_pos is not None:
+                    center_pve = (minmax_pve[1] + minmax_pve[0]) / 2
+                    center_pve = center_pve.clone()
+                    center_pve[0] = center_pos  # override position center
+                else:
+                    center_pve = (minmax_pve[1] + minmax_pve[0]) / 2
+                scaled_ranges = ranges_pve.expand(2,3) * minmax_scaling
+                lims = th.stack([center_pve - scaled_ranges[0]/2, center_pve + scaled_ranges[1]/2], dim=0)
+                return lims
+            control_limits_minmax_pve = {jn: scale_limit_centered(jn,
+                                                        phys_limits_minmax_pve[jn],
+                                                        control_limits_ratios_minmax_pve_th[jn],
+                                                        control_limits_center.get(jn, None))
+                                        for jn in phys_limits_minmax_pve.keys()}
+        else:
+            if control_limits_ratios_minmax_pve is not None:
+                raise RuntimeError("Both control_limits_minmax_pve and control_limits_ratios_minmax_pve are provided")
+            if control_limits_center is not None:
+                raise RuntimeError("Both control_limits_minmax_pve and control_limits_center are provided, control_limits_center can only be used in combination with control_limits_ratios_minmax_pve")
+            for jn in safe_limits_minmax_pve.keys():
+                if jn not in control_limits_minmax_pve:
+                    ggLog.warn(f"control_limits_minmax_pve does not contain joint {jn} that is present in safe_limits_minmax_pve, using the safe limit for that joint as control limit")
+                    control_limits_minmax_pve[jn] = safe_limits_minmax_pve[jn]
+                l = control_limits_minmax_pve[jn]
+                dbg_check_size(l, (2,3), msg=f"control_limits_minmax_pve[{jn}] has shape {control_limits_minmax_pve[jn].shape}, should have shape (2,3) representing min/max for position, velocity and effort")
+                control_limits_minmax_pve[jn] = l.to(self._th_device)
+        dbg_check_finite(control_limits_minmax_pve, assert_msg="control_limits_minmax_pve contains non-finite values")
+        # Ensure control limits are within safe limits
         for jn in safe_limits_minmax_pve.keys():
             if jn not in control_limits_minmax_pve:
                 control_limits_minmax_pve[jn] = safe_limits_minmax_pve[jn]
@@ -939,6 +963,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                             f"The limit will be clamped.") 
                 control_limits_minmax_pve[jn] = control_limits_minmax_pve[jn].clamp(min=safe_limits_minmax_pve[jn][0].expand(2,-1), 
                                                                                     max=safe_limits_minmax_pve[jn][1].expand(2,-1))
+
+        # ----- DEFINE HOMING POSE ------------------------------------------
 
         default_homing_joint_pose = {jn: unnormalize(0.0, safe_limits_minmax_pve[jn][0,0].item(), safe_limits_minmax_pve[jn][1,0].item())
                                      for jn in all_controlled_joints}
@@ -965,12 +991,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     for jn in held_joints]).view(-1,5)
         homing_held_joints_position = {jn:self._thtens(p) for jn,p in homing_joint_pose.items() if jn in held_joints}
         homing_nonctrl_joints_position = {jn:self._thtens(p) for jn,p in homing_joint_pose.items() if jn not in agent_controlled_joints_rn}
-        ggLog.info(f"homing_nonctrl_joints_position = {homing_nonctrl_joints_position}")
-        ggLog.info(f"homing_ctrl_joints_pvesd = {homing_ctrl_joints_pvesd}")
+        
+        # ----- RECAP -------------------------------------------------------
 
         def format_dict(d : dict):
             return "\n".join([f"'{k}':\n{v}" for k,v in d.items()])
-
+        
+        ggLog.info(f"homing_nonctrl_joints_position = {homing_nonctrl_joints_position}")
+        ggLog.info(f"homing_ctrl_joints_pvesd = {homing_ctrl_joints_pvesd}")
         ggLog.info(f"phys_limits_minmax_pve = \n"+format_dict(phys_limits_minmax_pve))
         ggLog.info(f"safe_limits_minmax_pve = \n"+format_dict({f"{k}\n":v for k,v in safe_limits_minmax_pve.items()}))
         ggLog.info(f"control_limits_minmax_pve = \n"+format_dict({f"{k}\n":v for k,v in control_limits_minmax_pve.items()}))

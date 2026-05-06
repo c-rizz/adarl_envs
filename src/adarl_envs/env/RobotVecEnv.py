@@ -950,7 +950,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     control_limits_minmax_pve[jn] = safe_limits_minmax_pve[jn]
                 l = control_limits_minmax_pve[jn]
                 dbg_check_size(l, (2,3), msg=f"control_limits_minmax_pve[{jn}] has shape {control_limits_minmax_pve[jn].shape}, should have shape (2,3) representing min/max for position, velocity and effort")
-                control_limits_minmax_pve[jn] = l.to(self._th_device)
+                control_limits_minmax_pve[jn] = self._thtens(l)
         dbg_check_finite(control_limits_minmax_pve, assert_msg="control_limits_minmax_pve contains non-finite values")
         # Ensure control limits are within safe limits
         for jn in safe_limits_minmax_pve.keys():
@@ -995,13 +995,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ----- RECAP -------------------------------------------------------
 
         def format_dict(d : dict):
-            return "\n".join([f"'{k}':\n{v}" for k,v in d.items()])
+            longest_key = max(len(str(k)) for k in d.keys())
+            col = longest_key + 6
+            s = " "*col
+            return "\n".join([f"'{k}':".ljust(col)+
+                              "\n".join([sv if i == 0 else s+sv for i,sv in enumerate(f"{v}".split("\n"))])
+                             for k,v in d.items()])
         
         ggLog.info(f"homing_nonctrl_joints_position = {homing_nonctrl_joints_position}")
         ggLog.info(f"homing_ctrl_joints_pvesd = {homing_ctrl_joints_pvesd}")
         ggLog.info(f"phys_limits_minmax_pve = \n"+format_dict(phys_limits_minmax_pve))
-        ggLog.info(f"safe_limits_minmax_pve = \n"+format_dict({f"{k}\n":v for k,v in safe_limits_minmax_pve.items()}))
-        ggLog.info(f"control_limits_minmax_pve = \n"+format_dict({f"{k}\n":v for k,v in control_limits_minmax_pve.items()}))
+        ggLog.info(f"safe_limits_minmax_pve = \n"+format_dict(safe_limits_minmax_pve))
+        ggLog.info(f"control_limits_minmax_pve = \n"+format_dict(control_limits_minmax_pve))
         ggLog.info(f"agent_controlled_joints = \n"+pprint.pformat(agent_controlled_joints_rn)) 
         ggLog.info(f"held_joints = \n"+pprint.pformat(held_joints)) # Joints that are controlled by the env to be held at a fixed position
         ggLog.info(f"free_joints = \n"+pprint.pformat(free_joints_rn)) # Joints that are not controlled at all
@@ -1900,7 +1905,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             samples=1000,
             threshold=1.0)
         ggLog.info(f"Always present self collisions = {pprint.pformat(self._always_present_collisions)}")
-        self._adapter.set_monitored_joints(self._configuration.joints_agent_controlled)
+        self._adapter.set_monitored_joints(self._configuration.joints_all_env_controlled)
         self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.set_impedance_controlled_joints(self._configuration.joints_all_env_controlled)
         # ggLog.info("Initialized RobotVecEnv scenario")

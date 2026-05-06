@@ -28,7 +28,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         env_device = th.device("cuda",0)
     
     eval_freq = 20
-    r = 0.0 # randomization strength
+    r = 1.0 # randomization strength
     n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
@@ -44,8 +44,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : [0.47,0.47] if args["robot"] == "kyon" else [0.30,0.30],
-        "goal_resampling_probability_per_sec" : 0.0,
+        "goal_height_minmax" : {"kyon" : [0.47,0.47],
+                                "go1" : [0.30,0.30],
+                                "centauro" : [0.79,0.79],
+                                }.get(args["robot"].lower(), [0.5,0.5]),
+        "goal_resampling_probability_per_sec" : 0.1,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_zero_ratio" : 0.25,
@@ -55,7 +58,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
-        "init_on_reset_ratio" : 1.0,
+        "init_on_reset_ratio" : 0.7,
         "initial_height_randomization_range_meters" : 0.1,
         "initial_joint_pose_randomization_range" : 0.1,
         "just_health_reward" : False,
@@ -103,10 +106,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_heading_velocity_weight" :    eps,
         "reward_heading_weight" :             eps,
         "reward_health_weight" :              eps,
-        "reward_height_position_weight" :     2.0,
+        "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     0.1,
         "reward_pitchnroll_velocity_weight" : 1.0,
-        "reward_pitchnroll_weight" :          1.0,
+        "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      1.0,
         "reward_position_weight" :            eps,
         "reward_posref_vel_weight" :          eps,
@@ -119,7 +122,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_torque_weight" :              0.0001*p,
         "reward_torquediff_weight" :          0.0001*p,
         "reward_torqueref_weight" :           eps,
-        "reward_tracking_weight" :            2.0,
+        "reward_tracking_weight" :            1.0,
         "reward_velocity_limit_weight" :      eps,
         "reward_velocity_weight" :            eps,
         "reward_velref_weight" :              eps,
@@ -394,7 +397,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder=None,
                 vec_env_builder=named_loco_venv_builder,
                 env_builder_args=env_builder_args,
-                agent_hyperparams=PPO_hyperparams(  minibatch_size=None,
+                agent_hyperparams=PPO_hyperparams(  minibatch_size=train_envs*24//4,
                                                     minibatch_num=4,
                                                     th_device=th.device("cuda"),
                                                     actor_network_arch=(512,256),

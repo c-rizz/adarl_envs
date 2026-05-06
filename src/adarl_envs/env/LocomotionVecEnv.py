@@ -603,7 +603,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         robot_description_string : str,
                         robot_description_format : Literal["urdf", "mjcf"],
                         safe_damping : float,
-                        control_limits_position_offset : dict[tuple[str,str], float],
+                        control_limits_center : dict[tuple[str,str], float],
                         safe_stiffness : float,
                         safety_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
                         control_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
@@ -709,14 +709,14 @@ class LocomotionVecEnv(RobotVecEnv):
                         goal_abs_yaw_minmax = th.as_tensor(goal_yaw_minmax, device=th_device, dtype=th.float32),
                         goal_yaw_vel_minmax = th.as_tensor(goal_yaw_vel_minmax, device=th_device, dtype=th.float32),
                         goal_yaw_vel_zero_ratio = self._thtens(goal_yaw_vel_zero_ratio),
-                        height_reward_settle_point=self._thtens(0.025), # A narrow reward bell
+                        height_reward_settle_point=self._thtens(0.05), # A narrow reward bell
                         height_reward_2_settle_point=self._thtens(0.3), # A wider reward bell
                         height_reward_2_weight=self._thtens(0.5), # weight of the wide reward bell over the narrow one
                         pitchnroll_reward_settle_point=self._thtens(th.pi/4), # ~zero reward after this angle
                         heading_reward_settle_point = self._thtens(3.14159/16), # ~zero reward after this distance (w component of the quat difference)
                         vel_reward_goalrelative_weight = self._thtens(0.25),
                         reward_vel_goal_relative_width = self._thtens(1.5),
-                        reward_vel_goal_absolute_width = self._thtens(0.25),
+                        reward_vel_goal_absolute_width = self._thtens(0.5),
                         reward_vel_goal_relative_width_offset = self._thtens(0.1),
                         feet_links = feet_links,
                         heightmap_resolution_xy = (heightmap_resolution,heightmap_resolution),
@@ -741,7 +741,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         enabled_rewards = None, #type: ignore Will be set below,
                         terminate_on_crash = terminate_on_crash,
                         playground_style_reward = playground_style_reward,
-                        reward_yaw_vel_goal_absolute_width = self._thtens(0.3),
+                        reward_yaw_vel_goal_absolute_width = self._thtens(0.5),
                         reward_yaw_vel_goal_relative_width = self._thtens(1.5),
                         reward_yaw_vel_goal_relative_width_offset = self._thtens(0.1),
                         reward_yaw_vel_goal_relative_weight = self._thtens(0.25),
@@ -876,7 +876,7 @@ class LocomotionVecEnv(RobotVecEnv):
                             robot_description_string = robot_description_string,
                             robot_description_format = robot_description_format,
                             safe_damping = safe_damping,
-                            control_limits_center = control_limits_position_offset,
+                            control_limits_center = control_limits_center,
                             safe_stiffness = safe_stiffness,
                             safety_limits_ratios_minmax_pve = safety_limits_ratios_minmax_pve,
                             control_limits_ratios_minmax_pve= control_limits_ratios_minmax_pve,
@@ -925,12 +925,6 @@ class LocomotionVecEnv(RobotVecEnv):
 
     @override
     def _build(self):
-        super()._build()
-        # self._feet_link_ids = self._adapter.get_links_ids(self._loco_conf.feet_links)
-        # self._ground_link_id = self._adapter.get_links_ids([self._configuration.ground_link])
-        self._adapter.set_monitored_links(self._adapter.get_monitored_links() + self._loco_conf.feet_links)
-        self._feet_and_body_link_ids = self._adapter.get_monitored_links_ids(self._loco_conf.feet_links + [self._configuration.main_body_link])
-        
         # Set up monitored collision pairs for MjxAdapter
         if isinstance_noimport(self._adapter, "MjxAdapter"):
             from adarl.adapters.MjxAdapter import MjxAdapter
@@ -938,6 +932,12 @@ class LocomotionVecEnv(RobotVecEnv):
             # Create collision pairs: each foot vs ground
             feet_ground_collision_pairs = [(foot, self._configuration.ground_link) for foot in self._loco_conf.feet_links]
             mjx_adapter.set_monitored_collision_pairs(feet_ground_collision_pairs)
+        super()._build()
+        # self._feet_link_ids = self._adapter.get_links_ids(self._loco_conf.feet_links)
+        # self._ground_link_id = self._adapter.get_links_ids([self._configuration.ground_link])
+        self._adapter.set_monitored_links(self._adapter.get_monitored_links() + self._loco_conf.feet_links)
+        self._feet_and_body_link_ids = self._adapter.get_monitored_links_ids(self._loco_conf.feet_links + [self._configuration.main_body_link])
+        
 
 
 
@@ -999,6 +999,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                             self._locomotion_state_helper,
                                                             obs_defs={"base":{"observable":True,"concatenate":True,"noise":None},
                                                                       "privileged":{"observable":True,"concatenate":True,"noise":None}})
+        observe_rew_weights = True
         self._reward_weights_state_helper = ThBoxStateHelper( field_names=self._loco_conf.enabled_rewards,
                                                     fields_minmax={n : [-1.0,1.0] for n in self._loco_conf.enabled_rewards}, # -1,1, makes it so that it does not get scaled
                                                     dtype=self._obs_dtype,
@@ -1006,8 +1007,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     field_size=(1,),
                                                     history_length=1,
                                                     observation_definitions={
-                                                        "base" : ThBoxStateHelper.SimpleObsDef.fully_observable(),
-                                                        "privileged" : ThBoxStateHelper.SimpleObsDef.fully_observable()},
+                                                        "base" : ThBoxStateHelper.SimpleObsDef.fully_observable() if observe_rew_weights else ThBoxStateHelper.SimpleObsDef.not_observable(),
+                                                        "privileged" : ThBoxStateHelper.SimpleObsDef.fully_observable() if observe_rew_weights else ThBoxStateHelper.SimpleObsDef.not_observable()},
                                                     flatten_observation=True,
                                                     vec_size=adapter.vec_size())
         self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_REWARDS,
@@ -1463,15 +1464,18 @@ class LocomotionVecEnv(RobotVecEnv):
         prev_pos = prev_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]
         goal_pos = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
         dt = current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT]
-        max_speed = self._loco_conf.max_height_speed_goal
-        kp = 2
-        height_err = curr_pos-goal_pos
-        goal_height_velocity = th.clamp(-height_err*kp, min=-max_speed, max=max_speed) 
         z_velocity = (curr_pos - prev_pos)/dt
-        reward_height = double_bell_reward(z_velocity-goal_height_velocity,
-                                           bell_width_a=self._thtens(0.05),
-                                           bell_width_b=goal_height_velocity*2+0.025,
-                                           bell_b_weight=self._thtens(0.5))
+
+        height_err = curr_pos-goal_pos
+        # max_speed = self._loco_conf.max_height_speed_goal
+        # kp = 2
+        # goal_height_velocity = th.clamp(-height_err*kp, min=-max_speed, max=max_speed) 
+        # reward_height = double_bell_reward(z_velocity-goal_height_velocity,
+        #                                    bell_width_a=self._thtens(0.05),
+        #                                    bell_width_b=goal_height_velocity*2+0.025,
+        #                                    bell_b_weight=self._thtens(0.5))
+        goal_height_velocity = th.zeros_like(z_velocity) # we want to maintain a constant height, so the goal velocity is zero
+        reward_height = -z_velocity**2
         return reward_height, z_velocity, goal_height_velocity, dt, height_err
     
     def _velocity_from_position_reward(self,    curr_pos : th.Tensor,
@@ -1653,9 +1657,8 @@ class LocomotionVecEnv(RobotVecEnv):
             "feet_air_time": 1.0
         }
 
-        weighted_rewards = {k: v * weights[k] for k, v in sub_rewards.items()}
+        weighted_rewards = {k: v * weights[k] * self._configuration.stepLength_sec for k, v in sub_rewards.items()}
         reward = th.clamp(th.sum(th.stack(list(weighted_rewards.values()), dim=1), dim=1), 0.0, 10000.0)
-        reward = reward * self._configuration.stepLength_sec
         return reward, weighted_rewards
 
     # ---- Playground-style reward methods ----
@@ -2225,6 +2228,7 @@ class LocomotionVecEnv(RobotVecEnv):
         i["smoothed_yawvel_error"] = th.abs(smoothed_yawvel_error)
         i["goal_abs_xyz_vec"] = goal_abs
         i["body_abs_linvel"] = abs_linvel
+        i["body_abs_linspeed"] = abs_linvel.norm(dim=1)
         i["avg_air_duration"] = avg_air_duration
         i["smoothed_is_jumping"] = smoothed_is_jumping
         i["smoothed_num_feet_on_ground"] = smoothed_num_feet_on_ground

@@ -30,14 +30,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         env_device = th.device("cuda",0)
     
     eval_freq = 5 if algo=="sac" else 40
-    r = 0.0 # randomization strength
-    n = 0.0 # noise strength
+    r = 1.0 # randomization strength
+    n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "action_delay_mustd_std" : (0.001, 0.001*n, 0.005*n),
+        "action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n),
         "action_noise_mustd" : (0.0,   0.0),
-        "action_smoothing_halflife_sec" : 0.01,
+        "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
@@ -47,7 +47,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
         "goal_height_minmax" : [0.47,0.47] if args["robot"] == "kyon" else [0.30,0.30],
-        "goal_resampling_probability_per_sec" : 0.0,
+        "goal_resampling_probability_per_sec" : 0.1,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_zero_ratio" : 0.25,
@@ -57,7 +57,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
-        "init_on_reset_ratio" : 1.0,
+        "init_on_reset_ratio" : 0.7,
         "initial_height_randomization_range_meters" : 0.1,
         "initial_joint_pose_randomization_range" : 0.1,
         "just_health_reward" : False,
@@ -65,19 +65,19 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,
         "max_goal_height_speed" : 0.1,
-        "max_good_step_duration" : 0.3,
+        "max_good_step_duration" : 0.5,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
-        "min_good_step_duration" : 0.2,
+        "min_good_step_duration" : 0.1,
         "mode" : mode,
-        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.2*n],
+        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.1*n],
         "obs_abs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.0*n, 0.0*n],
-        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.005*n, 0.05*n],
+        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.1*n],
         "obs_abs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_abs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_abs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
         "observe_full_robot_state" : False,
-        "offset_envs_ep_starts" : False,
+        "offset_envs_ep_starts" : True,
         "posref_safety_period" : 0.02,
         "quiet" : False,
         "randomized_armature_ratios" : 0.1*r,
@@ -93,35 +93,35 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_superweight_joint_penalties" : 1.0,
         "reward_acceleration_weight" :        eps,
         "reward_acc_on_vel_weight" :          eps,
-        "reward_actacc_weight" :              0.01,
-        "reward_actdiff_weight" :             0.01,
+        "reward_actacc_weight" :              0.5*p,
+        "reward_actdiff_weight" :             0.5*p,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
-        "reward_power_weight" :               0.002,
+        "reward_power_weight" :               0.002*p,
         "reward_failure_weight" :             eps,
-        "reward_feet_air_time_weight" :       1.0,
+        "reward_feet_air_time_weight" :       10.0,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      eps,
         "reward_heading_velocity_weight" :    eps,
         "reward_heading_weight" :             eps,
         "reward_health_weight" :              eps,
-        "reward_height_position_weight" :     1.0,
+        "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     0.1,
         "reward_pitchnroll_velocity_weight" : 1.0,
-        "reward_pitchnroll_weight" :          1.0,
+        "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      1.0,
         "reward_position_weight" :            eps,
         "reward_posref_vel_weight" :          eps,
         "reward_posref_acc_weight":           eps,
-        "reward_scale_nolength":              0.1,
+        "reward_scale_nolength":              0.01,
         "reward_sensed_effort_weight" :       eps,
-        "reward_slip_weight" :                eps,
+        "reward_slip_weight" :                1.0,
         "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,
-        "reward_torque_weight" :              0.001,
-        "reward_torquediff_weight" :          0.001,
+        "reward_torque_weight" :              0.0001*p,
+        "reward_torquediff_weight" :          0.0001*p,
         "reward_torqueref_weight" :           eps,
-        "reward_tracking_weight" :            3.0,
+        "reward_tracking_weight" :            1.0,
         "reward_velocity_limit_weight" :      eps,
         "reward_velocity_weight" :            eps,
         "reward_velref_weight" :              eps,
@@ -295,7 +295,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
                                      start_target=-0.5,
-                                     end_target=-5.0,
+                                     end_target=-3.0,
                                      start_reference_threshold=0.4,
                                      end_reference_threshold=0.05)
     
@@ -355,7 +355,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     no_wandb=args["no_wandb"],
                     debug_level=2,
                     log_weights_and_grads=False,
-                    transition_augmentor_builder=transition_augmentor_builder)
+                    transition_augmentor_builder=None, #transition_augmentor_builder
+                    )
     elif algo.lower() == "sac_small":
         sac_train(  seed,
                     folderName,

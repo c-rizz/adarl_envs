@@ -19,6 +19,7 @@ import copy
 from rreal.algorithms.sac_helpers import build_vec_env, VecEnvRunnerBuilderProtocol
 from math import pi
 import xml.etree.ElementTree as ET
+import numpy as np
 
 def set_asset_texture_paths(mjcf_string: str, meshdir: str, texturedir: str) -> str:
     """Set meshdir and texturedir in <compiler> to the given paths. If <compiler> doesn't exist, it is created."""
@@ -266,8 +267,10 @@ def loco_runner_builder(seed,
                                             revolute_dof_damping_override=env_builder_args.get("revolute_dof_damping_override", None),
                                             opt_preset=env_builder_args.pop("mjx_opt_preset"),
                                             opt_override=opt_override,
+                                            geom_overrides=env_builder_args.get("mjx_geom_overrides", None),
                                             reference_filter_cutoff_frequency=20.0,
-                                            reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none")
+                                            reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none",
+                                            mjx_impl="jax")
     elif mode == "mjx-act":
         from adarl.adapters.MjxActuatedAdapter import MjxActuatedAdapter
         import jax
@@ -421,10 +424,11 @@ def loco_runner_builder(seed,
                             robot_description_string=robot_description_string,
                             robot_description_format=robot_description_format,
                             safe_damping=env_builder_args.pop("safe_damping"),
-                            control_limits_position_offset=env_builder_args.pop("control_limits_position_offset"),
+                            control_limits_center=env_builder_args.pop("control_limits_center"),
                             safe_stiffness=env_builder_args.pop("safe_stiffness"),
                             safety_limits_ratios_minmax_pve=env_builder_args.pop("safety_limits_ratios_minmax_pve"),
                             control_limits_ratios_minmax_pve=env_builder_args.pop("control_limits_ratios_minmax_pve"),
+                            control_limits_minmax_pve=env_builder_args.pop("control_limits_minmax_pve"),
                             saturate_jimp_ref_limits = env_builder_args.pop("saturate_jimp_ref_limits"),
                             seed=seed,
                             stepLength_sec=stepLength_sec,
@@ -567,7 +571,7 @@ def get_quad_args():
             "randomized_friction_links" : [LINK_FILTERS.ALL],
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.3, 0.9, 0.9],
                                                     [ 0.3, 0.9, 0.9]] for k,v in homing.items()},
-            "control_limits_position_offset" : homing,
+            "control_limits_center" : homing,
             "enable_link_collisions" : [    (('quad', 'foot_center_link_back_left'),[('ground','ground_link')]),
                                             (('quad', 'foot_center_link_back_right'),[('ground','ground_link')]),
                                             (('quad', 'foot_center_link_front_left'),[('ground','ground_link')]),
@@ -580,22 +584,22 @@ def get_quad_args():
 robot_args_registry["quad"] = get_quad_args
 
 
-def get_kyon_args(enable_arms : bool = False):
+def get_kyon_args(enable_arms : bool = False,):
     hip_pitch = -0.8727 # = -50/180*3.14159
     hip_roll =   0.0349 # = 2/180*3.14159
     knee =      -1.5707 # = -90/180*3.14159
     homing_ref = {  ("kyon","hip_roll_3") :  hip_roll,
-                ("kyon","hip_roll_4") : -hip_roll,
-                ("kyon","hip_roll_1") : -hip_roll,
-                ("kyon","hip_roll_2") :  hip_roll,
-                ("kyon","hip_pitch_3") :  hip_pitch,
-                ("kyon","hip_pitch_4") : -hip_pitch,
-                ("kyon","hip_pitch_1") :  hip_pitch,
-                ("kyon","hip_pitch_2") : -hip_pitch,
-                ("kyon","knee_pitch_3") : -knee,
-                ("kyon","knee_pitch_4") :  knee,
-                ("kyon","knee_pitch_1") : -knee,
-                ("kyon","knee_pitch_2") :  knee}
+                    ("kyon","hip_roll_4") : -hip_roll,
+                    ("kyon","hip_roll_1") : -hip_roll,
+                    ("kyon","hip_roll_2") :  hip_roll,
+                    ("kyon","hip_pitch_3") :  hip_pitch,
+                    ("kyon","hip_pitch_4") : -hip_pitch,
+                    ("kyon","hip_pitch_1") :  hip_pitch,
+                    ("kyon","hip_pitch_2") : -hip_pitch,
+                    ("kyon","knee_pitch_3") : -knee,
+                    ("kyon","knee_pitch_4") :  knee,
+                    ("kyon","knee_pitch_1") : -knee,
+                    ("kyon","knee_pitch_2") :  knee}
     # These are correct for stifness=500
     homing = {  ("kyon","hip_roll_3") :    0.0930,
                 ("kyon","hip_roll_4") :   -0.0930,
@@ -609,6 +613,13 @@ def get_kyon_args(enable_arms : bool = False):
                 ("kyon","knee_pitch_4") : -1.6330,
                 ("kyon","knee_pitch_1") :  1.6495,
                 ("kyon","knee_pitch_2") : -1.6495}
+    j_vel_phys_lim = 7.6
+    j_eff_phys_lim = 185
+    j_pos_ctrl_range = 0.3
+    j_vel_ctrl_lim = j_vel_phys_lim*0.9
+    j_eff_ctrl_lim = j_eff_phys_lim*0.9
+    j_pos_ctrl_lims = {k:np.array([-1.0,1.0])*j_pos_ctrl_range+homing[k] for k in homing.keys()}
+
     if enable_arms:
         homing_ref.update({ ("kyon","shoulder_yaw_1") : 0.0,
                         ("kyon","shoulder_pitch_1") : 0.0,
@@ -622,8 +633,12 @@ def get_kyon_args(enable_arms : bool = False):
                         ("kyon","wrist_yaw_2") : 0.0,
                         ("kyon","dagana_1_clamp_joint") : 0.1,
                         ("kyon","dagana_2_clamp_joint") : 0.1})
-    return {"model_file" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro"),
-            "robot_description_format" : "xacro",
+    file = adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro")
+    format = "xacro"
+    # file = adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_mjx/kyon_mjx.xml")
+    # format = "mjcf"
+    return {"model_file" : file,
+            "robot_description_format" : format,
             "model_kwargs" : {"upper_body" : f"{enable_arms}",
                               "footonly_collision" : "true",
                               "varta" : "true"},
@@ -644,9 +659,13 @@ def get_kyon_args(enable_arms : bool = False):
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
                                                     [ 0.9, 0.9, 0.9]] for k,v in homing_ref.items()},
-            "control_limits_ratios_minmax_pve" : {k:[[ 0.25, 0.9, 0.9],
-                                                     [ 0.25, 0.9, 0.9]] for k,v in homing_ref.items()},
-            "control_limits_position_offset" : homing_ref,
+            "control_limits_ratios_minmax_pve" : None,
+                                                # {k:[[ joint_ranges[k], 0.9, 0.9],
+                                                #     [ joint_ranges[k], 0.9, 0.9]] for k,v in homing_ref.items()},
+            "control_limits_minmax_pve" : {k:th.as_tensor(
+                                             [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lim, -j_eff_ctrl_lim],
+                                              [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lim,  j_eff_ctrl_lim]]) for k,v in homing_ref.items()},
+            "control_limits_center" : None, #homing_ref,
             "enable_link_collisions" : [    (('kyon', 'contact_1'),[('ground','ground_link')]),
                                             (('kyon', 'contact_2'),[('ground','ground_link')]),
                                             (('kyon', 'contact_3'),[('ground','ground_link')]),
@@ -659,7 +678,19 @@ def get_kyon_args(enable_arms : bool = False):
             "safe_damping" : 20.0,
             "default_max_joint_impedance_ctrl_torque" : 150.0,
             "revolute_dof_damping_override" : 1.0,
-            "mjx_opt_preset" : "faster"
+            "mjx_opt_preset" : "faster",
+            "mjx_opt_override" : {  
+                                    #"noslip_iterations" : 10,
+                                    #   "impratio" : 10.0,
+                                    "cone" : 1}
+            # "mjx_geom_overrides" : {"kyon#contact_1" : {"solimp" : np.array([0.9, 0.95, 0.036, 0.5, 2.0]),
+            #                                             "friction" : np.array([0.8, 0.005, 0.0001])},
+            #                         "kyon#contact_2" : {"solimp" : np.array([0.9, 0.95, 0.036, 0.5, 2.0]),
+            #                                             "friction" : np.array([0.8, 0.005, 0.0001])},
+            #                         "kyon#contact_3" : {"solimp" : np.array([0.9, 0.95, 0.036, 0.5, 2.0]),
+            #                                             "friction" : np.array([0.8, 0.005, 0.0001])},
+            #                         "kyon#contact_4" : {"solimp" : np.array([0.9, 0.95, 0.036, 0.5, 2.0]),
+            #                                             "friction" : np.array([0.8, 0.005, 0.0001])}}
         }
 robot_args_registry["kyon"] = get_kyon_args
 robot_args_registry["kyon_arms"] = lambda : get_kyon_args(enable_arms=True)
@@ -747,7 +778,7 @@ def get_go1_args():
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
                                                     [ 0.9, 0.9, 0.9]] for k,v in homing.items()},
             "control_limits_ratios_minmax_pve" : ctrl_lims,
-            "control_limits_position_offset" : homing,
+            "control_limits_center" : homing,
             "enable_link_collisions" : [    ((rname, 'FL_calf'),[('ground','ground_link')]),
                                             ((rname, 'FR_calf'),[('ground','ground_link')]),
                                             ((rname, 'RL_calf'),[('ground','ground_link')]),
@@ -869,7 +900,7 @@ def get_spot_args():
             "safety_limits_ratios_minmax_pve" : {k:[[ 1.0, 0.9, 0.9],
                                                     [ 1.0, 0.9, 0.9]] for k,v in homing.items()},
             "control_limits_ratios_minmax_pve" : ctrl_lims,
-            "control_limits_position_offset" : homing,
+            "control_limits_center" : homing,
             "enable_link_collisions" : [    ((rname, 'fr_lleg'),[('ground','ground_link')]),
                                             ((rname, 'fl_lleg'),[('ground','ground_link')]),
                                             ((rname, 'hr_lleg'),[('ground','ground_link')]),
@@ -979,12 +1010,17 @@ def get_centauro_args():
             ,"ankle_pitch_4"
             # ,"ankle_yaw_4"
             ]
+    j_vel_ctrl_lim = 7.0
+    j_eff_ctrl_lim = 150.0
+    j_pos_range = 0.3
+    j_pos_ctrl_lims = {k:np.array([-1.0,1.0])*j_pos_range+homing[k] for k in homing.keys()}
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf/urdf/centauro.urdf.xacro"),
             "model_kwargs" : {  "realsense":"false",
                                 "velodyne" :"false",
                                 "floating_joint":"true",
                                 "small_sphere_wheel_collision":"true"
                                 },
+            "robot_description_format" : "xacro",
             "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf")},
             "homing_joint_position" : homing,
             "homing_joint_position_references" : None,
@@ -1000,9 +1036,13 @@ def get_centauro_args():
             "randomized_friction_links" : [LINK_FILTERS.ALL],
             "randomized_com_links" : [("centauro","pelvis")],
             "randomized_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
-            "safety_limits_ratios_minmax_pve" : {k:[[ 0.3, 0.9, 0.9],
-                                                    [ 0.3, 0.9, 0.9]] for k,v in homing.items()},
-            "control_limits_position_offset" : homing,
+            "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
+                                                    [ 0.9, 0.9, 0.9]] for k,v in homing.items()},
+            "control_limits_center" : None,
+            "control_limits_ratios_minmax_pve" : None,
+            "control_limits_minmax_pve" : {k:th.as_tensor(
+                                             [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lim, -j_eff_ctrl_lim],
+                                              [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lim,  j_eff_ctrl_lim]]) for k in homing.keys()},            
             "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_2'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_3'),[('ground','ground_link')]),
@@ -1012,7 +1052,8 @@ def get_centauro_args():
                             ('centauro', 'wheel_3'),
                             ('centauro', 'wheel_4')],
             "safe_stiffness" : 600.0,
-            "safe_damping" : 10.0
+            "safe_damping" : 10.0,
+            "mjx_opt_preset" : "faster"
         }
 robot_args_registry["centauro"] = get_centauro_args
 
@@ -1021,10 +1062,11 @@ def named_loco_venv_builder(seed : int,
                     num_envs : int, 
                     env_builder_args : dict,
                     env_name : str = "") -> gym.vector.VectorEnv:
-    env_builder_args.update(robot_args_registry[env_builder_args["robot_model"]]())
+    full_args = robot_args_registry[env_builder_args["robot_model"]]()
+    full_args.update(env_builder_args)
     return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
-                            env_builder_args = env_builder_args,
+                            env_builder_args = full_args,
                             num_envs=num_envs,
                             runner_builder=loco_runner_builder)[0]
 
@@ -1032,10 +1074,11 @@ def named_loco_single_env_builder(seed : int,
                     log_folder : str,
                     is_eval : bool, 
                     env_builder_args : dict) -> tuple[gym.Env,float]:
-    env_builder_args.update(robot_args_registry[env_builder_args["robot_model"]]())
+    full_args = robot_args_registry[env_builder_args["robot_model"]]()
+    full_args.update(env_builder_args)
     return single_env_builder(seed = seed,
                             log_folder = log_folder,
-                            env_builder_args = env_builder_args,
+                            env_builder_args = full_args,
                             is_eval=is_eval,
                             runner_builder=loco_runner_builder)
 

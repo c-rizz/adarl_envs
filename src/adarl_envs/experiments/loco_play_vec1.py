@@ -4,8 +4,10 @@ import time
 import inspect
 from adarl.utils.buffers import BaseBuffer
 import adarl.utils.dbg.dbg_img
+from rreal.algorithms.rl_agent import load_agent
 from rreal.algorithms.sac import SAC, compare_dicts
 from rreal.algorithms.sac_helpers import EnvBuilderProtocol
+from rreal.algorithms.ppo2 import PPO
 import adarl.utils.dbg.ggLog as ggLog
 import adarl.utils.utils
 import numpy as np
@@ -28,266 +30,81 @@ from typing import Any
 from ctypes.util import find_library
 import readline
 import math
+from rreal.algorithms.hardcoded_policies import FixedPolicy, SinPolicy, RandPolicy
 
-def load_model(model_path):
-    return SAC.load(model_path)
-
-
-class FixedPolicy(RLAgent):
-    def __init__(self, cmd : th.Tensor):
-        self._cmd = cmd.detach().clone()
-
-    def predict_action(self, observation_batch, deterministic = False, info_return : dict = None):
-        return self._cmd.clone()
+def build_fixed_policy(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
     
-    def get_hidden_state(self):
-        return None
-    
-    def update(self, transitions : TransitionBatch):
-        raise NotImplementedError()
-
-    def reset_hidden_state(self):
-        pass
-
-    def train_model(self, global_step, iterations, buffer: BaseBuffer) -> tuple[float, float, float]:
-        raise NotImplementedError()
-    
-    def save(self, path: str):
-        pass
-
-    @classmethod
-    def load(cls, path: str):
-        pass
-    
-    def load_(self, path: str):
-        pass
-    
-    def input_device(self):
-        return self._a_offset.device
-    
-    @staticmethod
-    def build(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
-        if robot == "quad":
-            home_jpose = get_quad_args()["homing_joint_position_references"]
-            stiffness = 400
-            damping = 10
-        elif robot == "kyon":
-            home_jpose = get_kyon_args()["homing_joint_position_references"]
-            stiffness = 400
-            damping = 10
-        elif robot == "spot":
-            home_jpose = robot_args_registry["spot"]()["homing_joint_position_references"]
-            stiffness = 400
-            damping = 10
-        elif robot == "centauro":
-            home_jpose = get_centauro_args()["homing_joint_position_references"]
-            stiffness = 1000
-            damping = 10
-        elif robot == "go1":
-            home_jpose = get_go1_args()["homing_joint_position_references"]
-            stiffness = 400
-            damping = 10
-        else:
-            raise RuntimeError(f"Unknown robot '{robot}")
-        
+    base_env = env.get_runner().get_base_env()
+    if isinstance_noimport(base_env, "RobotVecEnv"):
+        home_jpose = robot_args_registry[robot]()["homing_joint_position_references"]
+        stiffness = 400
+        damping = 10
         home_pvesd = {k:[v, 0.0, 0.0, stiffness, damping] for k,v in home_jpose.items()}
-        base_env = env.get_runner().get_base_env()
-        if isinstance_noimport(base_env, "RobotVecEnv"):
-            home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
-            action_len = base_env._action_helper.single_action_len()
-        else:
-            action_len = 12
-            home_action = th.zeros((action_len,), device=device)
+        home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
+        action_len = base_env._action_helper.single_action_len()
+    else:
+        action_len = 12
+        home_action = th.zeros((action_len,), device=device)
 
-        model = FixedPolicy(  cmd = home_action)
-        return model
+    model = FixedPolicy(  cmd = home_action)
+    return model
 
-
-class SinPolicy(RLAgent):
-    def __init__(self,  act_scale : th.Tensor,
-                        act_offset : th.Tensor,
-                        act_speed : th.Tensor,
-                        action_size : int,
-                        dt : float):
-        self._t0 = 0.0
-        self._t = 0.0
-        self._dt = dt
-        self._a_offset = act_offset
-        self._a_speed = act_speed
-        # self._t_off = th.asin(self._a_offset/act_range)
-        self._a_scale = act_scale.expand((action_size,))
-
-    def predict_action(self, observation_batch, deterministic = False, info_return : dict = None):
-        theta = (self._t0-self._t)*self._a_speed
-        a = th.sin(theta)*self._a_scale+self._a_offset
-        print(f" theta = {theta} \n"
-            #   f" _t_off = {self._t_off} \n"
-              f" _t = {self._t} \n"
-              f" _a_scale = {self._a_scale} \n"
-              f" _a_offset = {self._a_offset} \n"
-              f" a = {a}")
-        self._t = self._t+self._dt
-        return a
-    
-    def get_hidden_state(self):
-        return self._t
-    
-    def update(self, transitions : TransitionBatch):
-        raise NotImplementedError()
-
-    def reset_hidden_state(self):
-        self._t = self._t0
-
-    def train_model(self, global_step, iterations, buffer: BaseBuffer) -> tuple[float, float, float]:
-        raise NotImplementedError()
-    
-    def save(self, path: str):
-        pass
-
-    @classmethod
-    def load(cls, path: str):
-        pass
-    
-    def load_(self, path: str):
-        pass
-    
-    def input_device(self):
-        return self._a_offset.device
-    
-    @staticmethod
-    def build(env, robot : str, scale : float = 0.0, device = th.device("cpu")):
-        home_jpose = robot_args_registry[robot]()["homing_joint_position"]
-        home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
-        base_env = env.get_runner().get_base_env()
-        if isinstance_noimport(base_env, "RobotVecEnv"):
-            home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
-            action_len = base_env._action_helper.single_action_len()
-        else:
-            action_len = 12
-            home_action = th.zeros((action_len,), device=device)
-        speed = 0.8
+def get_act_range(robot : str, device):
+    if robot == "kyon_arms":
+        hx, hy, ky = 0.0, 0.1, 0.17
+        act_range = th.as_tensor([   hx, -hy,  ky,
+                                     hx, -hy,  ky,
+                                     hx, -hy,  ky,
+                                     hx, -hy,  ky,
+                                    0.5,  0.5,  0.5,
+                                    0.0,  0.5,  0.5,
+                                    0.0,  0.5,  0.5,
+                                    0.0,  0.5,  0.5,
+                                    ],device = device)
+    elif robot == "centauro":
+        act_range = th.as_tensor([0.1], device = device)
+    else:
         if robot == "quad":
-            act_range = th.as_tensor([0.0, 0.1, 0.2,
-                                    0.0, 0.1, 0.2,
-                                    0.0, 0.1, 0.2,
-                                    0.0, 0.1, 0.2], device = device)
+            hx, hy, ky = 0.0, 0.1, 0.2
         elif robot == "kyon":
-            act_range = th.as_tensor([   0.0, -0.1,  0.17,
-                                        -0.0,  0.1, -0.17,
-                                        0.0, -0.1,  0.17,
-                                        -0.0,  0.1, -0.17],device = device)
-            # act_range.view(4,3)[0] *= -1.0
-            act_range.view(4,3)[1] *= -1.0
-            # act_range.view(4,3)[2] *= -1.0
-            act_range.view(4,3)[3] *= -1.0
+            hx,hy,ky = 0.0, 0.1, 0.17
         elif robot == "spot":
-            hx,hy,k = 0.0, 1.0, 1.0
-            act_range = th.as_tensor([   hx, -hy,  k,
-                                        -hx,  hy, -k,
-                                        hx, -hy,  k,
-                                        -hx,  hy, -k],device = device)
-            # act_range.view(4,3)[0] *= -1.0
-            act_range.view(4,3)[1] *= -1.0
-            # act_range.view(4,3)[2] *= -1.0
-            act_range.view(4,3)[3] *= -1.0
-            speed = 0.5
+            hx,hy,ky = 0.0, 1.0, 1.0
         elif robot == "go1":
-            act_range = th.as_tensor([   0.0, -0.4,  0.8,
-                                        -0.0,  0.4, -0.8,
-                                        0.0, -0.4,  0.8,
-                                        -0.0,  0.4, -0.8],device = device)
-            # act_range.view(4,3)[0] *= -1.0
-            act_range.view(4,3)[1] *= -1.0
-            # act_range.view(4,3)[2] *= -1.0
-            act_range.view(4,3)[3] *= -1.0
-        elif robot == "kyon_arms":
-            act_range = th.as_tensor([   0.0, -0.1,  0.17,
-                                        -0.0,  0.1, -0.17,
-                                        0.0, -0.1,  0.17,
-                                        -0.0,  0.1, -0.17,
-                                        0.5,  0.5,  0.5,
-                                        0.0,  0.5,  0.5,
-                                        0.0,  0.5,  0.5,
-                                        0.0,  0.5,  0.5,
-                                        ],device = device)
-            # act_range.view(4,3)[0] *= -1.0
-            act_range.view(8,3)[1] *= -1.0
-            # act_range.view(4,3)[2] *= -1.0
-            act_range.view(8,3)[3] *= -1.0
-        elif robot == "centauro":
-            act_range = th.as_tensor([0.1], device = device)
+            hx,hy,ky = 0.0, 0.4, 0.8
         else:
             raise RuntimeError(f"Unknown robot '{robot}'")
-        model = SinPolicy(  act_scale=act_range*scale,
-                            act_offset=home_action,
-                            act_speed=th.as_tensor([speed], device = device),
-                            action_size=action_len,
-                            dt=0.05)
-        return model
-    
-class RandPolicy(RLAgent):
-    def __init__(self,  act_scale : th.Tensor,
-                        action_size : int):
-        self._a_scale = act_scale.expand((action_size,))
+        act_range = th.as_tensor([   hx, -hy,  ky,
+                                    hx, -hy,  ky,
+                                    hx, -hy,  ky,
+                                    hx, -hy,  ky],device = device)
+    return act_range
 
-    def predict_action(self, observation_batch, deterministic = False, info_return : dict = None):
-        a = (th.rand_like(self._a_scale)*2-1)*self._a_scale
-        return a
+def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("cpu")):
+    home_jpose = robot_args_registry[robot]()["homing_joint_position"]
+    home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
+    base_env = env.get_runner().get_base_env()
+    if isinstance_noimport(base_env, "RobotVecEnv"):
+        home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
+        action_len = base_env._action_helper.single_action_len()
+    else:
+        action_len = 12
+        home_action = th.zeros((action_len,), device=device)
+    speed = 0.8 if robot!="go1" else 0.5
+    act_range = get_act_range(robot, device)
+    model = SinPolicy(  act_scale=act_range*scale,
+                        act_offset=home_action,
+                        act_speed=th.as_tensor([speed], device = device),
+                        action_size=action_len,
+                        dt=0.05)
+    return model
     
-    def get_hidden_state(self):
-        return None
     
-    def update(self, transitions : TransitionBatch):
-        raise NotImplementedError()
-
-    def reset_hidden_state(self):
-        pass
-
-    def train_model(self, global_step, iterations, buffer: BaseBuffer) -> tuple[float, float, float]:
-        raise NotImplementedError()
-    
-    def save(self, path: str):
-        pass
-
-    @classmethod
-    def load(cls, path: str):
-        pass
-    
-    def load_(self, path: str):
-        pass
-    
-    def input_device(self):
-        return self._a_scale.device
-    
-    @staticmethod
-    def build(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
-        if robot == "quad":
-            home_jpose = get_quad_args()["homing_joint_position"]
-        elif robot == "kyon":
-            home_jpose = get_kyon_args()["homing_joint_position"]
-        elif robot == "centauro":
-            home_jpose = get_centauro_args()["homing_joint_position"]
-        else:
-            raise RuntimeError(f"Unknown robot '{robot}")
-        home_pvesd = {k:[v, 0.0, 0.0, 400, 10] for k,v in home_jpose.items()}
-        home_action = env.get_runner().get_base_env()._action_helper.pvesd_to_action(home_pvesd)
-        if robot == "quad":
-            act_range = th.as_tensor([0.0, 0.1, 0.2,
-                                    0.0, 0.1, 0.2,
-                                    0.0, 0.1, 0.2,
-                                    0.0, 0.1, 0.2], device = device)
-        elif robot == "kyon":
-            act_range = th.as_tensor([   0.0, -0.1,  0.17,
-                                        -0.0,  0.1, -0.17,
-                                        0.0, -0.1,  0.17,
-                                        -0.0,  0.1, -0.17], device = device )
-        elif robot == "centauro":
-            act_range = th.as_tensor([0.1], device = device)
-        else:
-            raise RuntimeError(f"Unknown robot '{robot}")
-        model = RandPolicy(  act_scale=act_range*scale,
-                            action_size=env.get_runner().get_base_env()._action_helper.single_action_len())
-        return model
+def build_rand_policy(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
+    act_range = get_act_range(robot, device)
+    model = RandPolicy( act_scale=act_range*scale,
+                        action_size=env.get_runner().get_base_env()._action_helper.single_action_len())
+    return model
 
 
 
@@ -302,7 +119,6 @@ def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
                 recorder = recorder.get_base_runner()
             else:
                 recorder = None
-    # print(f"Recorder found: {recorder}")
     return recorder
 
 
@@ -313,19 +129,19 @@ def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
 
 
 def adarl_builder_and_args():
-    step_length_sec = 0.02 #20/1024 
-    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
+    step_length_sec = 20/1024 
+    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
     mode = args["mode"]
     env_device = th.device("cuda") if mode == "mjx" else th.device("cpu")
     height_pixels = args["resolution"] #if mode == "mjx" else 720
     pixel_resolution = (height_pixels,int(height_pixels*16/9))
     
-    r = 0.0
-    n = 0.0
-    p = 0.0
-    eps= 0.0
+    r = 0.0 # randomization strength
+    n = 1.0 # noise strength
+    p = 1.0 # penalties strength
+    eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "action_delay_mustd_std" : (0.003, 0.001*n, 0.0025*n),
+        "action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n),
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
@@ -336,33 +152,33 @@ def adarl_builder_and_args():
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : [0.47,0.47],
-        "goal_resampling_probability_per_sec" : 0.1,
+        "goal_height_minmax" : [0.47,0.47] if args["robot"] == "kyon" else [0.30,0.30],
+        "goal_resampling_probability_per_sec" : 0.0,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
+        "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
-        "goal_yaw_vel_zero_ratio" : 1.0,
         "held_joints_damping" : 10.0,
         "held_joints_stiffness" : 500.0,
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
-        "init_on_reset_ratio" : 0.2,
-        "initial_height_randomization_range_meters" : 0.0,
-        "initial_joint_pose_randomization_range" : 0.5,
+        "init_on_reset_ratio" : 1.0,
+        "initial_height_randomization_range_meters" : 0.1,
+        "initial_joint_pose_randomization_range" : 0.1,
         "just_health_reward" : False,
         "log_info_stats" : True,
-        "longterm_states_decimation_time" : 0.05, # Averaging of the joint pose for the position reward
+        "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,
         "max_goal_height_speed" : 0.1,
-        "max_good_step_duration" : 0.3,
+        "max_good_step_duration" : 0.5,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
         "min_good_step_duration" : 0.1,
         "mode" : mode,
-        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.05*n],
-        "obs_abs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.01*n, 0.02*n],
-        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.02*n],
+        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.1*n],
+        "obs_abs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.0*n, 0.0*n],
+        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.1*n],
         "obs_abs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_abs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
         "obs_abs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
@@ -373,21 +189,21 @@ def adarl_builder_and_args():
         "randomized_armature_ratios" : 0.1*r,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
-        "randomized_frictionloss_ratios"             : 0.2*r,
-        "randomized_gains_damping_ratio_epstd"       : 0.2*r,
-        "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
+        "randomized_frictionloss_ratios"             : 0.0*r,
+        "randomized_gains_damping_ratio_epstd"       : 0.0*r,
+        "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
-        "randomized_reference_filter_distribution" : ("uniform", (20.0, 20.0)),
+        "randomized_reference_filter_distribution" : ("uniform", (50.0, 50.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
         "reward_superweight_joint_penalties" : 1.0,
         "reward_acceleration_weight" :        eps,
-        "reward_acc_on_vel_weight" :          0.0,
-        "reward_actacc_weight" :              1.0,
-        "reward_actdiff_weight" :             1.0,
+        "reward_acc_on_vel_weight" :          eps,
+        "reward_actacc_weight" :              0.5*p,
+        "reward_actdiff_weight" :             0.5*p,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
-        "reward_power_weight" :               1.0,
+        "reward_power_weight" :               0.002*p,
         "reward_failure_weight" :             eps,
         "reward_feet_air_time_weight" :       10.0,
         "reward_feet_ground_time_weight" :    eps,
@@ -395,35 +211,33 @@ def adarl_builder_and_args():
         "reward_heading_velocity_weight" :    eps,
         "reward_heading_weight" :             eps,
         "reward_health_weight" :              eps,
-        "reward_height_position_weight" :     1.0,
-        "reward_height_velocity_weight" :     eps,
+        "reward_height_position_weight" :     0.5,
+        "reward_height_velocity_weight" :     0.1,
         "reward_pitchnroll_velocity_weight" : 1.0,
-        "reward_pitchnroll_weight" :          1.0,
+        "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      1.0,
         "reward_position_weight" :            eps,
-        "reward_posref_vel_weight" :          0.0,
-        "reward_posref_acc_weight":           0.0,
-        "reward_scale_nolength":              0.1,
+        "reward_posref_vel_weight" :          eps,
+        "reward_posref_acc_weight":           eps,
+        "reward_scale_nolength":              0.01,
         "reward_sensed_effort_weight" :       eps,
-        "reward_slip_weight" :                eps,
+        "reward_slip_weight" :                1.0,
         "reward_stand_position_weight" :      1.0,
         "reward_torque_limit_weight" :        eps,
-        "reward_torque_weight" :              0.5,
-        "reward_torquediff_weight" :          eps,
+        "reward_torque_weight" :              0.0001*p,
+        "reward_torquediff_weight" :          0.0001*p,
         "reward_torqueref_weight" :           eps,
-        "reward_tracking_weight" :            3.0,
+        "reward_tracking_weight" :            1.0,
         "reward_velocity_limit_weight" :      eps,
         "reward_velocity_weight" :            eps,
         "reward_velref_weight" :              eps,
         "reward_yaw_vel_tracking_weight" :    1.0,
         "robot_model" : args["robot"],
-        "safe_damping" : 5,
-        "safe_stiffness" : 300,
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : False,
         "stepLength_sec" : step_length_sec,
         "terminate_on_safety" : False,
-        "terminate_on_crash" : False,
+        "terminate_on_crash" : True,
         "terminate_on_body_contact" : False,
         "th_device" : env_device,
         "ui_camera_resolution_hw" : [144,256],
@@ -431,16 +245,17 @@ def adarl_builder_and_args():
         "verbose_infos" : False,
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
-        "minimal_infos" : False,
+        "minimal_infos" : True,
         "playground_style_reward" : False
     }
 
-    skip_optionals = True
+    skip_optionals = False
     env_builder_args.update({
         "offset_envs_ep_starts" : False,
         "enable_rendering" : True,
         "record_video" : args["mode"] not in ["xbot","xbot_zmq"],
         "verbose_infos" : (not skip_optionals) or args["record"],
+        "minimal_infos" : skip_optionals or not args["record"],
         "video_save_freq" : True if args["record"] else 0,
         # "action_delay_mustd_std" : (0.0,0.0,0.0),
         # "action_noise_mustd" : (0.0,0.0),
@@ -464,7 +279,8 @@ def adarl_builder_and_args():
         "just_health_reward" : skip_optionals,
         "goal_resampling_probability_per_sec" : 0.0,
         "walltime_factor" : args["rt_factor"],
-        "record_whole_joint_trajectories" : True
+        "record_whole_joint_trajectories" : False,
+        # "mjx_opt_override" : {"noslip_iterations": 10, "impratio": 10.0, "iterations" : 20}
         })
     return named_loco_single_env_builder, env_builder_args, step_length_sec
 
@@ -520,7 +336,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder = builder,
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
-                render=not args["gui"] and not args["norender"],
+                render=args["publishimg"],
                 robot = args["robot"],
                 deterministic = args["deterministic"])
 
@@ -558,20 +374,23 @@ def play(seed, folderName, run_id, args,
     ggLog.info("Built")
     control_mode = args["control"].lower().strip()
     if control_mode=="pretrained":
-        model = load_model(args["model"])
-        trained_env_builder_args = model._init_args["init_hparams"].reference_init_args["env_builder_args"]
-        try:
-            equal, diffs = compare_dicts(env_builder_args, trained_env_builder_args)
-            if not equal:
-                ggLog.warn(f"Loaded model was trained with different env args: \n{diffs}")
-        except Exception as e: 
-            ggLog.warn(f"Could not compare env args with trained model: {type(e)}: {e}")
+        model = load_agent(args["model"])
+        if isinstance(model, SAC):
+            trained_env_builder_args = model._init_args["init_hparams"].reference_init_args["env_builder_args"]
+            try:
+                equal, diffs = compare_dicts(env_builder_args, trained_env_builder_args)
+                if not equal:
+                    ggLog.warn(f"Loaded model was trained with different env args: \n{diffs}")
+            except Exception as e: 
+                ggLog.warn(f"Could not compare env args with trained model: {type(e)}: {e}")
+        elif isinstance(model, PPO):
+            pass
     elif control_mode=="fixed":
-        model = FixedPolicy.build(env = env, robot=robot, device= env_device)
+        model = build_fixed_policy(env = env, robot=robot, device= env_device)
     elif control_mode=="random":
-        model = RandPolicy.build(env=env, robot=robot, scale=1.0, device = env_device)
+        model = build_rand_policy(env=env, robot=robot, scale=1.0, device = env_device)
     elif control_mode == "sine":
-        model = SinPolicy.build(env, robot=robot, scale = 1.0, device = env_device)
+        model = build_sin_policy(env, robot=robot, scale = 1.0, device = env_device)
     else:
         raise RuntimeError(f"Unknown control mode '{control_mode}'")
 
@@ -619,8 +438,8 @@ def play(seed, folderName, run_id, args,
                 break
             obs : TensorTree[th.Tensor]
 
-            cmd_xys = [1.0,0.0,0.0]
-            cmd_height = 0.45
+            cmd_xys = [1.0,0.0,0.2]
+            cmd_height = 0.47
             options["goal_velocity_xy"] = [cmd_xys[0]*cmd_xys[2], cmd_xys[1]*cmd_xys[2]]
             obs, info = env.reset(options = options)  #type: ignore
             ggLog.info(f"env resetted")
@@ -641,7 +460,7 @@ def play(seed, folderName, run_id, args,
             print(f"Env is of type {type(base_env)}")
 
             if isinstance(base_env, LocomotionVecEnv):
-                base_env.set_cam_pose((1.583, 0.201, 2.149))
+                # base_env.set_cam_pose((1.583, 0.201, 2.149))
                 base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height)
             while not done:
                 t0 = time.monotonic()
@@ -651,7 +470,7 @@ def play(seed, folderName, run_id, args,
                 t0_pred = time.monotonic()
                 obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
                 act_info = {}
-                action = model.predict_action(obs_batch, deterministic = deterministic, info_return=act_info)
+                action = model.predict_action(obs_batch, deterministic = deterministic, extra_returns=act_info)
                 if recorder is not None:
                     recorder.add_to_extra_info({"act_log_prob": act_info.get("log_prob", -1)})
                 t0_step = time.monotonic()
@@ -775,7 +594,7 @@ if __name__ == "__main__":
     ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,random,pretrained]")
     ap.add_argument("--resolution", default=240, type=int, help="Vertical video resolution")
     ap.add_argument("--deterministic", default=False, action='store_true', help="Force the policy to be deterministic")
-    ap.add_argument("--norender", default=False, action='store_true', help="Force disable the rendering")
+    ap.add_argument("--publishimg", default=False, action='store_true', help="publish rendered images to the web dbg server")
     ap.add_argument("--pg", default=False, action='store_true', help="Use playground env")
     
     ap.set_defaults(feature=True)

@@ -135,13 +135,15 @@ def adarl_builder_and_args():
     env_device = th.device("cuda") if mode == "mjx" else th.device("cpu")
     height_pixels = args["resolution"] #if mode == "mjx" else 720
     pixel_resolution = (height_pixels,int(height_pixels*16/9))
+    skip_optionals = False
+    realworld = args["mode"] in ["xbot","xbot_zmq"]
     
     r = 0.0 # randomization strength
     n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n),
+        "action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n) if not realworld else (0.0, 0.0, 0.0),
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
@@ -249,7 +251,6 @@ def adarl_builder_and_args():
         "playground_style_reward" : False
     }
 
-    skip_optionals = False
     env_builder_args.update({
         "offset_envs_ep_starts" : False,
         "enable_rendering" : True,
@@ -276,7 +277,7 @@ def adarl_builder_and_args():
         "randomized_mass_ratios" : ("normal", (0.0, 0.0)),
         "impulse_probability_per_sec" : 0.0,
         "show_gui" : args["gui"],
-        "just_health_reward" : skip_optionals,
+        "just_health_reward" : realworld,
         "goal_resampling_probability_per_sec" : 0.0,
         "walltime_factor" : args["rt_factor"],
         "record_whole_joint_trajectories" : False,

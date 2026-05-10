@@ -84,18 +84,18 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_armature_ratios" : 0.1*r,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
-        "randomized_frictionloss_ratios"             : 0.05*r,
-        "randomized_gains_damping_ratio_epstd"       : 0.05*r,
-        "randomized_gains_stiffness_ratio_epstd"     : 0.05*r,
+        "randomized_frictionloss_ratios"             : 0.0*r,
+        "randomized_gains_damping_ratio_epstd"       : 0.0*r,
+        "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
-        "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
+        "randomized_reference_filter_distribution" : ("uniform", (50.0, 50.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
         "reward_superweight_joint_penalties" : 1.0,
         "reward_acceleration_weight" :        eps,
         "reward_acc_on_vel_weight" :          eps,
-        "reward_actacc_weight" :              0.5*p,
-        "reward_actdiff_weight" :             0.5*p,
+        "reward_actacc_weight" :              1.0*p,
+        "reward_actdiff_weight" :             1.0*p,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
         "reward_power_weight" :               0.002*p,
@@ -405,7 +405,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     q_lr=None,
                                                     policy_lr=3e-4,
                                                     update_epochs=5,
-                                                    total_steps=1_500_000_000,
+                                                    total_steps=2_500_000_000,
                                                     num_envs=train_envs,
                                                     num_steps=24,
                                                     gamma=0.99,
@@ -446,7 +446,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--algorithm", default="ppo", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
-    ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
+    ap.add_argument("--robot", default="centauro", type=str, help="Which robot to use")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

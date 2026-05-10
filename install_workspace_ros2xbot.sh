@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# In a clean container with ros noetic and xbot
+# In a clean container with ros jazzy and xbot
 
-mkdir forest_ws
 
 
 
@@ -21,20 +20,6 @@ set -Eeo pipefail
 
 sudo apt update
 
-cd forest_ws
-python3 -m venv virtualenv
-. virtualenv/bin/activate
-pip install --upgrade pip setuptools wheel
-pip install hhcm-forest
-forest init
-. setup.bash
-forest add-recipes git@github.com:ADVRHumanoids/multidof_recipes.git --tag ros2
-
-# mkdir ros_src
-# cd ros_src
-# git clone git@github.com:c-rizz/adarl_ros # Would be nice to avoid this, just needed to be able to launch scripts from roslaunch
-# cd ..
-pip install empy==3.3.4 colcon-common-extensions==0.3.0 lark==1.3.0 numpy
 ubuntu_release=$(lsb_release -rs)
 if [[ $ubuntu_release == "22.04" ]]; then
     apt install -y libboost-all-dev libhdf5-dev libqhull-dev libassimp-dev liboctomap-dev ros-jazzy-srdfdom libgeometric-shapes-dev
@@ -43,17 +28,48 @@ if [[ $ubuntu_release == "24.04" ]]; then
     echo "Installing 24.04 dependencies"
     apt install -y libboost-all-dev libhdf5-dev libqhull-dev libassimp-dev liboctomap-dev \
                    ros-jazzy-srdfdom ros-jazzy-geometric-shapes ros-jazzy-gz-cmake-vendor \
-                   libglfw3-dev ros-jazzy-xacro libprotobuf32t64 ros-jazzy-rmw-cyclonedds-cpp 
+                   libglfw3-dev ros-jazzy-xacro libprotobuf32t64 ros-jazzy-rmw-cyclonedds-cpp \
+                   ros-jazzy-gz-sim-vendor
+fi
+
+
+mkdir forest_ws
+cd forest_ws
+python3 -m venv virtualenv
+. virtualenv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install hhcm-forest
+pip install empy==3.3.4 colcon-common-extensions==0.3.0 lark==1.3.0 numpy
+forest init
+. setup.bash
+forest add-recipes git@github.com:ADVRHumanoids/multidof_recipes.git --tag ros2
+
+# mkdir ros_src
+# cd ros_src
+# git clone git@github.com:c-rizz/adarl_ros # Would be nice to avoid this, just needed to be able to launch scripts from roslaunch
+# cd ..
 
 # sed -i '/DXBOT2_GZ_SUPPORT=ON/c\    - -DXBOT2_GZ_SUPPORT=OFF' ./recipes/multidof_recipes/recipes/xbot2.yaml # Issues finding gz-cmake3, and I got annoyed
+sed -i 's/^\(\s*\)tag:.*/\1tag: crzz-dev/' ./recipes/multidof_recipes/recipes/xbot2_mujoco.yaml
+sed -i 's/^\(\s*\)tag:.*/\1tag: 3\.7\.0/' ./recipes/multidof_recipes/recipes/mujoco_cmake.yaml
 source /opt/ros/jazzy/setup.bash
+forest grow -j10 xbot2
 forest grow -j10 xbot2_mujoco
 forest grow -j10 iit-kyon-ros-pkg
+
+
+cd src
+git clone git@github.com:c-rizz/xbot2_zmq.git --branch crzz-dev
+cd ../
+./src/xbot2_zmq/build_and_install_systemwide.sh --install-dir /opt/forest/forest_ws/install
+
 if [ stop_sshagent_afterwards ]; then
     ssh-agent -k
 fi
 
 pip install rospkg lxml
+
+
 
 # cd ..
 # pip install catkin_pkg

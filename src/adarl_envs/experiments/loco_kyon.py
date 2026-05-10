@@ -16,7 +16,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     algo = args["algorithm"]                                
     if algo == "sac":
-        train_envs = 2048
+        train_envs = 4096
     elif algo == "ppo":
         train_envs = 4096
     elif algo == "sac_small" or algo == "ppo_small":
@@ -107,9 +107,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_health_weight" :              eps,
         "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     0.1,
-        "reward_pitchnroll_velocity_weight" : 1.0,
+        "reward_pitchnroll_velocity_weight" : 0.05,
         "reward_pitchnroll_weight" :          0.5,
-        "reward_position_limit_weight" :      1.0,
+        "reward_position_limit_weight" :      eps,
         "reward_position_weight" :            eps,
         "reward_posref_vel_weight" :          eps,
         "reward_posref_acc_weight":           eps,
@@ -339,10 +339,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     critic_weight_decay=0.0,
                                                     policy_update_freq=2,
                                                     deterministic_collection_ratio=0.00,
-                                                    actor_mean_bounds_ratio = 0.8,
+                                                    actor_mean_bounds_ratio = 0.9,
                                                     alpha_lr_factor = 1.0,
                                                     independent_entropy_q=True,
-                                                    max_grad_norm=0.5,
+                                                    max_grad_norm=0.1,
                                                     log_alpha_grad_clip=0.1
                                                     ),
                     checkpoint_freq=20,
@@ -353,7 +353,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_batch_size=0,
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
-                    debug_level=2,
+                    debug_level=1,
                     log_weights_and_grads=False,
                     transition_augmentor_builder=None, #transition_augmentor_builder
                     )

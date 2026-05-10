@@ -1512,11 +1512,13 @@ class LocomotionVecEnv(RobotVecEnv):
         return reward, velocity, goal_velocity, velocity_err
 
     def _pitchnroll_velocity_penalty_reward(self, state):
-        curr_rel_gravity_vec_xyz      = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
-        prev_rel_gravity_vec_xyz      = state[self.STATE_EXTRINSIC][:,1,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
-        
-        angle_vel = vectors_angle(curr_rel_gravity_vec_xyz, prev_rel_gravity_vec_xyz).view((self.num_envs,))
-        return penalty_reward(angle_vel, max_rew=1, exponent=2)
+        # curr_rel_gravity_vec_xyz      = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
+        # prev_rel_gravity_vec_xyz      = state[self.STATE_EXTRINSIC][:,1,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
+        # angle_diff = vectors_angle(curr_rel_gravity_vec_xyz, prev_rel_gravity_vec_xyz).view((self.num_envs,))
+        # angle_vel = angle_diff/self._configuration.stepLength_sec
+        # return penalty_reward(angle_vel, max_rew=1, exponent=2)
+        angvel_xy = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X:self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y+1,0].view((self.num_envs,2))
+        return -(angvel_xy.norm(dim=1)**2)
 
     def _pitchnroll_velocity_reward(self, state, dt : th.Tensor):
         curr_rel_gravity_vec_xyz      = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1,0].view((self.num_envs,3))
@@ -1814,11 +1816,12 @@ class LocomotionVecEnv(RobotVecEnv):
 
         sub_rewards_return = {}
         if self._configuration.fixed_reward:
-            sub_rewards_return = {k:th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype) for k in self._loco_conf.enabled_rewards}
+            rews_num = len(self._loco_conf.enabled_rewards)
+            sub_rewards_return = {k:self._thones((self.num_envs,))/rews_num for k in self._loco_conf.enabled_rewards}
             if self._loco_conf.split_rewards:
-                reward = th.ones((self.num_envs, len(sub_rewards_return)), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
+                reward = self._thones((self.num_envs, len(sub_rewards_return)))/rews_num
             else:
-                reward = th.ones((self.num_envs,1), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
+                reward = self._thones((self.num_envs, 1))
             return reward, sub_rewards_return
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 

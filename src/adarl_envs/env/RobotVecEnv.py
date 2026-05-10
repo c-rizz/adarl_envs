@@ -36,6 +36,7 @@ from adarl.utils.base_utils import record_time, record_region_start, record_regi
 
 
 disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
+unsafe_realworld_init = True
 
 def hash_tensor(tensor):
     return hash(tuple(tensor.reshape(-1).tolist()))
@@ -1688,7 +1689,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         while True:
             print(f"Episode Initialization:\n"
                   f"Will move the robot joints into the homing pose and set the initial joint impedance command.")
-            r = input("Enter 'move' to move the robot or 'skip' to skip the robot pose initialization > ")
+            if unsafe_realworld_init:
+                r = "move"
+            else:
+                r = input("Enter 'move' to move the robot or 'skip' to skip the robot pose initialization > ")
             if r == "move":
                 self._realworld_robot_init_move(vec_mask)
             elif r == "skip":
@@ -1698,7 +1702,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 print(f"Invalid answer '{r}'")
                 continue
             
-            r = input("Please ensure the robot is in a suitable pose and type 'start' to start episode > ")
+            if unsafe_realworld_init:
+                r = "start"
+            else:
+                r = input("Please ensure the robot is in a suitable pose and type 'start' to start episode > ")
             if r == "start":
                 return
         raise NotImplementedError()
@@ -1870,6 +1877,19 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     #                                 launch_file_args={"gui":"false"})
                     self._arrow_base = ("arrow","arrow_link")
                     self._arrow_yellow = ("arrow_yellow","arrow_link")
+        elif isinstance_noimport(self._adapter, "VecZmqXbotAdapter"):
+            if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("ZmqXbotAdapter")):
+                if self._configuration.real:
+                    raise NotImplementedError()
+                else:
+                    # self._adapter.build_scenario(   models = [],
+                    #                                 launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path(  "adarl_envs",
+                    #                                                                                                 "ros/all_kyon_mujoco.launch"),
+                    #                                 launch_file_args={"gui":"false"})
+                    self._arrow_base = ("arrow","arrow_link")
+                    self._arrow_yellow = ("arrow_yellow","arrow_link")
+            else:
+                raise NotImplementedError("Unexpected sub adapter "+self._adapter.sub_adapter())
         elif isinstance_noimport(self._adapter, "MujocoAdapter"):
             self._adapter.build_scenario(models = self._get_spawn_defs())
             self._arrow_base = ("arrow","arrow_link")
@@ -2079,7 +2099,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_jstates_j_pveae = states.joint_state_pveae
         vec_bodystates_13 = states.link_state[:,0,:]
         vec_body_rel_linacc_xyz = states.link_linacc[:,0,:]
-        vec_stats_minmaxavgstdsumsum_j_pvaeep = states.joint_stats_pvaeep
+        vec_stats_minmaxavgstd_j_pvaeep = states.joint_stats_pvaeep
         
         body_abs_quat_xyzw_vec  = vec_bodystates_13[:,3:7]
         vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
@@ -2093,7 +2113,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_time_from_start = self._adapter.getEnvTimeFromStartup() - self._eps_start_stime
 
         record_region_end("RobotVecEnv._get_adapter_data_raw_mjx")
-        return (vec_stats_minmaxavgstdsumsum_j_pvaeep,
+        return (vec_stats_minmaxavgstd_j_pvaeep,
                 vec_jstates_j_pveae,
                 self._last_sent_v_j_pvesd,
                 vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
@@ -2114,7 +2134,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         record_region_start("RobotVecEnv._get_adapter_data_raw")
         jstates_v_j_pve = self._adapter.getJointsState(requestedJoints=self._controlled_joints_ids)
         record_time("RobotVecEnv._get_adapter_data_raw: getJointsState done")
-        vec_jstates_j_pveae = th.cat([jstates_v_j_pve, th.zeros_like(jstates_v_j_pve[:2])], dim = -1)
+        vec_jstates_j_pveae = th.cat([jstates_v_j_pve, th.zeros_like(jstates_v_j_pve[:,:,:2])], dim = -1)
         # ggLog.info(f"jstates_v_j_pve = {jstates_v_j_pve}")
         # th.cuda.synchronize()
         if isinstance(self._adapter, BaseVecSimulationAdapter):
@@ -2152,13 +2172,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # th.cuda.synchronize()
         try:
-            vec_stats_minmaxavgstdsumsum_j_pvaeep = self._adapter.get_joints_state_step_stats_extended()
+            vec_stats_minmaxavgstd_j_pvaeep = self._adapter.get_joints_state_step_stats_extended()
             record_time("RobotVecEnv._get_adapter_data_raw: get_joints_state_step_stats_extended done")
             if self._configuration.enable_dbg_checks:
-                dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstdsumsum_j_pvaeep)),
-                        lambda: (f"non finite values in joint stats at indexes:\n{th.logical_not(th.isfinite(vec_stats_minmaxavgstdsumsum_j_pvaeep)).nonzero()}\n"
-                                f"nonfinite values =\n{vec_stats_minmaxavgstdsumsum_j_pvaeep[th.logical_not(th.isfinite(vec_stats_minmaxavgstdsumsum_j_pvaeep))]}\n"
-                                f"all values =\n{vec_stats_minmaxavgstdsumsum_j_pvaeep}"),
+                dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvaeep)),
+                        lambda: (f"non finite values in joint stats at indexes:\n{th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvaeep)).nonzero()}\n"
+                                f"nonfinite values =\n{vec_stats_minmaxavgstd_j_pvaeep[th.logical_not(th.isfinite(vec_stats_minmaxavgstd_j_pvaeep))]}\n"
+                                f"all values =\n{vec_stats_minmaxavgstd_j_pvaeep}"),
                         just_warn=True,
                         async_assert=True,
                         assert_msg="non finite values in joint stats")
@@ -2172,10 +2192,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 f" model.body_mass = {mjx_adapter._sim_state.mjx_model.body_mass[bad_sim_id]} (avg = {jnp.mean(mjx_adapter._sim_state.mjx_model.body_mass, axis=0)})"
                                 f" model.dof_frictionloss = {mjx_adapter._sim_state.mjx_model.dof_frictionloss[bad_sim_id]} (avg = {jnp.mean(mjx_adapter._sim_state.mjx_model.dof_frictionloss, axis=0)})"
                                 f" model.dof_armature = {mjx_adapter._sim_state.mjx_model.dof_armature[bad_sim_id]} (avg = {jnp.mean(mjx_adapter._sim_state.mjx_model.dof_armature, axis=0)})")
-                    dbg_check(lambda : th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstdsumsum_j_pvaeep)), th.all(th.isfinite(vec_bodystates_13))),
+                    dbg_check(lambda : th.logical_or(th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvaeep)), th.all(th.isfinite(vec_bodystates_13))),
                             build_error_msg, just_warn = True, async_assert=True, assert_msg="diverging sim")
         except NotImplementedError:
-            vec_stats_minmaxavgstdsumsum_j_pvaeep = self._thfull(float("nan"), (self.num_envs,6,len(self._configuration.joints_agent_controlled),6))
+            vec_stats_minmaxavgstd_j_pvaeep = self._thfull(float("nan"), (self.num_envs,4,len(self._configuration.joints_agent_controlled),6))
         # th.cuda.synchronize()
         # ggLog.info(f"vec_stats_minmaxavgstd_j_pvae = {vec_stats_minmaxavgstd_j_pvae}")
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
@@ -2186,7 +2206,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         record_region_end("RobotVecEnv._get_adapter_data_raw")
         # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} others={t3_1-t3:.6f} tot = {t3_1-t0:.6f}s")
-        return (vec_stats_minmaxavgstdsumsum_j_pvaeep,
+        return (vec_stats_minmaxavgstd_j_pvaeep,
                 vec_jstates_j_pveae,
                 self._last_sent_v_j_pvesd,
                 vec_body_abs_linvel_xyz, # only used for visualization, can be wrong

@@ -1088,8 +1088,7 @@ class LocomotionVecEnv(RobotVecEnv):
         self._current_state[self.STATE_LOCOMOTION][:,:,self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z] = -1.0
 
         
-    @th.compiler.disable
-    def _get_loco_adapter_data(self):
+    def _get_loco_adapter_data(self, super_adapter_data):
         if isinstance(self._adapter,BaseVecSimulationAdapter):
             lstates = self._adapter.getLinksState(requestedLinks = self._feet_and_body_link_ids, use_com_pose = False)
             nfeet = lstates.shape[1] - 1  # number of feet links
@@ -1102,8 +1101,15 @@ class LocomotionVecEnv(RobotVecEnv):
             feet_rel_pos_vec_foot_xyz = th_quat_rotate(feet_abs_pos_vec_foot_xyz - body_pos_vec_xyz,
                                                    th_quat_conj(borient_quat_vec_xyzw).unsqueeze(1).expand(-1,nfeet,-1)) # (nenvs,nfeet,3)
         else:
+            if self.num_envs == 1:
+                jpos = super_adapter_data[1][0,:,0]
+                self._robot_model.set_joint_pose_by_names({jn[1]:jpos[i] for i,jn in enumerate(self._monitored_joints)} )
+                feet_poses_dict = self._robot_model.get_frame_poses_xyzxyzw(self._configuration.main_body_link[1],[l[1] for l in self._loco_conf.feet_links])
+                feet_positions_xyz = self._thtens([fp[:3] for fp in feet_poses_dict.values()])
+                feet_rel_pos_vec_foot_xyz = feet_positions_xyz.unsqueeze(0)
+            else:
+                feet_rel_pos_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
             feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
-            feet_rel_pos_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
             feet_abs_pos_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
             borient_quat_vec_xyzw = self._unit_quaternion.expand((self.num_envs,4))
         if isinstance_noimport(self._adapter, "MjxAdapter"):
@@ -1118,7 +1124,7 @@ class LocomotionVecEnv(RobotVecEnv):
     def _get_adapter_data_raw(self):
         record_region_start("LocomotionVecEnv._get_adapter_data_raw")
         super_adapter_data = super()._get_adapter_data_raw()
-        loco_adapter_data = self._get_loco_adapter_data()
+        loco_adapter_data = self._get_loco_adapter_data(super_adapter_data)
         record_region_end("LocomotionVecEnv._get_adapter_data_raw")
         return loco_adapter_data, super_adapter_data
 

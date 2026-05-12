@@ -179,7 +179,7 @@ def loco_runner_builder(seed,
                                                                         walltime_factor=walltime_factor),
                                                 vec_size = 1,
                                                 th_device = th_device)
-    elif mode == "xbot_zmq":
+    elif mode == "xbot-zmq":
         from adarl.adapters.VecZmqXbotAdapter import VecZmqXbotAdapter
         from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter
         ground_link = ("ground_plane","ground_link") # Should not be used

@@ -136,7 +136,7 @@ def adarl_builder_and_args():
     height_pixels = args["resolution"] #if mode == "mjx" else 720
     pixel_resolution = (height_pixels,int(height_pixels*16/9))
     skip_optionals = False
-    realworld = args["mode"] in ["xbot","xbot_zmq"]
+    realworld = args["mode"] in ["xbot","xbot-zmq"]
     
     r = 0.0 # randomization strength
     n = 1.0 # noise strength
@@ -215,9 +215,9 @@ def adarl_builder_and_args():
         "reward_health_weight" :              eps,
         "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     0.1,
-        "reward_pitchnroll_velocity_weight" : 1.0,
+        "reward_pitchnroll_velocity_weight" : 0.05,
         "reward_pitchnroll_weight" :          0.5,
-        "reward_position_limit_weight" :      1.0,
+        "reward_position_limit_weight" :      eps,
         "reward_position_weight" :            eps,
         "reward_posref_vel_weight" :          eps,
         "reward_posref_acc_weight":           eps,
@@ -254,18 +254,18 @@ def adarl_builder_and_args():
     env_builder_args.update({
         "offset_envs_ep_starts" : False,
         "enable_rendering" : True,
-        "record_video" : args["mode"] not in ["xbot","xbot_zmq"],
+        "record_video" : not realworld,
         "verbose_infos" : (not skip_optionals) or args["record"],
         "minimal_infos" : skip_optionals or not args["record"],
-        "video_save_freq" : True if args["record"] else 0,
-        # "action_delay_mustd_std" : (0.0,0.0,0.0),
-        # "action_noise_mustd" : (0.0,0.0),
-        # "obs_abs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
-        # "obs_abs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        # "obs_abs_noise_linacc_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        # "obs_abs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        # "obs_abs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
-        # "obs_abs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
+        "video_save_freq" : 1 if args["record"] else 0,
+        "action_delay_mustd_std" : (0.0,0.0,0.0),
+        "action_noise_mustd" : (0.0,0.0),
+        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
+        "obs_abs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_abs_noise_linacc_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_abs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "obs_abs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
+        "obs_abs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : (not skip_optionals) or args["record"],
         # "minimal_infos" : skip_optionals or not args["record"],
@@ -462,7 +462,8 @@ def play(seed, folderName, run_id, args,
 
             if isinstance(base_env, LocomotionVecEnv):
                 # base_env.set_cam_pose((1.583, 0.201, 2.149))
-                base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height)
+                base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height, goal_yaw_vel = 0.0,
+                                  goal_heading_yaw = 0.0)
             while not done:
                 t0 = time.monotonic()
                 record_time("start_step")
@@ -517,7 +518,8 @@ def play(seed, folderName, run_id, args,
 
                     if isinstance(base_env, LocomotionVecEnv):
                         base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
-                        base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height)
+                        base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height, goal_yaw_vel = 0.0,
+                                          goal_heading_yaw = 0.0)
                 if isinstance(base_env, LocomotionVecEnv):
                     goals = base_env.get_goals()
                     goal_rel_linvel_xys = goals["rel_linvel_xys"][0].tolist()

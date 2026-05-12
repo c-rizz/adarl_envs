@@ -1926,6 +1926,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             threshold=1.0)
         ggLog.info(f"Always present self collisions = {pprint.pformat(self._always_present_collisions)}")
         self._adapter.set_monitored_joints(self._configuration.joints_all_env_controlled)
+        self._monitored_joints = self._configuration.joints_all_env_controlled
         self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.set_impedance_controlled_joints(self._configuration.joints_all_env_controlled)
         # ggLog.info("Initialized RobotVecEnv scenario")

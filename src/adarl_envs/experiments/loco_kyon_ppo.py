@@ -33,7 +33,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n),
+        "action_delay_mustd_std" : (0.018, 0.005*n, 0.005*n),
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
@@ -85,8 +85,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
         "randomized_frictionloss_ratios"             : 0.05*r,
-        "randomized_gains_damping_ratio_epstd"       : 0.05*r,
-        "randomized_gains_stiffness_ratio_epstd"     : 0.05*r,
+        "randomized_gains_damping_ratio_epstd"       : 0.1*r,
+        "randomized_gains_stiffness_ratio_epstd"     : 0.1*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "record_video" : True,

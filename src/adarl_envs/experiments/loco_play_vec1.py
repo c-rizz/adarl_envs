@@ -23,7 +23,7 @@ import adarl.utils.sigint_handler
 from adarl_envs.experiments.loco_builder import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args, get_go1_args, robot_args_registry
 from adarl_envs.env.LocomotionVecEnv import LocomotionVecEnv
 from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
-from adarl.utils.base_utils import record_time, clear_recorded_times, print_recorded_times, isinstance_noimport
+from adarl.utils.base_utils import record_time, clear_recorded_times, print_recorded_times, isinstance_noimport, set_disable_clear_recorded_times
 
 import adarl.utils.dbg
 from typing import Any
@@ -135,7 +135,7 @@ def adarl_builder_and_args():
     env_device = th.device("cuda") if mode == "mjx" else th.device("cpu")
     height_pixels = args["resolution"] #if mode == "mjx" else 720
     pixel_resolution = (height_pixels,int(height_pixels*16/9))
-    skip_optionals = False
+    skip_optionals = True
     realworld = args["mode"] in ["xbot","xbot-zmq"]
     
     r = 0.0 # randomization strength
@@ -466,6 +466,7 @@ def play(seed, folderName, run_id, args,
                                   goal_heading_yaw = 0.0)
             while not done:
                 t0 = time.monotonic()
+                set_disable_clear_recorded_times(True)
                 record_time("start_step")
                 session.run_info["collected_steps"].value += 1
                 # ggLog.info(f"ep_config = {info['ep_config']}")
@@ -535,10 +536,11 @@ def play(seed, folderName, run_id, args,
                 ep_wall_duration += step_wallduration
 
                 record_time("pre sleep")
-                if args["mode"] not in ["xbot","xbot_zmq"]:
+                if args["mode"] not in ["xbot","xbot-zmq"]:
                     time.sleep(max(0,step_length_sec/rt - step_wallduration))
                 record_time("step end")
                 full_step_wallduration = time.monotonic()-t0
+                set_disable_clear_recorded_times(False)
                 print_recorded_times()
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"

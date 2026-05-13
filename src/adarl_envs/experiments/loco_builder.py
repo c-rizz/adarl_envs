@@ -199,9 +199,10 @@ def loco_runner_builder(seed,
                                                                         is_simulated = False,
                                                                         walltime_factor = 1.0,
                                                                         remote_ip = 'localhost',
-                                                                        remote_port = 5557,
-                                                                        remote_joint_state_port = 5559,
-                                                                        remote_cmd_port = 5558,
+                                                                        comm_protocol ='ipc', # or 'ipc'
+                                                                        ipc_pub_path ="/tmp/xbot2_zmq_pub.ipc",
+                                                                        ipc_cmd_path ="/tmp/xbot2_zmq_cmd.ipc",
+                                                                        ipc_service_path ="/tmp/xbot2_zmq_rep.ipc",
                                                                         robot_urdf=robot_description_string),
                                                 vec_size = 1,
                                                 th_device = th_device)

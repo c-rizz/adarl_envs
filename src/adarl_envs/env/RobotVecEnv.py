@@ -28,11 +28,10 @@ import time
 from pathlib import Path
 import pprint
 import scipy.stats
-from adarl.utils.base_utils import record_time
 from gymnasium.vector.utils.spaces import batch_space
 import os
 from adarl.utils.spaces import get_space_labels
-from adarl.utils.base_utils import record_time, record_region_start, record_region_end
+from adarl.utils.base_utils import record_time, record_region_start, record_region_end, DelayStats
 
 
 disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
@@ -336,10 +335,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         original_max_epsteps : int
         posref_safety_period : float
         quiet : bool
-        randomized_armature_joints : tuple[tuple[str,str],...]
-        randomized_armature_ratios : th.Tensor
-        randomized_frictionloss_joints : tuple[tuple[str,str],...]
-        randomized_frictionloss_ratios : th.Tensor
+        randomized_dof_armature_joints : tuple[tuple[str,str],...]
+        randomized_dof_armature_ratios : th.Tensor
+        randomized_dof_damping_joints : tuple[tuple[str,str],...]
+        randomized_dof_damping_ratios : th.Tensor
+        randomized_dof_frictionloss_joints : tuple[tuple[str,str],...]
+        randomized_dof_frictionloss_ratios : th.Tensor
         randomized_com_links : tuple[tuple[str,str], ...]
         """Center of mass randomization, randomized links"""
         randomized_com_xyz_diff_distribution : DistributionDefTh
@@ -452,6 +453,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         link_frictions_ratios : th.Tensor
         link_coms_diffs : th.Tensor
         joint_armatures_ratios : th.Tensor
+        joint_dampings_ratios : th.Tensor
         joint_frictionlosses_ratios : th.Tensor
         joint_reference_filter_freqs : th.Tensor
 
@@ -528,10 +530,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         observe_full_robot_state : bool = False,
                         offset_envs_ep_starts = False,
                         posref_safety_period = 0.001,
-                        randomized_armature_joints : Sequence[tuple[str,str]] = [],
-                        randomized_armature_ratios : float = 0.0,
-                        randomized_frictionloss_joints : Sequence[tuple[str,str]] = [],
-                        randomized_frictionloss_ratios : float = 0.0,
+                        randomized_dof_armature_joints : Sequence[tuple[str,str]] = [],
+                        randomized_dof_armature_ratios : float = 0.0,
+                        randomized_dof_damping_joints : Sequence[tuple[str,str]] = [],
+                        randomized_dof_damping_ratios : float = 0.0,
+                        randomized_dof_frictionloss_joints : Sequence[tuple[str,str]] = [],
+                        randomized_dof_frictionloss_ratios : float = 0.0,
                         randomized_com_links : list[tuple[str,str]] = [],
                         randomized_com_xyz_diff_distribution : DistributionDef = ("uniform", ([-0.01,-0.01,-0.01],[0.01, 0.01,0.01])),
                         randomized_friction_links : list[tuple[str,str]] = [],
@@ -563,6 +567,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # self._build_new_instantaneous_state = th.vmap(self._build_new_instantaneous_state_single)
         # ggLog.info("Properties:"+("\n".join([str(jp) for jp in self._robot_model.get_joint_properties(self._robot_model.get_joint_names()).items()])))
         # exit()
+        self._obs2act_timings = DelayStats()
         
         action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec) if action_smoothing_halflife_sec>0 else 0.0
         goal_err_exp_smoothing_1s = 0.5**(1/goal_err_smoothing_halflife_sec) if goal_err_smoothing_halflife_sec>0 else 0.0
@@ -656,14 +661,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     posref_safety_period = posref_safety_period,
                                                     quiet=quiet,
                                                     offset_envs_ep_starts = offset_envs_ep_starts,
-                                                    randomized_armature_joints = None, # Will fill up later
-                                                    randomized_armature_ratios = None, # Will fill up later
+                                                    randomized_dof_armature_joints = None, # Will fill up later
+                                                    randomized_dof_armature_ratios = None, # Will fill up later
+                                                    randomized_dof_damping_joints=None, # Will fill up later
+                                                    randomized_dof_damping_ratios = None, # Will fill up later
+                                                    randomized_dof_frictionloss_joints = None, # Will fill up later
+                                                    randomized_dof_frictionloss_ratios = None, # Will fill up later
                                                     randomized_com_links=None, #Will fill up later
                                                     randomized_com_xyz_diff_distribution = None, #Will fill up later
                                                     randomized_friction_links=None, # Will fill up later
                                                     randomized_friction_slide_spin_roll_ratios = None, # Will fill up later
-                                                    randomized_frictionloss_joints = None, # Will fill up later
-                                                    randomized_frictionloss_ratios = None, # Will fill up later
                                                     randomized_gains_damping_ratio_epstd=self._thtens(randomized_gains_damping_ratio_epstd),
                                                     randomized_gains_stiffness_ratio_epstd=self._thtens(randomized_gains_stiffness_ratio_epstd),
                                                     randomized_mass_links=None, # Will fill up later
@@ -746,25 +753,29 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         randomized_mass_links = self._expand_link_filters(randomized_mass_links)
         randomized_com_links = self._expand_link_filters(randomized_com_links)
         randomized_friction_links = self._expand_link_filters(randomized_friction_links)        
-        randomized_armature_joints = self._expand_joint_filters(randomized_armature_joints)
-        randomized_frictionloss_joints = self._expand_joint_filters(randomized_frictionloss_joints)
+        randomized_dof_armature_joints = self._expand_joint_filters(randomized_dof_armature_joints)
+        randomized_dof_damping_joints = self._expand_joint_filters(randomized_dof_damping_joints)
+        randomized_dof_frictionloss_joints = self._expand_joint_filters(randomized_dof_frictionloss_joints)
         self._configuration.randomized_mass_links = tuple(randomized_mass_links)
         self._configuration.randomized_com_links = tuple(randomized_com_links)
         self._configuration.randomized_friction_links = tuple(randomized_friction_links)
-        self._configuration.randomized_armature_joints = tuple(randomized_armature_joints)
-        self._configuration.randomized_frictionloss_joints = tuple(randomized_frictionloss_joints)
+        self._configuration.randomized_dof_armature_joints = tuple(randomized_dof_armature_joints)
+        self._configuration.randomized_dof_damping_joints = tuple(randomized_dof_damping_joints)
+        self._configuration.randomized_dof_frictionloss_joints = tuple(randomized_dof_frictionloss_joints)
         self._model_randomization_enabled = (
                     any([len(self._configuration.randomized_mass_links)>0 and not self._distr_is_constant(randomized_mass_ratios_distr),
                          len(self._configuration.randomized_com_links)>0 and not self._distr_is_constant(randomized_com_xyz_diff_distribution),
                          len(self._configuration.randomized_friction_links)>0 and any(r>0 for r in randomized_friction_slide_spin_roll_ratios),
-                         len(self._configuration.randomized_armature_joints)>0 and randomized_armature_ratios>0,
-                         len(self._configuration.randomized_frictionloss_joints)>0 and randomized_frictionloss_ratios>0]) 
+                         len(self._configuration.randomized_dof_armature_joints)>0 and randomized_dof_armature_ratios>0,
+                         len(self._configuration.randomized_dof_damping_joints)>0 and randomized_dof_damping_ratios>0,
+                         len(self._configuration.randomized_dof_frictionloss_joints)>0 and randomized_dof_frictionloss_ratios>0]) 
                     )
         self._configuration.randomized_mass_ratio_distribution = self._distr_to_tensor(randomized_mass_ratios_distr, size=(len(randomized_mass_links),))
         self._configuration.randomized_com_xyz_diff_distribution = self._distr_to_tensor(randomized_com_xyz_diff_distribution, size=(len(randomized_com_links), 3))
         self._configuration.randomized_friction_slide_spin_roll_ratios = self._thtens(randomized_friction_slide_spin_roll_ratios).expand((len(randomized_friction_links),3))
-        self._configuration.randomized_armature_ratios = self._thtens(randomized_armature_ratios).expand((len(randomized_armature_joints),))
-        self._configuration.randomized_frictionloss_ratios = self._thtens(randomized_frictionloss_ratios).expand((len(randomized_frictionloss_joints),))
+        self._configuration.randomized_dof_armature_ratios = self._thtens(randomized_dof_armature_ratios).expand((len(randomized_dof_armature_joints),))
+        self._configuration.randomized_dof_damping_ratios = self._thtens(randomized_dof_damping_ratios).expand((len(randomized_dof_damping_joints),))
+        self._configuration.randomized_dof_frictionloss_ratios = self._thtens(randomized_dof_frictionloss_ratios).expand((len(randomized_dof_frictionloss_joints),))
         self._configuration.randomized_reference_filter_distribution = self._distr_to_tensor(randomized_reference_filter_distribution, size=(1,)) if randomized_reference_filter_distribution is not None else None
         self._filters_randomization_enabled = self._configuration.randomized_reference_filter_distribution != None and not self._distr_is_constant(self._configuration.randomized_reference_filter_distribution)
 
@@ -788,8 +799,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     link_masses_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_mass_links))),
                                                     link_frictions_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_friction_links), 3)),
                                                     link_coms_diffs = self._thzeros((adapter.vec_size(), len(self._configuration.randomized_com_links), 3)),
-                                                    joint_armatures_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_armature_joints))),
-                                                    joint_frictionlosses_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_frictionloss_joints))),
+                                                    joint_armatures_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_dof_armature_joints))),
+                                                    joint_dampings_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_dof_damping_joints))),
+                                                    joint_frictionlosses_ratios = self._thones((adapter.vec_size(), len(self._configuration.randomized_dof_frictionloss_joints))),
                                                     joint_reference_filter_freqs = self._thzeros((adapter.vec_size(),))
                                                     )
 
@@ -797,8 +809,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._randomized_mass_link_ids = self._adapter.get_links_ids(self._configuration.randomized_mass_links)
         self._randomized_com_links_ids = self._adapter.get_links_ids(self._configuration.randomized_com_links)
         self._randomized_friction_links_ids = self._adapter.get_links_ids(self._configuration.randomized_friction_links)
-        self._randomized_armature_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_armature_joints)
-        self._randomized_frictionloss_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_frictionloss_joints)
+        self._randomized_dof_armature_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_dof_armature_joints)
+        self._randomized_dof_damping_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_dof_damping_joints)
+        self._randomized_dof_frictionloss_joints_ids = self._adapter.get_joints_ids(self._configuration.randomized_dof_frictionloss_joints)
 
 
         self.single_state_space=self._state_helper.get_single_space()
@@ -1284,15 +1297,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                         },
                                                         **vsize_dev_type) # type: ignore
         
-
-        # randomizations_state_size = (   len(self._current_episode_config.link_masses_ratios)+
-        #                                 len(self._current_episode_config.link_frictions_ratios)*3+
-        #                                 len(self._current_episode_config.link_coms_diffs)*3+
-        #                                 len(self._current_episode_config.joint_armatures_ratios)+
-        #                                 len(self._current_episode_config.joint_frictionlosses_ratios)+
-        #                                 len(self._current_episode_config.joint_reference_filter_freqs))
-        # randomizations_
-        
         if not self._configuration.merge_privileged:
             obs_definitions={"base" : 
                             DictStateHelper.SimpleDictObsDef(  observable_substates=[
@@ -1430,9 +1434,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             v_j_pvesd[:,:,4]*=self._current_episode_config.randomized_damping_factor
             self._last_sent_v_j_pvesd = v_j_pvesd
             full_cmd_vec_j_pvesd = th.concat([v_j_pvesd, self._homing_held_joints_vec_pvesd], dim = 1)
+            self._submit_time = time.monotonic()
             self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = full_cmd_vec_j_pvesd,
                                                     delay_sec=action_delay)
-            
+            self._obs2act_timings.mark_end()
+            ggLog.info(f"obs-act delay: \n{pprint.pformat(self._obs2act_timings.get_stats())}")
+    
 
 
 
@@ -1634,11 +1641,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             link_masses_ratios =            self._sample_distr((self.num_envs, len(self._configuration.randomized_mass_links)), self._configuration.randomized_mass_ratio_distribution)
             link_coms_diffs =               self._sample_distr((self.num_envs, len(self._configuration.randomized_com_links),3), self._configuration.randomized_com_xyz_diff_distribution)
             link_frictions_ratios =         (self._thrand(size=(self.num_envs,)+self._configuration.randomized_friction_slide_spin_roll_ratios.size())*2-1)*self._configuration.randomized_friction_slide_spin_roll_ratios
-            joint_armatures_ratios =        (self._thrand(size=(self.num_envs, len(self._configuration.randomized_armature_ratios)))*2-1)*self._configuration.randomized_armature_ratios
-            joint_frictionlosses_ratios =   (self._thrand(size=(self.num_envs, len(self._configuration.randomized_frictionloss_ratios)))*2-1)*self._configuration.randomized_frictionloss_ratios
+            joint_armatures_ratios =        (self._thrand(size=(self.num_envs, len(self._configuration.randomized_dof_armature_ratios)))*2-1)*self._configuration.randomized_dof_armature_ratios
+            joint_dampings_ratios =         (self._thrand(size=(self.num_envs, len(self._configuration.randomized_dof_damping_ratios)))*2-1)*self._configuration.randomized_dof_damping_ratios
+            joint_frictionlosses_ratios =   (self._thrand(size=(self.num_envs, len(self._configuration.randomized_dof_frictionloss_ratios)))*2-1)*self._configuration.randomized_dof_frictionloss_ratios
             masked_assign(self._current_episode_config.link_masses_ratios,          vec_mask, link_masses_ratios)
             masked_assign(self._current_episode_config.link_frictions_ratios,       vec_mask, link_frictions_ratios)
             masked_assign(self._current_episode_config.joint_armatures_ratios,      vec_mask, joint_armatures_ratios)
+            masked_assign(self._current_episode_config.joint_dampings_ratios,       vec_mask, joint_dampings_ratios)
             masked_assign(self._current_episode_config.joint_frictionlosses_ratios, vec_mask, joint_frictionlosses_ratios)
             masked_assign(self._current_episode_config.link_coms_diffs,             vec_mask, link_coms_diffs)
         if self._filters_randomization_enabled:
@@ -1781,8 +1790,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 AlterModelCommand(
                         link_masses=(self._randomized_mass_link_ids, self._current_episode_config.link_masses_ratios) if len(self._randomized_mass_link_ids) > 0 else None,
                         link_frictions=(self._randomized_friction_links_ids, self._current_episode_config.link_frictions_ratios) if len(self._randomized_friction_links_ids) > 0 else None,
-                        joint_armature_ratios=(self._randomized_armature_joints_ids, self._current_episode_config.joint_armatures_ratios) if len(self._randomized_armature_joints_ids) > 0 else None,
-                        joint_frictionloss_ratios=(self._randomized_frictionloss_joints_ids, self._current_episode_config.joint_frictionlosses_ratios) if len(self._randomized_frictionloss_joints_ids) > 0 else None,
+                        joint_armature_ratios=(self._randomized_dof_armature_joints_ids, self._current_episode_config.joint_armatures_ratios) if len(self._randomized_dof_armature_joints_ids) > 0 else None,
+                        joint_damping_ratios=(self._randomized_dof_damping_joints_ids, self._current_episode_config.joint_dampings_ratios) if len(self._randomized_dof_damping_joints_ids) > 0 else None,
+                        joint_frictionloss_ratios=(self._randomized_dof_frictionloss_joints_ids, self._current_episode_config.joint_frictionlosses_ratios) if len(self._randomized_dof_frictionloss_joints_ids) > 0 else None,
                         com_position_diffs=(self._randomized_com_links_ids, self._current_episode_config.link_coms_diffs) if len(self._randomized_com_links_ids) > 0 else None,
                         com_quatxyzw_diffs=None,
                         vec_mask=reinit_vecs,
@@ -1814,9 +1824,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                         link_frictions =
                                             (self._randomized_friction_links_ids, self._current_episode_config.link_frictions_ratios) if len(self._randomized_friction_links_ids) > 0 else None,
                                         joint_armature_ratios =
-                                            (self._randomized_armature_joints_ids,     self._current_episode_config.joint_armatures_ratios) if len(self._randomized_armature_joints_ids) > 0 else None,
+                                            (self._randomized_dof_armature_joints_ids,     self._current_episode_config.joint_armatures_ratios) if len(self._randomized_dof_armature_joints_ids) > 0 else None,
+                                        joint_damping_ratios =
+                                            (self._randomized_dof_damping_joints_ids, self._current_episode_config.joint_dampings_ratios) if len(self._randomized_dof_damping_joints_ids) > 0 else None,
                                         joint_frictionloss_ratios = 
-                                            (self._randomized_frictionloss_joints_ids, self._current_episode_config.joint_frictionlosses_ratios) if len(self._randomized_frictionloss_joints_ids) > 0 else None,
+                                            (self._randomized_dof_frictionloss_joints_ids, self._current_episode_config.joint_frictionlosses_ratios) if len(self._randomized_dof_frictionloss_joints_ids) > 0 else None,
                                         com_position_diffs =
                                             (self._randomized_com_links_ids, self._current_episode_config.link_coms_diffs) if len(self._randomized_com_links_ids) > 0 else None,
                                         com_quatxyzw_diffs =
@@ -2223,9 +2235,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     def _get_adapter_data(self):
         if th.compiler.is_compiling():
-            return self._get_adapter_data_no_compile()
+            r = self._get_adapter_data_no_compile()
         else:
-            return self._get_adapter_data_raw()
+            r = self._get_adapter_data_raw()
+        self._obs2act_timings.mark_start()
+        return r
 
     def _get_new_instantaneous_state(self, adapter_data) -> dict[str, dict[Any, th.Tensor] | th.Tensor]:        
         

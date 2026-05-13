@@ -188,10 +188,11 @@ def adarl_builder_and_args():
         "offset_envs_ep_starts" : True,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomized_armature_ratios" : 0.1*r,
+        "randomized_dof_armature_ratios" : 0.1*r,
+        "randomized_dof_frictionloss_ratios"             : 0.0*r,
+        "randomized_dof_damping_ratios":        0.2*r,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
-        "randomized_frictionloss_ratios"             : 0.0*r,
         "randomized_gains_damping_ratio_epstd"       : 0.0*r,
         "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
@@ -270,11 +271,15 @@ def adarl_builder_and_args():
         "log_info_stats" : (not skip_optionals) or args["record"],
         # "minimal_infos" : skip_optionals or not args["record"],
         "initial_joint_pose_randomization_range" : 0.0,
-        "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.0,0.0,0.0])),
-        "randomized_friction_slide_spin_roll_ratios" : (0.0,0.0,0.0),
-        "randomized_gains_damping_ratio_epstd" : 0.0,
-        "randomized_gains_stiffness_ratio_epstd" : 0.0,
-        "randomized_mass_ratios" : ("normal", (0.0, 0.0)),
+        "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
+        "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
+        "randomized_dof_frictionloss_ratios"         : 0.0*r,
+        "randomized_dof_damping_ratios"              : 0.0*r,
+        "randomized_gains_damping_ratio_epstd"       : 0.0*r,
+        "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
+        "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
+        "randomized_dof_armature_ratios" : 0.0*r,
+        "randomized_reference_filter_distribution" : ("uniform", (50.0, 50.0)),
         "impulse_probability_per_sec" : 0.0,
         "show_gui" : args["gui"],
         "just_health_reward" : realworld,
@@ -439,7 +444,8 @@ def play(seed, folderName, run_id, args,
                 break
             obs : TensorTree[th.Tensor]
 
-            cmd_xys = [1.0,0.0,0.2]
+            cmd_xys = [1.0,0.0,0.1]
+            cmd_yawvel = 0.0
             cmd_height = 0.47
             options["goal_velocity_xy"] = [cmd_xys[0]*cmd_xys[2], cmd_xys[1]*cmd_xys[2]]
             obs, info = env.reset(options = options)  #type: ignore
@@ -500,6 +506,11 @@ def play(seed, folderName, run_id, args,
                     if keyboard_listener.get_key_press_count("d")>0: cmd_angle  += -10*3.14159/180
                     if keyboard_listener.get_key_press_count("r")>0: cmd_height +=  0.005
                     if keyboard_listener.get_key_press_count("f")>0: cmd_height += -0.005
+                    if keyboard_listener.get_key_press_count("q")>0: cmd_yawvel += 0.05
+                    if keyboard_listener.get_key_press_count("e")>0: cmd_yawvel += -0.05
+                    if keyboard_listener.get_key_press_count("z")>0: 
+                        cmd_xys[2] = 0.0
+                        cmd_yawvel = 0.0
                     cmd_xys[0] = np.cos(cmd_angle)
                     cmd_xys[1] = np.sin(cmd_angle)
                     cmd_height = np.clip(cmd_height, 0.35, 0.57)
@@ -519,7 +530,8 @@ def play(seed, folderName, run_id, args,
 
                     if isinstance(base_env, LocomotionVecEnv):
                         base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
-                        base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height, goal_yaw_vel = 0.0,
+                        base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height,
+                                          goal_yaw_vel = cmd_yawvel,
                                           goal_heading_yaw = 0.0)
                 if isinstance(base_env, LocomotionVecEnv):
                     goals = base_env.get_goals()
@@ -545,7 +557,7 @@ def play(seed, folderName, run_id, args,
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
                            f" tstep={t1_step-t0_step:1.4f} \t"
-                           f" rgoal_dir={goal_rel_linvel_xys[:2]} \t"
+                           f" rgoal_dir={np.arctan2(goal_rel_linvel_xys[1], goal_rel_linvel_xys[0])/3.14159*180} \t"
                            f" rgoal_speed={goal_rel_linvel_xys[2]} \t"
                            f" goal_height={goal_height} \t")
                 # print_recorded_times()

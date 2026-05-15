@@ -687,7 +687,10 @@ def get_kyon_args(enable_arms : bool = False,):
             "mjx_opt_override" : {  
                                     #"noslip_iterations" : 10,
                                     #   "impratio" : 10.0,
-                                    "cone" : 1}
+                                    "cone" : 1},
+            "revolute_dof_frictionloss_override" : 4.68,
+            "revolute_dof_damping_override" : 1.7,
+            "revolute_dof_armature_override" : 0.234
             # "mjx_geom_overrides" : {"kyon#contact_1" : {"solimp" : np.array([0.9, 0.95, 0.036, 0.5, 2.0]),
             #                                             "friction" : np.array([0.8, 0.005, 0.0001])},
             #                         "kyon#contact_2" : {"solimp" : np.array([0.9, 0.95, 0.036, 0.5, 2.0]),

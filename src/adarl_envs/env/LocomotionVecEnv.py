@@ -2466,8 +2466,8 @@ class LocomotionVecEnv(RobotVecEnv):
         elif goal_rel_linvel_xys is not None:
             self._locomotion_episode_config.goal_rel_vel_vec_xys = self._thtens(goal_rel_linvel_xys).view(self.num_envs,3)
             self._locomotion_episode_config.goal_abs_vel_vec_xys = None
-        else:
-            raise RuntimeError("One of goal_abs_linvel_vec_xys, goal_diff_linvel_speed_yaw or goal_rel_linvel_xys must be provided")
+        # else:
+        #     raise RuntimeError("One of goal_abs_linvel_vec_xys, goal_diff_linvel_speed_yaw or goal_rel_linvel_xys must be provided")
 
         if goal_abs_height is not None:
             goal_abs_height = self._thtens(goal_abs_height).expand(1,self.num_envs).permute(1,0)

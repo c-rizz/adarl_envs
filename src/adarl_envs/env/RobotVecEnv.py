@@ -32,7 +32,7 @@ from gymnasium.vector.utils.spaces import batch_space
 import os
 from adarl.utils.spaces import get_space_labels
 from adarl.utils.base_utils import record_time, record_region_start, record_region_end, DelayStats
-
+import gc
 
 disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
 unsafe_realworld_init = True
@@ -567,7 +567,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # self._build_new_instantaneous_state = th.vmap(self._build_new_instantaneous_state_single)
         # ggLog.info("Properties:"+("\n".join([str(jp) for jp in self._robot_model.get_joint_properties(self._robot_model.get_joint_names()).items()])))
         # exit()
-        self._obs2act_timings = DelayStats()
+        self._obs2act_timings = DelayStats(maxlen=500)
         
         action_exp_smoothing_1s = 0.5**(1/action_smoothing_halflife_sec) if action_smoothing_halflife_sec>0 else 0.0
         goal_err_exp_smoothing_1s = 0.5**(1/goal_err_smoothing_halflife_sec) if goal_err_smoothing_halflife_sec>0 else 0.0
@@ -1438,7 +1438,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._adapter.setJointsImpedanceCommand(joint_impedances_pvesd = full_cmd_vec_j_pvesd,
                                                     delay_sec=action_delay)
             self._obs2act_timings.mark_end()
-            ggLog.info(f"obs-act delay: \n{pprint.pformat(self._obs2act_timings.get_stats())}")
+            # ggLog.info(f"obs-act delay: \n{pprint.pformat(self._obs2act_timings.get_stats())}")
     
 
 
@@ -1533,6 +1533,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         #     mjx_adapter : MjxAdapter = self._adapter # type: ignore
         #     mjx_adapter.reset_model_alterations(vec_mask)
         record_time("RobotVecEnv.initialize_episodes: resetted alterations")
+
+        if not isinstance_noimport(self._adapter, ("BaseVecSimulationAdapter")):
+            gc.unfreeze() # unfreezes whatevwer is already frozen
+            gc.collect(2) # collects whatever nedds to be collected
+            gc.freeze() # freeze currently allocated objects, so it is ignored in future collections, to make the fast
 
 
         self._set_current_ep_config(reset_options = options, vec_mask=vec_mask)

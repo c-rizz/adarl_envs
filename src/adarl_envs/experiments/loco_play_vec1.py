@@ -444,10 +444,17 @@ def play(seed, folderName, run_id, args,
                 break
             obs : TensorTree[th.Tensor]
 
-            cmd_xys = [1.0,0.0,0.1]
-            cmd_yawvel = 0.0
-            cmd_height = 0.47
-            options["goal_velocity_xy"] = [cmd_xys[0]*cmd_xys[2], cmd_xys[1]*cmd_xys[2]]
+            if interactive:
+                cmd_xys = [1.0,0.0,0.0]
+                cmd_yawvel = 0.0
+                cmd_height = 0.47
+            else:
+                dir = np.random.rand()*2*3.14159
+                speed = np.random.rand()
+                cmd_xys = [np.cos(dir), np.sin(dir), speed]
+                cmd_yawvel = (np.random.rand()*2-1)*0.5*(np.random.rand()>0.5)
+                cmd_height = 0.47
+            # options["goal_velocity_xy"] = [cmd_xys[0]*cmd_xys[2], cmd_xys[1]*cmd_xys[2]]
             obs, info = env.reset(options = options)  #type: ignore
             ggLog.info(f"env resetted")
             # ggLog.info(f"ep_config = {info['ep_config']}")
@@ -468,8 +475,11 @@ def play(seed, folderName, run_id, args,
 
             if isinstance(base_env, LocomotionVecEnv):
                 # base_env.set_cam_pose((1.583, 0.201, 2.149))
-                base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height, goal_yaw_vel = 0.0,
-                                  goal_heading_yaw = 0.0)
+                base_env.set_goal(
+                                    goal_rel_linvel_xys = tuple(cmd_xys),
+                                    goal_abs_height = cmd_height,
+                                    goal_yaw_vel = cmd_yawvel,
+                                    goal_heading_yaw = 0.0)
             while not done:
                 t0 = time.monotonic()
                 set_disable_clear_recorded_times(True)
@@ -557,9 +567,10 @@ def play(seed, folderName, run_id, args,
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
                            f" tstep={t1_step-t0_step:1.4f} \t"
-                           f" rgoal_dir={np.arctan2(goal_rel_linvel_xys[1], goal_rel_linvel_xys[0])/3.14159*180} \t"
-                           f" rgoal_speed={goal_rel_linvel_xys[2]} \t"
-                           f" goal_height={goal_height} \t")
+                           f" cmd_reldir={np.arctan2(goal_rel_linvel_xys[1], goal_rel_linvel_xys[0])/3.14159*180} \t"
+                           f" cmd_speed={goal_rel_linvel_xys[2]} \t"
+                           f" cmd_height={goal_height} \t"
+                           f" cmd_yaw_vel={cmd_yawvel}")
                 # print_recorded_times()
             if step_count>0:
                 rewards.append(th.as_tensor(ep_reward,device="cpu").sum().item())

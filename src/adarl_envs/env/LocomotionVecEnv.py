@@ -1107,7 +1107,7 @@ class LocomotionVecEnv(RobotVecEnv):
         else:
             if self.num_envs == 1:
                 jpos = super_adapter_data[1][0,:,0]
-                self._robot_model.set_joint_pose_by_names({jn[1]:jpos[i] for i,jn in enumerate(self._monitored_joints)} )
+                self._robot_model.set_joint_pose_by_names({jn[1]:jpos[i] for i,jn in enumerate(self._configuration.joints_agent_controlled)} )
                 feet_poses_dict = self._robot_model.get_frame_poses_xyzxyzw(self._configuration.main_body_link[1],[l[1] for l in self._loco_conf.feet_links])
                 feet_positions_xyz = self._thtens([fp[:3] for fp in feet_poses_dict.values()])
                 feet_rel_pos_vec_foot_xyz = feet_positions_xyz.unsqueeze(0)

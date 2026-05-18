@@ -130,7 +130,7 @@ def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
 
 def adarl_builder_and_args():
     step_length_sec = 20/1024 
-    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=5000 #int(ep_duration_sec/step_length_sec)
     mode = args["mode"]
     env_device = th.device("cuda") if mode == "mjx" else th.device("cpu")
     height_pixels = args["resolution"] #if mode == "mjx" else 720

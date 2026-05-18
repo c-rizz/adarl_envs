@@ -1937,8 +1937,9 @@ class LocomotionVecEnv(RobotVecEnv):
         #                                              flattening_width=1.0,
         #                                              flattening_threshold=posref_vel_threshold/posref_vel_max)
         # reward_posref_vel       = joint_penalty_reward(posref_vel/posref_threshold,     max_rew=1.0,exponent=5, presquash_factor=1)
-        flattened_posref_vels = posref_vel*smoothclip_flattener(posref_vel, posref_vel_threshold, 1.0)
-        reward_posref_vel       = norm_penalty(flattened_posref_vels/15,     norm=4, power=2, squash_max=1.0, squash_smoothness=4.0, flattening_scale=0.005, flattening_power=4.0)
+        abs_posref_vel = posref_vel.abs()
+        flattened_posref_vels = abs_posref_vel*smoothclip_flattener(abs_posref_vel, posref_vel_threshold, 1.0)
+        reward_posref_vel       = norm_penalty(flattened_posref_vels/posref_vel_max,     norm=2, power=2, squash_max=1.0, squash_smoothness=4.0)
         reward_posref_acc       = norm_penalty(posref_acc/1_000,  norm=4, power=1.0, squash_max=2.0, squash_smoothness=2.0)
         
         

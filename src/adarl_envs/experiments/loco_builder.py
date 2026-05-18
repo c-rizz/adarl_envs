@@ -940,6 +940,11 @@ def get_spot_args():
         }
 robot_args_registry["spot"] = get_spot_args
 
+def union(dicts : list[dict]):
+    out = {}
+    for d in dicts:
+        out.update(d)
+    return out
 
 
 def get_centauro_args():
@@ -1019,7 +1024,26 @@ def get_centauro_args():
             # ,"ankle_yaw_4"
             ]
     j_vel_ctrl_lim = 7.0
-    j_eff_ctrl_lim = 150.0
+    j_eff_ctrl_lim_leg_a = 200.0
+    j_eff_ctrl_lim_leg_b = 100.0
+    j_eff_ctrl_lim_leg_c = 35.0
+    j_eff_ctrl_lim_arm_a = 140.0
+    j_eff_ctrl_lim_arm_b = 55.0
+    j_eff_ctrl_lims =union([{   ("centauro",f"hip_yaw_{i}") :      j_eff_ctrl_lim_leg_a,
+                                ("centauro",f"hip_pitch_{i}") :    j_eff_ctrl_lim_leg_a,
+                                ("centauro",f"knee_pitch_{i}") :   j_eff_ctrl_lim_leg_a,
+                                ("centauro",f"ankle_pitch_{i}") :  j_eff_ctrl_lim_leg_b,
+                                ("centauro",f"ankle_yaw_{i}") :    j_eff_ctrl_lim_leg_c} for i in range(1,5)]+
+                            [{  ("centauro",f"j_arm{i}_1") : j_eff_ctrl_lim_arm_a,
+                                ("centauro",f"j_arm{i}_2") : j_eff_ctrl_lim_arm_a,
+                                ("centauro",f"j_arm{i}_3") : j_eff_ctrl_lim_arm_a,
+                                ("centauro",f"j_arm{i}_4") : j_eff_ctrl_lim_arm_a,
+                                ("centauro",f"j_arm{i}_5") : j_eff_ctrl_lim_arm_b,
+                                ("centauro",f"j_arm{i}_6") : j_eff_ctrl_lim_arm_b} for i in range(1,3)]+
+                            [{  ("centauro",f"j_wheel_{i}") : j_eff_ctrl_lim_leg_c} for i in range(1,5)]+
+                            [{  ("centauro","torso_yaw") : 140.0,
+                                ("centauro","velodyne_joint") : 35.0,
+                                ("centauro","d435_head_joint") : 35.0}])
     j_pos_range = 0.3
     j_pos_ctrl_lims = {k:np.array([-1.0,1.0])*j_pos_range+homing[k] for k in homing.keys()}
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf/urdf/centauro.urdf.xacro"),
@@ -1036,6 +1060,8 @@ def get_centauro_args():
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
             "homing_body_pose_xyz_xyzw" : (0.,0.,0.84,0.,0.,0.,1.),
+            "default_max_joint_impedance_ctrl_torque" : 100.0,
+            "max_joint_impedance_ctrl_torques" : j_eff_ctrl_lims,
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : legs,
@@ -1044,13 +1070,14 @@ def get_centauro_args():
             "randomized_friction_links" : [LINK_FILTERS.ALL],
             "randomized_com_links" : [("centauro","pelvis")],
             "randomized_dof_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "randomized_dof_damping_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
                                                     [ 0.9, 0.9, 0.9]] for k,v in homing.items()},
             "control_limits_center" : None,
             "control_limits_ratios_minmax_pve" : None,
             "control_limits_minmax_pve" : {k:th.as_tensor(
-                                             [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lim, -j_eff_ctrl_lim],
-                                              [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lim,  j_eff_ctrl_lim]]) for k in homing.keys()},            
+                                             [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lim, -j_eff_ctrl_lims[k]],
+                                              [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lim,  j_eff_ctrl_lims[k]]]) for k in homing.keys()},            
             "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_2'),[('ground','ground_link')]),
                                             (('centauro', 'wheel_3'),[('ground','ground_link')]),

@@ -113,7 +113,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      eps,
         "reward_position_weight" :            eps,
-        "reward_posref_vel_weight" :          eps,
+        "reward_posref_vel_weight" :          0.1,
         "reward_posref_acc_weight":           eps,
         "reward_scale_nolength":              0.01,
         "reward_sensed_effort_weight" :       eps,
@@ -447,7 +447,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--algorithm", default="ppo", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
-    ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
+    ap.add_argument("--robot", default="centauro", type=str, help="Which robot to use")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

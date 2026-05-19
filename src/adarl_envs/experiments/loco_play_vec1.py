@@ -222,6 +222,7 @@ def adarl_builder_and_args():
         "reward_position_weight" :            eps,
         "reward_posref_vel_weight" :          eps,
         "reward_posref_acc_weight":           eps,
+        "reward_safety_triggered_weight" :    1.0,
         "reward_scale_nolength":              0.01,
         "reward_sensed_effort_weight" :       eps,
         "reward_slip_weight" :                1.0,

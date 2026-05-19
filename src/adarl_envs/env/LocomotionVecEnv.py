@@ -333,6 +333,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_weight_failure : th.Tensor
         reward_weight_sensed_effort : th.Tensor
         reward_weight_stand_position : th.Tensor
+        reward_weight_safety_triggered : th.Tensor
         reward_weight_slip : th.Tensor
         reward_weight_velref : th.Tensor
         reward_weight_torqueref : th.Tensor
@@ -435,6 +436,7 @@ class LocomotionVecEnv(RobotVecEnv):
         posref_acc : th.Tensor
         posref_vel : th.Tensor
         sensed_effort : th.Tensor
+        safety_triggered : th.Tensor
         slip : th.Tensor
         stand_position : th.Tensor
         torque : th.Tensor
@@ -500,6 +502,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                 "POWER",
                                                 "POSREF_ACC",
                                                 "POSREF_VEL",
+                                                "SAFETY_TRIGGERED",
                                                 "SENSED_EFFORT",
                                                 "SLIP",
                                                 "STAND_POSITION",
@@ -587,6 +590,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_stand_position_weight : float,
                         reward_scale : float,
                         reward_sensed_effort_weight : float,
+                        reward_safety_triggered_weight : float,
                         reward_slip_weight : float,
                         reward_torque_limit_weight : float,
                         reward_cmdtorque_weight : DistributionDef,
@@ -694,6 +698,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_posref_vel=self._distr_to_tensor(reward_posref_vel_weight),
                         reward_weight_posref_acc = self._distr_to_tensor(reward_posref_acc_weight),
                         reward_weight_sensed_effort = self._thtens(reward_sensed_effort_weight),
+                        reward_weight_safety_triggered=self._thtens(reward_safety_triggered_weight),
                         reward_weight_slip=self._thtens(reward_slip_weight),
                         reward_weight_stand_position = self._thtens(reward_stand_position_weight),
                         reward_weight_torque = self._distr_to_tensor(reward_cmdtorque_weight),
@@ -778,6 +783,7 @@ class LocomotionVecEnv(RobotVecEnv):
             posref_acc =            self._thtens([float("-inf"), 0            ]),
             posref_vel =            self._thtens([float("-inf"), 0            ]),
             sensed_effort =         self._thtens([float("-inf"), 0            ]),
+            safety_triggered =      self._thtens([float("-inf"), 0            ]),
             slip =                  self._thtens([float("-inf"), 0            ]),
             stand_position =        self._thtens([float("-inf"), 0            ]),
             torque =                self._thtens([float("-inf"), 0            ]),
@@ -2036,11 +2042,16 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_feet_on_ground = th.mean(feet_touching_ground.to(th.float32), dim=1) * th.logical_not(should_be_moving.view((self.num_envs,)))
 
         # FAILURE SCALING
+        safety_triggered = th.logical_or(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED,0],
+                                         state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,0])
         failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
         if self._configuration.fail_on_safety:
-            safety_triggered = th.logical_or(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED,0],
-                                             state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,0])
             failed = th.logical_or(failed, safety_triggered)
+
+
+        # ---------------- SAFETY TRIGGERED REWARD ----------------
+        reward_safety_triggered = -1*safety_triggered
+
 
         raw_rewards = LocomotionVecEnv.SubRewards(
             acceleration = reward_acceleration,
@@ -2064,6 +2075,7 @@ class LocomotionVecEnv(RobotVecEnv):
             posref_acc = reward_posref_acc,
             posref_vel = reward_posref_vel,
             sensed_effort = reward_sensed_effort,
+            safety_triggered = reward_safety_triggered,
             slip = reward_slip,
             stand_position = reward_stand_position,
             torque = reward_cmdtorque,

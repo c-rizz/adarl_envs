@@ -559,6 +559,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._obs_dtype = th.float32
         self._robot_model = Robot(robot_description_string=robot_description_string,
                                     robot_description_format=robot_description_format)
+        ggLog.info(f"urdf: {robot_description_string}")
         ggLog.info(f"Robot has links: {self._robot_model.get_frame_names()}")
         ggLog.info(f"Robot has joints: {self._robot_model.get_joint_names()}")
         root_joint_name = self._robot_model.get_parent_joint(robot_root_link)

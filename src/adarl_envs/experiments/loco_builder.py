@@ -1003,6 +1003,7 @@ def get_centauro_args():
                 # ("centauro","dagana_1_claw_joint") : 0,
                 # ("centauro","dagana_2_claw_joint") : 0
                 }
+    homing_ref = homing.copy()
     legs = ["hip_yaw_1"
             ,"hip_pitch_1"
             ,"knee_pitch_1"
@@ -1056,7 +1057,7 @@ def get_centauro_args():
             "robot_description_format" : "xacro",
             "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf")},
             "homing_joint_position" : homing,
-            "homing_joint_position_references" : None,
+            "homing_joint_position_references" : homing_ref,
             "robot_name" : "centauro",
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",

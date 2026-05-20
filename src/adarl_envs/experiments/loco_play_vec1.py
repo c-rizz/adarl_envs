@@ -124,18 +124,22 @@ def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
 
 
 
-
+robot_heights = {   "kyon" : [0.47,0.47],
+                    "go1" : [0.30,0.30],
+                    "centauro" : [0.79,0.79],
+                    }
 
 
 
 def adarl_builder_and_args():
     step_length_sec = 20/1024 
-    max_steps_per_episode=5000 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
     mode = args["mode"]
     env_device = th.device("cuda") if mode == "mjx" else th.device("cpu")
     height_pixels = args["resolution"] #if mode == "mjx" else 720
     pixel_resolution = (height_pixels,int(height_pixels*16/9))
-    skip_optionals = True
+    record = args["record"] or args["verbose_recording"]
+    skip_optionals = not args["verbose_recording"]
     realworld = args["mode"] in ["xbot","xbot-zmq"]
     
     r = 0.0 # randomization strength
@@ -154,7 +158,7 @@ def adarl_builder_and_args():
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : [0.47,0.47] if args["robot"] == "kyon" else [0.30,0.30],
+        "goal_height_minmax" : robot_heights.get(args["robot"].lower(), [0.5,0.5]),
         "goal_resampling_probability_per_sec" : 0.0,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
@@ -210,23 +214,23 @@ def adarl_builder_and_args():
         "reward_failure_weight" :             eps,
         "reward_feet_air_time_weight" :       10.0,
         "reward_feet_ground_time_weight" :    eps,
-        "reward_feet_on_ground_weight" :      eps,
+        "reward_feet_on_ground_weight" :      1.0,
         "reward_heading_velocity_weight" :    eps,
         "reward_heading_weight" :             eps,
         "reward_health_weight" :              eps,
         "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     0.1,
-        "reward_pitchnroll_velocity_weight" : 0.05,
+        "reward_pitchnroll_velocity_weight" : 0.2,
         "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      eps,
         "reward_position_weight" :            eps,
-        "reward_posref_vel_weight" :          eps,
+        "reward_posref_vel_weight" :          0.05,
         "reward_posref_acc_weight":           eps,
-        "reward_safety_triggered_weight" :    1.0,
         "reward_scale_nolength":              0.01,
         "reward_sensed_effort_weight" :       eps,
+        "reward_safety_triggered_weight" :    0.5,
         "reward_slip_weight" :                1.0,
-        "reward_stand_position_weight" :      1.0,
+        "reward_stand_position_weight" :      5.0,
         "reward_torque_limit_weight" :        eps,
         "reward_torque_weight" :              0.0001*p,
         "reward_torquediff_weight" :          0.0001*p,
@@ -257,9 +261,9 @@ def adarl_builder_and_args():
         "offset_envs_ep_starts" : False,
         "enable_rendering" : True,
         "record_video" : not realworld,
-        "verbose_infos" : (not skip_optionals) or args["record"],
-        "minimal_infos" : skip_optionals or not args["record"],
-        "video_save_freq" : 1 if args["record"] else 0,
+        "verbose_infos" : (not skip_optionals) or record,
+        "minimal_infos" : skip_optionals or not record,
+        "video_save_freq" : 1 if record else 0,
         "action_delay_mustd_std" : (0.0,0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
         "obs_abs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
@@ -269,9 +273,10 @@ def adarl_builder_and_args():
         "obs_abs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
         "obs_abs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
-        "log_info_stats" : (not skip_optionals) or args["record"],
-        # "minimal_infos" : skip_optionals or not args["record"],
+        "log_info_stats" : (not skip_optionals) or record,
+        # "minimal_infos" : skip_optionals or not record,
         "initial_joint_pose_randomization_range" : 0.0,
+        "initial_height_randomization_range_meters" : 0.0,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
         "randomized_dof_frictionloss_ratios"         : 0.0*r,
@@ -369,7 +374,12 @@ def play(seed, folderName, run_id, args,
                                                         use_wandb=False)
 
     # th.cuda.set_sync_debug_mode("warn")
-    device = adarl.utils.utils.torch_selectBestGpu()
+    if args["agent_device"].lower() == "cpu":
+        device = th.device("cpu")
+    elif args["agent_device"].lower() == "cuda":
+        device = adarl.utils.utils.torch_selectBestGpu()
+    else:
+        device = th.device(args["agent_device"])
     env_device = env_builder_args["th_device"]
     ggLog.info("Building env...")
 
@@ -381,7 +391,7 @@ def play(seed, folderName, run_id, args,
     ggLog.info("Built")
     control_mode = args["control"].lower().strip()
     if control_mode=="pretrained":
-        model = load_agent(args["model"])
+        model = load_agent(args["model"], device)
         if isinstance(model, SAC):
             trained_env_builder_args = model._init_args["init_hparams"].reference_init_args["env_builder_args"]
             try:
@@ -445,16 +455,19 @@ def play(seed, folderName, run_id, args,
                 break
             obs : TensorTree[th.Tensor]
 
+            minmax_height = robot_heights.get(args["robot"].lower(), [0.5,0.5])
+            h = sum(minmax_height)/2
+
             if interactive:
                 cmd_xys = [1.0,0.0,0.0]
                 cmd_yawvel = 0.0
-                cmd_height = 0.47
+                cmd_height = h
             else:
                 dir = np.random.rand()*2*3.14159
-                speed = np.random.rand()
+                speed = 0 #np.random.rand()
                 cmd_xys = [np.cos(dir), np.sin(dir), speed]
-                cmd_yawvel = (np.random.rand()*2-1)*0.5*(np.random.rand()>0.5)
-                cmd_height = 0.47
+                cmd_yawvel = 0 #(np.random.rand()*2-1)*0.5*(np.random.rand()>0.5)
+                cmd_height = h
             # options["goal_velocity_xy"] = [cmd_xys[0]*cmd_xys[2], cmd_xys[1]*cmd_xys[2]]
             obs, info = env.reset(options = options)  #type: ignore
             ggLog.info(f"env resetted")
@@ -524,7 +537,7 @@ def play(seed, folderName, run_id, args,
                         cmd_yawvel = 0.0
                     cmd_xys[0] = np.cos(cmd_angle)
                     cmd_xys[1] = np.sin(cmd_angle)
-                    cmd_height = np.clip(cmd_height, 0.35, 0.57)
+                    cmd_height = np.clip(cmd_height, minmax_height[0], minmax_height[1])
                     flip = keyboard_listener.get_key_press_count("x")>0
                     cam_dist_pitch_yaw_diff = [0.0,0.0,0.0]
                     if keyboard_listener.get_key_press_count("u")>0: cam_dist_pitch_yaw_diff[0] = -0.1
@@ -625,7 +638,9 @@ if __name__ == "__main__":
     ap.add_argument("--deterministic", default=False, action='store_true', help="Force the policy to be deterministic")
     ap.add_argument("--publishimg", default=False, action='store_true', help="publish rendered images to the web dbg server")
     ap.add_argument("--pg", default=False, action='store_true', help="Use playground env")
-    
+    ap.add_argument("--verbose-recording", default=False, action='store_true', help="Print detailed infos about the env step timings and outputs")
+    ap.add_argument("--agent-device", default="cpu", type=str, help="Device to load the model on (cpu or cuda)")
+
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())
 

@@ -1330,6 +1330,7 @@ class LocomotionVecEnv(RobotVecEnv):
             self.REWARD_WEIGHTS_FIELDS.HEADING                : self._loco_conf.reward_weight_heading.expand(nenvs,1),
             self.REWARD_WEIGHTS_FIELDS.HEADING_VELOCITY       : self._loco_conf.reward_weight_heading_velocity.expand(nenvs,1),
             self.REWARD_WEIGHTS_FIELDS.FAILURE                : self._loco_conf.reward_weight_failure.expand(nenvs,1),
+            self.REWARD_WEIGHTS_FIELDS.SAFETY_TRIGGERED       : self._loco_conf.reward_weight_safety_triggered.expand(nenvs,1),
             self.REWARD_WEIGHTS_FIELDS.SENSED_EFFORT          : self._loco_conf.reward_weight_sensed_effort.expand(nenvs,1),
             self.REWARD_WEIGHTS_FIELDS.SLIP                   : self._loco_conf.reward_weight_slip.expand(nenvs,1),
             self.REWARD_WEIGHTS_FIELDS.VELOCITY_REFs          : self._loco_conf.reward_weight_velref.expand(nenvs,1),
@@ -1862,27 +1863,19 @@ class LocomotionVecEnv(RobotVecEnv):
         longterm_stats_pos_norm = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
                                                                                                       warn_limits_violation=False)
         joints_num = state_robot_norm.size()[2]
-        # self._warn_out_of_bounds(state_robot_norm)
         state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state_robot, self._safety_limits, warn_limits_violation=False)
-        # state_stats_norm = self._state_helper.sub_helpers[self.STATE_ROBOT_STATS].normalize(state_stats)
         normposstathomingdiff    = longterm_stats_pos_norm[:,0,0] - normhoming
         normpositions        = state_robot_norm[:,0,:,0]
         normvelocities       = state_robot_norm[:,0,:,1]
-        normcmdtorques       = state_robot_norm[:,0,:,2]
         norm_velocity_refs   = state_robot_norm[:,0,:,6]
         norm_torque_refs     = state_robot_norm[:,0,:,7]
         normposhomingdiff     = normpositions - normhoming
-        # norm_pos2posref_diff = state_robot_norm[:,0,:,0] - state_robot_norm[:,0,:,5]
         posref_vel           = (state_robot[:,0,:,5] - state_robot[:,1,:,5])/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         prev_posref_vel      = (state_robot[:,1,:,5] - state_robot[:,2,:,5])/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
         posref_acc    = (posref_vel-prev_posref_vel)/last_step_dt.unsqueeze(1).expand((self.num_envs,joints_num))
-        # normaccelerations   = (state_robot_norm[:,0,:,1] - state_robot_norm[:,1,:,1])/2 # like this it should be between [-1,1] #self._configuration.stepLength_sec
-        max_senseff = 1_000 # max expected sensed effort (not really a strict max)
         max_jacc = 1_000 # max expected joint acceleration (not really a strict max)
         max_sensed_effort = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,0:2,4].abs().amax(dim=2)
-        norm_senseff        = th.clamp(max_sensed_effort/max_senseff, -1, 1) # normalized max abs sensed effort
         normaccelerations   = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,2,2]/max_jacc # normalized average accelearation
-        normtorquediff      = state_robot_norm[:,0,:,2] - state_robot_norm[:,1,:,2]
         actdiff             = th.flatten((state_action_raw_vec[:,0] - state_action_raw_vec[:,1])/2, start_dim=1) # divide by 2 to keep it in [-1,1]
         prev_actdiff        = th.flatten((state_action_raw_vec[:,1] - state_action_raw_vec[:,2])/2, start_dim=1)
         act_acc             = (actdiff - prev_actdiff)/2
@@ -1891,17 +1884,17 @@ class LocomotionVecEnv(RobotVecEnv):
         velocities_safenorm = state_robot_safenorm[:,0,:,1]
         torque_safenorm     = state_robot_safenorm[:,0,:,2]
 
+
+
+
+        # ---------------- JOINT-LEVEL PENALTIES ----------------
+
         bad_effort_threshold = 200.0
         flattened_max_sensed_effort = max_sensed_effort*smoothclip_flattener(max_sensed_effort, bad_effort_threshold, bad_effort_threshold/10)
         reward_sensed_effort    = norm_penalty(flattened_max_sensed_effort, norm=4, power=2, squash_max=1.0, squash_smoothness=4.0)
-        # reward_cmdtorque        = norm_penalty(normcmdtorques,   norm=4, power=2, squash_max=1.0, squash_smoothness=4.0)
         reward_velocity         = joint_penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
-        # reward_acceleration     = flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=8.0, flattening_scale=0.1)
-        # reward_acceleration     = flattened_joint_penalty_reward(normaccelerations, max_rew=max_rew, exponent=2.0, flattening_scale=0.1)
         reward_acceleration     = norm_penalty(normaccelerations, norm=4.0, power=2.0, squash_max=1.0, squash_smoothness=4.0)
-        reward_stand_position   = joint_penalty_reward(normposhomingdiff,    max_rew=max_rew, exponent=1.0)*(th.logical_not(should_be_moving.view((self.num_envs,))))
         reward_position         = flattened_joint_penalty_reward(normposstathomingdiff,max_rew=max_rew, exponent=2.0, flattening_scale=0.02)
-        # reward_torquediff       = joint_penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
         reward_actdiff          = joint_penalty_reward(actdiff,max_rew=1, exponent=2, presquash_factor=10)
         reward_actacc           = joint_penalty_reward(act_acc,max_rew=1, exponent=2, presquash_factor=100)
         reward_torque_limit     = joint_penalty_reward(torque_safenorm,max_rew=1,exponent=50)
@@ -1932,8 +1925,8 @@ class LocomotionVecEnv(RobotVecEnv):
 
         reward_velocity_refs    = joint_penalty_reward(norm_velocity_refs,   max_rew=max_rew,exponent=2)
         reward_torque_refs      = joint_penalty_reward(norm_torque_refs,     max_rew=max_rew,exponent=2)
-        # reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
         posref_vel_threshold = 6.5
+        # reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
         posref_vel_max = 15.0
         # reward_posref_vel       = norm_penalty_flat2(posref_vel/posref_vel_max,
         #                                              norm=4,
@@ -1948,28 +1941,35 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_posref_vel       = norm_penalty(flattened_posref_vels/posref_vel_max,     norm=2, power=2, squash_max=1.0, squash_smoothness=4.0)
         reward_posref_acc       = norm_penalty(posref_acc/1_000,  norm=4, power=1.0, squash_max=2.0, squash_smoothness=2.0)
         
+
+        # ---------------- STAND POSITION REWARD ----------------
+        
+        reward_stand_position   = joint_penalty_reward(normposhomingdiff,    max_rew=max_rew, exponent=1.0)*(th.logical_not(should_be_moving.view((self.num_envs,))))
         
         # ---------------- TRACKING REWARDS ----------------
         
-        # reward_posref_acc = flattened_joint_penalty_reward(posref_acc/1_000, max_rew=1.0, exponent=2.0, presquash_factor=100, flattening_scale=0.01)
-
-        # reward_position     = bell_reward(th.mean(th.abs(normposhomingdiff), dim=1),
-        #                                     zero_rew_dist=self._thtens(0.02))
+        # ---- Height ----
+        # Height of the pelvis
         reward_height_velocity, _, _, _, _ = self._height_velocity_reward(curr_state_extr_vec, current_state_locom_vec, current_state_internal, prev_state_extr_vec)
         height_err = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]-current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
         reward_height_position = double_bell_reward( error=height_err,
                                             bell_width_a=self._loco_conf.height_reward_settle_point,
                                             bell_width_b=self._loco_conf.height_reward_2_settle_point,
                                             bell_b_weight=self._loco_conf.height_reward_2_weight)
-        # reward_pitchnroll   = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR],
-        #                                     zero_rew_dist=self._loco_conf.pitchnroll_reward_settle_point)
+        
+        # ---- Pitch and Roll ----
+        # Pitch and Roll of the pelvis
         reward_pitchnroll = 1+penalty_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR]*4, max_rew=1, exponent=2.0)
-        # reward_pitchnroll_velocity, _, _, _, _ = self._pitchnroll_velocity_reward(state, current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT])
         reward_pitchnroll_velocity = self._pitchnroll_velocity_penalty_reward(state)
+
+        # ---- Heading ----
+        # This is the direction the robot should be facing, relative to the direction it should be moving.
         reward_heading_position = bell_reward(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR],
                                             zero_rew_dist=self._loco_conf.heading_reward_settle_point)
         reward_heading_velocity, _, _, _, _ = self._heading_velocity_reward(state, last_step_dt)
 
+        # ---- Linear Velocity Tracking ----
+        # Linear velocity of the pelvis
         goalrelative_weight = self._loco_conf.vel_reward_goalrelative_weight
         rel_goal_bell_width = self._loco_conf.reward_vel_goal_relative_width
         rel_goal_offset = self._loco_conf.reward_vel_goal_relative_width_offset
@@ -1980,6 +1980,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                       rel_goal_bell_width*(goal_speed+rel_goal_offset),
                                                       goalrelative_weight)
         
+        # ---- Yaw Velocity Tracking ----
+        # Yaw velocity of the pelvis
         abs_yaw_vel_bell_width = self._loco_conf.reward_yaw_vel_goal_absolute_width
         rel_yaw_vel_bell_width = self._loco_conf.reward_yaw_vel_goal_relative_width
         rel_goal_bell_width_offset = self._loco_conf.reward_yaw_vel_goal_relative_width_offset
@@ -1988,9 +1990,9 @@ class LocomotionVecEnv(RobotVecEnv):
                                                   abs_yaw_vel_bell_width,
                                                   rel_yaw_vel_bell_width*(goal_speed+rel_goal_bell_width_offset),
                                                   yaw_vel_relative_weight)
-        reward_contacts = - th.clamp(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
 
         # ---------------- FEET AIR TIME REWARD ----------------
+        # This reward tries to encourage good durations of feet being in the air
         feet_state = state[self.STATE_FEET][:,0] # vec_size*history*fields*nfeet -> vec_size*fields*nfeet
         feet_air_durations_secs = feet_state[:,self.FEET_FIELDS.FEET_AIR_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
         steps_finishing = feet_air_durations_secs < 0
@@ -2015,6 +2017,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_feet_air_time = th.mean(feet_air_rewards, dim=1) # average across the feet
 
         # ---------------- FEET GROUND TIME REWARD ----------------
+        # Similar to feet air time, but rewarding good durations of ground contact
         feet_ground_durations_secs = feet_state[:,self.FEET_FIELDS.FEET_GROUND_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
         steps_starting = feet_ground_durations_secs < 0
         feet_ground_durations = -feet_ground_durations_secs # When the value is positive then it is the duration of a currently ongoing step, which we dont consider
@@ -2025,12 +2028,14 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_feet_ground_time = th.mean(feet_ground_rewards, dim=1) # average across the feet
 
         # ---------------- FEET AIR UNIFORMITY REWARD ----------------
+        # This reward tries to encourage the robot to have similar air times for all feet
         avg_feet_step_durations = feet_state[:,self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
         avg_all_feet_step_duration = th.mean(avg_feet_step_durations, dim=1) # vec_size*nfeet -> vec_size
         step_duration_difformity = steps_finishing*(feet_air_durations_secs-avg_all_feet_step_duration.unsqueeze(1).expand_as(feet_air_durations_secs)) # vec_size*nfeet
         reward_feet_air_time_uniformity = joint_penalty_reward(step_duration_difformity, max_rew=1, exponent=2)
         
         # ---------------- FEET SLIP REWARD ----------------
+        # This reward tries to encourage the robot to not slide its feet when they are in contact with the ground
         feet_linvels_xy = feet_state[:,1:3] # vec_size*fields*nfeet -> vec_size*2*nfeet
         feet_linvels = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*fields*nfeet -> vec_size*nfeet
         feet_touching_ground = feet_state[:,self.FEET_FIELDS.FEET_AIR_DURATIONS] <= 0
@@ -2038,20 +2043,24 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_slip = joint_penalty_reward(feet_sliding_linvel, max_rew=1, exponent=2)
 
         # ---------------- FEET ON GROUND REWARD ----------------
+        # Reward for having feet on the ground, to encourage the robot to stand still when it should
         feet_touching_ground = feet_state[:,0] <= 0
         reward_feet_on_ground = th.mean(feet_touching_ground.to(th.float32), dim=1) * th.logical_not(should_be_moving.view((self.num_envs,)))
 
-        # FAILURE SCALING
+        # ---------------- CONTACT REWARD ----------------
+        # This reward tries to encourage smooth and gentle contacts, by penalizing high impulses
+        reward_contacts = - th.clamp(current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SUM_IMPULSES], -max_rew, max_rew)
+
+        # ---------------- SAFETY TRIGGERED REWARD ----------------
+        # This is a penalty for triggering safety mechanisms
         safety_triggered = th.logical_or(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED,0],
                                          state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,0])
+        reward_safety_triggered = -1*safety_triggered
+
+        # FAILURE SCALING
         failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
         if self._configuration.fail_on_safety:
             failed = th.logical_or(failed, safety_triggered)
-
-
-        # ---------------- SAFETY TRIGGERED REWARD ----------------
-        reward_safety_triggered = -1*safety_triggered
-
 
         raw_rewards = LocomotionVecEnv.SubRewards(
             acceleration = reward_acceleration,

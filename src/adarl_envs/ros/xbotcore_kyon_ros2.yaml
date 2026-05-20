@@ -46,10 +46,10 @@ xbotcore_plugins:
 xbotcore_param:
     /jm/tx_filter_autostart: {value: true, type: bool}
     /jm/tx_filter_cutoff: {value: 2.0, type: double}
-    /jm/enable_safety: {value: false, type: bool}
+    /jm/enable_safety: {value: true, type: bool}
     /xbot_internal/ros_io/call_timeout: {value: 1.0, type: chrono}
     /rt_main/memory_hooks: {value: true, type: bool}
-    /xbot/hal/enable_safety: {value: false, type: bool}
+    /xbot/hal/enable_safety: {value: true, type: bool}
     /xbot/hal/joint_safety/filter_safe_cutoff_hz: {value: 5.0, type: double}
     /xbot/hal/joint_safety/filter_medium_cutoff_hz: {value: 20.0, type: double}
     /xbot/hal/joint_safety/filter_fast_cutoff_hz: {value: 40.0, type: double}

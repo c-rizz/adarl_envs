@@ -704,6 +704,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     verbose_infos = verbose_infos,
                                                     minimal_infos=minimal_infos
                                                     )
+        self._initial_pose_randomization_enabled = self._configuration.initial_joint_pose_randomization_range > 0 or self._configuration.initial_height_randomization_range_meters > 0
         self._last_pose_randomization : th.Tensor | None = None
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(adapter.vec_size(), 1, 1)
         self._always_present_collisions : set[tuple[str,str]] = set()
@@ -1594,7 +1595,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         homing_pos = self._configuration.homing_ctrl_joints_position
         t0 = time.monotonic()
         recomputed_pose_randomization = False
-        if self._configuration.initial_joint_pose_randomization_range > 0 or self._configuration.initial_height_randomization_range_meters > 0:
+        if self._initial_pose_randomization_enabled:
             never_sampled_poses_yet = self._last_pose_randomization is None
             not_recycling = not self._configuration.recycle_pose_randomization
             at_least_one_episode_passed = self._configuration.original_max_epsteps == 0 # approximately, just to avoid doing it too often
@@ -1930,18 +1931,21 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 # ggLog.info(f"root_joint_offset = {root_joint_offset}")
                 # ggLog.info(f"self._configuration.main_body_link[1] = {self._configuration.main_body_link[1]}")
                 # ggLog.info(f"_corrected_homing_body_pose_xyzxyzw = {self._pinocchio_corrected_homing_body_pose_xyzxyzw}")
-        ggLog.info(f"Detecting always present self collisions...")
         self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
         # self._robot_model.remove_collision_pairs([("rail_link_0","slider_link_0")])            
         self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
                                                                     collision_box_size_xyz=(100,100,1),
                                                                     collision_obj_id="ground_collision")
-        self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
-            moving_joints=[jn[1] for jn in self._configuration.joints_agent_controlled],
-            fixed_joints_pose={self._configuration.robot_root_joint : self._pinocchio_corrected_homing_body_pose_xyzxyzw}
-                                            if self._configuration.robot_is_floating else {},
-            samples=1000,
-            threshold=1.0)
+        ggLog.info(f"Detecting always present self collisions...")
+        if self._initial_pose_randomization_enabled:
+            self._always_present_collisions : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
+                moving_joints=[jn[1] for jn in self._configuration.joints_agent_controlled],
+                fixed_joints_pose={self._configuration.robot_root_joint : self._pinocchio_corrected_homing_body_pose_xyzxyzw}
+                                                if self._configuration.robot_is_floating else {},
+                samples=1000,
+                threshold=1.0)
+        else:
+            self._always_present_collisions = None # not used
         ggLog.info(f"Always present self collisions = {pprint.pformat(self._always_present_collisions)}")
         self._adapter.set_monitored_joints(self._configuration.joints_all_env_controlled)
         self._monitored_joints = self._configuration.joints_all_env_controlled

@@ -54,7 +54,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
         "held_joints_damping" : 10.0,
-        "held_joints_stiffness" : 500.0,
+        "held_joints_stiffness" : 200.0,
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
@@ -109,7 +109,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_health_weight" :              eps,
         "reward_height_position_weight" :     0.5,
         "reward_height_velocity_weight" :     0.1,
-        "reward_pitchnroll_velocity_weight" : 0.4,
+        "reward_pitchnroll_velocity_weight" : 0.2,
         "reward_pitchnroll_weight" :          0.5,
         "reward_position_limit_weight" :      eps,
         "reward_position_weight" :            eps,
@@ -117,7 +117,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_posref_acc_weight":           eps,
         "reward_scale_nolength":              0.01,
         "reward_sensed_effort_weight" :       eps,
-        "reward_safety_triggered_weight" :    1.0,
+        "reward_safety_triggered_weight" :    0.5,
         "reward_slip_weight" :                1.0,
         "reward_stand_position_weight" :      5.0,
         "reward_torque_limit_weight" :        eps,
@@ -188,7 +188,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 10,
         "env_builder_args" : video_eval_env_builder_args,
         "num_envs" : 10,
-        "skip_first_eval": False
+        "skip_first_eval": True
     }
     video_det_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
     eval_conf_video_det = {
@@ -198,7 +198,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 10,
         "env_builder_args" : video_det_eval_env_builder_args,
         "num_envs" : 10,
-        "skip_first_eval": False
+        "skip_first_eval": True
     }
     # run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
     # run_1ms_env_builder_args["goal_speed_minmax"] = (1,1)

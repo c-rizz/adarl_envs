@@ -10,7 +10,7 @@ from adarl.adapters.BaseSimulationAdapter import BaseSimulationAdapter
 from pathlib import Path
 import adarl.utils.utils
 from adarl_envs.env.LocomotionVecEnv import LocomotionVecEnv
-from adarl_envs.env.RobotVecEnv import JOINT_FILTERS, LINK_FILTERS
+from adarl_envs.env.RobotVecEnv import JOINT_FILTERS, LINK_FILTERS, RobotVecEnvInitArgs
 from adarl.envs.vec.EnvRunner import EnvRunner
 from adarl.envs.vec.Runner2GymWrapper import Runner2GymWrapper
 from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
@@ -20,6 +20,7 @@ from rreal.algorithms.sac_helpers import build_vec_env, VecEnvRunnerBuilderProto
 from math import pi
 import xml.etree.ElementTree as ET
 import numpy as np
+from typing import Literal
 
 def set_asset_texture_paths(mjcf_string: str, meshdir: str, texturedir: str) -> str:
     """Set meshdir and texturedir in <compiler> to the given paths. If <compiler> doesn't exist, it is created."""
@@ -107,6 +108,27 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
                 f"posrefvel_weight      {format_tensor(info.get('posref_vel_weight',float('nan')), 3)}\n"
                 f"posrefacc_weight      {format_tensor(info.get('posref_acc_weight',float('nan')), 3)}\n")
 
+def get_robot_string_and_format(model_file_path : str,
+                                robot_description_format : Literal["urdf", "xacro", "mjcf"],
+                                robot_description_string : str,
+                                model_kwargs : dict,
+                                xacro_extra_pkg_paths : dict[str, str]) -> tuple[str, Literal["urdf", "sdf", "mjcf"]]:
+    if model_file_path is None:
+        if robot_description_string is None:
+            raise ValueError("Either model_file or robot_description_string must be provided in env_builder_args")
+    else:
+        raw_model_string = Path(model_file_path).read_text()
+        if robot_description_format in ["xacro"]:
+            robot_description_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=raw_model_string,
+                                                                    model_kwargs=model_kwargs,
+                                                                    extra_pkg_paths=xacro_extra_pkg_paths)
+            robot_description_format = "urdf"
+        elif robot_description_format == "mjcf":
+            robot_description_string = make_asset_texture_paths_absolute(raw_model_string, model_file_path)
+        else:
+            robot_description_string = raw_model_string
+    return robot_description_string, robot_description_format
+
 def loco_runner_builder(seed,
                         run_folder,
                         num_envs : int,
@@ -130,23 +152,13 @@ def loco_runner_builder(seed,
     mode = env_builder_args["mode"]
     walltime_factor = env_builder_args.pop("walltime_factor")
 
-    robot_description_format = env_builder_args["robot_description_format"]
-    model_file_path = env_builder_args.pop("model_file", None)
-    if model_file_path is None:
-        robot_description_string = env_builder_args.pop("robot_description_string", None)
-        if robot_description_string is None:
-            raise ValueError("Either model_file or robot_description_string must be provided in env_builder_args")
-    else:
-        raw_model_string = Path(model_file_path).read_text()
-        if robot_description_format in ["xacro"]:
-            robot_description_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=raw_model_string,
-                                                                    model_kwargs=env_builder_args.pop("model_kwargs"),
-                                                                    extra_pkg_paths=env_builder_args.pop("xacro_extra_pkg_paths"))
-            robot_description_format = "urdf"
-        elif robot_description_format == "mjcf":
-            robot_description_string = make_asset_texture_paths_absolute(raw_model_string, model_file_path)
-        else:
-            robot_description_string = raw_model_string
+    s,f = get_robot_string_and_format(model_file_path = env_builder_args.get("model_file", None),
+                                        robot_description_format = env_builder_args["robot_description_format"],
+                                        robot_description_string = env_builder_args.get("robot_description_string", None),
+                                        model_kwargs = env_builder_args.get("model_kwargs"),
+                                        xacro_extra_pkg_paths = env_builder_args.get("xacro_extra_pkg_paths"))
+    robot_description_string = s
+    robot_description_format = f
 
 
     if mode == "gz":
@@ -319,73 +331,95 @@ def loco_runner_builder(seed,
     time.sleep(1)
 
     
-    lrenv = LocomotionVecEnv(action_delay_mustd_std = env_builder_args.pop("action_delay_mustd_std"),
-                            action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
-                            action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
-                            adapter=adapter,
-                            control_mode = env_builder_args.pop("control_mode"),
-                            controlled_joints=env_builder_args.pop("controlled_joints"),
+    lrenv = LocomotionVecEnv(robot_init_args = RobotVecEnvInitArgs(
+                                action_delay_mustd_std = env_builder_args.pop("action_delay_mustd_std"),
+                                action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
+                                action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
+                                adapter=adapter,
+                                control_mode = env_builder_args.pop("control_mode"),
+                                controlled_joints=env_builder_args.pop("controlled_joints"),
+                                enable_dbg_checks=True,
+                                enable_limits_safety = env_builder_args.pop("enable_limits_safety"),
+                                enable_link_collisions=env_builder_args.pop("enable_link_collisions"),
+                                enable_posref_safety = env_builder_args.pop("enable_posref_safety"),
+                                fail_on_safety=env_builder_args.pop("fail_on_safety"),
+                                frame_stack_length=env_builder_args.pop("frame_stack_length"),
+                                free_joints=[],
+                                goal_err_smoothing_halflife_sec = env_builder_args.pop("goal_err_smoothing_halflife_sec"),
+                                ground_link=ground_link,
+                                held_joints_damping=env_builder_args.pop("held_joints_damping"),
+                                held_joints_stiffness=env_builder_args.pop("held_joints_stiffness"),
+                                homing_body_pose_xyz_xyzw=env_builder_args.pop("homing_body_pose_xyz_xyzw"),
+                                homing_joint_position=env_builder_args.pop("homing_joint_position"),
+                                homing_joint_position_references=env_builder_args.pop("homing_joint_position_references"),
+                                impulse_duration_minmax=env_builder_args.pop("impulse_duration_minmax"),
+                                impulse_mean_std=env_builder_args.pop("impulse_mean_std"),
+                                impulse_probability_per_sec=env_builder_args.pop("impulse_probability_per_sec"),
+                                init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
+                                initial_height_randomization_range_meters = env_builder_args.pop("initial_height_randomization_range_meters"),
+                                initial_joint_pose_randomization_range = env_builder_args.pop("initial_joint_pose_randomization_range"),
+                                just_health_reward = env_builder_args.pop("just_health_reward"),
+                                longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
+                                maxStepsPerEpisode=max_steps,
+                                merge_privileged = env_builder_args.pop("merge_privileged"),
+                                minmax_damping=(0.0,30.0),
+                                minmax_stiffness=(0.0,1000.0),
+                                obs_abs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_angvel_ep_mustd_step_std"),
+                                obs_abs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_gravity_ep_mustd_step_std"),
+                                obs_abs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_joints_pve_ep_mustd_step_std"),
+                                obs_abs_noise_linacc_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_linacc_ep_mustd_step_std"),
+                                obs_abs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_linvel_ep_mustd_step_std"),
+                                obs_abs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_posz_ep_mustd_step_std"),
+                                observe_full_robot_state = env_builder_args.pop("observe_full_robot_state"),
+                                offset_envs_ep_starts = env_builder_args.pop("offset_envs_ep_starts"),
+                                posref_safety_period = env_builder_args.pop("posref_safety_period"),
+                                quiet=quiet,
+                                randomized_dof_armature_joints=env_builder_args.pop("randomized_dof_armature_joints"),
+                                randomized_dof_armature_ratios= env_builder_args.pop("randomized_dof_armature_ratios"),
+                                randomized_dof_damping_joints=env_builder_args.pop("randomized_dof_damping_joints"),
+                                randomized_dof_damping_ratios=env_builder_args.pop("randomized_dof_damping_ratios"),
+                                randomized_dof_frictionloss_joints=env_builder_args.pop("randomized_dof_frictionloss_joints"),
+                                randomized_dof_frictionloss_ratios=env_builder_args.pop("randomized_dof_frictionloss_ratios"),
+                                randomized_com_links=env_builder_args.pop("randomized_com_links"),
+                                randomized_com_xyz_diff_distribution=env_builder_args.pop("randomized_com_xyz_diff_distribution"),
+                                randomized_friction_links=env_builder_args.pop("randomized_friction_links"),
+                                randomized_friction_slide_spin_roll_ratios=env_builder_args.pop("randomized_friction_slide_spin_roll_ratios"),
+                                randomized_gains_damping_ratio_epstd=env_builder_args.pop("randomized_gains_damping_ratio_epstd"),
+                                randomized_gains_stiffness_ratio_epstd=env_builder_args.pop("randomized_gains_stiffness_ratio_epstd"),
+                                randomized_mass_links=env_builder_args.pop("randomized_mass_links"),
+                                randomized_mass_ratios_distr=env_builder_args.pop("randomized_mass_ratios"),
+                                randomized_reference_filter_distribution=env_builder_args.pop("randomized_reference_filter_distribution"),
+                                recycle_pose_randomization=env_builder_args.pop("recycle_pose_randomization"),
+                                robot_main_body_link=env_builder_args.pop("robot_main_body_link"),
+                                robot_name=robot_name,
+                                robot_root_link=env_builder_args.pop("robot_root_link"),
+                                robot_description_string=robot_description_string,
+                                robot_description_format=robot_description_format,
+                                safe_damping=env_builder_args.pop("safe_damping"),
+                                control_limits_center=env_builder_args.pop("control_limits_center"),
+                                safe_stiffness=env_builder_args.pop("safe_stiffness"),
+                                safety_limits_ratios_minmax_pve=env_builder_args.pop("safety_limits_ratios_minmax_pve"),
+                                control_limits_ratios_minmax_pve=env_builder_args.pop("control_limits_ratios_minmax_pve"),
+                                control_limits_minmax_pve=env_builder_args.pop("control_limits_minmax_pve"),
+                                saturate_jimp_ref_limits = env_builder_args.pop("saturate_jimp_ref_limits"),
+                                seed=seed,
+                                stepLength_sec=stepLength_sec,
+                                step_precision_tolerance=0 if isinstance(adapter, BaseSimulationAdapter) else 0.001,
+                                terminate_on_safety=env_builder_args.pop("terminate_on_safety"),
+                                th_device=th_device,
+                                ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw"),
+                                verbose_infos=env_builder_args.pop("verbose_infos"),
+                                minimal_infos=env_builder_args.pop("minimal_infos")),
+                            desired_foot_clearance = env_builder_args.pop("desired_foot_clearance"),
                             disallowed_contact_links = env_builder_args.pop("disallowed_contact_links"),
-                            enable_dbg_checks=True,
-                            enable_limits_safety = env_builder_args.pop("enable_limits_safety"),
-                            enable_link_collisions=env_builder_args.pop("enable_link_collisions"),
-                            enable_posref_safety = env_builder_args.pop("enable_posref_safety"),
-                            fail_on_safety=env_builder_args.pop("fail_on_safety"),
                             feet_links=env_builder_args.pop("feet_links"),
-                            frame_stack_length=env_builder_args.pop("frame_stack_length"),
-                            free_joints=[],
-                            goal_err_smoothing_halflife_sec = env_builder_args.pop("goal_err_smoothing_halflife_sec"),
                             goal_height_minmax=env_builder_args.pop("goal_height_minmax"),
                             goal_resampling_probability_per_sec= env_builder_args.pop("goal_resampling_probability_per_sec"),
                             goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
                             goal_yaw_minmax=env_builder_args.pop("goal_yaw_minmax"),
-                            ground_link=ground_link,
-                            held_joints_damping=env_builder_args.pop("held_joints_damping"),
-                            held_joints_stiffness=env_builder_args.pop("held_joints_stiffness"),
-                            homing_body_pose_xyz_xyzw=env_builder_args.pop("homing_body_pose_xyz_xyzw"),
-                            homing_joint_position=env_builder_args.pop("homing_joint_position"),
-                            homing_joint_position_references=env_builder_args.pop("homing_joint_position_references"),
-                            impulse_duration_minmax=env_builder_args.pop("impulse_duration_minmax"),
-                            impulse_mean_std=env_builder_args.pop("impulse_mean_std"),
-                            impulse_probability_per_sec=env_builder_args.pop("impulse_probability_per_sec"),
-                            init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
-                            initial_height_randomization_range_meters = env_builder_args.pop("initial_height_randomization_range_meters"),
-                            initial_joint_pose_randomization_range = env_builder_args.pop("initial_joint_pose_randomization_range"),
-                            just_health_reward = env_builder_args.pop("just_health_reward"),
-                            longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
                             max_goal_height_pos_change_speed=env_builder_args.pop("max_goal_height_pos_change_speed"),
-                            maxStepsPerEpisode=max_steps,
                             max_good_step_duration=env_builder_args.pop("max_good_step_duration"),
-                            merge_privileged = env_builder_args.pop("merge_privileged"),
                             min_good_step_duration=env_builder_args.pop("min_good_step_duration"),
-                            minmax_damping=(0.0,30.0),
-                            minmax_stiffness=(0.0,1000.0),
-                            obs_abs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_angvel_ep_mustd_step_std"),
-                            obs_abs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_gravity_ep_mustd_step_std"),
-                            obs_abs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_joints_pve_ep_mustd_step_std"),
-                            obs_abs_noise_linacc_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_linacc_ep_mustd_step_std"),
-                            obs_abs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_linvel_ep_mustd_step_std"),
-                            obs_abs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_posz_ep_mustd_step_std"),
-                            observe_full_robot_state = env_builder_args.pop("observe_full_robot_state"),
-                            offset_envs_ep_starts = env_builder_args.pop("offset_envs_ep_starts"),
-                            posref_safety_period = env_builder_args.pop("posref_safety_period"),
-                            quiet=quiet,
-                            randomized_dof_armature_joints=env_builder_args.pop("randomized_dof_armature_joints"),
-                            randomized_dof_armature_ratios= env_builder_args.pop("randomized_dof_armature_ratios"),
-                            randomized_dof_damping_joints=env_builder_args.pop("randomized_dof_damping_joints"),
-                            randomized_dof_damping_ratios=env_builder_args.pop("randomized_dof_damping_ratios"),
-                            randomized_dof_frictionloss_joints=env_builder_args.pop("randomized_dof_frictionloss_joints"),
-                            randomized_dof_frictionloss_ratios=env_builder_args.pop("randomized_dof_frictionloss_ratios"),
-                            randomized_com_links=env_builder_args.pop("randomized_com_links"),
-                            randomized_com_xyz_diff_distribution=env_builder_args.pop("randomized_com_xyz_diff_distribution"),
-                            randomized_friction_links=env_builder_args.pop("randomized_friction_links"),
-                            randomized_friction_slide_spin_roll_ratios=env_builder_args.pop("randomized_friction_slide_spin_roll_ratios"),
-                            randomized_gains_damping_ratio_epstd=env_builder_args.pop("randomized_gains_damping_ratio_epstd"),
-                            randomized_gains_stiffness_ratio_epstd=env_builder_args.pop("randomized_gains_stiffness_ratio_epstd"),
-                            randomized_mass_links=env_builder_args.pop("randomized_mass_links"),
-                            randomized_mass_ratios_distr=env_builder_args.pop("randomized_mass_ratios"),
-                            randomized_reference_filter_distribution=env_builder_args.pop("randomized_reference_filter_distribution"),
-                            recycle_pose_randomization=env_builder_args.pop("recycle_pose_randomization"),
                             reward_superweight_joint_penalties = env_builder_args.pop("reward_superweight_joint_penalties"),    
                             reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
                             reward_acc_on_vel_weight = env_builder_args.pop("reward_acc_on_vel_weight"),
@@ -398,6 +432,7 @@ def loco_runner_builder(seed,
                             reward_feet_air_time_weight = env_builder_args.pop("reward_feet_air_time_weight"),
                             reward_feet_ground_time_weight = env_builder_args.pop("reward_feet_ground_time_weight"),
                             reward_feet_on_ground_weight = env_builder_args.pop("reward_feet_on_ground_weight"),
+                            reward_feet_step_height_weight=env_builder_args.pop("reward_feet_step_height_weight"),
                             reward_heading_weight = env_builder_args.pop("reward_heading_weight"),
                             reward_heading_velocity_weight = env_builder_args.pop("reward_heading_velocity_weight"),
                             reward_health_weight = env_builder_args.pop("reward_health_weight"),
@@ -423,30 +458,10 @@ def loco_runner_builder(seed,
                             reward_velocity_weight = env_builder_args.pop("reward_velocity_weight"),
                             reward_velref_weight = env_builder_args.pop("reward_velref_weight"),
                             reward_yaw_vel_tracking_weight=env_builder_args.pop("reward_yaw_vel_tracking_weight"),
-                            robot_main_body_link=env_builder_args.pop("robot_main_body_link"),
-                            robot_name=robot_name,
-                            robot_root_link=env_builder_args.pop("robot_root_link"),
-                            robot_description_string=robot_description_string,
-                            robot_description_format=robot_description_format,
-                            safe_damping=env_builder_args.pop("safe_damping"),
-                            control_limits_center=env_builder_args.pop("control_limits_center"),
-                            safe_stiffness=env_builder_args.pop("safe_stiffness"),
-                            safety_limits_ratios_minmax_pve=env_builder_args.pop("safety_limits_ratios_minmax_pve"),
-                            control_limits_ratios_minmax_pve=env_builder_args.pop("control_limits_ratios_minmax_pve"),
-                            control_limits_minmax_pve=env_builder_args.pop("control_limits_minmax_pve"),
-                            saturate_jimp_ref_limits = env_builder_args.pop("saturate_jimp_ref_limits"),
-                            seed=seed,
-                            stepLength_sec=stepLength_sec,
-                            step_precision_tolerance=0 if isinstance(adapter, BaseSimulationAdapter) else 0.001,
-                            terminate_on_safety=env_builder_args.pop("terminate_on_safety"),
                             terminate_on_crash=env_builder_args.pop("terminate_on_crash"),
                             terminating_contact_pairs=env_builder_args.pop("terminating_contact_pairs") if env_builder_args.pop("terminate_on_body_contact") else [],
-                            th_device=th_device,
-                            ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw"),
                             use_contacts=env_builder_args.pop("use_contacts"),
-                            verbose_infos=env_builder_args.pop("verbose_infos"),
                             split_rewards=env_builder_args.pop("split_rewards"),
-                            minimal_infos=env_builder_args.pop("minimal_infos"),
                             goal_yaw_vel_minmax=env_builder_args.pop("goal_yaw_vel_minmax"),
                             goal_yaw_vel_zero_ratio=env_builder_args.pop("goal_yaw_vel_zero_ratio"),
                             playground_style_reward=env_builder_args.pop("playground_style_reward")
@@ -948,7 +963,7 @@ def union(dicts : list[dict]):
     return out
 
 
-def get_centauro_args():
+def get_centauro_args(control_arms=False):
     # # Standard homing
     # hip_yaw =      0.75
     # hip_pitch =    1.25
@@ -984,23 +999,23 @@ def get_centauro_args():
                 ("centauro","torso_yaw") : 0.0,
                 ("centauro","velodyne_joint") : 0,
                 ("centauro","d435_head_joint") : 0,
-                ("centauro","j_arm1_1") : 0.520149,
-                ("centauro","j_arm1_2") : 0.320865,
-                ("centauro","j_arm1_3") : 0.274669,
-                ("centauro","j_arm1_4") : -2.23604,
-                ("centauro","j_arm1_5") : 0.0500815,
-                ("centauro","j_arm1_6") : -0.781461,
-                ("centauro","j_arm2_1") : 0.520149,
-                ("centauro","j_arm2_2") : -0.320865,
-                ("centauro","j_arm2_3") : -0.274669,
-                ("centauro","j_arm2_4") : -2.23604,
-                ("centauro","j_arm2_5") : -0.0500815,
-                ("centauro","j_arm2_6") : -0.781461,
+                ("centauro","j_arm1_1") : 0.52,
+                ("centauro","j_arm1_2") : 0.40,
+                ("centauro","j_arm1_3") : 0.27,
+                ("centauro","j_arm1_4") : -2.00,
+                ("centauro","j_arm1_5") : 0.05,
+                ("centauro","j_arm1_6") : -0.78,
+                ("centauro","j_arm2_1") : 0.52,
+                ("centauro","j_arm2_2") : -0.40,
+                ("centauro","j_arm2_3") : -0.27,
+                ("centauro","j_arm2_4") : -2.00,
+                ("centauro","j_arm2_5") : -0.05,
+                ("centauro","j_arm2_6") : -0.78,
                 ("centauro","j_wheel_1") : 0.0,
                 ("centauro","j_wheel_2") : 0.0,
                 ("centauro","j_wheel_3") : 0.0,
                 ("centauro","j_wheel_4") : 0.0
-                # ("centauro","dagana_1_claw_joint") : 0,
+                # ("centauro","dagana_1_claw_joint") : 0.3,
                 # ("centauro","dagana_2_claw_joint") : 0
                 }
     homing_ref = homing.copy()
@@ -1025,6 +1040,23 @@ def get_centauro_args():
             ,"ankle_pitch_4"
             # ,"ankle_yaw_4"
             ]
+    arms = [    "j_arm1_1",
+                "j_arm1_2",
+                "j_arm1_3",
+                "j_arm1_4",
+                "j_arm1_5",
+                "j_arm1_6",
+                "j_arm2_1",
+                "j_arm2_2",
+                "j_arm2_3",
+                "j_arm2_4",
+                "j_arm2_5",
+                "j_arm2_6",
+                ]
+    controlled_joints = legs
+    if control_arms:
+        controlled_joints += arms
+
     j_vel_ctrl_lim = 7.0
     j_eff_ctrl_lim_leg_a = 200.0
     j_eff_ctrl_lim_leg_b = 100.0
@@ -1066,7 +1098,7 @@ def get_centauro_args():
             "max_joint_impedance_ctrl_torques" : j_eff_ctrl_lims,
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
-            "controlled_joints" : legs,
+            "controlled_joints" : controlled_joints,
             "randomized_dof_armature_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "randomized_mass_links" : [LINK_FILTERS.ALL_ROBOT],
             "randomized_friction_links" : [LINK_FILTERS.ALL],
@@ -1080,22 +1112,23 @@ def get_centauro_args():
             "control_limits_minmax_pve" : {k:th.as_tensor(
                                              [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lim, -j_eff_ctrl_lims[k]],
                                               [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lim,  j_eff_ctrl_lims[k]]]) for k in homing.keys()},            
-            "enable_link_collisions" : [    (('centauro', 'wheel_1'),[('ground','ground_link')]),
-                                            (('centauro', 'wheel_2'),[('ground','ground_link')]),
-                                            (('centauro', 'wheel_3'),[('ground','ground_link')]),
-                                            (('centauro', 'wheel_4'),[('ground','ground_link')])],
-            "feet_links" : [('centauro', 'wheel_1'),
-                            ('centauro', 'wheel_2'),
-                            ('centauro', 'wheel_3'),
-                            ('centauro', 'wheel_4')],
+            "enable_link_collisions" : [    (('centauro', 'wheel_contact_1'),[('ground','ground_link')]),
+                                            (('centauro', 'wheel_contact_2'),[('ground','ground_link')]),
+                                            (('centauro', 'wheel_contact_3'),[('ground','ground_link')]),
+                                            (('centauro', 'wheel_contact_4'),[('ground','ground_link')])],
+            "feet_links" : [('centauro', 'wheel_contact_1'),
+                            ('centauro', 'wheel_contact_2'),
+                            ('centauro', 'wheel_contact_3'),
+                            ('centauro', 'wheel_contact_4')],
             "safe_stiffness" : 600.0,
-            "safe_damping" : 10.0,
+            "safe_damping" : 20.0,
             "mjx_opt_preset" : "faster",
             "revolute_dof_frictionloss_override" : 4.68,
             "revolute_dof_damping_override" : 1.7,
             "revolute_dof_armature_override" : 0.234
         }
 robot_args_registry["centauro"] = get_centauro_args
+robot_args_registry["centauro_legs_arms"] = lambda : get_centauro_args(control_arms=True)
 
 def named_loco_venv_builder(seed : int,
                     run_folder : str,

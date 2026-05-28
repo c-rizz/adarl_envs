@@ -215,6 +215,7 @@ def adarl_builder_and_args():
         "reward_feet_air_time_weight" :       10.0,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      1.0,
+        "reward_feet_step_height_weight" :    0.0,
         "reward_heading_velocity_weight" :    eps,
         "reward_heading_weight" :             eps,
         "reward_health_weight" :              eps,

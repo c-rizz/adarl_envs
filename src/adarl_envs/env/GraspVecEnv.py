@@ -16,7 +16,7 @@ import numpy as np
 import torch as th
 import math
 import quaternion
-from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionDef
+from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionDef, RobotVecEnvInitArgs
 from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import adarl.utils.tensor_trees
 import traceback
@@ -45,6 +45,26 @@ def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
 @th.jit.script
 def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     return 1-error/zero_rew_dist
+
+@dataclass
+class GrapVecEnvInitArgs():
+    robot_init_args : RobotVecEnvInitArgs
+    gripper_links : list[tuple[str,str]]
+    manipulator_links : list[tuple[str,str]]
+    reward_acceleration_weight : float
+    reward_actacc_weight : float
+    reward_actdiff_weight : float
+    reward_health_weight : float
+    reward_position_limit_weight : float
+    reward_position_weight : float
+    reward_scale : float
+    reward_torque_limit_weight : float
+    reward_torque_weight : float
+    reward_torquediff_weight : float
+    reward_velocity_limit_weight : float
+    reward_velocity_weight : float
+    target_object_link : tuple[str,str]
+    observe_object_pose : bool = False
 
 class GraspVecEnv(RobotVecEnv):
     STATE_GRASPING = "grasp"
@@ -94,78 +114,10 @@ class GraspVecEnv(RobotVecEnv):
     CAMERA_FIELDS = IntEnum("CAMERA_FIELDS",   ["IMAGE"], start=0)
     
 
-    def __init__(self,  action_delay_mustd_std : tuple[float,float,float],
-                        action_noise_mustd : Sequence[float] | th.Tensor, 
-                        action_smoothing_halflife_sec : float,
-                        adapter: BaseVecJointImpedanceAdapter,
-                        control_limits_position_offset : dict[tuple[str,str], float],
-                        control_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
-                        control_mode : Literal["velocity", "torque","position","pvesd","pve","pt","ps"],
-                        controlled_joints : Sequence[str | JOINT_FILTERS],
-                        enable_dbg_checks : bool,
-                        fail_on_safety : bool,
-                        frame_stack_length : int,
-                        free_joints : Sequence[str],
-                        goal_err_smoothing_halflife_sec : float,
-                        gripper_links : list[tuple[str,str]],
-                        ground_link : tuple[str,str],
-                        held_joints_damping : float,
-                        held_joints_stiffness : float,
-                        homing_body_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float],
-                        homing_joint_pose : dict[tuple[str,str], float],
-                        homing_references : dict[tuple[str,str], float] | None = None,
-                        init_on_reset_ratio : float,
-                        initial_pose_randomization_range : float,
-                        manipulator_links : list[tuple[str,str]],
-                        maxStepsPerEpisode : int,
-                        minmax_damping : dict[str,tuple[float,float]] | tuple[float,float],
-                        minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float],
-                        obs_noise_angvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_gravity_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_joints_pve_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        obs_noise_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor,
-                        observe_body_velocity : bool,
-                        quiet : bool,
-                        reward_acceleration_weight : float,
-                        reward_actacc_weight : float,
-                        reward_actdiff_weight : float,
-                        reward_health_weight : float,
-                        reward_position_limit_weight : float,
-                        reward_position_weight : float,
-                        reward_scale : float,
-                        reward_torque_limit_weight : float,
-                        reward_torque_weight : float,
-                        reward_torquediff_weight : float,
-                        reward_velocity_limit_weight : float,
-                        reward_velocity_weight : float,
-                        robot_main_body_link : str,
-                        robot_name : str,
-                        robot_root_link : str,
-                        robot_urdf_string : str,
-                        safe_damping : float,
-                        safe_stiffness : float,
-                        safety_limits_ratios_minmax_pve : float | tuple[float,float,float] | list[float] | th.Tensor | dict[tuple[str,str], th.Tensor | list[float] | tuple[float] | float], 
-                        seed : int,
-                        stepLength_sec : float,
-                        step_precision_tolerance : float,
-                        stop_on_failure : bool,
-                        target_object_link : tuple[str,str],
-                        th_device : th.device,
-                        verbose_infos : bool,
-                        offset_envs_ep_starts : bool = False,
-                        enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = [],
-                        friction_randomized_links : list[tuple[str,str]] = [],
-                        friction_slide_spin_roll_randomization_ratios : tuple[float, float, float] = (0.1,0.1,0.1),
-                        impulse_duration_minmax : tuple[float,float ]= (0.01, 5.0),
-                        impulse_mean_std : tuple[float,float ]= (50.0, 50.0),
-                        impulse_probability_per_sec : float = 0.0,
-                        longterm_states_decimation_time : float = 0.0001,
-                        mass_randomized_links : list[tuple[str,str]] = [],
-                        observe_object_pose : bool = False,
-                        randomized_mass_ratios_distr : DistributionDef = ("normal", (0.0, 0.05)),
-                        ui_camera_resolution_hw : tuple[int,int] = (256,144)
-                        ):
+    def __init__(self,  grasp_init_args : GrapVecEnvInitArgs):
+        robot_init_args = grasp_init_args.robot_init_args
+        adapter = robot_init_args.adapter
+        th_device = robot_init_args.th_device
         self._th_device = th_device
         self._obs_dtype = th.float32
         self._all_vecs = th.ones((adapter.vec_size(),), device=th_device, dtype=th.bool)
@@ -178,30 +130,30 @@ class GraspVecEnv(RobotVecEnv):
         manipulation_area_minmax_xyz = [[ 0.50,  0.0, self._table_height+0.05],
                                         [ 0.60,  0.1, self._table_height+0.10]]
         self._grasping_conf = GraspVecEnv.GraspingConfiguration(
-                        reward_scale = self._thtens(reward_scale),
-                        target_object_link=target_object_link,
-                        gripper_links=gripper_links,
-                        observe_object_pose=observe_object_pose,
+                        reward_scale = self._thtens(grasp_init_args.reward_scale),
+                        target_object_link=grasp_init_args.target_object_link,
+                        gripper_links=grasp_init_args.gripper_links,
+                        observe_object_pose=grasp_init_args.observe_object_pose,
                         camera_resolution_hw = (256,256),
                         init_obj_area_minmax_xyz = th.as_tensor(manipulation_area_minmax_xyz, device=th_device),
                         goal_obj_area_minmax_xyz = th.as_tensor(manipulation_area_minmax_xyz, device=th_device),
                         table_link = ("table","cube"),
-                        manipulator_links = manipulator_links,
+                        manipulator_links = grasp_init_args.manipulator_links,
                         use_head_cam_as_ui_camera = True
                         )
         self._sub_reward_weights = GraspVecEnv.RewardConfiguration(
-                        acceleration = self._thtens(reward_acceleration_weight),
-                        actacc = self._thtens(reward_actacc_weight),
-                        actdiff = self._thtens(reward_actdiff_weight),
+                        acceleration = self._thtens(grasp_init_args.reward_acceleration_weight),
+                        actacc = self._thtens(grasp_init_args.reward_actacc_weight),
+                        actdiff = self._thtens(grasp_init_args.reward_actdiff_weight),
                         failure = self._thtens(1.0),
-                        health = self._thtens(reward_health_weight),
-                        position = self._thtens(reward_position_weight),
-                        position_limit  = self._thtens(reward_position_limit_weight) ,
-                        torque = self._thtens(reward_torque_weight),
-                        torque_limit  = self._thtens(reward_torque_limit_weight) ,
-                        torquediff = self._thtens(reward_torquediff_weight),
-                        velocity = self._thtens(reward_velocity_weight),
-                        velocity_limit = self._thtens(reward_velocity_limit_weight),
+                        health = self._thtens(grasp_init_args.reward_health_weight),
+                        position = self._thtens(grasp_init_args.reward_position_weight),
+                        position_limit  = self._thtens(grasp_init_args.reward_position_limit_weight) ,
+                        torque = self._thtens(grasp_init_args.reward_torque_weight),
+                        torque_limit  = self._thtens(grasp_init_args.reward_torque_limit_weight) ,
+                        torquediff = self._thtens(grasp_init_args.reward_torquediff_weight),
+                        velocity = self._thtens(grasp_init_args.reward_velocity_weight),
+                        velocity_limit = self._thtens(grasp_init_args.reward_velocity_limit_weight),
                         object_pose = self._thtens(1.0),
                         gripper_pose = self._thtens(1.0)
                         )
@@ -209,77 +161,12 @@ class GraspVecEnv(RobotVecEnv):
         
         self._grasping_episode_config = GraspVecEnv.EpisodeGraspingConfiguration(initial_object_pose = self._thzeros((adapter.vec_size(), 7)),
                                                                                    goal_object_pose = self._thzeros((adapter.vec_size(), 7)))
-        if enable_link_collisions is None:
-            enable_link_collisions = []
-        enable_link_collisions.append((self._grasping_conf.target_object_link, [self._grasping_conf.table_link]+self._grasping_conf.manipulator_links))
-        super().__init__(   action_delay_mustd_std = action_delay_mustd_std,
-                            action_noise_mustd = action_noise_mustd, 
-                            action_smoothing_halflife_sec = action_smoothing_halflife_sec,
-                            adapter = adapter,
-                            control_mode = control_mode,
-                            controlled_joints = controlled_joints,
-                            goal_err_smoothing_halflife_sec = goal_err_smoothing_halflife_sec,
-                            maxStepsPerEpisode = maxStepsPerEpisode,
-                            minmax_damping = minmax_damping,
-                            minmax_stiffness = minmax_stiffness,
-                            robot_main_body_link = robot_main_body_link,
-                            robot_name = robot_name,
-                            robot_root_link = robot_root_link,
-                            robot_description_string = robot_urdf_string,
-                            safe_damping = safe_damping,
-                            safe_stiffness = safe_stiffness,
-                            safety_limits_ratios_minmax_pve = safety_limits_ratios_minmax_pve,
-                            control_limits_ratios_minmax_pve = control_limits_ratios_minmax_pve,
-                            control_limits_center = control_limits_position_offset,
-                            seed = seed,
-                            stepLength_sec = stepLength_sec,
-                            step_precision_tolerance = step_precision_tolerance,
-                            stop_on_failure = stop_on_failure,
-                            th_device = th_device,
-                            homing_body_pose_xyz_xyzw = homing_body_pose_xyz_xyzw,
-                            homing_joint_pose = homing_joint_pose,
-                            homing_references = homing_references,
-                            frame_stack_length=frame_stack_length,
-                            verbose_infos = verbose_infos,
-                            quiet = quiet,
-                            enable_dbg_checks = enable_dbg_checks,
-                            initial_joint_pose_randomization_range = initial_pose_randomization_range,
-                            init_on_reset_ratio = init_on_reset_ratio,
-                            offset_envs_ep_starts = offset_envs_ep_starts,
-                            obs_abs_noise_joints_pve_ep_mustd_step_std = obs_noise_joints_pve_ep_mustd_step_std,
-                            obs_abs_noise_linvel_ep_mustd_step_std = obs_noise_linvel_ep_mustd_step_std,
-                            obs_abs_noise_angvel_ep_mustd_step_std = obs_noise_angvel_ep_mustd_step_std,
-                            obs_abs_noise_posz_ep_mustd_step_std = obs_noise_posz_ep_mustd_step_std,
-                            obs_abs_noise_gravity_ep_mustd_step_std = obs_noise_gravity_ep_mustd_step_std,
-                            ui_camera_resolution_hw = ui_camera_resolution_hw,
-                            enable_link_collisions = enable_link_collisions,
-                            randomized_mass_links=mass_randomized_links,
-                            randomized_mass_ratios_distr=randomized_mass_ratios_distr,
-                            randomized_friction_links=friction_randomized_links,
-                            randomized_friction_slide_spin_roll_ratios=friction_slide_spin_roll_randomization_ratios,
-                            ground_link=ground_link,
-                            impulse_probability_per_sec = impulse_probability_per_sec,
-                            impulse_duration_minmax = impulse_duration_minmax,
-                            impulse_mean_std = impulse_mean_std,
-                            fail_on_safety = fail_on_safety,
-                            longterm_states_decimation_time = longterm_states_decimation_time,
-                            free_joints=free_joints,
-                            held_joints_stiffness = held_joints_stiffness,
-                            held_joints_damping = held_joints_damping,
-                            initial_height_randomization_range_meters=0.0,
-                            obs_abs_noise_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
-                        )
-
-        
-        # example_labels : dict[str,th.Tensor] = {}
-        # example_infos = self.get_infos(self._current_state, example_labels)
-        # self.info_space = space_from_tree(example_infos, example_labels) # needs to be done afer super()__init__
-        # obs_labels = self._state_helper.observation_names()
-        # infolabels = get_space_labels(self.info_space)
-        # ggLog.info(f"GraspVecEnv: info_space.labels types = "+str({k:str(type(l))+f" (dtype="+str(l.dtype if isinstance(l, np.ndarray) else "nan")+")" for k,l in infolabels.items()}))
-
-        # ggLog.info(f"Obs labels = \n{pprint.pformat(obs_labels)}")
-        # ggLog.info(f"Env constructed")
+        if robot_init_args.enable_link_collisions is None:
+            robot_init_args.enable_link_collisions = []
+        robot_init_args.enable_link_collisions.append((self._grasping_conf.target_object_link, [self._grasping_conf.table_link]+self._grasping_conf.manipulator_links))
+        robot_init_args.initial_height_randomization_range_meters=0.0
+        robot_init_args.obs_abs_noise_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
+        super().__init__(robot_init_args)
 
     @override
     def _build_stats(self):
@@ -294,6 +181,7 @@ class GraspVecEnv(RobotVecEnv):
     @override
     def _build(self):
         super()._build()
+        self._adapter.set_monitored_links(self._adapter.get_monitored_links() + [self._grasping_conf.target_object_link] + self._grasping_conf.gripper_links)
         self._object_link_id = self._adapter.get_monitored_links_ids([self._grasping_conf.target_object_link])
         self._gripper_link_ids = self._adapter.get_monitored_links_ids(self._grasping_conf.gripper_links)
         self._obj_and_gripper_link_ids = self._adapter.get_monitored_links_ids([self._grasping_conf.target_object_link]+self._grasping_conf.gripper_links)

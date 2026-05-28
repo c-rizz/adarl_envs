@@ -22,10 +22,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unexpected algo '{algo}'")
     
+    
     if mode == "pybullet":
         env_device = th.device("cpu",0)
-    else:
+    elif mode == "mjx":
         env_device = th.device("cuda",0)
+    else:
+        raise RuntimeError(f"Unknown mode '{mode}'")
     
     eval_freq = 20
     r = 1.0 # randomization strength
@@ -37,10 +40,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
+        "desired_foot_clearance" : 0.05,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
         "enable_rendering" : False,
-        "enable_reference_filter" : False,
+        "enable_reference_filter" : True,
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
@@ -53,8 +57,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
-        "held_joints_damping" : 10.0,
-        "held_joints_stiffness" : 200.0,
+        "held_joints_damping" : 20.0,
+        "held_joints_stiffness" : 500.0,
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
@@ -95,8 +99,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_superweight_joint_penalties" : 1.0,
         "reward_acceleration_weight" :        eps,
         "reward_acc_on_vel_weight" :          eps,
-        "reward_actacc_weight" :              0.5*p,
-        "reward_actdiff_weight" :             0.5*p,
+        "reward_actacc_weight" :              1.0*p,
+        "reward_actdiff_weight" :             1.0*p,
         "reward_contacts_weight" :            eps,
         "reward_energy_weight" :              eps,
         "reward_power_weight" :               0.002*p,
@@ -104,6 +108,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_feet_air_time_weight" :       10.0,
         "reward_feet_ground_time_weight" :    eps,
         "reward_feet_on_ground_weight" :      1.0,
+        "reward_feet_step_height_weight" :    1.0,
         "reward_heading_velocity_weight" :    eps,
         "reward_heading_weight" :             eps,
         "reward_health_weight" :              eps,

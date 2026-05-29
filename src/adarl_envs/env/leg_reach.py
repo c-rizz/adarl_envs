@@ -41,11 +41,11 @@ class LegReachEnv(ControlledEnv):
                             "HIP_POS_Z",
                             "HIP_VEL_Z",
                             "HIP_GOAL_Z",
-                            "REWARD_TORQUE_LIMIT_WEIGHT",
-                            "REWARD_POSITION_LIMIT_WEIGHT",
-                            "REWARD_VELOCITY_WEIGHT",
+                            "reward_joint_torque_limit_weight",
+                            "reward_joint_position_limit_weight",
+                            "reward_joint_velocity_weight",
                             "REWARD_TRACKING_WEIGHT",
-                            "REWARD_TORQUE_WEIGHT",
+                            "reward_joint_torque_weight",
                             "KNEE_TORQUE_CMD_SCALE",
                             "HIP_TORQUE_CMD_SCALE",
                             "HIP_POS_REF",
@@ -67,11 +67,11 @@ class LegReachEnv(ControlledEnv):
 
     @dataclass
     class EnvConfiguration:
-        reward_position_limit_weight : float
-        reward_torque_limit_weight : float
-        reward_torque_weight : float
+        reward_joint_position_limit_weight : float
+        reward_joint_torque_limit_weight : float
+        reward_joint_torque_weight : float
         reward_tracking_weight : float
-        reward_velocity_weight : float
+        reward_joint_velocity_weight : float
         action_exp_smoothing_1s : float
         stepLength_sec : float
         position_phys_limits_hip : Tuple[float,float]
@@ -121,11 +121,11 @@ class LegReachEnv(ControlledEnv):
                     startSimulation : bool = True,
                     seed = 0,
                     th_device = th.device("cpu"),
-                    reward_torque_limit_weight = 0.0,
-                    reward_position_limit_weight = 1.0,
-                    reward_velocity_weight = 0.0,
+                    reward_joint_torque_limit_weight = 0.0,
+                    reward_joint_position_limit_weight = 1.0,
+                    reward_joint_velocity_weight = 0.0,
                     reward_tracking_weight = 1.0,
-                    reward_torque_weight = 0.0,
+                    reward_joint_torque_weight = 0.0,
                     reward_scale = 1.0,
                     real : bool = False,
                     step_precision_tolerance : float = 0.0,
@@ -157,11 +157,11 @@ class LegReachEnv(ControlledEnv):
 
         halflife_s = 0.05
         action_exp_smoothing_1s = 0.5**(1/halflife_s)
-        self._configuration = LegReachEnv.EnvConfiguration( reward_position_limit_weight = reward_position_limit_weight,
-                                                            reward_torque_limit_weight = reward_torque_limit_weight,
-                                                            reward_torque_weight = reward_torque_weight,
+        self._configuration = LegReachEnv.EnvConfiguration( reward_joint_position_limit_weight = reward_joint_position_limit_weight,
+                                                            reward_joint_torque_limit_weight = reward_joint_torque_limit_weight,
+                                                            reward_joint_torque_weight = reward_joint_torque_weight,
                                                             reward_tracking_weight = reward_tracking_weight,
-                                                            reward_velocity_weight = reward_velocity_weight,
+                                                            reward_joint_velocity_weight = reward_joint_velocity_weight,
                                                             action_exp_smoothing_1s = action_exp_smoothing_1s, 
                                                             stepLength_sec=stepLength_sec,
                                                             position_phys_limits_hip =  (-2.4, 2.4),
@@ -203,11 +203,11 @@ class LegReachEnv(ControlledEnv):
                             self.BASE_STATE_IDXS.HIP_POS_Z : [0,3],
                             self.BASE_STATE_IDXS.HIP_VEL_Z : [-100,100],
                             self.BASE_STATE_IDXS.HIP_GOAL_Z : [0,2],
-                            self.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT : [0,10],
-                            self.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
-                            self.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT : [0,10],
+                            self.BASE_STATE_IDXS.reward_joint_torque_limit_weight : [0,10],
+                            self.BASE_STATE_IDXS.reward_joint_position_limit_weight : [0,10],
+                            self.BASE_STATE_IDXS.reward_joint_velocity_weight : [0,10],
                             self.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT : [0,10],
-                            self.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT : [0,10],
+                            self.BASE_STATE_IDXS.reward_joint_torque_weight : [0,10],
                             self.BASE_STATE_IDXS.KNEE_TORQUE_CMD_SCALE : [0,150],
                             self.BASE_STATE_IDXS.HIP_TORQUE_CMD_SCALE : [0,150],
                             self.BASE_STATE_IDXS.HIP_POS_REF : self._configuration.position_phys_limits_hip,
@@ -410,11 +410,11 @@ class LegReachEnv(ControlledEnv):
             sub_rewards["velocity_reward"] = velocity_reward
             sub_rewards["position_limit_reward"] = position_limit_reward
 
-        torque_lim_weight = vstate_un[LegReachEnv.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT]
-        position_lim_weight = vstate_un[LegReachEnv.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT]
-        velocity_weight = vstate_un[LegReachEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]
+        torque_lim_weight = vstate_un[LegReachEnv.BASE_STATE_IDXS.reward_joint_torque_limit_weight]
+        position_lim_weight = vstate_un[LegReachEnv.BASE_STATE_IDXS.reward_joint_position_limit_weight]
+        velocity_weight = vstate_un[LegReachEnv.BASE_STATE_IDXS.reward_joint_velocity_weight]
         tracking_weight = vstate_un[LegReachEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]
-        torque_weight = vstate_un[LegReachEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]
+        torque_weight = vstate_un[LegReachEnv.BASE_STATE_IDXS.reward_joint_torque_weight]
 
         return (tracking_weight*tracking_reward + 
                 torque_lim_weight*torque_limit_reward + 
@@ -643,11 +643,11 @@ class LegReachEnv(ControlledEnv):
                                     hip_height,
                                     hip_vel_z,
                                     self._current_episode_config.hip_goal_z,
-                                    self._configuration.reward_torque_limit_weight,
-                                    self._configuration.reward_position_limit_weight,
-                                    self._configuration.reward_velocity_weight,
+                                    self._configuration.reward_joint_torque_limit_weight,
+                                    self._configuration.reward_joint_position_limit_weight,
+                                    self._configuration.reward_joint_velocity_weight,
                                     self._configuration.reward_tracking_weight,
-                                    self._configuration.reward_torque_weight,
+                                    self._configuration.reward_joint_torque_weight,
                                     self._configuration.torque_command_scale_knee,
                                     self._configuration.torque_command_scale_hip,
                                     self._last_sent_pvesd[self._hip_joint][0],

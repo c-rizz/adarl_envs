@@ -60,15 +60,15 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                     "SUPPORT2_Z"], start=0)
     # I don't like the GOAL_STATE name, but for now let's call it like that
     INTERNAL_FIELDS = IntEnum("INTERNAL_FIELDS", ["HIP_GOAL_Z",
-                                                "REWARD_TORQUE_LIMIT_WEIGHT",
-                                                "REWARD_POSITION_LIMIT_WEIGHT",
-                                                "REWARD_VELOCITY_LIMIT_WEIGHT",
-                                                "REWARD_VELOCITY_WEIGHT",
-                                                "REWARD_ACCELERATION_WEIGHT",
-                                                "REWARD_ENERGY_WEIGHT",
+                                                "reward_joint_torque_limit_weight",
+                                                "reward_joint_position_limit_weight",
+                                                "reward_joint_velocity_limit_weight",
+                                                "reward_joint_velocity_weight",
+                                                "reward_joint_acceleration_weight",
+                                                "reward_joint_energy_weight",
                                                 "REWARD_TRACKING_WEIGHT",
-                                                "REWARD_TORQUE_WEIGHT",
-                                                "REWARD_TORQUEDIFF_WEIGHT",
+                                                "reward_joint_torque_weight",
+                                                "reward_joint_torquediff_weight",
                                                 "REWARD_CONTACTS_WEIGHT",
                                                 "REWARD_IMPULSE_THRESHOLD",
                                                 "KNEE_TORQUE_CMD_SCALE",
@@ -128,18 +128,18 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         randomize_initial_pose : bool
         real : bool
         rendering_enabled :bool
-        reward_acceleration_weight : float
+        reward_joint_acceleration_weight : float
         reward_contacts_weight : float
-        reward_energy_weight : float
+        reward_joint_energy_weight : float
         reward_max_impulse : float
-        reward_position_limit_weight : float
+        reward_joint_position_limit_weight : float
         reward_scale : float
-        reward_torque_limit_weight : float
-        reward_torque_weight : float
-        reward_torquediff_weight : float
+        reward_joint_torque_limit_weight : float
+        reward_joint_torque_weight : float
+        reward_joint_torquediff_weight : float
         reward_tracking_weight : float
-        reward_velocity_limit_weight : float
-        reward_velocity_weight : float
+        reward_joint_velocity_limit_weight : float
+        reward_joint_velocity_weight : float
         safe_damping : float
         safe_stiffness : float
         show_goal : bool
@@ -216,15 +216,15 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                     obs_img_width = 64,
                     rgb = True,
                     th_device = th.device("cpu"),
-                    reward_torque_limit_weight = 0.0,
-                    reward_position_limit_weight = 1.0,
-                    reward_velocity_limit_weight = 1.0,
-                    reward_velocity_weight = 0.0,
-                    reward_acceleration_weight = 0.0,
-                    reward_energy_weight = 0.01,
+                    reward_joint_torque_limit_weight = 0.0,
+                    reward_joint_position_limit_weight = 1.0,
+                    reward_joint_velocity_limit_weight = 1.0,
+                    reward_joint_velocity_weight = 0.0,
+                    reward_joint_acceleration_weight = 0.0,
+                    reward_joint_energy_weight = 0.01,
                     reward_tracking_weight = 1.0,
-                    reward_torque_weight = 0.0,
-                    reward_torquediff_weight = 0.0,
+                    reward_joint_torque_weight = 0.0,
+                    reward_joint_torquediff_weight = 0.0,
                     reward_contacts_weight = 0.0,
                     control_mode : Literal["impedance","impedance_no_gains","position_and_torques",
                                            "position_and_gains","torque","velocity","position"] = "impedance",
@@ -339,18 +339,18 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                             randomize_initial_pose = randomize_initial_pose,
                                                             real = real,
                                                             rendering_enabled = True,
-                                                            reward_acceleration_weight = reward_acceleration_weight,
+                                                            reward_joint_acceleration_weight = reward_joint_acceleration_weight,
                                                             reward_contacts_weight = reward_contacts_weight,
-                                                            reward_energy_weight = reward_energy_weight,
+                                                            reward_joint_energy_weight = reward_joint_energy_weight,
                                                             reward_max_impulse = 10,
-                                                            reward_position_limit_weight = reward_position_limit_weight,
+                                                            reward_joint_position_limit_weight = reward_joint_position_limit_weight,
                                                             reward_scale = reward_scale,
-                                                            reward_torque_limit_weight = reward_torque_limit_weight,
-                                                            reward_torque_weight = reward_torque_weight,
-                                                            reward_torquediff_weight = reward_torquediff_weight,
+                                                            reward_joint_torque_limit_weight = reward_joint_torque_limit_weight,
+                                                            reward_joint_torque_weight = reward_joint_torque_weight,
+                                                            reward_joint_torquediff_weight = reward_joint_torquediff_weight,
                                                             reward_tracking_weight = reward_tracking_weight,
-                                                            reward_velocity_limit_weight = reward_velocity_limit_weight,
-                                                            reward_velocity_weight = reward_velocity_weight,
+                                                            reward_joint_velocity_limit_weight = reward_joint_velocity_limit_weight,
+                                                            reward_joint_velocity_weight = reward_joint_velocity_weight,
                                                             safe_damping = 10,
                                                             safe_stiffness = 200,
                                                             show_goal = True,
@@ -411,15 +411,15 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                               th_device=th_device,
                                               field_size=(1,),
                                               fields_minmax={   self.INTERNAL_FIELDS.HIP_GOAL_Z : [0,2],
-                                                                self.INTERNAL_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_VELOCITY_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_ACCELERATION_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_ENERGY_WEIGHT : [0,10],
+                                                                self.INTERNAL_FIELDS.reward_joint_torque_limit_weight : [0,10],
+                                                                self.INTERNAL_FIELDS.reward_joint_position_limit_weight : [0,10],
+                                                                self.INTERNAL_FIELDS.reward_joint_velocity_limit_weight : [0,10],
+                                                                self.INTERNAL_FIELDS.reward_joint_velocity_weight : [0,10],
+                                                                self.INTERNAL_FIELDS.reward_joint_acceleration_weight : [0,10],
+                                                                self.INTERNAL_FIELDS.reward_joint_energy_weight : [0,10],
                                                                 self.INTERNAL_FIELDS.REWARD_TRACKING_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_TORQUE_WEIGHT : [0,10],
-                                                                self.INTERNAL_FIELDS.REWARD_TORQUEDIFF_WEIGHT : [0,10],
+                                                                self.INTERNAL_FIELDS.reward_joint_torque_weight : [0,10],
+                                                                self.INTERNAL_FIELDS.reward_joint_torquediff_weight : [0,10],
                                                                 self.INTERNAL_FIELDS.REWARD_CONTACTS_WEIGHT : [0,10],
                                                                 self.INTERNAL_FIELDS.REWARD_IMPULSE_THRESHOLD : [0,10],
                                                                 self.INTERNAL_FIELDS.KNEE_TORQUE_CMD_SCALE : [0,150],
@@ -702,14 +702,14 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         sub_rewards_unscaled = {f"{k}_unscaled":v for k,v in sub_rewards.items()}
 
         weights = { "reward_tracking" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_TRACKING_WEIGHT],
-                    "reward_torque" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_TORQUE_WEIGHT],
-                    "reward_torquediff" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_TORQUEDIFF_WEIGHT],
-                    "reward_torque_limit" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT],
-                    "reward_velocity" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_VELOCITY_WEIGHT],
-                    "reward_acceleration" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_ACCELERATION_WEIGHT],
-                    "reward_position_limit" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_POSITION_LIMIT_WEIGHT],
-                    "reward_velocity_limit" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT],
-                    "reward_energy" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_ENERGY_WEIGHT],
+                    "reward_torque" : internal_state[LegJumpEnv.INTERNAL_FIELDS.reward_joint_torque_weight],
+                    "reward_torquediff" : internal_state[LegJumpEnv.INTERNAL_FIELDS.reward_joint_torquediff_weight],
+                    "reward_torque_limit" : internal_state[LegJumpEnv.INTERNAL_FIELDS.reward_joint_torque_limit_weight],
+                    "reward_velocity" : internal_state[LegJumpEnv.INTERNAL_FIELDS.reward_joint_velocity_weight],
+                    "reward_acceleration" : internal_state[LegJumpEnv.INTERNAL_FIELDS.reward_joint_acceleration_weight],
+                    "reward_position_limit" : internal_state[LegJumpEnv.INTERNAL_FIELDS.reward_joint_position_limit_weight],
+                    "reward_velocity_limit" : internal_state[LegJumpEnv.INTERNAL_FIELDS.reward_joint_velocity_limit_weight],
+                    "reward_energy" : internal_state[LegJumpEnv.INTERNAL_FIELDS.reward_joint_energy_weight],
                     "reward_contacts" : internal_state[LegJumpEnv.INTERNAL_FIELDS.REWARD_CONTACTS_WEIGHT],
                     "reward_health" : 1}
         for k in sub_rewards:
@@ -1247,15 +1247,15 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
 
         new_internal_state = {
                         self.INTERNAL_FIELDS.HIP_GOAL_Z : self._current_episode_config.hip_goal_z,
-                        self.INTERNAL_FIELDS.REWARD_TORQUE_LIMIT_WEIGHT : self._configuration.reward_torque_limit_weight,
-                        self.INTERNAL_FIELDS.REWARD_POSITION_LIMIT_WEIGHT : self._configuration.reward_position_limit_weight,
-                        self.INTERNAL_FIELDS.REWARD_VELOCITY_LIMIT_WEIGHT : self._configuration.reward_velocity_limit_weight,
-                        self.INTERNAL_FIELDS.REWARD_VELOCITY_WEIGHT : self._configuration.reward_velocity_weight,
-                        self.INTERNAL_FIELDS.REWARD_ACCELERATION_WEIGHT : self._configuration.reward_acceleration_weight,
-                        self.INTERNAL_FIELDS.REWARD_ENERGY_WEIGHT : self._configuration.reward_energy_weight,
+                        self.INTERNAL_FIELDS.reward_joint_torque_limit_weight : self._configuration.reward_joint_torque_limit_weight,
+                        self.INTERNAL_FIELDS.reward_joint_position_limit_weight : self._configuration.reward_joint_position_limit_weight,
+                        self.INTERNAL_FIELDS.reward_joint_velocity_limit_weight : self._configuration.reward_joint_velocity_limit_weight,
+                        self.INTERNAL_FIELDS.reward_joint_velocity_weight : self._configuration.reward_joint_velocity_weight,
+                        self.INTERNAL_FIELDS.reward_joint_acceleration_weight : self._configuration.reward_joint_acceleration_weight,
+                        self.INTERNAL_FIELDS.reward_joint_energy_weight : self._configuration.reward_joint_energy_weight,
                         self.INTERNAL_FIELDS.REWARD_TRACKING_WEIGHT : self._configuration.reward_tracking_weight,
-                        self.INTERNAL_FIELDS.REWARD_TORQUE_WEIGHT : self._configuration.reward_torque_weight,
-                        self.INTERNAL_FIELDS.REWARD_TORQUEDIFF_WEIGHT : self._configuration.reward_torquediff_weight,
+                        self.INTERNAL_FIELDS.reward_joint_torque_weight : self._configuration.reward_joint_torque_weight,
+                        self.INTERNAL_FIELDS.reward_joint_torquediff_weight : self._configuration.reward_joint_torquediff_weight,
                         self.INTERNAL_FIELDS.REWARD_CONTACTS_WEIGHT : self._current_episode_config.reward_contacts_weights,
                         self.INTERNAL_FIELDS.REWARD_IMPULSE_THRESHOLD : self._configuration.reward_max_impulse,
                         self.INTERNAL_FIELDS.KNEE_TORQUE_CMD_SCALE : self._configuration.torque_command_scale_knee,

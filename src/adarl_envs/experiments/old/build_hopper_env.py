@@ -98,19 +98,19 @@ def env_builder(seed,
                             minmax_stiffness=(50.0,1000.0),
                             obs_noise_ep_mustd=env_builder_args.pop("obs_noise_ep_mustd"),
                             obs_noise_step_std=env_builder_args.pop("obs_noise_step_std"),
-                            reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
-                            reward_actdiff_weight = env_builder_args.pop("reward_actdiff_weight"),
+                            reward_joint_acceleration_weight = env_builder_args.pop("reward_joint_acceleration_weight"),
+                            reward_joint_actdiff_weight = env_builder_args.pop("reward_joint_actdiff_weight"),
                             reward_contacts_weight = env_builder_args.pop("reward_contacts_weight"),
-                            reward_energy_weight = env_builder_args.pop("reward_energy_weight"),
+                            reward_joint_energy_weight = env_builder_args.pop("reward_joint_energy_weight"),
                             reward_health_weight = env_builder_args.pop("reward_health_weight"),
-                            reward_position_limit_weight = env_builder_args.pop("reward_position_limit_weight"),
+                            reward_joint_position_limit_weight = env_builder_args.pop("reward_joint_position_limit_weight"),
                             reward_scale=1000/max_steps,
-                            reward_torque_limit_weight = env_builder_args.pop("reward_torque_limit_weight"),
-                            reward_torque_weight = env_builder_args.pop("reward_torque_weight"),
-                            reward_torquediff_weight = env_builder_args.pop("reward_torquediff_weight"),
+                            reward_joint_torque_limit_weight = env_builder_args.pop("reward_joint_torque_limit_weight"),
+                            reward_joint_torque_weight = env_builder_args.pop("reward_joint_torque_weight"),
+                            reward_joint_torquediff_weight = env_builder_args.pop("reward_joint_torquediff_weight"),
                             reward_tracking_weight = env_builder_args.pop("reward_tracking_weight"),
-                            reward_velocity_limit_weight = env_builder_args.pop("reward_velocity_limit_weight"),
-                            reward_velocity_weight = env_builder_args.pop("reward_velocity_weight"),
+                            reward_joint_velocity_limit_weight = env_builder_args.pop("reward_joint_velocity_limit_weight"),
+                            reward_joint_velocity_weight = env_builder_args.pop("reward_joint_velocity_weight"),
                             reward_height_weight=env_builder_args.pop("reward_height_weight"),
                             reward_pitchnroll_weight=env_builder_args.pop("reward_pitchnroll_weight"),
                             robot_main_body_link="torso",
@@ -183,13 +183,13 @@ video_recorder_kwargs : dict[str,typing.Any]  = dict(vec_obs_key="vec",
                                     # f"ShiEner {info['new_shin_energy']:+.3f}\n"+
                                     # f"SliEner {info['new_slider_energy']:+.3f}\n"+
                                     # f"rContac {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT]:.2f}\n"+
-                                    # f"rEnergy {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT]:.2f}\n"+
+                                    # f"rEnergy {info['state'][LegJumpEnv.BASE_STATE_IDXS.reward_joint_energy_weight]:.2f}\n"+
                                     # f"rImpThr {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD]:.2f}\n"+
-                                    # f"rPosLim {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT]:.2f}\n"+
-                                    # f"rTorLim {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT]:.2f}\n"+
-                                    # f"rTorque {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]:.2f}\n"+
+                                    # f"rPosLim {info['state'][LegJumpEnv.BASE_STATE_IDXS.reward_joint_position_limit_weight]:.2f}\n"+
+                                    # f"rTorLim {info['state'][LegJumpEnv.BASE_STATE_IDXS.reward_joint_torque_limit_weight]:.2f}\n"+
+                                    # f"rTorque {info['state'][LegJumpEnv.BASE_STATE_IDXS.reward_joint_torque_weight]:.2f}\n"+
                                     # f"rTrack  {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]:.2f}\n"+
-                                    # f"rVeloci {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]:.2f}\n"
+                                    # f"rVeloci {info['state'][LegJumpEnv.BASE_STATE_IDXS.reward_joint_velocity_weight]:.2f}\n"
                                     f"goal_vel       {info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_X]].cpu().item(): .3f}, " 
                                                      f"{info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Y]].cpu().item(): .3f}, "
                                                      f"{info['state_loco'][[LocomotionEnv.LOCOMOTION_FIELDS.GOAL_VELOCITY_REL_Z]].cpu().item(): .3f}\n"

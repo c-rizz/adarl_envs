@@ -168,18 +168,13 @@ def runner_builder(seed,
                                                     ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw"),
                                                     verbose_infos=env_builder_args.pop("verbose_infos"),
                                                     minimal_infos=env_builder_args.pop("minimal_infos")),
-                                                reward_acceleration_weight = env_builder_args.pop("reward_acceleration_weight"),
-                                                reward_actdiff_weight = env_builder_args.pop("reward_actdiff_weight"),
-                                                reward_actacc_weight = env_builder_args.pop("reward_actacc_weight"),
                                                 reward_health_weight = env_builder_args.pop("reward_health_weight"),
-                                                reward_position_limit_weight = env_builder_args.pop("reward_position_limit_weight"),
+                                                reward_joint_power_weight = env_builder_args.pop("reward_joint_power_weight"),
+                                                reward_joint_actacc_weight = env_builder_args.pop("reward_joint_actacc_weight"),
+                                                reward_joint_actdiff_weight = env_builder_args.pop("reward_joint_actdiff_weight"),
+                                                reward_joint_torque_weight = env_builder_args.pop("reward_joint_torque_weight"),
+                                                reward_safety_weight = env_builder_args.pop("reward_safety_weight"),
                                                 reward_scale=1000/max_steps,
-                                                reward_torque_limit_weight = env_builder_args.pop("reward_torque_limit_weight"),
-                                                reward_torque_weight = env_builder_args.pop("reward_torque_weight"),
-                                                reward_torquediff_weight = env_builder_args.pop("reward_torquediff_weight"),
-                                                reward_velocity_limit_weight = env_builder_args.pop("reward_velocity_limit_weight"),
-                                                reward_velocity_weight = env_builder_args.pop("reward_velocity_weight"),
-                                                reward_position_weight=env_builder_args.pop("reward_position_weight"),
                                                 target_object_link=env_builder_args.pop("target_object_link"),
                                                 gripper_links=env_builder_args.pop("gripper_links"),
                                                 observe_object_pose=env_builder_args.pop("observe_object_pose"),
@@ -226,7 +221,8 @@ def get_centauro_args():
     knee_pitch =   1.25
     ankle_pitch =  0.0
     ankle_yaw =   -0.75
-    fullhoming = {  ("centauro","hip_yaw_1") :      -hip_yaw,
+    fullhoming = {  
+                ("centauro","hip_yaw_1") :      -hip_yaw,
                 ("centauro","hip_pitch_1") :    -hip_pitch,
                 ("centauro","knee_pitch_1") :   -knee_pitch,
                 ("centauro","ankle_pitch_1") :  -ankle_pitch,
@@ -248,7 +244,7 @@ def get_centauro_args():
                 ("centauro","ankle_yaw_4") :    -ankle_yaw,
                 ("centauro","torso_yaw") : 0.0,
                 ("centauro","velodyne_joint") : 0,
-                ("centauro","d435_head_joint") : 0,
+                ("centauro","d435_head_joint") : -0.8,
                 ("centauro","j_arm1_1") : 0.52,
                 ("centauro","j_arm1_2") : 0.40,
                 ("centauro","j_arm1_3") : 0.27,
@@ -268,25 +264,52 @@ def get_centauro_args():
                 ("centauro","dagana_1_claw_joint") : 0.3,
                 # ("centauro","dagana_2_claw_joint") : 0
                 }
-    controlled_joints = [   "j_arm1_1",
-                            "j_arm1_2",
-                            "j_arm1_3",
-                            "j_arm1_4",
-                            "j_arm1_5",
-                            "j_arm1_6",
-                            "dagana_1_claw_joint",
-                            # "j_arm2_1",
-                            # "j_arm2_2",
-                            # "j_arm2_3",
-                            # "j_arm2_4",
-                            # "j_arm2_5",
-                            # "j_arm2_6",
-                        ]
+    arm1 = ["j_arm1_1",
+            "j_arm1_2",
+            "j_arm1_3",
+            "j_arm1_4",
+            "j_arm1_5",
+            "j_arm1_6",
+            "dagana_1_claw_joint"]
+    arm2 = ["j_arm2_1",
+            "j_arm2_2",
+            "j_arm2_3",
+            "j_arm2_4",
+            "j_arm2_5",
+            "j_arm2_6",
+            "dagana_2_claw_joint"]
+    legs = [
+        "hip_yaw_1",
+        "hip_pitch_1",
+        "knee_pitch_1",
+        "ankle_pitch_1",
+        "ankle_yaw_1",
+        "hip_yaw_2"
+        "hip_pitch_2"
+        "knee_pitch_2"
+        "ankle_pitch_2"
+        "ankle_yaw_2"
+        "hip_yaw_3"
+        "hip_pitch_3"
+        "knee_pitch_3"
+        "ankle_pitch_3"
+        "ankle_yaw_3"
+        "hip_yaw_4",
+        "hip_pitch_4",
+        "knee_pitch_4",
+        "ankle_pitch_4",
+        "ankle_yaw_4",
+    ]
+    torso = ["torso_yaw"]
+    cams = ["velodyne_joint","d435_head_joint"]
+    
+    controlled_joints = arm1
     spawn_legs = False
     if spawn_legs:
-        homing = fullhoming
+        present_joints = arm1 + arm2 + legs + torso + cams
     else:
-        homing = {k:v for k,v in fullhoming.items() if k[1] in controlled_joints}
+        present_joints = arm1 + torso + cams
+    homing = {k:v for k,v in fullhoming.items() if k[1] in present_joints}
     homing_ref = homing.copy()
     j_vel_ctrl_lim = 7.0
     j_eff_ctrl_lim_leg_a = 200.0
@@ -312,7 +335,7 @@ def get_centauro_args():
                                 ("centauro","d435_head_joint") : 35.0,
                                 ("centauro","dagana_1_claw_joint") : j_eff_ctrl_lim_dagana,
                                 }])
-    j_pos_range = 0.3
+    j_pos_range = 0.8
     j_pos_ctrl_lims = {k:np.array([-1.0,1.0])*j_pos_range+fullhoming[k] for k in fullhoming.keys()}
     
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf/urdf/centauro.urdf.xacro"),

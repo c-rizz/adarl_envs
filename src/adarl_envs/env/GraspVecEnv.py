@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from adarl_envs.env.env_utils import joint_penalty_reward, norm_penalty, smoothclip_flattener
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
 from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter, ModelSpawnDef
@@ -23,6 +25,8 @@ import traceback
 import pprint
 import dataclasses
 from pathlib import Path
+from adarl_envs.env.env_utils import flattened_joint_penalty_reward
+from adarl.utils.dbg.dbg_checks import dbg_check_finite
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -51,18 +55,13 @@ class GrapVecEnvInitArgs():
     robot_init_args : RobotVecEnvInitArgs
     gripper_links : list[tuple[str,str]]
     manipulator_links : list[tuple[str,str]]
-    reward_acceleration_weight : float
-    reward_actacc_weight : float
-    reward_actdiff_weight : float
     reward_health_weight : float
-    reward_position_limit_weight : float
-    reward_position_weight : float
+    reward_joint_actacc_weight : float
+    reward_joint_actdiff_weight : float
+    reward_joint_power_weight : float
+    reward_joint_torque_weight : float
+    reward_safety_weight : float
     reward_scale : float
-    reward_torque_limit_weight : float
-    reward_torque_weight : float
-    reward_torquediff_weight : float
-    reward_velocity_limit_weight : float
-    reward_velocity_weight : float
     target_object_link : tuple[str,str]
     observe_object_pose : bool = False
 
@@ -82,24 +81,18 @@ class GraspVecEnv(RobotVecEnv):
         table_link : tuple[str,str]
         manipulator_links : list[tuple[str,str]]
         use_head_cam_as_ui_camera : bool
+        split_rewards : bool
 
     @dataclass
-    class RewardConfiguration:
-        acceleration : th.Tensor
+    class SubRewards:
         health : th.Tensor
-        actdiff : th.Tensor
-        actacc : th.Tensor
-        position_limit : th.Tensor
-        position : th.Tensor
-        torque_limit : th.Tensor
-        torque : th.Tensor
-        torquediff : th.Tensor
-        velocity_limit : th.Tensor
-        velocity : th.Tensor
-        failure : th.Tensor
-        object_pose : th.Tensor
-        gripper_pose : th.Tensor
-
+        joint_actacc : th.Tensor
+        joint_actdiff : th.Tensor
+        joint_power : th.Tensor
+        joint_torque : th.Tensor
+        safety_triggered : th.Tensor
+        reward_object_pose : th.Tensor
+        reward_gripper_pose : th.Tensor
 
 
     @dataclass
@@ -127,37 +120,38 @@ class GraspVecEnv(RobotVecEnv):
         self._zero = self._thtens([0.0])
         self._head_camera_name = "head_camera"
         self._table_height = 0.8
-        manipulation_area_minmax_xyz = [[ 0.50,  0.0, self._table_height+0.05],
-                                        [ 0.60,  0.1, self._table_height+0.10]]
+        cube_spawn_height = self._table_height + 0.031
+        spawn_area_minmax_xyz = [[ 0.50,  0.0, cube_spawn_height],
+                                        [ 0.60,  0.1, cube_spawn_height]]
+        
+        manipulation_area_minmax_xyz = [[ 0.50,  0.0, cube_spawn_height],
+                                        [ 0.60,  0.1, self._table_height + 0.1]]
         self._grasping_conf = GraspVecEnv.GraspingConfiguration(
                         reward_scale = self._thtens(grasp_init_args.reward_scale),
                         target_object_link=grasp_init_args.target_object_link,
                         gripper_links=grasp_init_args.gripper_links,
                         observe_object_pose=grasp_init_args.observe_object_pose,
                         camera_resolution_hw = (256,256),
-                        init_obj_area_minmax_xyz = th.as_tensor(manipulation_area_minmax_xyz, device=th_device),
+                        init_obj_area_minmax_xyz = th.as_tensor(spawn_area_minmax_xyz, device=th_device),
                         goal_obj_area_minmax_xyz = th.as_tensor(manipulation_area_minmax_xyz, device=th_device),
                         table_link = ("table","cube"),
                         manipulator_links = grasp_init_args.manipulator_links,
-                        use_head_cam_as_ui_camera = True
+                        use_head_cam_as_ui_camera = True,
+                        split_rewards = False
                         )
-        self._sub_reward_weights = GraspVecEnv.RewardConfiguration(
-                        acceleration = self._thtens(grasp_init_args.reward_acceleration_weight),
-                        actacc = self._thtens(grasp_init_args.reward_actacc_weight),
-                        actdiff = self._thtens(grasp_init_args.reward_actdiff_weight),
-                        failure = self._thtens(1.0),
-                        health = self._thtens(grasp_init_args.reward_health_weight),
-                        position = self._thtens(grasp_init_args.reward_position_weight),
-                        position_limit  = self._thtens(grasp_init_args.reward_position_limit_weight) ,
-                        torque = self._thtens(grasp_init_args.reward_torque_weight),
-                        torque_limit  = self._thtens(grasp_init_args.reward_torque_limit_weight) ,
-                        torquediff = self._thtens(grasp_init_args.reward_torquediff_weight),
-                        velocity = self._thtens(grasp_init_args.reward_velocity_weight),
-                        velocity_limit = self._thtens(grasp_init_args.reward_velocity_limit_weight),
-                        object_pose = self._thtens(1.0),
-                        gripper_pose = self._thtens(1.0)
-                        )
-        self._reward_weights = self._thtens([v for v in dataclasses.asdict(self._sub_reward_weights).values()])
+
+        self._sub_rewards_weights2 = GraspVecEnv.SubRewards(
+                health = self._thtens(1.0),
+                joint_actacc = self._thtens(grasp_init_args.reward_joint_actacc_weight),
+                joint_actdiff = self._thtens(grasp_init_args.reward_joint_actdiff_weight),
+                joint_power = self._thtens(grasp_init_args.reward_joint_power_weight),
+                joint_torque = self._thtens(grasp_init_args.reward_joint_torque_weight),
+                safety_triggered = self._thtens(grasp_init_args.reward_safety_weight),
+                reward_object_pose = self._thtens(1.0),
+                reward_gripper_pose = self._thtens(1.0)
+        )
+        self._sub_rewards_enabled = {k:v for k,v in dataclasses.asdict(self._sub_rewards_weights2).items() if v!=0.0}
+        self._sub_rewards_enabled_weights_th = self._thtens([v for v in self._sub_rewards_enabled.values()])
         
         self._grasping_episode_config = GraspVecEnv.EpisodeGraspingConfiguration(initial_object_pose = self._thzeros((adapter.vec_size(), 7)),
                                                                                    goal_object_pose = self._thzeros((adapter.vec_size(), 7)))
@@ -287,44 +281,66 @@ class GraspVecEnv(RobotVecEnv):
             it with a tanh to be under max_rew.
         """
         return th.tanh(th.mean(th.pow(th.abs(x),exponent),dim=1)/max_rew)*max_rew
+   
 
-    @override
-    def compute_rewards(self,   state : dict[str,th.Tensor],
-                                sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
-
+    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",
+    #                                 #   skip_eval_unsafe_warmup=100, skip_eval_unsafe_manual_arg_guard=0,
+    #                                   disable=disable_compile)
+    def compute_rewards(self,   state : dict[str,th.Tensor], 
+                                sub_rewards_return: dict[str,th.Tensor] = {}) -> th.Tensor:
         max_rew = self._configuration.reward_penalties_max
-        state_action_vec = state[self.STATE_ACT_RAW_HIST]
-        state_stats = state[self.STATE_JOINT_STEP_STATS]
-
+        # curr_state_extr_vec = state[self.STATE_EXTRINSIC][:, 0,:,0]
+        current_state_internal = state[self.STATE_INTERNAL][:, 0,:,0]
+        state_action_raw_vec = state[self.STATE_ACT_RAW_HIST]
+        state_stats_v_h_j_minmaxavgstd_pvaeep = state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 6)
+        last_step_dt = current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT].view((self.num_envs,))
+        
         lims = self._state_helper.sub_helpers[self.STATE_ROBOT].get_limits()
         normhoming = normalize(self._configuration.homing_ctrl_joints_position, lims[0,:,0], lims[1,:,0])
-        state_robot_norm     = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], warn_limits_violation=False)
-        longterm_stats_pos_norm     = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
+        state_robot = state[self.STATE_ROBOT]
+        state_robot_norm        = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state_robot, warn_limits_violation=False)
+        longterm_stats_pos_norm = self._state_helper.sub_helpers[self.STATE_JOINT_LONGTERM_STATS].normalize(state[self.STATE_JOINT_LONGTERM_STATS],
                                                                                                       warn_limits_violation=False)
-        state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state[self.STATE_ROBOT], self._safety_limits, warn_limits_violation=False)
-        normposhomingdiff   = longterm_stats_pos_norm[:,0,0] - normhoming
-        normvelocities      = state_robot_norm[:,0,:,1]
-        normtorques         = state_robot_norm[:,0,:,2]
-        normaccelerations   = state_stats[:,0,:,10]/1000 # average accelearation, normalized assuming a max of 1000 m/s^2
-        normtorquediff      = state_robot_norm[:,0,:,2] - state_robot_norm[:,1,:,2]
-        actdiff             = th.flatten((state_action_vec[:,0] - state_action_vec[:,1])/2, start_dim=1)
-        prev_actdiff        = th.flatten((state_action_vec[:,1] - state_action_vec[:,2])/2, start_dim=1)
-        act_acc             = actdiff - prev_actdiff
+        joints_num = state_robot_norm.size()[2]
+        norm_posstathomingdiff    = longterm_stats_pos_norm[:,0,0] - normhoming
+        actdiff             = th.flatten((state_action_raw_vec[:,0] - state_action_raw_vec[:,1])/2, start_dim=1) # divide by 2 to keep it in [-1,1]
+        prev_actdiff        = th.flatten((state_action_raw_vec[:,1] - state_action_raw_vec[:,2])/2, start_dim=1)
+        act_acc             = (actdiff - prev_actdiff)/2
 
-        position_safenorm   = state_robot_safenorm[:,0,:,0]
-        velocities_safenorm = state_robot_safenorm[:,0,:,1]
-        torque_safenorm     = state_robot_safenorm[:,0,:,2]
 
-        reward_torque           = -self._penalty_reward(normtorques,max_rew=max_rew,exponent=2)
-        reward_velocity         = -self._penalty_reward(normvelocities,max_rew=max_rew,exponent=2)
-        reward_acceleration     = -self._flattened_penalty_reward(normaccelerations,max_rew=max_rew, exponent=1.5, flattening_scale=0.02)
-        reward_position         = -self._flattened_penalty_reward(normposhomingdiff,max_rew=max_rew, exponent=0.5, flattening_scale=0.02)
-        reward_torquediff       = -self._penalty_reward(normtorquediff,max_rew=max_rew,exponent=2)
-        reward_actdiff          = -self._penalty_reward(actdiff,max_rew=max_rew,exponent=2)
-        reward_actacc           = -self._flattened_penalty_reward(act_acc,max_rew=max_rew, exponent=0.5,flattening_scale=0.1)
-        reward_torque_limit     = -self._penalty_reward(torque_safenorm,max_rew=max_rew,exponent=50)
-        reward_position_limit   = -self._penalty_reward(position_safenorm,max_rew=max_rew,exponent=50)
-        reward_velocity_limit   = -self._penalty_reward(velocities_safenorm,max_rew=max_rew,exponent=50)
+        # ---------------- JOINT-LEVEL PENALTIES ----------------
+
+        reward_position         = flattened_joint_penalty_reward(norm_posstathomingdiff,max_rew=max_rew, exponent=2.0, flattening_scale=0.02)
+        reward_actdiff          = joint_penalty_reward(actdiff,max_rew=1, exponent=2, presquash_factor=10)
+        reward_actacc           = joint_penalty_reward(act_acc,max_rew=1, exponent=2, presquash_factor=100)
+
+        avg_cmd_torque = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,2,3] # average torque of each joint over the simulation substeps
+        avg_mechanical_power = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,2,5] # average power of each joint over the simulation substeps
+        reward_power = norm_penalty(avg_mechanical_power, norm=1.0, power=1.0, squash_max=100000.0, 
+                                    squash_smoothness=4.0)/joints_num
+        # We try to make it so that the cmdtorque reward expresses roughly the 
+        # motor copper power losses.
+        # Following this logic 
+        # - K_t represents the "motor torque constant", in Nm/A, the ratio between torque and current, tau = K_t * I
+        # - R   represents the "motor resistance", in Ohms, the ratio between voltage and current, so Power = I^2*R = (tau/K_t)^2 * R
+        # - K_m represents the "motor constant", in Nm/sqrt(W), K_m = K_t/sqrt(R), so Power = (tau/K_m)^2
+        # With this the L2 norm becomes the total copper loss of the motors, in W, same scale as the power reward
+        K_m = 2.5 # reasonable froma B1-kyon sized quadruped, maybe, can be compensated by the reward weight
+        reward_cmdtorque = norm_penalty(avg_cmd_torque/K_m, norm=2.0, power=2.0, squash_max=100000.0, 
+                                        squash_smoothness=4.0)/joints_num
+
+        # ---------------- SAFETY TRIGGERED REWARD ----------------
+        # This is a penalty for triggering safety mechanisms
+        safety_triggered = th.logical_or(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED,0],
+                                         state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,0])
+        reward_safety_triggered = -1*safety_triggered
+
+        # # FAILURE SCALING
+        # failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
+        # if self._configuration.fail_on_safety:
+        #     failed = th.logical_or(failed, safety_triggered)
+
+        # ----------------- GRASPING REWARDS ----------------
 
         obj_position = state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.OBJECT_POSE,:3]
         goal_position = state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.GOAL_POSE,:3]
@@ -335,48 +351,32 @@ class GraspVecEnv(RobotVecEnv):
         reward_object_pose = 1-th.tanh(obj2goal_dist/0.5)
         reward_gripper_pose = 1-th.tanh(obj2hand_dist/0.5)
 
-        failed = self._no_vecs        
-        if self._configuration.fail_on_safety:
-            safety_triggered = th.logical_or(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED,0],
-                                             state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,0])
-            failed = th.logical_or(failed, safety_triggered)
 
-        sub_rewards_unscaled_dict : dict[str,th.Tensor] = {
-            "acceleration" : reward_acceleration,
-            "actacc" : reward_actacc,
-            "actdiff" : reward_actdiff,
-            "failure" : self._thtens(0.0).expand(self.num_envs),
-            "health" : self._thtens(1.0).expand(self.num_envs),
-            "position" : reward_position,
-            "position_limit" : reward_position_limit,
-            "torque" : reward_torque,
-            "torque_limit" : reward_torque_limit,
-            "torquediff" : reward_torquediff,
-            "velocity" : reward_velocity,
-            "velocity_limit" : reward_velocity_limit,
-            "object_pose" : reward_object_pose,
-            "gripper_pose" : reward_gripper_pose
-        }
-        sub_rewards_unscaled_dict["failure"] = -th.sum(th.stack([rew*(rew>0.0) for rew in sub_rewards_unscaled_dict.values()], dim=1), dim =1)*failed
+        raw_rewards = GraspVecEnv.SubRewards(
+            health = th.ones_like(reward_position),
+            joint_actacc = reward_actacc,
+            joint_actdiff = reward_actdiff,
+            joint_power = reward_power,
+            joint_torque = reward_cmdtorque,
+            safety_triggered = reward_safety_triggered,
+            reward_object_pose = reward_object_pose,
+            reward_gripper_pose = reward_gripper_pose
+        )
+        sub_rew_unscaled = th.stack([dataclasses.asdict(raw_rewards)[k] for k in self._sub_rewards_enabled], dim=1)
+        sub_rew_scaled = sub_rew_unscaled*self._sub_rewards_enabled_weights_th.unsqueeze(0)*self._grasping_conf.reward_scale
+
+        sub_rewards_return.update({k:sub_rew_scaled[:,i] for i,k in enumerate(self._sub_rewards_enabled.keys())})
+        if self._grasping_conf.split_rewards:
+            reward = sub_rew_scaled
+            dbg_check_size(reward, (self._adapter.vec_size(),len(sub_rewards_return)), f"Unexpected reward size")
+        else:
+            reward = th.sum(sub_rew_scaled, dim =1, keepdim=True)
+            dbg_check_size(reward, (self._adapter.vec_size(),1), f"Unexpected reward size")
+        reward = th.clamp(reward, -self._configuration.reward_clamp, self._configuration.reward_clamp)
         
-        for k,v in sub_rewards_unscaled_dict.items():
-            dbg_check_size(v, (self._adapter.vec_size(),), f"Unexpected size for sub_reward {k}")
-        if set(sub_rewards_unscaled_dict.keys()) != set(dataclasses.asdict(self._sub_reward_weights).keys()):
-            raise ValueError(f"Keys in sub_rewards_unscaled_dict do not match keys in sub_reward_weights. sub_rewards_unscaled_dict keys = {list(sub_rewards_unscaled_dict.keys())}, sub_reward_weights keys = {list(dataclasses.asdict(self._sub_reward_weights).keys())}")
-        rewards_unscaled = th.stack([sub_rewards_unscaled_dict[rn] for rn in dataclasses.asdict(self._sub_reward_weights).keys()], dim=1)
-        rewards_scaled = rewards_unscaled*self._reward_weights*self._grasping_conf.reward_scale
-        sub_rewards_return.update({rn:rewards_scaled[:,i] for i,rn in enumerate(dataclasses.asdict(self._sub_reward_weights).keys())})
-        reward = th.sum(rewards_scaled, dim =1)
-
-        dbg_check_size(reward, (self._adapter.vec_size(),), f"Unexpected reward size")
-        dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(sub_rewards_return, -100, 100),
-                  lambda: f"{adarl.utils.tensor_trees.flatten_tensor_tree(map_tensor_tree(sub_rewards_return, lambda t: adarl.utils.tensor_trees.is_leaf_bounded(t,min=-100,max=100)))}",
-                  just_warn=True)
-        dbg_check(lambda: adarl.utils.tensor_trees.is_all_bounded(reward, -100, 100),
-                  lambda: f"Reward over 100. sub_rewards = {map_tensor_tree(sub_rewards_return,lambda t: 'minmax='+str((th.min(t).cpu().item(), th.max(t).cpu().item())))}",
-                  just_warn=True)
+        dbg_check_finite(sub_rewards_return, async_assert=True, assert_msg="Nonfinite sub rewards detected")
+        
         return reward
-    
 
 
 
@@ -386,61 +386,60 @@ class GraspVecEnv(RobotVecEnv):
 
 
 
+    # def _update_stats(self):
+    #     super()._update_stats()
 
-    def _update_stats(self):
-        super()._update_stats()
+    #     self._stats["obj2hand_dist"] = self._thzeros((self._configuration.vec_size, self._buff_sizes))
+    #     self._stats["obj2goal_dist"] = self._thzeros((self._configuration.vec_size, self._buff_sizes))
+    #     self._stats["ep_obj2hand_dist"] = self._thzeros((self._configuration.vec_size,))
+    #     self._stats["ep_obj2goal_dist"] = self._thzeros((self._configuration.vec_size,))
+    #     self._stats["ep_obj_travel"] = self._thzeros((self._configuration.vec_size,))
 
-        self._stats["obj2hand_dist"] = self._thzeros((self._configuration.vec_size, self._buff_sizes))
-        self._stats["obj2goal_dist"] = self._thzeros((self._configuration.vec_size, self._buff_sizes))
-        self._stats["ep_obj2hand_dist"] = self._thzeros((self._configuration.vec_size,))
-        self._stats["ep_obj2goal_dist"] = self._thzeros((self._configuration.vec_size,))
-        self._stats["ep_obj_travel"] = self._thzeros((self._configuration.vec_size,))
+    #     obj_pose  = self._current_state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.OBJECT_POSE]
+    #     goal_pose = self._current_state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.GOAL_POSE]
+    #     gripper_pose = self._current_state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.GRIPPER_POSE]
+    #     obj2goal_dist = th.linalg.norm(obj_pose[:,:3]-goal_pose[:,:3], dim = -1)
+    #     obj2hand_dist = th.linalg.norm(obj_pose[:,:3]-gripper_pose[:,:3], dim = -1)
+    #     prev_obj_pose  = self._current_state[self.STATE_GRASPING][:,1,self.GRASPING_FIELDS.OBJECT_POSE]
+    #     obj_travel = th.linalg.norm(obj_pose[:,:3]-prev_obj_pose[:,:3], dim = -1)
 
-        obj_pose  = self._current_state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.OBJECT_POSE]
-        goal_pose = self._current_state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.GOAL_POSE]
-        gripper_pose = self._current_state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.GRIPPER_POSE]
-        obj2goal_dist = th.linalg.norm(obj_pose[:,:3]-goal_pose[:,:3], dim = -1)
-        obj2hand_dist = th.linalg.norm(obj_pose[:,:3]-gripper_pose[:,:3], dim = -1)
-        prev_obj_pose  = self._current_state[self.STATE_GRASPING][:,1,self.GRASPING_FIELDS.OBJECT_POSE]
-        obj_travel = th.linalg.norm(obj_pose[:,:3]-prev_obj_pose[:,:3], dim = -1)
-
-        step_counts = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT,0].to(th.long)
-        dbg_check_size(step_counts, (self._adapter.vec_size(),))
+    #     step_counts = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT,0].to(th.long)
+    #     dbg_check_size(step_counts, (self._adapter.vec_size(),))
         
-        # Update episode averages
-        self._stats["ep_obj2hand_dist"]          = (self._stats["ep_obj2hand_dist"]*(step_counts-1) + obj2hand_dist)/step_counts # Elements with step_count == 0 will be inf
-        self._stats["ep_obj2goal_dist"]          = (self._stats["ep_obj2goal_dist"]*(step_counts-1) + obj2goal_dist)/step_counts # Elements with step_count == 0 will be inf
-        self._stats["ep_obj_travel"]             = (self._stats["ep_obj_travel"] + obj_travel) # Elements with step_count == 0 will be inf
-        # Correct the episode averages for episodes that have just started
-        starting_eps = step_counts==0
-        masked_assign(self._stats["ep_obj2hand_dist"],      starting_eps, obj2hand_dist)
-        masked_assign(self._stats["ep_obj2goal_dist"],      starting_eps, obj2goal_dist)
-        masked_assign(self._stats["ep_obj_travel"],         starting_eps, obj_travel)
-        # Fill the buffers for episodes that have just staretd
-        masked_assign(self._stats["obj2hand_dist"],     step_counts==0, obj2hand_dist.unsqueeze(1).expand(-1, self._buff_sizes))
-        masked_assign(self._stats["obj2goal_dist"],     step_counts==0, obj2goal_dist.unsqueeze(1).expand(-1, self._buff_sizes))
+    #     # Update episode averages
+    #     self._stats["ep_obj2hand_dist"]          = (self._stats["ep_obj2hand_dist"]*(step_counts-1) + obj2hand_dist)/step_counts # Elements with step_count == 0 will be inf
+    #     self._stats["ep_obj2goal_dist"]          = (self._stats["ep_obj2goal_dist"]*(step_counts-1) + obj2goal_dist)/step_counts # Elements with step_count == 0 will be inf
+    #     self._stats["ep_obj_travel"]             = (self._stats["ep_obj_travel"] + obj_travel) # Elements with step_count == 0 will be inf
+    #     # Correct the episode averages for episodes that have just started
+    #     starting_eps = step_counts==0
+    #     masked_assign(self._stats["ep_obj2hand_dist"],      starting_eps, obj2hand_dist)
+    #     masked_assign(self._stats["ep_obj2goal_dist"],      starting_eps, obj2goal_dist)
+    #     masked_assign(self._stats["ep_obj_travel"],         starting_eps, obj_travel)
+    #     # Fill the buffers for episodes that have just staretd
+    #     masked_assign(self._stats["obj2hand_dist"],     step_counts==0, obj2hand_dist.unsqueeze(1).expand(-1, self._buff_sizes))
+    #     masked_assign(self._stats["obj2goal_dist"],     step_counts==0, obj2goal_dist.unsqueeze(1).expand(-1, self._buff_sizes))
         
-        # Update the buffers
-        # idxs = step_counts%self._buff_sizes
-        idxs = step_counts%self._stats["obj2hand_dist"].size()[1]
-        # print(f"torch.is_grad_enabled()) = {th.is_grad_enabled()}")
-        # print(f"idx.size() = {idxs.size()}, idx = {idxs}")
-        # print(f"vel_error_vec.size() = {vel_error_vec.size()}, {vel_error_vec}")
-        self._stats["obj2hand_dist"][:,idxs] = obj2hand_dist
-        self._stats["obj2goal_dist"][:,idxs] = obj2goal_dist
+    #     # Update the buffers
+    #     # idxs = step_counts%self._buff_sizes
+    #     idxs = step_counts%self._stats["obj2hand_dist"].size()[1]
+    #     # print(f"torch.is_grad_enabled()) = {th.is_grad_enabled()}")
+    #     # print(f"idx.size() = {idxs.size()}, idx = {idxs}")
+    #     # print(f"vel_error_vec.size() = {vel_error_vec.size()}, {vel_error_vec}")
+    #     self._stats["obj2hand_dist"][:,idxs] = obj2hand_dist
+    #     self._stats["obj2goal_dist"][:,idxs] = obj2goal_dist
    
     @override
     def get_infos(self,state, labels : dict[str, th.Tensor] | None = None) -> dict[Any,Any]:
         i = super().get_infos(state=state, labels=labels)
         
-        i["obj2hand_dist"] = self._stats["obj2hand_dist"]
-        i["obj2goal_dist"] = self._stats["obj2goal_dist"]
-        i["ep_obj2hand_dist"] = self._stats["ep_obj2hand_dist"]
-        i["ep_obj2goal_dist"] = self._stats["ep_obj2goal_dist"]
-        i["ep_obj_travel"] = self._stats["ep_obj_travel"]
-        i["avg10_obj2hand_dist"] = th.mean(self._stats["obj2hand_dist"], dim = 1)
-        i["avg10_obj2goal_dist"] = th.mean(self._stats["obj2goal_dist"], dim = 1)
-        i["success_vec"] = i["avg10_obj2goal_dist"] < 0.05
+        obj_position = state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.OBJECT_POSE,:3]
+        goal_position = state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.GOAL_POSE,:3]
+        gripper_position = state[self.STATE_GRASPING][:,0,self.GRASPING_FIELDS.GRIPPER_POSE,:3]
+        obj2goal_dist = th.linalg.norm(obj_position - goal_position, dim = -1)
+        obj2hand_dist = th.linalg.norm(obj_position - gripper_position, dim = -1)
+        i["obj2hand_dist"] = obj2hand_dist
+        i["obj2goal_dist"] = obj2goal_dist
+        
         sub_rews = {}
         self.compute_rewards(state, sub_rews)
         i["rewards"] = th.stack(list(sub_rews.values()), dim = 1) 

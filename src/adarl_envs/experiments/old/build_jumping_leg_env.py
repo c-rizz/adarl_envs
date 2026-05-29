@@ -89,15 +89,15 @@ def env_builder(seed,
                         obs_img_width=100,
                         rgb=True,
                         th_device=th_device,
-                        reward_torque_limit_weight = env_builder_args["reward_torque_limit_weight"],
-                        reward_position_limit_weight = env_builder_args["reward_position_limit_weight"],
-                        reward_velocity_limit_weight = env_builder_args["reward_velocity_limit_weight"],
-                        reward_velocity_weight = env_builder_args["reward_velocity_weight"],
-                        reward_acceleration_weight = env_builder_args["reward_acceleration_weight"],
-                        reward_energy_weight = env_builder_args["reward_energy_weight"],
+                        reward_joint_torque_limit_weight = env_builder_args["reward_joint_torque_limit_weight"],
+                        reward_joint_position_limit_weight = env_builder_args["reward_joint_position_limit_weight"],
+                        reward_joint_velocity_limit_weight = env_builder_args["reward_joint_velocity_limit_weight"],
+                        reward_joint_velocity_weight = env_builder_args["reward_joint_velocity_weight"],
+                        reward_joint_acceleration_weight = env_builder_args["reward_joint_acceleration_weight"],
+                        reward_joint_energy_weight = env_builder_args["reward_joint_energy_weight"],
                         reward_tracking_weight = env_builder_args["reward_tracking_weight"],
-                        reward_torque_weight = env_builder_args["reward_torque_weight"],
-                        reward_torquediff_weight = env_builder_args["reward_torquediff_weight"],
+                        reward_joint_torque_weight = env_builder_args["reward_joint_torque_weight"],
+                        reward_joint_torquediff_weight = env_builder_args["reward_joint_torquediff_weight"],
                         reward_contacts_weight = env_builder_args["reward_contacts_weight"],
                         control_mode = env_builder_args["control_mode"],
                         reward_scale=500/max_steps,
@@ -145,13 +145,13 @@ video_recorder_kwargs : dict[str,typing.Any]  = dict(vec_obs_key="vec",
                                     # f"ShiEner {info['new_shin_energy']:+.3f}\n"+
                                     # f"SliEner {info['new_slider_energy']:+.3f}\n"+
                                     # f"rContac {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_CONTACTS_WEIGHT]:.2f}\n"+
-                                    # f"rEnergy {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_ENERGY_WEIGHT]:.2f}\n"+
+                                    # f"rEnergy {info['state'][LegJumpEnv.BASE_STATE_IDXS.reward_joint_energy_weight]:.2f}\n"+
                                     # f"rImpThr {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_IMPULSE_THRESHOLD]:.2f}\n"+
-                                    # f"rPosLim {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT]:.2f}\n"+
-                                    # f"rTorLim {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT]:.2f}\n"+
-                                    # f"rTorque {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]:.2f}\n"+
+                                    # f"rPosLim {info['state'][LegJumpEnv.BASE_STATE_IDXS.reward_joint_position_limit_weight]:.2f}\n"+
+                                    # f"rTorLim {info['state'][LegJumpEnv.BASE_STATE_IDXS.reward_joint_torque_limit_weight]:.2f}\n"+
+                                    # f"rTorque {info['state'][LegJumpEnv.BASE_STATE_IDXS.reward_joint_torque_weight]:.2f}\n"+
                                     # f"rTrack  {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]:.2f}\n"+
-                                    # f"rVeloci {info['state'][LegJumpEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]:.2f}\n"
+                                    # f"rVeloci {info['state'][LegJumpEnv.BASE_STATE_IDXS.reward_joint_velocity_weight]:.2f}\n"
                                     f"goal_z   {info['state_internal'][LegJumpEnv.INTERNAL_FIELDS.HIP_GOAL_Z]:.2f}\n"
                                     f"safety   {info['state_internal'][LegJumpEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]:.2f}\n"
                                     f"hip_z    {info['state_extrinsic'][LegJumpEnv.EXTRINSIC_FIELDS.HIP_POS_Z]:.2f}\n"

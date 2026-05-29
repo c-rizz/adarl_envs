@@ -33,24 +33,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     r = 0.0
     n = 0.0
     env_builder_args = {
-        "reward_acceleration_weight" :      2.0,
-        "reward_actdiff_weight" :           0.2,
-        "reward_actacc_weight" :            0.1,
-        "reward_contacts_weight" :          0.0,
-        "reward_energy_weight" :            0.0,
-        "reward_health_weight" :            0.0,
-        "reward_position_limit_weight" :    0.1,
-        "reward_torque_limit_weight" :      0.0,
-        "reward_torque_weight" :            5.0,
-        "reward_torquediff_weight" :        0.0,
-        "reward_tracking_weight" :          1.0,
-        "reward_velocity_limit_weight" :    0.0,
-        "reward_velocity_weight" :          1.0,
-        "reward_height_weight" :            0.15,
-        "reward_pitchnroll_weight" :        0.15,
-        "reward_position_weight" :          0.1,
-        "reward_feet_air_time_weight" :     20.0,
-        "reward_heading_weight" :           0.05,
+        "reward_health_weight" : 1.0,
+
+        "reward_joint_power_weight" : 0.002,
+        "reward_joint_actacc_weight" :  1.0,
+        "reward_joint_actdiff_weight" : 1.0,
+        "reward_joint_torque_weight" :  0.0001, 
+        "reward_safety_weight" : 0.5,     
+        
         "target_object_link" : ("cube","cube"),
         "gripper_links" : [("centauro","dagana_1_fixed_palm_center"), ("centauro","dagana_1_claw_palm_center")],
         "observe_object_pose" : True,
@@ -74,7 +64,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
         "held_joints_damping" : 20.0,
-        "held_joints_stiffness" : 500.0,
+        "held_joints_stiffness" : 2000.0,
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
@@ -131,6 +121,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
     video_eval_env_builder_args["verbose_infos"] = True
+    video_eval_env_builder_args["minimal_infos"] = False
     video_eval_env_builder_args["video_save_freq"] = 1
     video_eval_env_builder_args["ui_camera_resolution_hw"] = (270,480)
     eval_conf_video_det = {

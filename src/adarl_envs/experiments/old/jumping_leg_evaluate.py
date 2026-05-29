@@ -23,12 +23,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
     env_builder_args = {
         "reward_contacts_weight" : 0.0,
-        "reward_energy_weight" : 0.0,
-        "reward_position_limit_weight" : 1.0,
-        "reward_torque_limit_weight" : 1.0,
-        "reward_torque_weight" : 0.1,
+        "reward_joint_energy_weight" : 0.0,
+        "reward_joint_position_limit_weight" : 1.0,
+        "reward_joint_torque_limit_weight" : 1.0,
+        "reward_joint_torque_weight" : 0.1,
         "reward_tracking_weight" : 1.0,
-        "reward_velocity_weight" : 0.01,
+        "reward_joint_velocity_weight" : 0.01,
         "th_device" : th.device("cpu"),
         "control_mode" : "position_and_gains",
         "video_save_freq" : 0,

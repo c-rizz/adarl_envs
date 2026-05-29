@@ -69,12 +69,12 @@ import stable_baselines3.common.on_policy_algorithm
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
     env_builder_args = {
         "reward_contacts_weight" : 0.0,
-        "reward_energy_weight" : 0.0,
-        "reward_position_limit_weight" : 10.0,
-        "reward_torque_limit_weight" : 1.0,
-        "reward_torque_weight" : 0.0,
+        "reward_joint_energy_weight" : 0.0,
+        "reward_joint_position_limit_weight" : 10.0,
+        "reward_joint_torque_limit_weight" : 1.0,
+        "reward_joint_torque_weight" : 0.0,
         "reward_tracking_weight" : 1.0,
-        "reward_velocity_weight" : 0.0,
+        "reward_joint_velocity_weight" : 0.0,
         "th_device" : th.device("cpu"),
         "control_mode" : "position",
         "video_save_freq" : 0,

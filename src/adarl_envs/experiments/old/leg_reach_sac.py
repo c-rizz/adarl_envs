@@ -76,11 +76,11 @@ def env_builder(seed, log_folder, env_builder_args, no_dict = False):
                         environmentController=env_controller,
                         seed=seed,
                         th_device=th_device,
-                        reward_torque_limit_weight = env_builder_args["reward_torque_limit_weight"],
-                        reward_position_limit_weight = env_builder_args["reward_position_limit_weight"],
-                        reward_velocity_weight = env_builder_args["reward_velocity_weight"],
+                        reward_joint_torque_limit_weight = env_builder_args["reward_joint_torque_limit_weight"],
+                        reward_joint_position_limit_weight = env_builder_args["reward_joint_position_limit_weight"],
+                        reward_joint_velocity_weight = env_builder_args["reward_joint_velocity_weight"],
                         reward_tracking_weight = env_builder_args["reward_tracking_weight"],
-                        reward_torque_weight = env_builder_args["reward_torque_weight"],
+                        reward_joint_torque_weight = env_builder_args["reward_joint_torque_weight"],
                         reward_scale=500/max_steps,
                         step_precision_tolerance=0 if isinstance(env_controller, BaseSimulationAdapter) else 0.001,
                         stop_on_safety=env_builder_args["stop_on_safety"]) # scale it to be the same as if we have 500 steps (mostly so that we can compare easily)
@@ -119,11 +119,11 @@ def wrap_with_recorder(env, stepLength_sec, log_folder, video_save_freq):
                                         f"ThiEner {info['new_thigh_energy']:+.3f}\n"+
                                         f"ShiEner {info['new_shin_energy']:+.3f}\n"+
                                         f"SliEner {info['new_slider_energy']:+.3f}\n"+
-                                        f"rPosLim {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.REWARD_POSITION_LIMIT_WEIGHT]:.2f}\n"+
-                                        f"rTorLim {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.REWARD_TORQUE_LIMIT_WEIGHT]:.2f}\n"+
-                                        f"rTorque {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.REWARD_TORQUE_WEIGHT]:.2f}\n"+
+                                        f"rPosLim {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.reward_joint_position_limit_weight]:.2f}\n"+
+                                        f"rTorLim {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.reward_joint_torque_limit_weight]:.2f}\n"+
+                                        f"rTorque {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.reward_joint_torque_weight]:.2f}\n"+
                                         f"rTrack  {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.REWARD_TRACKING_WEIGHT]:.2f}\n"+
-                                        f"rVeloci {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.REWARD_VELOCITY_WEIGHT]:.2f}\n"
+                                        f"rVeloci {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.reward_joint_velocity_weight]:.2f}\n"
                                         f"goal_z   {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.HIP_GOAL_Z]:.2f}\n"
                                         f"hip_z    {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.HIP_POS_Z]:.2f}\n"
                                         f"torque   {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.HIP_JOINT_EFFORT]:.2f}, {info['cbstate'][LegReachEnv.BASE_STATE_IDXS.KNEE_JOINT_EFFORT]:.2f}\n"

@@ -195,27 +195,31 @@ def loco_runner_builder(seed,
         from adarl.adapters.VecZmqXbotAdapter import VecZmqXbotAdapter
         from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter
         ground_link = ("ground_plane","ground_link") # Should not be used
-        adapter = VecZmqXbotAdapter(   adapter = ZmqXbotAdapter( model_name = robot_name,
-                                                                        stepLength_sec = stepLength_sec,
-                                                                        is_floating_base = True,
-                                                                        reference_frame = "world",
-                                                                        torch_device = th.device("cpu"),
-                                                                        allow_fallback = False,
-                                                                        jpos_cmd_max_vel = {},
-                                                                        jpos_cmd_max_vel_default = 5.0,
-                                                                        jpos_cmd_max_acc = {},
-                                                                        jpos_cmd_max_acc_default = 5.0,
-                                                                        enable_filters = True,
-                                                                        position_commands_stiffness = 400.0,
-                                                                        position_commands_damping = 10.0,
-                                                                        is_simulated = False,
-                                                                        walltime_factor = 1.0,
-                                                                        remote_ip = 'localhost',
-                                                                        comm_protocol ='ipc', # or 'ipc'
-                                                                        ipc_pub_path ="/tmp/xbot2_zmq_pub.ipc",
-                                                                        ipc_cmd_path ="/tmp/xbot2_zmq_cmd.ipc",
-                                                                        ipc_service_path ="/tmp/xbot2_zmq_rep.ipc",
-                                                                        robot_urdf=robot_description_string),
+
+        zmq_remote_ip = "10.24.4.100"
+        zmq_protocol = "tcp"
+
+        adapter = VecZmqXbotAdapter(   adapter = ZmqXbotAdapter(model_name = robot_name,
+                                                                stepLength_sec = stepLength_sec,
+                                                                is_floating_base = True,
+                                                                reference_frame = "world",
+                                                                torch_device = th.device("cpu"),
+                                                                allow_fallback = False,
+                                                                jpos_cmd_max_vel = {},
+                                                                jpos_cmd_max_vel_default = 5.0,
+                                                                jpos_cmd_max_acc = {},
+                                                                jpos_cmd_max_acc_default = 5.0,
+                                                                enable_filters = True,
+                                                                position_commands_stiffness = 400.0,
+                                                                position_commands_damping = 10.0,
+                                                                is_simulated = False,
+                                                                walltime_factor = 1.0,
+                                                                remote_ip = zmq_remote_ip,
+                                                                comm_protocol =zmq_protocol, # or 'ipc'
+                                                                ipc_pub_path ="/tmp/xbot2_zmq_pub.ipc",
+                                                                ipc_cmd_path ="/tmp/xbot2_zmq_cmd.ipc",
+                                                                ipc_service_path ="/tmp/xbot2_zmq_rep.ipc",
+                                                                robot_urdf=robot_description_string),
                                                 vec_size = 1,
                                                 th_device = th_device)
     elif mode == "xbot-gazebo":

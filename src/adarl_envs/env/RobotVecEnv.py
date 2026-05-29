@@ -35,7 +35,7 @@ from adarl.utils.base_utils import record_time, record_region_start, record_regi
 import gc
 
 disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
-unsafe_realworld_init = True
+unsafe_realworld_init = False
 
 def hash_tensor(tensor):
     return hash(tuple(tensor.reshape(-1).tolist()))
@@ -1705,7 +1705,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if r == "move":
                 self._realworld_robot_init_move(vec_mask)
             elif r == "skip":
-                masked_assign(self._last_sent_v_j_pvesd, vec_mask, self._adapter.get_current_joint_impedance_command())
+                masked_assign(self._last_sent_v_j_pvesd,
+                              vec_mask,
+                              self._adapter.get_current_joint_impedance_command()[:,:len(self._configuration.joints_agent_controlled)])
                 pass
             else:
                 print(f"Invalid answer '{r}'")

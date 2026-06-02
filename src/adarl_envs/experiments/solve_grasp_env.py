@@ -12,7 +12,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     mode = args["mode"].lower()
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
@@ -24,6 +24,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     if mode == "pybullet":
         env_device = th.device("cpu",0)
+    elif mode == "mujoco":
+        env_device = th.device("cpu",0)
     elif mode == "mjx":
         env_device = th.device("cuda",0)
     else:
@@ -33,14 +35,17 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     r = 0.0
     n = 0.0
     env_builder_args = {
-        "reward_health_weight" : 1.0,
+        "reward_health_weight" : 0.0,
 
-        "reward_joint_power_weight" : 0.002,
-        "reward_joint_actacc_weight" :  1.0,
-        "reward_joint_actdiff_weight" : 1.0,
-        "reward_joint_torque_weight" :  0.0001, 
-        "reward_safety_weight" : 0.5,     
-        
+        "reward_joint_power_weight" : 0.0,
+        "reward_joint_actacc_weight" :  0.0,
+        "reward_joint_actdiff_weight" : 0.0,
+        "reward_joint_torque_weight" :  0.0, 
+        "reward_joint_position_limit_weight" : 0.0,
+        "reward_object_pose_weight" : 0.0,
+        "reward_gripper_pose_weight" : 5.0,
+        "reward_safety_weight" : 0.0,     
+
         "target_object_link" : ("cube","cube"),
         "gripper_links" : [("centauro","dagana_1_fixed_palm_center"), ("centauro","dagana_1_claw_palm_center")],
         "observe_object_pose" : True,
@@ -48,7 +53,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_delay_mustd_std" : (0.008, 0.005*n, 0.0025*n),
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
-        "control_mode" : "position",
+        "control_mode" : "position_delta",
+        "control_mode_position_delta_max" : 0.05,
         "desired_foot_clearance" : 0.05,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
@@ -88,7 +94,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_abs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,     0.0],
         "obs_abs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,     0.0],
         "observe_full_robot_state" : False,
-        "offset_envs_ep_starts" : True,
+        "offset_envs_ep_starts" : False,
         "posref_safety_period" : 0.02,
         "quiet" : False,
         "randomized_dof_armature_ratios" :      0.05*r,
@@ -225,7 +231,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -0.5,
+                                                    target_entropy_factor = -1.5,
                                                     actor_log_std_init = -2.0
                                                     ),
                     checkpoint_freq=5,
@@ -281,34 +287,34 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     env_builder=None,
                     vec_env_builder=centgrasp_vecenv_builder,
                     env_builder_args=env_builder_args,
-                    agent_hyperparams=PPO_hyperparams(  minibatch_size=None,
+                    agent_hyperparams=PPO_hyperparams(  minibatch_size=train_envs*24//4,
                                                         minibatch_num=4,
                                                         th_device=th.device("cuda"),
                                                         actor_network_arch=(512,256),
                                                         critic_network_arch=(512,256),
                                                         q_lr=None,
                                                         policy_lr=3e-4,
-                                                        update_epochs=4,
-                                                        total_steps=200_000_000,
+                                                        update_epochs=5,
+                                                        total_steps=1_500_000_000,
                                                         num_envs=train_envs,
                                                         num_steps=24,
                                                         gamma=0.99,
                                                         loss_value_weight=1.0,
-                                                        loss_entropy_coeff=1e-4,
+                                                        loss_entropy_coeff=1e-3,
                                                         log_freq_vstep=int(max_steps_per_episode/10),
                                                         epsilon_policy_ratio_clip=0.2,
                                                         epsilon_value_clip_epsilon=0.2,
                                                         gae_lambda=0.95,
                                                         max_grad_norm=1.0,
-                                                        init_actor_logstd=-2.0,
-                                                        # actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
-                                                        # critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
-                                                        ),
+                                                        init_actor_logstd=-1.0,
+                                                        actor_observation_filter=["base.vec"], #, "base.reward_weights"],
+                                                        critic_observation_filter=["privileged.vec"], #, "base.reward_weights"],
+                                                        actor_mean_bounds_ratio=0.8),
                     max_episode_duration=max_steps_per_episode,
                     validation_batch_size=0,
                     validation_buffer_size=0,
                     validation_holdout_ratio=0,
-                    checkpoint_freq_vec_ep=-1,
+                    checkpoint_freq_vec_ep=10,
                     collector_device=env_device,
                     eval_configurations=eval_configurations,
                     debug_level=1)

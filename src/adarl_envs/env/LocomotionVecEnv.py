@@ -280,9 +280,6 @@ class LocomotionVecEnv(RobotVecEnv):
                                                 "SMOOTHED_GOAL_BODY_HEIGHT",
                                                 "SUM_IMPULSES",
                                                 "CRASHED",
-                                                "SUPPORT_POLYGON_LINVEL_X",
-                                                "SUPPORT_POLYGON_LINVEL_Y",
-                                                "SUPPORT_POLYGON_LINVEL_Z",
                                                 "SMOOTHED_IS_JUMPING",
                                                 "SMOOTHED_NUM_FEET_ON_GROUND"
                                                 ], start=0)
@@ -590,9 +587,6 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                     self.LOCOMOTION_FIELDS.SUM_IMPULSES : [0,10000],
                                                                     self.LOCOMOTION_FIELDS.COLLISON_COUNT : [0,1000],
                                                                     self.LOCOMOTION_FIELDS.CRASHED : [0,1],
-                                                                    self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_X : [-10,10],
-                                                                    self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Y : [-10,10],
-                                                                    self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : [-10,10],
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_IS_JUMPING : [0,1],
                                                                     self.LOCOMOTION_FIELDS.SMOOTHED_NUM_FEET_ON_GROUND : [0,4]},
                                                     dtype=self._obs_dtype,
@@ -937,10 +931,7 @@ class LocomotionVecEnv(RobotVecEnv):
             self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z : self._locomotion_episode_config.goal_abs_gravity_vec_xyz[:,2].view(nenvs,1),
             self.LOCOMOTION_FIELDS.SUM_IMPULSES : sum_bad_impulses_vec,
             self.LOCOMOTION_FIELDS.COLLISON_COUNT :collision_count_vec,
-            self.LOCOMOTION_FIELDS.CRASHED : crashed_vec,
-            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_X : support_polygon_linvel[:,0].view(nenvs,1),
-            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Y : support_polygon_linvel[:,1].view(nenvs,1),
-            self.LOCOMOTION_FIELDS.SUPPORT_POLYGON_LINVEL_Z : support_polygon_linvel[:,2].view(nenvs,1)}
+            self.LOCOMOTION_FIELDS.CRASHED : crashed_vec}
         
         nenv_nfeet = (nenvs,len(self._loco_conf.feet_links))
         if isinstance_noimport(self._adapter, "MjxAdapter"):
@@ -1310,16 +1301,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_velocity_refs    = joint_penalty_reward(norm_velocity_refs,   max_rew=max_rew,exponent=2)
         reward_torque_refs      = joint_penalty_reward(norm_torque_refs,     max_rew=max_rew,exponent=2)
         posref_vel_threshold = 6.5
-        # reward_posref_vel       = joint_penalty_reward(norm_posref_vel,      max_rew=1.0,exponent=2, presquash_factor=10)
         posref_vel_max = 15.0
-        # reward_posref_vel       = norm_penalty_flat2(posref_vel/posref_vel_max,
-        #                                              norm=4,
-        #                                              power=2,
-        #                                              squash_max=2.0,
-        #                                              squash_smoothness=2.0,
-        #                                              flattening_width=1.0,
-        #                                              flattening_threshold=posref_vel_threshold/posref_vel_max)
-        # reward_posref_vel       = joint_penalty_reward(posref_vel/posref_threshold,     max_rew=1.0,exponent=5, presquash_factor=1)
         abs_posref_vel = posref_vel.abs()
         flattened_posref_vels = abs_posref_vel*smoothclip_flattener(abs_posref_vel, posref_vel_threshold, 1.0)
         reward_posref_vel       = norm_penalty(flattened_posref_vels/posref_vel_max,     norm=2, power=2, squash_max=1.0, squash_smoothness=4.0)
@@ -1519,6 +1501,7 @@ class LocomotionVecEnv(RobotVecEnv):
             dbg_check_size(reward, (self._adapter.vec_size(),1), f"Unexpected reward size")
         reward = th.clamp(reward, -self._configuration.reward_clamp, self._configuration.reward_clamp)
         
+        # ggLog.info(f"sub_rewards_return = {sub_rewards_return}")
         dbg_check_finite(sub_rewards_return, async_assert=True, assert_msg="Nonfinite sub rewards detected")
         
         return reward, sub_rewards_return

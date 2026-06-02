@@ -325,6 +325,7 @@ class RobotVecEnvInitArgs():
     th_device : th.device
     verbose_infos : bool
     control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] | None = None
+    control_mode_position_delta_max : float | None = None
     homing_joint_position_references : dict[tuple[str,str], float] | None = None
     enable_limits_safety : bool = True
     enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = dataclasses.field(default_factory=list)
@@ -369,6 +370,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         joints_all_env_controlled : Sequence[tuple[str,str]]
         control_limits_minmax_pve : dict[tuple[str,str], th.Tensor]
         control_mode : JointImpedanceActionHelper.CONTROL_MODES
+        control_mode_position_delta_max : float | None
+        """ Only used if control_mode is "position_delta" """
         joints_agent_controlled : Sequence[tuple[str,str]]
         enable_dbg_checks : bool
         enable_limits_safety : bool
@@ -626,6 +629,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     action_noise_mustd = self._thtens(init_args.action_noise_mustd),
                                                     control_limits_minmax_pve = init_args.control_limits_minmax_pve,
                                                     control_mode = JointImpedanceActionHelper.CONTROL_MODES[init_args.control_mode.upper()],
+                                                    control_mode_position_delta_max = init_args.control_mode_position_delta_max,
                                                     enable_dbg_checks = init_args.enable_dbg_checks,
                                                     enable_limits_safety = init_args.enable_limits_safety,
                                                     enable_link_collisions = init_args.enable_link_collisions,
@@ -742,7 +746,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 safe_stiffness=self._thtens([self._configuration.safe_stiffness]).repeat(len(controlled_joints_rn)),
                                 safe_damping=self._thtens([self._configuration.safe_damping]).repeat(len(controlled_joints_rn)),
                                 th_device=self._configuration.th_device,
-                                generator=self._rng)
+                                generator=self._rng,
+                                position_delta_max=self._configuration.control_mode_position_delta_max,)
         
         self._build_stats()
 
@@ -970,6 +975,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 l = control_limits_minmax_pve[jn]
                 dbg_check_size(l, (2,3), msg=f"control_limits_minmax_pve[{jn}] has shape {control_limits_minmax_pve[jn].shape}, should have shape (2,3) representing min/max for position, velocity and effort")
                 control_limits_minmax_pve[jn] = self._thtens(l)
+        control_limits_minmax_pve = {k:t.to(self._th_device) for k,t in control_limits_minmax_pve.items()}
         dbg_check_finite(control_limits_minmax_pve, assert_msg="control_limits_minmax_pve contains non-finite values")
         # Ensure control limits are within safe limits
         for jn in safe_limits_minmax_pve.keys():
@@ -1449,22 +1455,22 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             actions, action_delay = self._preproc_acts(actions)
             self._last_preprocessed_actions = actions
             actions = th.clamp(actions + self._thrandn(size=actions.shape)*self._configuration.action_noise_mustd[1], min = -1, max = 1)
-            v_j_pvesd = self._action_helper.action_to_pvesd(actions)
+            v_j_pvesd = self._action_helper.action_to_pvesd(actions, self._last_sent_v_j_pvesd[:,:,0])
             # do this better, avoid this if condition, put it in the helper
             if self._configuration.saturate_jimp_posref_limits:
                 v_j_pvesd[:,:,:3] = th.clamp(v_j_pvesd[:,:,:3], min=self._safe_limits_minmax_j_pve[0], max=self._safe_limits_minmax_j_pve[1])
                 posref_diff = v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0]
                 posref_diff = th.clamp(posref_diff, min=self._posref_saturation_minmmax_diff[0], max=self._posref_saturation_minmmax_diff[1])
                 v_j_pvesd[:,:,0] = self._last_sent_v_j_pvesd[:,:,0] + posref_diff
-            if self._configuration.control_mode in [JointImpedanceActionHelper.CONTROL_MODES.POSITION, JointImpedanceActionHelper.CONTROL_MODES.PS, JointImpedanceActionHelper.CONTROL_MODES.PT] :
-                if self._configuration.velref_from_posref:
-                    refvel = (v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec
-                    # current_pos = self._current_state[self.STATE_ROBOT][:,0,:,0]
-                    # refvel = (v_j_pvesd[:,:,0] - current_pos)/self._intendedStepLength_sec
-                    # refvel = th.zeros_like(refvel)
-                    v_j_pvesd[:,:,1] = th.clamp(refvel,
-                                                min=self._safe_limits_minmax_j_pve[0,:,1], 
-                                                max=self._safe_limits_minmax_j_pve[1,:,1]) # set velocity reference
+            # if self._configuration.control_mode in [JointImpedanceActionHelper.CONTROL_MODES.POSITION, JointImpedanceActionHelper.CONTROL_MODES.PS, JointImpedanceActionHelper.CONTROL_MODES.PT] :
+            #     if self._configuration.velref_from_posref:
+            #         refvel = (v_j_pvesd[:,:,0] - self._last_sent_v_j_pvesd[:,:,0])/self._intendedStepLength_sec
+            #         # current_pos = self._current_state[self.STATE_ROBOT][:,0,:,0]
+            #         # refvel = (v_j_pvesd[:,:,0] - current_pos)/self._intendedStepLength_sec
+            #         # refvel = th.zeros_like(refvel)
+            #         v_j_pvesd[:,:,1] = th.clamp(refvel,
+            #                                     min=self._safe_limits_minmax_j_pve[0,:,1], 
+            #                                     max=self._safe_limits_minmax_j_pve[1,:,1]) # set velocity reference
 
             v_j_pvesd[:,:,3]*=self._current_episode_config.randomized_stiffness_factor
             v_j_pvesd[:,:,4]*=self._current_episode_config.randomized_damping_factor
@@ -1580,7 +1586,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._realworld_initialization(vec_mask=vec_mask)
         record_time("RobotVecEnv.initialize_episodes: initialized")
             
-        last_sent_actions = th.clamp(self._action_helper.pvesd_to_action(self._last_sent_v_j_pvesd), min=-1, max=1)
+        last_sent_actions = th.clamp(self._action_helper.pvesd_to_action(self._last_sent_v_j_pvesd, self._last_sent_v_j_pvesd[:,:,0]), min=-1, max=1)
         masked_assign(self._last_preprocessed_actions,  vec_mask, last_sent_actions)
         masked_assign(self._last_raw_actions,           vec_mask, last_sent_actions)
         masked_assign(self._eps_start_stime,            vec_mask, self._adapter.getEnvTimeFromStartup())

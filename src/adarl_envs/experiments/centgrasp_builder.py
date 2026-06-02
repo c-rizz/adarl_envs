@@ -27,6 +27,12 @@ def format_tensor(t, float_precision):
     t = [f"{e: .{float_precision}f}" if isinstance(e,float) else str(e) for e in t]
     return f"[{', '.join(t)}]"
 
+def overlay_text_func(vo, a, r, te, tr, info, extra_info):
+    return  (   f"\n"
+                f"Step    {info['ep_step_count']: .3f}\n"+
+                f"obj2hand_dist          {format_tensor(info.get('obj2hand_dist',None), 3)}\n"
+                f"obj2goal_dist          {format_tensor(info.get('obj2goal_dist',None), 3)}\n")
+
 def runner_builder(seed,
                         run_folder,
                         num_envs : int,
@@ -74,6 +80,23 @@ def runner_builder(seed,
                                             safe_revolute_dof_armature=0.1,
                                             opt_preset="fast",
                                             opt_override = {"impratio" : 1.0})
+    elif mode == "mujoco":
+        from adarl.adapters.MujocoJointImpedanceAdapter import MujocoJointImpedanceAdapter
+        if num_envs != 1:
+            raise RuntimeError(f"The 'mujoco' adapter (mujoco classic) only supports a single environment, but got num_envs={num_envs}")
+        ground_link = ("ground","ground_link")
+        # MujocoJointImpedanceAdapter always renders and runs on cpu; it does not take enable_rendering/show_gui.
+        env_builder_args.pop("enable_rendering", None)
+        adapter = MujocoJointImpedanceAdapter(  vec_size=num_envs,
+                                                sim_step_dt=1/2048,
+                                                step_length_sec=stepLength_sec,
+                                                output_th_device=th_device,
+                                                log_folder=run_folder,
+                                                show_gui=show_gui,
+                                                default_max_joint_impedance_ctrl_torque=env_builder_args.get("default_max_joint_impedance_ctrl_torque", 100.0),
+                                                max_joint_impedance_ctrl_torques=env_builder_args.get("max_joint_impedance_ctrl_torques", {}),
+                                                reference_filter_cutoff_frequency=20.0,
+                                                reference_filter_mode="second_order" if env_builder_args.get("enable_reference_filter", True) else "none")
     else:
         print(f"Requested unknown adapter '{mode}'")
         exit(0)
@@ -95,6 +118,7 @@ def runner_builder(seed,
                                                     action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                                                     adapter=adapter,
                                                     control_mode = env_builder_args.pop("control_mode"),
+                                                    control_mode_position_delta_max = env_builder_args.pop("control_mode_position_delta_max"),
                                                     controlled_joints=env_builder_args.pop("controlled_joints"),
                                                     enable_dbg_checks=True,
                                                     enable_limits_safety = env_builder_args.pop("enable_limits_safety"),
@@ -168,11 +192,14 @@ def runner_builder(seed,
                                                     ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw"),
                                                     verbose_infos=env_builder_args.pop("verbose_infos"),
                                                     minimal_infos=env_builder_args.pop("minimal_infos")),
+                                                reward_gripper_pose_weight = env_builder_args.pop("reward_gripper_pose_weight"),
                                                 reward_health_weight = env_builder_args.pop("reward_health_weight"),
-                                                reward_joint_power_weight = env_builder_args.pop("reward_joint_power_weight"),
                                                 reward_joint_actacc_weight = env_builder_args.pop("reward_joint_actacc_weight"),
                                                 reward_joint_actdiff_weight = env_builder_args.pop("reward_joint_actdiff_weight"),
+                                                reward_joint_position_limit_weight = env_builder_args.pop("reward_joint_position_limit_weight"),
+                                                reward_joint_power_weight = env_builder_args.pop("reward_joint_power_weight"),
                                                 reward_joint_torque_weight = env_builder_args.pop("reward_joint_torque_weight"),
+                                                reward_object_pose_weight = env_builder_args.pop("reward_object_pose_weight"),
                                                 reward_safety_weight = env_builder_args.pop("reward_safety_weight"),
                                                 reward_scale=1000/max_steps,
                                                 target_object_link=env_builder_args.pop("target_object_link"),
@@ -193,16 +220,7 @@ def runner_builder(seed,
                                     overlay_text_xy=(0.025,0.025),
                                     overlay_text_height=0.035,
                                     overlay_text_color_rgb=(255,150,0),
-                                    # overlay_text_func=lambda vo, a, r, te, tr, info:   
-                                    #         f"\n"
-                                    #         f"Step    {info['ep_step_count']: .3f}\n"+
-                                    #         f"body_abs_linvel       {format_tensor(info['state_extrinsic'][[LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y, LocomotionVecEnv.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z]], 3)}\n"
-                                    #         f"goal_abs              {format_tensor(info['goal_abs_xyz_vec'], 3)}\n"
-                                    #         f"goal_rel              {format_tensor(info['goal_rel_xyz_vec'], 3)}\n"
-                                    #         f"smoothed_linvel_error {format_tensor(info['smoothed_linvel_error'], 3)}\n"
-                                    #         f"linvel_error          {format_tensor(info['linvel_error'], 3)}\n"
-                                    #         f"safety                {info['state_internal'][LocomotionVecEnv.INTERNAL_FIELDS.SAFETY_TRIGGERED]: .2f}\n"
-                                            )
+                                    overlay_text_func=overlay_text_func)
     return vrunner
 
 from adarl_envs.experiments.loco_builder import union

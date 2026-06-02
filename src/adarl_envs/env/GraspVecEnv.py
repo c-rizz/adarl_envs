@@ -58,10 +58,13 @@ class GrapVecEnvInitArgs():
     reward_health_weight : float
     reward_joint_actacc_weight : float
     reward_joint_actdiff_weight : float
+    reward_joint_position_limit_weight : float
     reward_joint_power_weight : float
     reward_joint_torque_weight : float
     reward_safety_weight : float
     reward_scale : float
+    reward_object_pose_weight : float
+    reward_gripper_pose_weight : float
     target_object_link : tuple[str,str]
     observe_object_pose : bool = False
 
@@ -90,6 +93,7 @@ class GraspVecEnv(RobotVecEnv):
         joint_actdiff : th.Tensor
         joint_power : th.Tensor
         joint_torque : th.Tensor
+        joint_position_limit : th.Tensor
         safety_triggered : th.Tensor
         reward_object_pose : th.Tensor
         reward_gripper_pose : th.Tensor
@@ -141,14 +145,15 @@ class GraspVecEnv(RobotVecEnv):
                         )
 
         self._sub_rewards_weights2 = GraspVecEnv.SubRewards(
-                health = self._thtens(1.0),
+                health = self._thtens(grasp_init_args.reward_health_weight),
                 joint_actacc = self._thtens(grasp_init_args.reward_joint_actacc_weight),
                 joint_actdiff = self._thtens(grasp_init_args.reward_joint_actdiff_weight),
                 joint_power = self._thtens(grasp_init_args.reward_joint_power_weight),
                 joint_torque = self._thtens(grasp_init_args.reward_joint_torque_weight),
+                joint_position_limit = self._thtens(grasp_init_args.reward_joint_position_limit_weight),
                 safety_triggered = self._thtens(grasp_init_args.reward_safety_weight),
-                reward_object_pose = self._thtens(1.0),
-                reward_gripper_pose = self._thtens(1.0)
+                reward_object_pose = self._thtens(grasp_init_args.reward_object_pose_weight),
+                reward_gripper_pose = self._thtens(grasp_init_args.reward_gripper_pose_weight)
         )
         self._sub_rewards_enabled = {k:v for k,v in dataclasses.asdict(self._sub_rewards_weights2).items() if v!=0.0}
         self._sub_rewards_enabled_weights_th = self._thtens([v for v in self._sub_rewards_enabled.values()])
@@ -157,7 +162,9 @@ class GraspVecEnv(RobotVecEnv):
                                                                                    goal_object_pose = self._thzeros((adapter.vec_size(), 7)))
         if robot_init_args.enable_link_collisions is None:
             robot_init_args.enable_link_collisions = []
-        robot_init_args.enable_link_collisions.append((self._grasping_conf.target_object_link, [self._grasping_conf.table_link]+self._grasping_conf.manipulator_links))
+        cube_colliding_links = [self._grasping_conf.table_link]
+        # cube_colliding_links += self._grasping_conf.manipulator_links
+        robot_init_args.enable_link_collisions.append((self._grasping_conf.target_object_link, cube_colliding_links))
         robot_init_args.initial_height_randomization_range_meters=0.0
         robot_init_args.obs_abs_noise_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
         super().__init__(robot_init_args)
@@ -306,6 +313,8 @@ class GraspVecEnv(RobotVecEnv):
         actdiff             = th.flatten((state_action_raw_vec[:,0] - state_action_raw_vec[:,1])/2, start_dim=1) # divide by 2 to keep it in [-1,1]
         prev_actdiff        = th.flatten((state_action_raw_vec[:,1] - state_action_raw_vec[:,2])/2, start_dim=1)
         act_acc             = (actdiff - prev_actdiff)/2
+        state_robot_safenorm = self._state_helper.sub_helpers[self.STATE_ROBOT].normalize(state_robot, self._safety_limits, warn_limits_violation=False)
+        position_safenorm   = state_robot_safenorm[:,0,:,0]
 
 
         # ---------------- JOINT-LEVEL PENALTIES ----------------
@@ -313,6 +322,7 @@ class GraspVecEnv(RobotVecEnv):
         reward_position         = flattened_joint_penalty_reward(norm_posstathomingdiff,max_rew=max_rew, exponent=2.0, flattening_scale=0.02)
         reward_actdiff          = joint_penalty_reward(actdiff,max_rew=1, exponent=2, presquash_factor=10)
         reward_actacc           = joint_penalty_reward(act_acc,max_rew=1, exponent=2, presquash_factor=100)
+        reward_position_limit   = joint_penalty_reward(position_safenorm,max_rew=1,exponent=50)
 
         avg_cmd_torque = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,2,3] # average torque of each joint over the simulation substeps
         avg_mechanical_power = state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,2,5] # average power of each joint over the simulation substeps
@@ -360,7 +370,8 @@ class GraspVecEnv(RobotVecEnv):
             joint_torque = reward_cmdtorque,
             safety_triggered = reward_safety_triggered,
             reward_object_pose = reward_object_pose,
-            reward_gripper_pose = reward_gripper_pose
+            reward_gripper_pose = reward_gripper_pose,
+            joint_position_limit = reward_position_limit
         )
         sub_rew_unscaled = th.stack([dataclasses.asdict(raw_rewards)[k] for k in self._sub_rewards_enabled], dim=1)
         sub_rew_scaled = sub_rew_unscaled*self._sub_rewards_enabled_weights_th.unsqueeze(0)*self._grasping_conf.reward_scale

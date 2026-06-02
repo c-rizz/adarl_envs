@@ -2,6 +2,7 @@
 from __future__ import annotations
 import time
 import inspect
+import copy
 from adarl.utils.buffers import BaseBuffer
 import adarl.utils.dbg.dbg_img
 from rreal.algorithms.rl_agent import load_agent
@@ -16,12 +17,12 @@ import gymnasium as gym
 import os
 import torch as th
 import adarl.utils.session
-import adarl.utils.dbg.dbg_img as dbg_img 
+import adarl.utils.dbg.dbg_img as dbg_img
 from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
-from adarl_envs.experiments.loco_builder import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args, get_go1_args, robot_args_registry
-from adarl_envs.env.LocomotionVecEnv import LocomotionVecEnv
+from adarl_envs.experiments.centgrasp_builder import centgrasp_singleenv_builder
+from adarl_envs.env.GraspVecEnv import GraspVecEnv
 from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
 from adarl.utils.base_utils import record_time, clear_recorded_times, print_recorded_times, isinstance_noimport, set_disable_clear_recorded_times
 
@@ -32,70 +33,94 @@ import readline
 import math
 from rreal.algorithms.hardcoded_policies import FixedPolicy, SinPolicy, RandPolicy
 
-def get_home_action(env, robot : str, device):
+
+def get_action_len(env) -> int:
     base_env = env.get_runner().get_base_env()
-    if isinstance_noimport(base_env, "RobotVecEnv"):
-        home_jpose = robot_args_registry[robot]()["homing_joint_position_references"]
-        stiffness = 400
-        damping = 10
-        home_pvesd = {k:[v, 0.0, 0.0, stiffness, damping] for k,v in home_jpose.items()}
-        home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
-        action_len = base_env._action_helper.single_action_len()
-    else:
-        action_len = 12
-        home_action = th.zeros((action_len,), device=device)
-    return home_action
+    return base_env._action_helper.single_action_len()
 
 
-def get_act_range(robot : str, device):
-    if robot == "kyon_arms":
-        hx, hy, ky = 0.0, 0.1, 0.17
-        act_range = th.as_tensor([   hx, -hy,  ky,
-                                     hx, -hy,  ky,
-                                     hx, -hy,  ky,
-                                     hx, -hy,  ky,
-                                    0.5,  0.5,  0.5,
-                                    0.0,  0.5,  0.5,
-                                    0.0,  0.5,  0.5,
-                                    0.0,  0.5,  0.5,
-                                    ],device = device)
-    elif robot == "centauro":
-        act_range = th.as_tensor([0.1], device = device)
-    else:
-        if robot == "quad":
-            hx, hy, ky = 0.0, 0.1, 0.2
-        elif robot == "kyon":
-            hx,hy,ky = 0.0, 0.1, 0.17
-        elif robot == "spot":
-            hx,hy,ky = 0.0, 1.0, 1.0
-        elif robot == "go1":
-            hx,hy,ky = 0.0, 0.4, 0.8
-        else:
-            raise RuntimeError(f"Unknown robot '{robot}'")
-        act_range = th.as_tensor([   hx, -hy,  ky,
-                                    hx, -hy,  ky,
-                                    hx, -hy,  ky,
-                                    hx, -hy,  ky],device = device)
-    return act_range
+def get_home_action(env, device):
+    # In position_delta control mode a zero action means "hold the current pose".
+    return th.zeros((get_action_len(env),), device=device)
 
-def build_fixed_policy(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
-    return FixedPolicy(  cmd = get_home_action(env, robot, device))
 
-def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("cpu")):
-    home_action = get_home_action(env, robot, device)
+def build_fixed_policy(env, scale : float = 0.0, device : th.device = th.device("cpu")):
+    return FixedPolicy(  cmd = get_home_action(env, device))
+
+
+def build_sin_policy(env, scale : float = 1.0, device = th.device("cpu")):
+    home_action = get_home_action(env, device)
     action_len = len(home_action)
-    speed = 0.8 if robot!="go1" else 0.5
-    act_range = get_act_range(robot, device)
+    act_range = th.ones((action_len,), device=device)
     return SinPolicy(  act_scale=act_range*scale,
                         act_offset=home_action,
-                        act_speed=th.as_tensor([speed], device = device),
+                        act_speed=th.as_tensor([0.8], device = device),
                         action_size=action_len,
                         dt=0.05)
 
-def build_rand_policy(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
-    act_range = get_act_range(robot, device)
+
+def build_rand_policy(env, scale : float = 1.0, device : th.device = th.device("cpu")):
+    action_len = get_action_len(env)
+    act_range = th.ones((action_len,), device=device)
     return RandPolicy( act_scale=act_range*scale,
-                        action_size=env.get_runner().get_base_env()._action_helper.single_action_len())
+                        action_size=action_len)
+
+
+class KeyboardJointPolicy(RLAgent):
+    """Lets the user drive the controlled joints from the keyboard.
+
+    Number keys 1-7 increase joints 1-7, the letters just below (q w e r t y u)
+    decrease them. The produced action is a per-joint position delta (clamped to
+    the normalized [-1,1] range expected by the position_delta control mode).
+    """
+    INC_KEYS = ["1","2","3","4","5","6","7"]
+    DEC_KEYS = ["q","w","e","r","t","y","u"]
+
+    def __init__(self, action_size : int, step : float = 0.5, device : th.device = th.device("cpu")):
+        self._action_size = action_size
+        self._step = step
+        self._device = device
+        self._next_action = th.zeros((action_size,), device=device)
+
+    def set_action_from_keys(self, keyboard_listener : KeyboardListener):
+        action = th.zeros((self._action_size,), device=self._device)
+        for i in range(min(self._action_size, len(self.INC_KEYS))):
+            inc = keyboard_listener.get_key_press_count(self.INC_KEYS[i])
+            dec = keyboard_listener.get_key_press_count(self.DEC_KEYS[i])
+            action[i] = float(inc - dec) * self._step
+        self._next_action = th.clamp(action, -1.0, 1.0)
+
+    def predict_action(self, observation_batch, deterministic = False, extra_returns : dict = None):
+        return self._next_action.clone()
+
+    def get_hidden_state(self):
+        return None
+
+    def update(self, transitions : TransitionBatch):
+        raise NotImplementedError()
+
+    def reset_hidden_state(self):
+        self._next_action = th.zeros((self._action_size,), device=self._device)
+
+    def train_model(self, global_step, iterations, buffer: BaseBuffer) -> tuple[float, float, float]:
+        raise NotImplementedError()
+
+    def save(self, path: str):
+        pass
+
+    @classmethod
+    def load(cls, path: str):
+        pass
+
+    def load_(self, path: str):
+        pass
+
+    def input_device(self):
+        return self._device
+
+
+def build_keyboard_policy(env, step : float = 0.5, device : th.device = th.device("cpu")):
+    return KeyboardJointPolicy(action_size=get_action_len(env), step=step, device=device)
 
 
 
@@ -103,6 +128,7 @@ from adarl.envs.vec.EnvRunnerRecorderWrapper import EnvRunnerRecorderWrapper
 def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
     from adarl.envs.vec.Runner2GymWrapper import Runner2GymWrapper
     from adarl.envs.vec.EnvRunnerWrapper import EnvRunnerWrapper
+    recorder = None
     if isinstance(env, Runner2GymWrapper):
         recorder = env
         while recorder is not None and not isinstance(recorder, EnvRunnerRecorderWrapper):
@@ -115,53 +141,68 @@ def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
 
 
 
-robot_heights = {   "kyon" : [0.47,0.47],
-                    "go1" : [0.30,0.30],
-                    "centauro" : [0.79,0.79],
-                    }
+def grasp_builder_and_args():
+    step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
+    max_steps_per_episode = 500 #int(ep_duration_sec/step_length_sec)
+    mode = args["mode"].lower()
 
+    if mode == "pybullet":
+        env_device = th.device("cpu", 0)
+    elif mode == "mujoco":
+        env_device = th.device("cpu", 0)
+    elif mode == "mjx":
+        env_device = th.device("cuda", 0)
+    else:
+        raise RuntimeError(f"Unknown mode '{mode}'")
 
-
-def adarl_builder_and_args():
-    step_length_sec = 20/1024 
-    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
-    mode = args["mode"]
-    env_device = th.device("cuda") if mode == "mjx" else th.device("cpu")
-    height_pixels = args["resolution"] #if mode == "mjx" else 720
-    pixel_resolution = (height_pixels,int(height_pixels*16/9))
+    height_pixels = args["resolution"]
+    pixel_resolution = (height_pixels, int(height_pixels*16/9))
     record = args["record"] or args["verbose_recording"]
     skip_optionals = not args["verbose_recording"]
-    realworld = args["mode"] in ["xbot","xbot-zmq"]
-    
-    r = 0.0 # randomization strength
-    n = 1.0 # noise strength
-    p = 1.0 # penalties strength
-    eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
+
+    r = 0.0  # randomization strength
+    n = 0.0  # noise strength
     env_builder_args = {
-        "action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n) if not realworld else (0.0, 0.0, 0.0),
+        "reward_health_weight" : 0.0,
+
+        "reward_joint_power_weight" : 0.0,
+        "reward_joint_actacc_weight" :  0.0,
+        "reward_joint_actdiff_weight" : 0.0,
+        "reward_joint_torque_weight" :  0.0,
+        "reward_joint_position_limit_weight" : 0.0,
+        "reward_object_pose_weight" : 0.0,
+        "reward_gripper_pose_weight" : 5.0,
+        "reward_safety_weight" : 0.0,
+
+        "target_object_link" : ("cube","cube"),
+        "gripper_links" : [("centauro","dagana_1_fixed_palm_center"), ("centauro","dagana_1_claw_palm_center")],
+        "observe_object_pose" : True,
+
+        "action_delay_mustd_std" : (0.008, 0.005*n, 0.0025*n),
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
-        "control_mode" : "position",
+        "control_mode" : "position_delta",
+        "control_mode_position_delta_max" : 0.05,
         "desired_foot_clearance" : 0.05,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
         "enable_rendering" : False,
-        "enable_reference_filter" : False,
+        "enable_reference_filter" : True,
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : robot_heights.get(args["robot"].lower(), [0.5,0.5]),
-        "goal_resampling_probability_per_sec" : 0.0,
+        "goal_height_minmax" : [0.79,0.79],
+        "goal_resampling_probability_per_sec" : 0.1,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
-        "held_joints_damping" : 10.0,
-        "held_joints_stiffness" : 500.0,
+        "held_joints_damping" : 20.0,
+        "held_joints_stiffness" : 2000.0,
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
-        "init_on_reset_ratio" : 1.0,
+        "init_on_reset_ratio" : 0.7,
         "initial_height_randomization_range_meters" : 0.1,
         "initial_joint_pose_randomization_range" : 0.1,
         "just_health_reward" : False,
@@ -174,66 +215,28 @@ def adarl_builder_and_args():
         "merge_privileged" : False,
         "min_good_step_duration" : 0.1,
         "mode" : mode,
-        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.1*n],
-        "obs_abs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.0*n, 0.0*n],
+        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n,  0.1*n],
+        "obs_abs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.0*n,   0.1*n],
         "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.1*n],
-        "obs_abs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
-        "obs_abs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
-        "obs_abs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
+        "obs_abs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,     0.0],
+        "obs_abs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,     0.0],
+        "obs_abs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,     0.0],
         "observe_full_robot_state" : False,
-        "offset_envs_ep_starts" : True,
+        "offset_envs_ep_starts" : False,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomized_dof_armature_ratios" : 0.1*r,
-        "randomized_dof_frictionloss_ratios"             : 0.0*r,
+        "randomized_dof_armature_ratios" :      0.05*r,
+        "randomized_dof_frictionloss_ratios":   0.1*r,
         "randomized_dof_damping_ratios":        0.2*r,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
-        "randomized_gains_damping_ratio_epstd"       : 0.0*r,
-        "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
+        "randomized_gains_damping_ratio_epstd"       : 0.2*r,
+        "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
-        "randomized_reference_filter_distribution" : ("uniform", (50.0, 50.0)),
+        "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "reward_superweight_joint_penalties" : 1.0,
-        "reward_joint_acceleration_weight" :        eps,
-        "reward_joint_acc_on_vel_weight" :          eps,
-        "reward_joint_actacc_weight" :              0.5*p,
-        "reward_joint_actdiff_weight" :             0.5*p,
-        "reward_contacts_weight" :            eps,
-        "reward_joint_energy_weight" :              eps,
-        "reward_joint_power_weight" :               0.002*p,
-        "reward_failure_weight" :             eps,
-        "reward_feet_air_time_weight" :       10.0,
-        "reward_feet_ground_time_weight" :    eps,
-        "reward_feet_on_ground_weight" :      1.0,
-        "reward_feet_step_height_weight" :    0.0,
-        "reward_heading_velocity_weight" :    eps,
-        "reward_heading_weight" :             eps,
-        "reward_health_weight" :              eps,
-        "reward_height_position_weight" :     0.5,
-        "reward_height_velocity_weight" :     0.1,
-        "reward_pitchnroll_velocity_weight" : 0.2,
-        "reward_pitchnroll_weight" :          0.5,
-        "reward_joint_position_limit_weight" :      eps,
-        "reward_joint_position_weight" :            eps,
-        "reward_joint_posref_vel_weight" :          0.05,
-        "reward_joint_posref_acc_weight":           eps,
-        "reward_scale_nolength":              0.01,
-        "reward_joint_sensed_effort_weight" :       eps,
-        "reward_safety_triggered_weight" :    0.5,
-        "reward_slip_weight" :                1.0,
-        "reward_joint_stand_position_weight" :      5.0,
-        "reward_joint_torque_limit_weight" :        eps,
-        "reward_joint_torque_weight" :              0.0001*p,
-        "reward_joint_torquediff_weight" :          0.0001*p,
-        "reward_joint_torqueref_weight" :           eps,
-        "reward_tracking_weight" :            1.0,
-        "reward_joint_velocity_limit_weight" :      eps,
-        "reward_joint_velocity_weight" :            eps,
-        "reward_joint_velref_weight" :              eps,
-        "reward_yaw_vel_tracking_weight" :    1.0,
-        "robot_model" : args["robot"],
+        "robot_model" : "centauro",
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : False,
         "stepLength_sec" : step_length_sec,
@@ -251,12 +254,12 @@ def adarl_builder_and_args():
     }
 
     env_builder_args.update({
-        "offset_envs_ep_starts" : False,
-        "enable_rendering" : args["record"] or args["publishimg"],
-        "record_video" : not realworld,
+        "enable_rendering" : True,
+        "record_video" : True,
         "verbose_infos" : (not skip_optionals) or record,
         "minimal_infos" : skip_optionals or not record,
         "video_save_freq" : 1 if record else 0,
+        "log_info_stats" : (not skip_optionals) or record,
         "action_delay_mustd_std" : (0.0,0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
         "obs_abs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
@@ -266,8 +269,6 @@ def adarl_builder_and_args():
         "obs_abs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
         "obs_abs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
-        "log_info_stats" : (not skip_optionals) or record,
-        # "minimal_infos" : skip_optionals or not record,
         "initial_joint_pose_randomization_range" : 0.0,
         "initial_height_randomization_range_meters" : 0.0,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
@@ -278,62 +279,19 @@ def adarl_builder_and_args():
         "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
         "randomized_dof_armature_ratios" : 0.0*r,
-        "randomized_reference_filter_distribution" : ("uniform", (50.0, 50.0)),
+        "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "impulse_probability_per_sec" : 0.0,
         "show_gui" : args["gui"],
-        "just_health_reward" : realworld,
         "goal_resampling_probability_per_sec" : 0.0,
         "walltime_factor" : args["rt_factor"],
-        "record_whole_joint_trajectories" : False,
-        # "mjx_opt_override" : {"noslip_iterations": 10, "impratio": 10.0, "iterations" : 20}
-        })
-    return named_loco_single_env_builder, env_builder_args, step_length_sec
-
-def pg_builder_and_args():
-    from adarl_envs.experiments.playground_builder import playground_single_env_builder
-    
-    step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    
-    env_builder_args = {
-        "video_save_freq" : 1,
-        "record_video" : True,
-        "env_name" : "SpotFlatTerrainJoystick",
-        "quiet" : False,
-        "th_device" : th.device("cuda",0),
-        "log_info_stats": True,
-        "randomize_step_timeout_counters": True,
-        "camera" : "track",
-        "episode_length" : max_steps_per_episode,
-        "autoreset" : True,
-        "playground_config_overrides": {"reward_config.scales.feet_clearance":0.0,
-                                        "reward_config.scales.feet_height":0.0,
-                                        "obs_noise.scales.joint_pos": 0.0,
-                                        "obs_noise.scales.gyro" : 0.0,
-                                        "obs_noise.scales.gravity" : 0.0,
-                                        "obs_noise.scales.feet_pos" : [0.0, 0.0, 0.0],
-                                        }
-    }
-    return playground_single_env_builder, env_builder_args, step_length_sec
-
-
-
-
-
-
-
-
-
+    })
+    return centgrasp_singleenv_builder, env_builder_args, step_length_sec
 
 
 
 
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
-
-    if args["pg"]:
-        builder, env_builder_args, step_length_sec = pg_builder_and_args()
-    else:
-        builder, env_builder_args, step_length_sec = adarl_builder_and_args()
+    builder, env_builder_args, step_length_sec = grasp_builder_and_args()
 
     return play(seed,
                 folderName,
@@ -342,18 +300,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder_args = env_builder_args,
                 step_length_sec = step_length_sec,
                 render=args["publishimg"],
-                robot = args["robot"],
                 deterministic = args["deterministic"])
 
 
 
-def play(seed, folderName, run_id, args, 
-         env_builder : EnvBuilderProtocol, 
-         env_builder_args : dict[str,Any], 
+def play(seed, folderName, run_id, args,
+         env_builder : EnvBuilderProtocol,
+         env_builder_args : dict[str,Any],
          step_length_sec : float, render : bool,
-         robot : str,
          deterministic : bool):
-    
+
     ggLog.info(f"Starting run")
     if render:
         adarl.utils.dbg.dbg_img.helper.enable_web_dbg(True)
@@ -366,7 +322,6 @@ def play(seed, folderName, run_id, args,
                                                         run_comment=args["comment"],
                                                         use_wandb=False)
 
-    # th.cuda.set_sync_debug_mode("warn")
     if args["agent_device"].lower() == "cpu":
         device = th.device("cpu")
     elif args["agent_device"].lower() == "cuda":
@@ -383,6 +338,7 @@ def play(seed, folderName, run_id, args,
     recorder = find_recorder_wrapper(env)
     ggLog.info("Built")
     control_mode = args["control"].lower().strip()
+    manual = control_mode == "manual"
     if control_mode=="pretrained":
         model = load_agent(args["model"], device)
         if isinstance(model, SAC):
@@ -391,16 +347,18 @@ def play(seed, folderName, run_id, args,
                 equal, diffs = compare_dicts(env_builder_args, trained_env_builder_args)
                 if not equal:
                     ggLog.warn(f"Loaded model was trained with different env args: \n{diffs}")
-            except Exception as e: 
+            except Exception as e:
                 ggLog.warn(f"Could not compare env args with trained model: {type(e)}: {e}")
         elif isinstance(model, PPO):
             pass
     elif control_mode=="fixed":
-        model = build_fixed_policy(env = env, robot=robot, device= env_device)
+        model = build_fixed_policy(env = env, device= env_device)
     elif control_mode=="random":
-        model = build_rand_policy(env=env, robot=robot, scale=1.0, device = env_device)
+        model = build_rand_policy(env=env, scale=1.0, device = env_device)
     elif control_mode == "sine":
-        model = build_sin_policy(env, robot=robot, scale = 1.0, device = env_device)
+        model = build_sin_policy(env, scale = 1.0, device = env_device)
+    elif control_mode == "manual":
+        model = build_keyboard_policy(env, device = env_device)
     else:
         raise RuntimeError(f"Unknown control mode '{control_mode}'")
 
@@ -409,7 +367,6 @@ def play(seed, folderName, run_id, args,
     interactive = False
     rewards = []
     durations = []
-    avg10_dists = []
 
     keyboard_listener : KeyboardListener = None
 
@@ -431,14 +388,13 @@ def play(seed, folderName, run_id, args,
                     if cmd == "quit":
                         play = False
                         break
-                    elif cmd == "interactive":
-                        print(f" Use WASD to move the goal, IJKL to move the camera, T to terminate.")
+                    elif cmd == "interactive" and not manual:
+                        print(f" Use WASD to move the goal in xy, RF to move it in z, IJKL/UO to move the camera, T to terminate.")
                         time.sleep(1)
                         interactive = True
                         options["max_ep_steps"] = 100_000
-                        options["goal_velocity_xy"] = [0.0, 0.0]
                         keyboard_listener = KeyboardListener()
-                        cmd = 'c'   
+                        cmd = 'c'
                 if not play:
                     break
             else:
@@ -446,25 +402,17 @@ def play(seed, folderName, run_id, args,
                     break
             if not play:
                 break
+            if manual and keyboard_listener is None:
+                print(f" Manual joint control:\n"
+                      f"   1 2 3 4 5 6 7   : increase arm joints 1-7\n"
+                      f"   q w e r t y u   : decrease arm joints 1-7\n"
+                      f"   i/k pitch cam, j/l yaw cam, o/p cam distance, z terminate episode")
+                time.sleep(1)
+                keyboard_listener = KeyboardListener()
             obs : TensorTree[th.Tensor]
 
-            minmax_height = robot_heights.get(args["robot"].lower(), [0.5,0.5])
-            h = sum(minmax_height)/2
-
-            if interactive:
-                cmd_xys = [1.0,0.0,0.0]
-                cmd_yawvel = 0.0
-                cmd_height = h
-            else:
-                dir = np.random.rand()*2*3.14159
-                speed = 0 #np.random.rand()
-                cmd_xys = [np.cos(dir), np.sin(dir), speed]
-                cmd_yawvel = 0 #(np.random.rand()*2-1)*0.5*(np.random.rand()>0.5)
-                cmd_height = h
-            # options["goal_velocity_xy"] = [cmd_xys[0]*cmd_xys[2], cmd_xys[1]*cmd_xys[2]]
             obs, info = env.reset(options = options)  #type: ignore
             ggLog.info(f"env resetted")
-            # ggLog.info(f"ep_config = {info['ep_config']}")
             done = False
             ep_reward = 0
             step_count = 0
@@ -477,22 +425,18 @@ def play(seed, folderName, run_id, args,
                 img = env.render()
                 dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
                 time.sleep(step_length_sec/rt)
-            base_env : LocomotionVecEnv = env.get_runner().get_base_env()
+            base_env : GraspVecEnv = env.get_runner().get_base_env()
             print(f"Env is of type {type(base_env)}")
 
-            if isinstance(base_env, LocomotionVecEnv):
-                # base_env.set_cam_pose((1.583, 0.201, 2.149))
-                base_env.set_goal(
-                                    goal_rel_linvel_xys = tuple(cmd_xys),
-                                    goal_abs_height = cmd_height,
-                                    goal_yaw_vel = cmd_yawvel,
-                                    goal_heading_yaw = 0.0)
+            goal_pose = None
+            if isinstance(base_env, GraspVecEnv):
+                # goal is the target object pose, as a (xyz, xyzw) vector
+                goal_pose = base_env.get_goals()[0].clone()
             while not done:
                 t0 = time.monotonic()
                 set_disable_clear_recorded_times(True)
                 record_time("start_step")
                 session.run_info["collected_steps"].value += 1
-                # ggLog.info(f"ep_config = {info['ep_config']}")
                 t0_pred = time.monotonic()
                 obs_batch = map_tensor_tree(obs,lambda t: th.unsqueeze(t,0).to(device))
                 act_info = {}
@@ -509,29 +453,20 @@ def play(seed, folderName, run_id, args,
                     img = env.render()
                     dbg_img.helper.publishDbgImg("render", img_callback=lambda: img)
                 record_time("post render")
-                # input("press enter")
                 if verbose:
                     print(f"obs = {obs}\n"+
                         f"rew = {reward}\n"+
                         f"terminated = {terminated}\n"+
                         f"truncated = {truncated}\n")
                 if interactive:
-                    cmd_angle = np.arctan2(cmd_xys[1],cmd_xys[0])
-                    if keyboard_listener.get_key_press_count("w")>0: cmd_xys[2] +=  0.05
-                    if keyboard_listener.get_key_press_count("s")>0: cmd_xys[2] += -0.05
-                    if keyboard_listener.get_key_press_count("a")>0: cmd_angle  +=  10*3.14159/180
-                    if keyboard_listener.get_key_press_count("d")>0: cmd_angle  += -10*3.14159/180
-                    if keyboard_listener.get_key_press_count("r")>0: cmd_height +=  0.005
-                    if keyboard_listener.get_key_press_count("f")>0: cmd_height += -0.005
-                    if keyboard_listener.get_key_press_count("q")>0: cmd_yawvel += 0.05
-                    if keyboard_listener.get_key_press_count("e")>0: cmd_yawvel += -0.05
-                    if keyboard_listener.get_key_press_count("z")>0: 
-                        cmd_xys[2] = 0.0
-                        cmd_yawvel = 0.0
-                    cmd_xys[0] = np.cos(cmd_angle)
-                    cmd_xys[1] = np.sin(cmd_angle)
-                    cmd_height = np.clip(cmd_height, minmax_height[0], minmax_height[1])
-                    flip = keyboard_listener.get_key_press_count("x")>0
+                    goal_diff_xyz = [0.0, 0.0, 0.0]
+                    if keyboard_listener.get_key_press_count("w")>0: goal_diff_xyz[0] +=  0.02
+                    if keyboard_listener.get_key_press_count("s")>0: goal_diff_xyz[0] += -0.02
+                    if keyboard_listener.get_key_press_count("a")>0: goal_diff_xyz[1] +=  0.02
+                    if keyboard_listener.get_key_press_count("d")>0: goal_diff_xyz[1] += -0.02
+                    if keyboard_listener.get_key_press_count("r")>0: goal_diff_xyz[2] +=  0.02
+                    if keyboard_listener.get_key_press_count("f")>0: goal_diff_xyz[2] += -0.02
+
                     cam_dist_pitch_yaw_diff = [0.0,0.0,0.0]
                     if keyboard_listener.get_key_press_count("u")>0: cam_dist_pitch_yaw_diff[0] = -0.1
                     if keyboard_listener.get_key_press_count("o")>0: cam_dist_pitch_yaw_diff[0] =  0.1
@@ -541,22 +476,36 @@ def play(seed, folderName, run_id, args,
                     if keyboard_listener.get_key_press_count("l")>0: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
 
                     if keyboard_listener.get_key_press_count("t")>0: truncated = True
-                    if flip:
-                        cmd_xys = [-cmd_xys[0],-cmd_xys[1],-cmd_xys[2]]
                     keyboard_listener.reset_key_press_counters()
 
-                    if isinstance(base_env, LocomotionVecEnv):
+                    if isinstance(base_env, GraspVecEnv):
                         base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
-                        base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height,
-                                          goal_yaw_vel = cmd_yawvel,
-                                          goal_heading_yaw = 0.0)
-                if isinstance(base_env, LocomotionVecEnv):
-                    goals = base_env.get_goals()
-                    goal_rel_linvel_xys = goals["rel_linvel_xys"][0].tolist()
-                    goal_height = goals["abs_height"][0].item()
+                        goal_pose[:3] = goal_pose[:3] + th.as_tensor(goal_diff_xyz, device=goal_pose.device)
+                        base_env.set_goals(goal_pose.unsqueeze(0).clone())
+                        base_env._set_goal_marker_pose(base_env._all_vecs)
+                if manual:
+                    # Read all keys, then reset once, so no presses are double-counted.
+                    # The joint deltas drive the next predict_action() call.
+                    model.set_action_from_keys(keyboard_listener)
+                    cam_dist_pitch_yaw_diff = [0.0,0.0,0.0]
+                    if keyboard_listener.get_key_press_count("o")>0: cam_dist_pitch_yaw_diff[0] = -0.1
+                    if keyboard_listener.get_key_press_count("p")>0: cam_dist_pitch_yaw_diff[0] =  0.1
+                    if keyboard_listener.get_key_press_count("i")>0: cam_dist_pitch_yaw_diff[1] =  5*3.14159/180
+                    if keyboard_listener.get_key_press_count("k")>0: cam_dist_pitch_yaw_diff[1] = -5*3.14159/180
+                    if keyboard_listener.get_key_press_count("j")>0: cam_dist_pitch_yaw_diff[2] = -5*3.14159/180
+                    if keyboard_listener.get_key_press_count("l")>0: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
+                    if keyboard_listener.get_key_press_count("z")>0: truncated = True
+                    keyboard_listener.reset_key_press_counters()
+                    if isinstance(base_env, GraspVecEnv):
+                        base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
+                if isinstance(base_env, GraspVecEnv):
+                    goal_obj_pose = base_env.get_goals()[0].tolist()
                 else:
-                    goal_rel_linvel_xys = [0.0, 0.0, 0.0]
-                    goal_height = 0.0
+                    goal_obj_pose = [0.0]*7
+                obj2goal_dist = info.get("obj2goal_dist", None)
+                obj2hand_dist = info.get("obj2hand_dist", None)
+                if isinstance(obj2goal_dist, th.Tensor): obj2goal_dist = obj2goal_dist.flatten()[0].item()
+                if isinstance(obj2hand_dist, th.Tensor): obj2hand_dist = obj2hand_dist.flatten()[0].item()
                 step_count += 1
 
                 done = terminated or truncated
@@ -565,8 +514,7 @@ def play(seed, folderName, run_id, args,
                 ep_wall_duration += step_wallduration
 
                 record_time("pre sleep")
-                if args["mode"] not in ["xbot","xbot-zmq"]:
-                    time.sleep(max(0,step_length_sec/rt - step_wallduration))
+                time.sleep(max(0,step_length_sec/rt - step_wallduration))
                 record_time("step end")
                 full_step_wallduration = time.monotonic()-t0
                 set_disable_clear_recorded_times(False)
@@ -574,15 +522,12 @@ def play(seed, folderName, run_id, args,
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
                            f" tstep={t1_step-t0_step:1.4f} \t"
-                           f" cmd_reldir={np.arctan2(goal_rel_linvel_xys[1], goal_rel_linvel_xys[0])/3.14159*180} \t"
-                           f" cmd_speed={goal_rel_linvel_xys[2]} \t"
-                           f" cmd_height={goal_height} \t"
-                           f" cmd_yaw_vel={cmd_yawvel}")
-                # print_recorded_times()
+                           f" goal_xyz=[{goal_obj_pose[0]:.3f}, {goal_obj_pose[1]:.3f}, {goal_obj_pose[2]:.3f}] \t"
+                           f" obj2goal_dist={obj2goal_dist} \t"
+                           f" obj2hand_dist={obj2hand_dist}")
             if step_count>0:
                 rewards.append(th.as_tensor(ep_reward,device="cpu").sum().item())
                 durations.append(th.as_tensor(step_count,device="cpu").item())
-                # avg10_dists.append(info["avg_vel_track_err"])
             with session.run_info["collected_episodes"].get_lock():
                 session.run_info["collected_episodes"].value += 1
             ggLog.info("\n"
@@ -590,18 +535,16 @@ def play(seed, folderName, run_id, args,
                     f"Wall duration =   {ep_wall_duration:.2f}s\n"
                     f"Sim  duration =   {step_count*step_length_sec:.2f}s\n"
                     f"Realtime factor = {step_count*step_length_sec/ep_wall_duration:.2f}\n")
-            if interactive:
+            if interactive or manual:
                 keyboard_listener.close()
+                keyboard_listener = None
     finally:
         if keyboard_listener is not None:
             keyboard_listener.close()
     rewards = np.array(rewards)
     durations = np.array(durations)
-    # avg10_dists = np.array(avg10_dists)
     ggLog.info(f"Avg reward = {rewards.mean()}, {rewards.std()} std")
     ggLog.info(f"Avg durations = {durations.mean()}, {durations.std()} std")
-    # ggLog.info(f"Avg avg10_dists = {avg10_dists.mean()}, {avg10_dists.std()} std")
-    # env.reset() # trigger video saving
     env.close()
 
 if __name__ == "__main__":
@@ -612,32 +555,26 @@ if __name__ == "__main__":
     from adarl.utils.session import launchRun
 
     ap = argparse.ArgumentParser()
-    # ap.add_argument("--evaluate", default=None, type=str, help="Load and evaluate model file")
     ap.add_argument("--seedsNum", default=1, type=int, help="Number of seeds to test with")
-    # ap.add_argument("--seeds", nargs="+", required=False, type=int, help="Seeds to use")
-    # ap.add_argument("--no_rb_checkpoint", default=False, action='store_true', help="Do not save replay buffer checkpoints")
-    # ap.add_argument("--robot_pc_ip", default=None, type=str, help="Ip of the pc connected to the robot (which runs the control, using its rt kernel)")
     ap.add_argument("--seedsOffset", default=0, type=int, help="Offset the used seeds by this amount")
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--model", required = False, default=None, type=str, help="Model to load")
-    ap.add_argument("--mode", default="mjx", type=str, help="Adapter to use [pybullet,xbot-gazebo,mjx]")
-    ap.add_argument("--robot", default="kyon", type=str, help="Robot to be used")
+    ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
     ap.add_argument("--rt-factor", default=1.0, type=float, help="Tentative realtime factor")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
     ap.add_argument("--gui", default=False, action='store_true', help="Start the gui, instead of streaming renderings")
     ap.add_argument("--record", default=False, action='store_true', help="Record episode videos")
-    ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,random,pretrained]")
+    ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,random,pretrained,manual]")
     ap.add_argument("--resolution", default=240, type=int, help="Vertical video resolution")
     ap.add_argument("--deterministic", default=False, action='store_true', help="Force the policy to be deterministic")
     ap.add_argument("--publishimg", default=False, action='store_true', help="publish rendered images to the web dbg server")
-    ap.add_argument("--pg", default=False, action='store_true', help="Use playground env")
     ap.add_argument("--verbose-recording", default=False, action='store_true', help="Print detailed infos about the env step timings and outputs")
     ap.add_argument("--agent-device", default="cpu", type=str, help="Device to load the model on (cpu or cuda)")
 
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())
 
-    
+
     launchRun(  seedsNum=1,
                 seedsOffset=args["seedsOffset"],
                 runFunction=runFunction,

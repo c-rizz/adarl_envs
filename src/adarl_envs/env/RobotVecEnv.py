@@ -35,7 +35,7 @@ from adarl.utils.base_utils import record_time, record_region_start, record_regi
 import gc
 
 disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
-unsafe_realworld_init = True
+unsafe_realworld_init = False
 
 def hash_tensor(tensor):
     return hash(tuple(tensor.reshape(-1).tolist()))
@@ -847,7 +847,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._last_preprocessed_actions = self._thzeros(self._action_helper.get_vec_action_space().shape)
 
 
-        if isinstance(self._adapter, BaseVecSimulationAdapter) and init_args.enable_link_collisions is not None and not isinstance_noimport(self._adapter, "MujocoAdapter"):
+        if isinstance(self._adapter, BaseVecSimulationAdapter) and init_args.enable_link_collisions is not None:
             self._adapter.set_body_collisions(init_args.enable_link_collisions)
         example_labels : dict[str,th.Tensor] = {}
         example_infos = self.get_infos(self._current_state, example_labels)
@@ -1739,7 +1739,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if r == "move":
                 self._realworld_robot_init_move(vec_mask)
             elif r == "skip":
-                masked_assign(self._last_sent_v_j_pvesd, vec_mask, self._adapter.get_current_joint_impedance_command())
+                masked_assign(self._last_sent_v_j_pvesd,
+                              vec_mask,
+                              self._adapter.get_current_joint_impedance_command()[:,:len(self._configuration.joints_agent_controlled)])
                 pass
             else:
                 print(f"Invalid answer '{r}'")
@@ -2213,7 +2215,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # th.cuda.synchronize()
         try:
-            vec_stats_minmaxavgstd_j_pvaeep = self._adapter.get_joints_state_step_stats_extended()
+            # The adapter returns stats for all monitored joints (agent-controlled first, then held);
+            # keep only the agent-controlled ones, matching _get_adapter_data_raw_mjx.
+            vec_stats_minmaxavgstd_j_pvaeep = self._adapter.get_joints_state_step_stats_extended()[:, :, :len(self._configuration.joints_agent_controlled)]
             record_time("RobotVecEnv._get_adapter_data_raw: get_joints_state_step_stats_extended done")
             if self._configuration.enable_dbg_checks:
                 dbg_check(lambda: th.all(th.isfinite(vec_stats_minmaxavgstd_j_pvaeep)),

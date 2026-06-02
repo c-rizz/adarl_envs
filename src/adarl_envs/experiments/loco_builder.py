@@ -195,48 +195,33 @@ def loco_runner_builder(seed,
         from adarl.adapters.VecZmqXbotAdapter import VecZmqXbotAdapter
         from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter
         ground_link = ("ground_plane","ground_link") # Should not be used
-        adapter = VecZmqXbotAdapter(   adapter = ZmqXbotAdapter( model_name = robot_name,
-                                                                        stepLength_sec = stepLength_sec,
-                                                                        is_floating_base = True,
-                                                                        reference_frame = "world",
-                                                                        torch_device = th.device("cpu"),
-                                                                        allow_fallback = False,
-                                                                        jpos_cmd_max_vel = {},
-                                                                        jpos_cmd_max_vel_default = 5.0,
-                                                                        jpos_cmd_max_acc = {},
-                                                                        jpos_cmd_max_acc_default = 5.0,
-                                                                        enable_filters = True,
-                                                                        position_commands_stiffness = 400.0,
-                                                                        position_commands_damping = 10.0,
-                                                                        is_simulated = False,
-                                                                        walltime_factor = 1.0,
-                                                                        remote_ip = 'localhost',
-                                                                        comm_protocol ='ipc', # or 'ipc'
-                                                                        ipc_pub_path ="/tmp/xbot2_zmq_pub.ipc",
-                                                                        ipc_cmd_path ="/tmp/xbot2_zmq_cmd.ipc",
-                                                                        ipc_service_path ="/tmp/xbot2_zmq_rep.ipc",
-                                                                        robot_urdf=robot_description_string),
+
+        zmq_remote_ip = "10.24.4.100"
+        zmq_protocol = "tcp"
+
+        adapter = VecZmqXbotAdapter(   adapter = ZmqXbotAdapter(model_name = robot_name,
+                                                                stepLength_sec = stepLength_sec,
+                                                                is_floating_base = True,
+                                                                reference_frame = "world",
+                                                                torch_device = th.device("cpu"),
+                                                                allow_fallback = False,
+                                                                jpos_cmd_max_vel = {},
+                                                                jpos_cmd_max_vel_default = 5.0,
+                                                                jpos_cmd_max_acc = {},
+                                                                jpos_cmd_max_acc_default = 5.0,
+                                                                enable_filters = True,
+                                                                position_commands_stiffness = 400.0,
+                                                                position_commands_damping = 10.0,
+                                                                is_simulated = False,
+                                                                walltime_factor = 1.0,
+                                                                remote_ip = zmq_remote_ip,
+                                                                comm_protocol =zmq_protocol, # or 'ipc'
+                                                                ipc_pub_path ="/tmp/xbot2_zmq_pub.ipc",
+                                                                ipc_cmd_path ="/tmp/xbot2_zmq_cmd.ipc",
+                                                                ipc_service_path ="/tmp/xbot2_zmq_rep.ipc",
+                                                                robot_urdf=robot_description_string),
                                                 vec_size = 1,
                                                 th_device = th_device)
-    elif mode == "xbot-gazebo":
-        from adarl_ros.adapters.RosXbotGazeboAdapter import RosXbotGazeboAdapter
-        from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
-        adapter = VecSimJointImpedanceAdapterWrapper(adapters = RosXbotGazeboAdapter(model_name = robot_name,
-                                                                                    stepLength_sec = stepLength_sec,
-                                                                                    forced_ros_master_uri = None,
-                                                                                    maxObsDelay = float("+inf"),
-                                                                                    blocking_observation = False,
-                                                                                    is_floating_base = True,
-                                                                                    reference_frame = "base_link",
-                                                                                    torch_device = th.device("cpu"),
-                                                                                    fallback_cmd_stiffness = 200.0,
-                                                                                    fallback_cmd_damping = 10.0,
-                                                                                    allow_fallback = True,
-                                                                                    jpos_cmd_max_vel = {},
-                                                                                    jpos_cmd_max_vel_default = 10.0,
-                                                                                    jpos_cmd_max_acc = {},
-                                                                                    jpos_cmd_max_acc_default = 10.0),
-                                                            th_device = th_device)
     elif mode == "pybullet":
         from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
         from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
@@ -318,12 +303,26 @@ def loco_runner_builder(seed,
                                         max_actuator_forces=env_builder_args.get("max_joint_impedance_ctrl_torques", {}))
     elif mode == "mujoco":
         from adarl.adapters.MujocoJointImpedanceAdapter import MujocoJointImpedanceAdapter
-        from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
         ground_link = ("ground","ground_link")
+        robot_model = env_builder_args["robot_model"]
+        sim_dt = {"centauro" : 2/1024, "spot" : 0.004}.get(robot_model, 2/1024)
+        opt_override = {}
+        opt_override.update(env_builder_args.pop("mjx_opt_override", {}))
         adapter = MujocoJointImpedanceAdapter(  step_length_sec=stepLength_sec,
-                                                sim_step_dt=1/2048,
+                                                sim_step_dt=sim_dt,
                                                 output_th_device=th_device,
-                                                reference_filter_cutoff_frequency=20.0)
+                                                log_folder=run_folder,
+                                                show_gui=show_gui,
+                                                default_max_joint_impedance_ctrl_torque=env_builder_args.pop("default_max_joint_impedance_ctrl_torque", 100.0),
+                                                max_joint_impedance_ctrl_torques=env_builder_args.pop("max_joint_impedance_ctrl_torques", {}),
+                                                revolute_dof_frictionloss_override = env_builder_args.get("revolute_dof_frictionloss_override", 1.0),
+                                                revolute_dof_armature_override     = env_builder_args.get("revolute_dof_armature_override", 0.1),
+                                                revolute_dof_damping_override      = env_builder_args.get("revolute_dof_damping_override", 1.0),
+                                                safe_revolute_dof_armature         = env_builder_args.get("safe_revolute_dof_armature", 0.1),
+                                                opt_preset=env_builder_args.get("mjx_opt_preset", "faster"),
+                                                opt_override=opt_override,
+                                                reference_filter_cutoff_frequency=20.0,
+                                                reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none")
     else:
         print(f"Requested unknown adapter '{mode}'")
         exit(0)

@@ -456,9 +456,9 @@ def play(seed, folderName, run_id, args,
                 cmd_yawvel = 0.0
                 cmd_height = h
             else:
-                dir = np.random.rand()*2*3.14159
-                speed = 0 #np.random.rand()
-                cmd_xys = [np.cos(dir), np.sin(dir), speed]
+                direction = np.random.rand()*2*3.14159
+                speed = np.random.rand()
+                cmd_xys = [np.cos(direction), np.sin(direction), speed]
                 cmd_yawvel = 0 #(np.random.rand()*2-1)*0.5*(np.random.rand()>0.5)
                 cmd_height = h
             # options["goal_velocity_xy"] = [cmd_xys[0]*cmd_xys[2], cmd_xys[1]*cmd_xys[2]]
@@ -570,7 +570,8 @@ def play(seed, folderName, run_id, args,
                 record_time("step end")
                 full_step_wallduration = time.monotonic()-t0
                 set_disable_clear_recorded_times(False)
-                print_recorded_times()
+                print_recorded_times(False)
+                clear_recorded_times()
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
                            f" tstep={t1_step-t0_step:1.4f} \t"

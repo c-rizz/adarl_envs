@@ -196,8 +196,8 @@ def loco_runner_builder(seed,
         from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter
         ground_link = ("ground_plane","ground_link") # Should not be used
 
-        zmq_remote_ip = "10.24.4.100"
-        zmq_protocol = "tcp"
+        xbotzmq_remote_ip = env_builder_args.get("xbotzmq_remote_ip", "127.0.0.1")
+        zmq_protocol = env_builder_args.get("zmq_protocol", "tcp")
 
         adapter = VecZmqXbotAdapter(   adapter = ZmqXbotAdapter(model_name = robot_name,
                                                                 stepLength_sec = stepLength_sec,
@@ -214,7 +214,7 @@ def loco_runner_builder(seed,
                                                                 position_commands_damping = 10.0,
                                                                 is_simulated = False,
                                                                 walltime_factor = 1.0,
-                                                                remote_ip = zmq_remote_ip,
+                                                                remote_ip = xbotzmq_remote_ip,
                                                                 comm_protocol =zmq_protocol, # or 'ipc'
                                                                 ipc_pub_path ="/tmp/xbot2_zmq_pub.ipc",
                                                                 ipc_cmd_path ="/tmp/xbot2_zmq_cmd.ipc",

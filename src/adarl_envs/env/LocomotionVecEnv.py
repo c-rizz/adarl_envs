@@ -1750,24 +1750,35 @@ class LocomotionVecEnv(RobotVecEnv):
 
     @override
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
-        goal_abs_linvel_vec_xys, goal_height, goal_heading_yaws, goal_yaw_vels = self._sample_abs_goals()
-        if "goal_velocity_xy" in reset_options:
-            goal_velocity_vec_xy = th.as_tensor(reset_options["goal_velocity_xy"],device=self._configuration.th_device).view(self.num_envs,2)
-            goal_speeds = th.linalg.norm(goal_velocity_vec_xy, dim=-1)
-            goal_yaws = th.atan2(goal_velocity_vec_xy[:,1], goal_velocity_vec_xy[:,0])
-            goal_abs_linvel_vec_xys = th.stack([  th.cos(goal_yaws),
-                                                    th.sin(goal_yaws),
-                                                    goal_speeds],
-                                                dim=1)
-        if isinstance(self._adapter, BaseVecSimulationAdapter):
-            self.set_goal(  goal_abs_linvel_vec_xys=goal_abs_linvel_vec_xys, 
-                            goal_abs_height=goal_height,
-                            vec_mask=vec_mask,
-                            goal_heading_yaw=goal_heading_yaws,
-                            goal_yaw_vel=goal_yaw_vels)
+        sampled_goal_linvel_vec_xys, sampled_goal_height, goal_heading_yaws, sampled_goal_yaw_vels = self._sample_abs_goals()
+        if "goal_abs_linvel_vec_xys" in reset_options:
+            if "goal_rel_linvel_xys" in reset_options:
+                raise ValueError("Cannot specify both goal_abs_linvel_vec_xys and goal_rel_linvel_xys in reset options")
+            goal_abs_linvel_vec_xys = th.as_tensor(reset_options["goal_abs_linvel_vec_xys"],device=self._configuration.th_device).view(self.num_envs,3)
+            goal_rel_linvel_xys = None
+        elif "goal_rel_linvel_xys" in reset_options:
+            goal_rel_linvel_xys = th.as_tensor(reset_options["goal_rel_linvel_xys"],device=self._configuration.th_device).view(self.num_envs,3)
+            goal_abs_linvel_vec_xys = None
         else:
-            self.set_goal(goal_rel_linvel_xys=goal_abs_linvel_vec_xys,
-                        goal_abs_height=goal_height,
+            if isinstance(self._adapter, BaseVecSimulationAdapter):
+                goal_abs_linvel_vec_xys = sampled_goal_linvel_vec_xys
+                goal_rel_linvel_xys = None
+            else:
+                goal_abs_linvel_vec_xys = None
+                goal_rel_linvel_xys = sampled_goal_linvel_vec_xys
+
+        if "goal_abs_height" in reset_options:
+            goal_abs_height = th.as_tensor(reset_options["goal_abs_height"],device=self._configuration.th_device).view(self.num_envs)
+        else:
+            goal_abs_height = sampled_goal_height
+
+        if "goal_yaw_vels" in reset_options:
+            goal_yaw_vels = th.as_tensor(reset_options["goal_yaw_vels"],device=self._configuration.th_device).view(self.num_envs)
+        else:
+            goal_yaw_vels = sampled_goal_yaw_vels
+        self.set_goal(  goal_abs_linvel_vec_xys=goal_abs_linvel_vec_xys, 
+                        goal_rel_linvel_xys=goal_rel_linvel_xys,
+                        goal_abs_height=goal_abs_height,
                         vec_mask=vec_mask,
                         goal_heading_yaw=goal_heading_yaws,
                         goal_yaw_vel=goal_yaw_vels)
@@ -1791,7 +1802,7 @@ class LocomotionVecEnv(RobotVecEnv):
         
 
     def set_goal(self,  goal_abs_linvel_vec_xys : Sequence[tuple[float,float,float]] | tuple[float,float,float] | th.Tensor | None = None,
-                        goal_diff_linvel_speed_yaw : tuple[float,float] | th.Tensor | None = None,
+                        # goal_diff_linvel_speed_yaw : tuple[float,float] | th.Tensor | None = None,
                         goal_rel_linvel_xys : tuple[float,float,float] | th.Tensor | None = None,
                         goal_abs_height : float | th.Tensor | None = None,
                         goal_heading_yaw : float | th.Tensor | None = None,
@@ -1808,24 +1819,25 @@ class LocomotionVecEnv(RobotVecEnv):
             masked_assign(self._locomotion_episode_config.goal_abs_vel_vec_xys,
                           vec_mask,
                           goal_abs_linvel_vec_xys)
-        elif goal_diff_linvel_speed_yaw is not None:
-            if self._locomotion_episode_config.goal_abs_vel_vec_xys is None:
-                self._locomotion_episode_config.goal_abs_vel_vec_xys = self._thtens([1.0,0.0,0.0]).expand(self.num_envs,3)
-            self._locomotion_episode_config.goal_rel_vel_vec_xys = None
-            if isinstance(goal_diff_linvel_speed_yaw, Sequence):
-                goal_diff_linvel_speed_yaw = self._thtens(goal_diff_linvel_speed_yaw)
-            elif not isinstance(goal_diff_linvel_speed_yaw, th.Tensor):
-                raise RuntimeError(f"Unexpected type {type(goal_diff_linvel_speed_yaw)} for goal_velocity_diff_speed_yaw")
-            prev_goal_abs_vel_vec_xys = self._locomotion_episode_config.goal_abs_vel_vec_xys
-            curr_goal_speeds : th.Tensor = prev_goal_abs_vel_vec_xys[:,2]
-            curr_goal_yaws = th.atan2(prev_goal_abs_vel_vec_xys[:,1], prev_goal_abs_vel_vec_xys[:,0])
-            new_goal_speeds = curr_goal_speeds + goal_diff_linvel_speed_yaw[0]
-            new_goal_yaws = curr_goal_yaws + goal_diff_linvel_speed_yaw[1]
-            new_goal_dirs = th.stack([th.cos(new_goal_yaws), th.sin(new_goal_yaws)], dim = 1)    
-            new_goals_xys = th.cat([new_goal_dirs, new_goal_speeds.unsqueeze(1)], dim = 1)
-            masked_assign(self._locomotion_episode_config.goal_abs_vel_vec_xys,
-                          vec_mask,
-                          new_goals_xys)
+        # elif goal_diff_linvel_speed_yaw is not None:
+        #     raise NotImplementedError("goal_diff_linvel_speed_yaw has been disabled for now.")
+        #     if self._locomotion_episode_config.goal_abs_vel_vec_xys is None:
+        #         self._locomotion_episode_config.goal_abs_vel_vec_xys = self._thtens([1.0,0.0,0.0]).expand(self.num_envs,3)
+        #     self._locomotion_episode_config.goal_rel_vel_vec_xys = None
+        #     if isinstance(goal_diff_linvel_speed_yaw, Sequence):
+        #         goal_diff_linvel_speed_yaw = self._thtens(goal_diff_linvel_speed_yaw)
+        #     elif not isinstance(goal_diff_linvel_speed_yaw, th.Tensor):
+        #         raise RuntimeError(f"Unexpected type {type(goal_diff_linvel_speed_yaw)} for goal_velocity_diff_speed_yaw")
+        #     prev_goal_abs_vel_vec_xys = self._locomotion_episode_config.goal_abs_vel_vec_xys
+        #     curr_goal_speeds : th.Tensor = prev_goal_abs_vel_vec_xys[:,2]
+        #     curr_goal_yaws = th.atan2(prev_goal_abs_vel_vec_xys[:,1], prev_goal_abs_vel_vec_xys[:,0])
+        #     new_goal_speeds = curr_goal_speeds + goal_diff_linvel_speed_yaw[0]
+        #     new_goal_yaws = curr_goal_yaws + goal_diff_linvel_speed_yaw[1]
+        #     new_goal_dirs = th.stack([th.cos(new_goal_yaws), th.sin(new_goal_yaws)], dim = 1)    
+        #     new_goals_xys = th.cat([new_goal_dirs, new_goal_speeds.unsqueeze(1)], dim = 1)
+        #     masked_assign(self._locomotion_episode_config.goal_abs_vel_vec_xys,
+        #                   vec_mask,
+        #                   new_goals_xys)
         elif goal_rel_linvel_xys is not None:
             self._locomotion_episode_config.goal_rel_vel_vec_xys = self._thtens(goal_rel_linvel_xys).view(self.num_envs,3)
             self._locomotion_episode_config.goal_abs_vel_vec_xys = None

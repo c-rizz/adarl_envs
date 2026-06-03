@@ -16,7 +16,7 @@ import gymnasium as gym
 import os
 import torch as th
 import adarl.utils.session
-import adarl.utils.dbg.dbg_img as dbg_img 
+import adarl.utils.dbg.dbg_img as dbg_img
 from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
@@ -31,6 +31,7 @@ from ctypes.util import find_library
 import readline
 import math
 from rreal.algorithms.hardcoded_policies import FixedPolicy, SinPolicy, RandPolicy
+
 
 def get_home_action(env, robot : str, device):
     base_env = env.get_runner().get_base_env()
@@ -123,7 +124,7 @@ robot_heights = {   "kyon" : [0.47,0.47],
 
 
 def adarl_builder_and_args():
-    step_length_sec = 20/1024 
+    step_length_sec = 20/1024
     max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
     mode = args["mode"]
     env_device = th.device("cuda") if mode == "mjx" else th.device("cpu")
@@ -132,7 +133,7 @@ def adarl_builder_and_args():
     record = args["record"] or args["verbose_recording"]
     skip_optionals = not args["verbose_recording"]
     realworld = args["mode"] in ["xbot","xbot-zmq"]
-    
+
     r = 0.0 # randomization strength
     n = 1.0 # noise strength
     p = 1.0 # penalties strength
@@ -285,16 +286,17 @@ def adarl_builder_and_args():
         "goal_resampling_probability_per_sec" : 0.0,
         "walltime_factor" : args["rt_factor"],
         "record_whole_joint_trajectories" : False,
+        "xbotzmq_remote_ip" : args["xbotzmq_remote_ip"]
         # "mjx_opt_override" : {"noslip_iterations": 10, "impratio": 10.0, "iterations" : 20}
         })
     return named_loco_single_env_builder, env_builder_args, step_length_sec
 
 def pg_builder_and_args():
     from adarl_envs.experiments.playground_builder import playground_single_env_builder
-    
+
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
-    
+
     env_builder_args = {
         "video_save_freq" : 1,
         "record_video" : True,
@@ -324,10 +326,6 @@ def pg_builder_and_args():
 
 
 
-
-
-
-
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     if args["pg"]:
@@ -347,13 +345,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
 
 
-def play(seed, folderName, run_id, args, 
-         env_builder : EnvBuilderProtocol, 
-         env_builder_args : dict[str,Any], 
+def play(seed, folderName, run_id, args,
+         env_builder : EnvBuilderProtocol,
+         env_builder_args : dict[str,Any],
          step_length_sec : float, render : bool,
          robot : str,
          deterministic : bool):
-    
+
     ggLog.info(f"Starting run")
     if render:
         adarl.utils.dbg.dbg_img.helper.enable_web_dbg(True)
@@ -391,7 +389,7 @@ def play(seed, folderName, run_id, args,
                 equal, diffs = compare_dicts(env_builder_args, trained_env_builder_args)
                 if not equal:
                     ggLog.warn(f"Loaded model was trained with different env args: \n{diffs}")
-            except Exception as e: 
+            except Exception as e:
                 ggLog.warn(f"Could not compare env args with trained model: {type(e)}: {e}")
         elif isinstance(model, PPO):
             pass
@@ -411,7 +409,7 @@ def play(seed, folderName, run_id, args,
     durations = []
     avg10_dists = []
 
-    keyboard_listener : KeyboardListener = None
+    gamepad : "GamepadTeleop | None" = None
 
     if render:
         img = env.render()
@@ -432,13 +430,19 @@ def play(seed, folderName, run_id, args,
                         play = False
                         break
                     elif cmd == "interactive":
-                        print(f" Use WASD to move the goal, IJKL to move the camera, T to terminate.")
+                        print(  f" Gamepad teleop via joyzmq. Start a publisher first:\n"
+                                f"   joyzmq-keyboard  (keyboard)   or   joyzmq-joystick  (joystick)\n"
+                                f"   left stick:  move (direction + speed)\n"
+                                f"   right stick: yaw velocity (x) and height rate (y)\n"
+                                f"   d-pad: camera pitch/yaw,  LB/RB: camera zoom\n"
+                                f"   RS: stop,  RE: flip direction,  RN: terminate episode")
                         time.sleep(1)
                         interactive = True
                         options["max_ep_steps"] = 100_000
-                        options["goal_velocity_xy"] = [0.0, 0.0]
-                        keyboard_listener = KeyboardListener()
-                        cmd = 'c'   
+                        if gamepad is None:
+                            from joyzmq import GamepadTeleop  # lazy import: only needed for interactive teleop
+                            gamepad = GamepadTeleop(connect=args["gamepad_addr"])
+                        cmd = 'c'
                 if not play:
                     break
             else:
@@ -457,15 +461,19 @@ def play(seed, folderName, run_id, args,
                 cmd_height = h
             else:
                 direction = np.random.rand()*2*3.14159
-                speed = np.random.rand()
+                speed = 0.0 #np.random.rand()
                 cmd_xys = [np.cos(direction), np.sin(direction), speed]
                 cmd_yawvel = 0 #(np.random.rand()*2-1)*0.5*(np.random.rand()>0.5)
                 cmd_height = h
+            options["goal_rel_linvel_xys"] = tuple(cmd_xys)
+            options["goal_yaw_vel"] = cmd_yawvel
+            options["goal_abs_height"] = cmd_height
             # options["goal_velocity_xy"] = [cmd_xys[0]*cmd_xys[2], cmd_xys[1]*cmd_xys[2]]
             obs, info = env.reset(options = options)  #type: ignore
             ggLog.info(f"env resetted")
             # ggLog.info(f"ep_config = {info['ep_config']}")
             done = False
+            zero_all_commands = True
             ep_reward = 0
             step_count = 0
             step_wallduration = float("nan")
@@ -482,8 +490,7 @@ def play(seed, folderName, run_id, args,
 
             if isinstance(base_env, LocomotionVecEnv):
                 # base_env.set_cam_pose((1.583, 0.201, 2.149))
-                base_env.set_goal(
-                                    goal_rel_linvel_xys = tuple(cmd_xys),
+                base_env.set_goal(  goal_rel_linvel_xys = tuple(cmd_xys),
                                     goal_abs_height = cmd_height,
                                     goal_yaw_vel = cmd_yawvel,
                                     goal_heading_yaw = 0.0)
@@ -516,38 +523,47 @@ def play(seed, folderName, run_id, args,
                         f"terminated = {terminated}\n"+
                         f"truncated = {truncated}\n")
                 if interactive:
-                    cmd_angle = np.arctan2(cmd_xys[1],cmd_xys[0])
-                    if keyboard_listener.get_key_press_count("w")>0: cmd_xys[2] +=  0.05
-                    if keyboard_listener.get_key_press_count("s")>0: cmd_xys[2] += -0.05
-                    if keyboard_listener.get_key_press_count("a")>0: cmd_angle  +=  10*3.14159/180
-                    if keyboard_listener.get_key_press_count("d")>0: cmd_angle  += -10*3.14159/180
-                    if keyboard_listener.get_key_press_count("r")>0: cmd_height +=  0.005
-                    if keyboard_listener.get_key_press_count("f")>0: cmd_height += -0.005
-                    if keyboard_listener.get_key_press_count("q")>0: cmd_yawvel += 0.05
-                    if keyboard_listener.get_key_press_count("e")>0: cmd_yawvel += -0.05
-                    if keyboard_listener.get_key_press_count("z")>0: 
-                        cmd_xys[2] = 0.0
-                        cmd_yawvel = 0.0
+                    cmd_angle = np.arctan2(cmd_xys[1], cmd_xys[0])
+                    cam_dist_pitch_yaw_diff = [0.0, 0.0, 0.0]
+                    flip = False
+                    pad = gamepad.poll()
+                    if pad is not None:
+                        cmd_xy = (pad.lx, pad.ly)
+                        # left stick -> linear velocity command (direction + speed)
+                        speed = min(1.0, math.hypot(*cmd_xy)**2)*args["speed_scale"]
+                        cmd_angle = math.atan2(cmd_xy[1], cmd_xy[0])-90.0
+
+                        cmd_yawvel = -math.copysign(1,pad.rx)*pad.rx**2*args["speed_scale"]
+                        cmd_height += pad.ry**2 * 0.005
+
+                        cmd_xys[2] = speed
+                        # right stick -> yaw velocity (x) and height rate (y)
+                        # d-pad -> camera pitch/yaw,  bumpers -> camera distance
+                        if pad.LN: cam_dist_pitch_yaw_diff[1] =  5*3.14159/180
+                        if pad.LS: cam_dist_pitch_yaw_diff[1] = -5*3.14159/180
+                        if pad.LW: cam_dist_pitch_yaw_diff[2] = -5*3.14159/180
+                        if pad.LE: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
+                        if pad.lb: cam_dist_pitch_yaw_diff[0] = -0.1
+                        if pad.rb: cam_dist_pitch_yaw_diff[0] =  0.1
+                        # discrete actions, only on the rising edge
+                        if gamepad.pressed_edge("RS"):
+                            zero_all_commands = not zero_all_commands
+                        if zero_all_commands:
+                            cmd_xys[2] = 0.0
+                            cmd_yawvel = 0.0
+                        flip = gamepad.pressed_edge("RE")
+                        if gamepad.pressed_edge("RN"):
+                            truncated = True
                     cmd_xys[0] = np.cos(cmd_angle)
                     cmd_xys[1] = np.sin(cmd_angle)
                     cmd_height = np.clip(cmd_height, minmax_height[0], minmax_height[1])
-                    flip = keyboard_listener.get_key_press_count("x")>0
-                    cam_dist_pitch_yaw_diff = [0.0,0.0,0.0]
-                    if keyboard_listener.get_key_press_count("u")>0: cam_dist_pitch_yaw_diff[0] = -0.1
-                    if keyboard_listener.get_key_press_count("o")>0: cam_dist_pitch_yaw_diff[0] =  0.1
-                    if keyboard_listener.get_key_press_count("i")>0: cam_dist_pitch_yaw_diff[1] =  5*3.14159/180
-                    if keyboard_listener.get_key_press_count("k")>0: cam_dist_pitch_yaw_diff[1] = -5*3.14159/180
-                    if keyboard_listener.get_key_press_count("j")>0: cam_dist_pitch_yaw_diff[2] = -5*3.14159/180
-                    if keyboard_listener.get_key_press_count("l")>0: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
-
-                    if keyboard_listener.get_key_press_count("t")>0: truncated = True
                     if flip:
-                        cmd_xys = [-cmd_xys[0],-cmd_xys[1],-cmd_xys[2]]
-                    keyboard_listener.reset_key_press_counters()
+                        cmd_xys = [-cmd_xys[0], -cmd_xys[1], -cmd_xys[2]]
 
                     if isinstance(base_env, LocomotionVecEnv):
                         base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
-                        base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys), goal_abs_height = cmd_height,
+                        base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys),
+                                          goal_abs_height = cmd_height,
                                           goal_yaw_vel = cmd_yawvel,
                                           goal_heading_yaw = 0.0)
                 if isinstance(base_env, LocomotionVecEnv):
@@ -570,7 +586,7 @@ def play(seed, folderName, run_id, args,
                 record_time("step end")
                 full_step_wallduration = time.monotonic()-t0
                 set_disable_clear_recorded_times(False)
-                print_recorded_times(False)
+                # print_recorded_times(False)
                 clear_recorded_times()
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"
@@ -591,11 +607,9 @@ def play(seed, folderName, run_id, args,
                     f"Wall duration =   {ep_wall_duration:.2f}s\n"
                     f"Sim  duration =   {step_count*step_length_sec:.2f}s\n"
                     f"Realtime factor = {step_count*step_length_sec/ep_wall_duration:.2f}\n")
-            if interactive:
-                keyboard_listener.close()
     finally:
-        if keyboard_listener is not None:
-            keyboard_listener.close()
+        if gamepad is not None:
+            gamepad.close()
     rewards = np.array(rewards)
     durations = np.array(durations)
     # avg10_dists = np.array(avg10_dists)
@@ -634,11 +648,14 @@ if __name__ == "__main__":
     ap.add_argument("--pg", default=False, action='store_true', help="Use playground env")
     ap.add_argument("--verbose-recording", default=False, action='store_true', help="Print detailed infos about the env step timings and outputs")
     ap.add_argument("--agent-device", default="cpu", type=str, help="Device to load the model on (cpu or cuda)")
+    ap.add_argument("--xbotzmq-remote-ip", default="127.0.0.1", type=str, help="If in xbot-zmq mode, the ip to connect to for receiving observations and sending actions")
+    ap.add_argument("--gamepad-addr", default="tcp://localhost:5666", type=str, help="joyzmq gamepad publisher address to connect to for interactive teleop")
+    ap.add_argument("--speed-scale", default=0.5, type=float, help="Scale the linvel speed command by this factor")
 
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())
 
-    
+
     launchRun(  seedsNum=1,
                 seedsOffset=args["seedsOffset"],
                 runFunction=runFunction,

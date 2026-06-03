@@ -33,7 +33,7 @@ xbotcore_plugins:
 
     ros_control: {thread: nrt_main, type: ros2_control, params: {autostart: {type: bool, value: true}}}
     
-    zmq_io: {type: zmq_io, thread: nrt_main, params: {autostart: true}}
+    zmq_io: {type: zmq_io, thread: nrt_main, params: {autostart: true, protocol: tcp}}
     
     # Used for Horizon 
     # ros_io: {thread: nrt_main, type: ros2_io, params: {joint_state_queue_depth: {type: int, value: 1}}}

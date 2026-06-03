@@ -2335,7 +2335,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_body_rel_linacc_xyz : th.Tensor,
                                                     vec_time_from_start : th.Tensor) -> dict[str, dict[Any, th.Tensor] | th.Tensor]:
         is_resetting = (vec_step_count == -1).view((self.num_envs,))
-        has_settled = (vec_step_count >= 10).view((self.num_envs,))
+        has_settled = (vec_step_count >= -10).view((self.num_envs,))
         # prev_vec_time_from_start = prev_vec_internal_state[:,self.INTERNAL_FIELDS.SIM_TIME]
         # vec_prev_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")

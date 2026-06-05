@@ -1572,9 +1572,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_mask = self._all_envs
 
         if not isinstance_noimport(self._adapter, ("BaseVecSimulationAdapter")):
+            gc.enable() # enable garbage collection
             gc.unfreeze() # unfreezes whatevwer is already frozen
             gc.collect(2) # collects whatever nedds to be collected
             gc.freeze() # freeze currently allocated objects, so it is ignored in future collections, to make the fast
+            gc.disable() # disable automatic garbage collection
 
 
         self._set_current_ep_config(reset_options = options, vec_mask=vec_mask)

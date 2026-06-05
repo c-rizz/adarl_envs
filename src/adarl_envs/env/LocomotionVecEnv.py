@@ -34,7 +34,10 @@ disable_compile = os.environ.get("DISABLE_ENV_TH_COMPILE", False)
 class LocomotionVecEnvInitArgs():
     robot_init_args : RobotVecEnvInitArgs
     disallowed_contact_links : list[tuple[str,str]]
-    feet_links : list[tuple[str,str]]
+    feet_contact_links : list[tuple[str,str]]
+    """ Links representing the contact geometry of the feet, it is used for contact checking"""
+    feet_bottom_links : list[tuple[str,str]]
+    """ Links representing the contact point of the feet, should be on the bottom of the foot, it is used for position-related logic"""
     goal_height_minmax : tuple[float,float]
     goal_speed_minmax : tuple[float, float]
     goal_yaw_minmax : tuple[float, float]
@@ -65,6 +68,7 @@ class LocomotionVecEnvInitArgs():
     reward_joint_position_limit_weight : float
     reward_joint_position_weight : float
     reward_joint_stand_position_weight : float
+    reward_joint_stand_velocity_weight : float
     reward_scale : float
     reward_joint_sensed_effort_weight : float
     reward_safety_triggered_weight : float
@@ -138,6 +142,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_weight_failure : th.Tensor
         reward_weight_joint_sensed_effort : th.Tensor
         reward_weight_joint_stand_position : th.Tensor
+        reward_weight_joint_stand_velocity : th.Tensor
         reward_weight_safety_triggered : th.Tensor
         reward_weight_slip : th.Tensor
         reward_weight_joint_velref : th.Tensor
@@ -155,7 +160,8 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_vel_goal_relative_width : th.Tensor
         reward_vel_goal_relative_width_offset : th.Tensor
         reward_vel_goal_absolute_width : th.Tensor
-        feet_links : list[tuple[str,str]]
+        feet_contact_links : list[tuple[str,str]]
+        feet_bottom_links : list[tuple[str,str]]
         heightmap_resolution_xy : tuple[int,int]
         min_good_step_air_duration : float
         max_good_step_duration : float
@@ -241,6 +247,7 @@ class LocomotionVecEnv(RobotVecEnv):
         joint_power : th.Tensor
         joint_sensed_effort : th.Tensor
         joint_stand_position : th.Tensor
+        joint_stand_velocity : th.Tensor
         joint_torque : th.Tensor
         joint_torque_limit : th.Tensor
         joint_torque_refs : th.Tensor
@@ -307,6 +314,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                 "JOINT_POWER",
                                                 "JOINT_SENSED_EFFORT",
                                                 "JOINT_STAND_POSITION",
+                                                "JOINT_STAND_VELOCITY",
                                                 "JOINT_TORQUE",
                                                 "JOINT_TORQUEDIFF",
                                                 "JOINT_TORQUE_LIMIT",
@@ -373,6 +381,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_weight_joint_power =             self._thtens(init_args.reward_joint_power_weight) ,
                         reward_weight_joint_sensed_effort =     self._thtens(init_args.reward_joint_sensed_effort_weight),
                         reward_weight_joint_stand_position =    self._thtens(init_args.reward_joint_stand_position_weight),
+                        reward_weight_joint_stand_velocity =    self._thtens(init_args.reward_joint_stand_velocity_weight),
                         reward_weight_joint_torque =            self._distr_to_tensor(init_args.reward_joint_cmdtorque_weight),
                         reward_weight_joint_torque_limit =      self._thtens(init_args.reward_joint_torque_limit_weight) ,
                         reward_weight_joint_torquediff =        self._thtens(init_args.reward_joint_torquediff_weight),
@@ -402,7 +411,8 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_vel_goal_relative_width = self._thtens(1.5),
                         reward_vel_goal_absolute_width = self._thtens(0.5),
                         reward_vel_goal_relative_width_offset = self._thtens(0.1),
-                        feet_links = init_args.feet_links,
+                        feet_contact_links = init_args.feet_contact_links,
+                        feet_bottom_links = init_args.feet_bottom_links,
                         heightmap_resolution_xy = (init_args.heightmap_resolution,init_args.heightmap_resolution),
                         min_good_step_air_duration=init_args.min_good_step_duration,
                         max_good_step_duration=init_args.max_good_step_duration,
@@ -464,6 +474,7 @@ class LocomotionVecEnv(RobotVecEnv):
             safety_triggered =      self._thtens([float("-inf"), 0            ]),
             slip =                  self._thtens([float("-inf"), 0            ]),
             joint_stand_position =  self._thtens([float("-inf"), 0            ]),
+            joint_stand_velocity =  self._thtens([float("-inf"), 0            ]),
             joint_torque =          self._thtens([float("-inf"), 0            ]),
             joint_torque_limit =    self._thtens([float("-inf"), 0            ]),
             joint_torque_refs =     self._thtens([float("-inf"), 0            ]),
@@ -535,13 +546,13 @@ class LocomotionVecEnv(RobotVecEnv):
             from adarl.adapters.MjxAdapter import MjxAdapter
             mjx_adapter : MjxAdapter = self._adapter #type: ignore
             # Create collision pairs: each foot vs ground
-            feet_ground_collision_pairs = [(foot, self._configuration.ground_link) for foot in self._loco_conf.feet_links]
+            feet_ground_collision_pairs = [(foot, self._configuration.ground_link) for foot in self._loco_conf.feet_contact_links]
             mjx_adapter.set_monitored_collision_pairs(feet_ground_collision_pairs)
         super()._build()
         # self._feet_link_ids = self._adapter.get_links_ids(self._loco_conf.feet_links)
         # self._ground_link_id = self._adapter.get_links_ids([self._configuration.ground_link])
-        self._adapter.set_monitored_links(self._adapter.get_monitored_links() + self._loco_conf.feet_links)
-        self._feet_and_body_link_ids = self._adapter.get_monitored_links_ids(self._loco_conf.feet_links + [self._configuration.main_body_link])
+        self._adapter.set_monitored_links(self._adapter.get_monitored_links() + self._loco_conf.feet_bottom_links)
+        self._feet_and_body_link_ids = self._adapter.get_monitored_links_ids(self._loco_conf.feet_bottom_links + [self._configuration.main_body_link])
         
 
 
@@ -618,7 +629,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                             obs_defs={"base":{"observable":True,"concatenate":False,"noise":None},
                                                                       "privileged":{"observable":True,"concatenate":False,"noise":None}})
         
-        feet_num = len(self._loco_conf.feet_links)
+        feet_num = len(self._loco_conf.feet_contact_links)
         self._feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET_FIELDS],
                                                     fields_minmax={ 
                                                         self.FEET_FIELDS.FEET_AIR_DURATIONS     : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
@@ -633,7 +644,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                         self.FEET_FIELDS.PEAK_POS_Z : th.as_tensor([[-2.0],[2.0]]).expand(2,feet_num)},
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
-                                                    field_size=(len(self._loco_conf.feet_links),),
+                                                    field_size=(len(self._loco_conf.feet_contact_links),),
                                                     vec_size=adapter.vec_size(),
                                                     history_length=1,
                                                     observation_definitions=
@@ -685,13 +696,23 @@ class LocomotionVecEnv(RobotVecEnv):
             feet_abs_pos_vec_foot_xyz = lstates[:,:nfeet,0:3] # (nenvs,nfeet,3)
             feet_rel_pos_vec_foot_xyz = th_quat_rotate(feet_abs_pos_vec_foot_xyz - body_pos_vec_xyz,
                                                    th_quat_conj(borient_quat_vec_xyzw).unsqueeze(1).expand(-1,nfeet,-1)) # (nenvs,nfeet,3)
+            
+
+
+            jpos = super_adapter_data[1][0,:,0]
+            self._robot_model.set_joint_pose_by_names({jn[1]:jpos[i] for i,jn in enumerate(self._configuration.joints_agent_controlled)} )
+            fk_feet_poses_dict = self._robot_model.get_frame_poses_xyzxyzw(self._configuration.main_body_link[1],[l[1] for l in self._loco_conf.feet_bottom_links])
+            fk_feet_positions_xyz = self._thtens([fp[:3] for fp in fk_feet_poses_dict.values()])
+            fk_feet_rel_pos_vec_foot_xyz = fk_feet_positions_xyz.unsqueeze(0)
+            ggLog.info(f"Feet abs pos from adapter = \n{feet_rel_pos_vec_foot_xyz}")
+            ggLog.info(f"Feet rel pos from adapter FK = \n{fk_feet_rel_pos_vec_foot_xyz}")
         else:
             if self.num_envs == 1:
                 jpos = super_adapter_data[1][0,:,0]
                 self._robot_model.set_joint_pose_by_names({jn[1]:jpos[i] for i,jn in enumerate(self._configuration.joints_agent_controlled)} )
-                feet_poses_dict = self._robot_model.get_frame_poses_xyzxyzw(self._configuration.main_body_link[1],[l[1] for l in self._loco_conf.feet_links])
-                feet_positions_xyz = self._thtens([fp[:3] for fp in feet_poses_dict.values()])
-                feet_rel_pos_vec_foot_xyz = feet_positions_xyz.unsqueeze(0)
+                fk_feet_poses_dict = self._robot_model.get_frame_poses_xyzxyzw(self._configuration.main_body_link[1],[l[1] for l in self._loco_conf.feet_bottom_links])
+                fk_feet_positions_xyz = self._thtens([fp[:3] for fp in fk_feet_poses_dict.values()])
+                feet_rel_pos_vec_foot_xyz = fk_feet_positions_xyz.unsqueeze(0)
             else:
                 raise NotImplementedError("Feet positions are only implemented for single env when not using a simulation adapter")
             feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
@@ -890,6 +911,7 @@ class LocomotionVecEnv(RobotVecEnv):
             self.REWARD_WEIGHTS_FIELDS.JOINT_POWER            : self._loco_conf.reward_weight_joint_power.expand(nenvs,1),
             self.REWARD_WEIGHTS_FIELDS.JOINT_SENSED_EFFORT    : self._loco_conf.reward_weight_joint_sensed_effort.expand(nenvs,1),
             self.REWARD_WEIGHTS_FIELDS.JOINT_STAND_POSITION   : self._loco_conf.reward_weight_joint_stand_position.expand(nenvs,1),
+            self.REWARD_WEIGHTS_FIELDS.JOINT_STAND_VELOCITY   : self._loco_conf.reward_weight_joint_stand_velocity.expand(nenvs,1),
             self.REWARD_WEIGHTS_FIELDS.JOINT_TORQUE           : self._locomotion_episode_config.reward_weight_torque.expand(nenvs,1),
             self.REWARD_WEIGHTS_FIELDS.JOINT_TORQUEDIFF       : self._loco_conf.reward_weight_joint_torquediff.expand(nenvs,1),
             self.REWARD_WEIGHTS_FIELDS.JOINT_TORQUE_LIMIT     : self._loco_conf.reward_weight_joint_torque_limit.expand(nenvs,1),
@@ -933,7 +955,7 @@ class LocomotionVecEnv(RobotVecEnv):
             self.LOCOMOTION_FIELDS.COLLISON_COUNT :collision_count_vec,
             self.LOCOMOTION_FIELDS.CRASHED : crashed_vec}
         
-        nenv_nfeet = (nenvs,len(self._loco_conf.feet_links))
+        nenv_nfeet = (nenvs,len(self._loco_conf.feet_contact_links))
         if isinstance_noimport(self._adapter, "MjxAdapter"):
             prev_feet_air_durations_vec_foot_t = prev_feet_state[:,self.FEET_FIELDS.FEET_AIR_DURATIONS]
             prev_feet_ground_durations_vec_foot_t = prev_feet_state[:,self.FEET_FIELDS.FEET_GROUND_DURATIONS]
@@ -1308,10 +1330,12 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_posref_acc       = norm_penalty(posref_acc/1_000,  norm=4, power=1.0, squash_max=2.0, squash_smoothness=2.0)
         
 
-        # ---------------- STAND JOINT_POSITION REWARD ----------------
+        # ---------------- STAND REWARDS -------------------
         
         reward_stand_position   = joint_penalty_reward(norm_poshomingdiff,    max_rew=max_rew, exponent=1.0)*(th.logical_not(should_be_moving.view((self.num_envs,))))
-        
+        reward_stand_joint_velocity = joint_penalty_reward(norm_velocities,   max_rew=max_rew, exponent=2.0)*(th.logical_not(should_be_moving.view((self.num_envs,))))
+
+
         # ---------------- TRACKING REWARDS ----------------
         
         # ---- Height ----
@@ -1461,6 +1485,7 @@ class LocomotionVecEnv(RobotVecEnv):
             joint_power = reward_power,
             joint_sensed_effort = reward_sensed_effort,
             joint_stand_position = reward_stand_position,
+            joint_stand_velocity = reward_stand_joint_velocity,
             joint_torque = reward_cmdtorque,
             joint_torque_limit = reward_torque_limit,
             joint_torque_refs = reward_torque_refs,

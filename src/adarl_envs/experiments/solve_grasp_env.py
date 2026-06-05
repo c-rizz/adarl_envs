@@ -6,7 +6,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import copy
     import torch as th
     from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams
-    from adarl_envs.experiments.centgrasp_builder import centgrasp_vecenv_builder
+    from adarl_envs.experiments.grasp_builder import centgrasp_vecenv_builder
     import os
     import math
 
@@ -108,7 +108,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "robot_model" : "centauro",
+        "robot_model" : args["robot"],
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : True if algo=="sac" else False,
         "stepLength_sec" : step_length_sec,
@@ -336,7 +336,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--algorithm", default="sac", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
-    # ap.add_argument("--robot", default="quad", type=str, help="Robot to be used ('quad'/'kyon'/'centauro')")
+    ap.add_argument("--robot", default="centauro", type=str, help="Robot to be used ('centauro'/'franka')")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

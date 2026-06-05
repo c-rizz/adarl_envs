@@ -412,7 +412,8 @@ def loco_runner_builder(seed,
                                     minimal_infos=env_builder_args.pop("minimal_infos")),
                                 desired_foot_clearance = env_builder_args.pop("desired_foot_clearance"),
                                 disallowed_contact_links = env_builder_args.pop("disallowed_contact_links"),
-                                feet_links=env_builder_args.pop("feet_links"),
+                                feet_contact_links=env_builder_args.pop("feet_contact_links"),
+                                feet_bottom_links=env_builder_args.pop("feet_bottom_links"),
                                 goal_height_minmax=env_builder_args.pop("goal_height_minmax"),
                                 goal_resampling_probability_per_sec= env_builder_args.pop("goal_resampling_probability_per_sec"),
                                 goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
@@ -445,6 +446,7 @@ def loco_runner_builder(seed,
                                 reward_joint_power_weight = env_builder_args.pop("reward_joint_power_weight"),
                                 reward_joint_sensed_effort_weight = env_builder_args.pop("reward_joint_sensed_effort_weight"),
                                 reward_joint_stand_position_weight = env_builder_args.pop("reward_joint_stand_position_weight"),
+                                reward_joint_stand_velocity_weight = env_builder_args.pop("reward_joint_stand_velocity_weight"),
                                 reward_joint_torque_limit_weight = env_builder_args.pop("reward_joint_torque_limit_weight"),
                                 reward_joint_torquediff_weight = env_builder_args.pop("reward_joint_torquediff_weight"),
                                 reward_joint_torqueref_weight = env_builder_args.pop("reward_joint_torqueref_weight"),
@@ -566,6 +568,10 @@ def get_quad_args():
                 ("quad","knee_joint_back_right") : 1.8,
                 ("quad","knee_joint_front_left") : 1.8,
                 ("quad","knee_joint_front_right") : 1.8}
+    feet_links = [  ('quad', 'foot_center_link_back_left'),
+                    ('quad', 'foot_center_link_back_right'),
+                    ('quad', 'foot_center_link_front_left'),
+                    ('quad', 'foot_center_link_front_right')]
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("adarl_envs","models/quad_simple.urdf.xacro"),
             "model_kwargs" : {  "use_cylinders" : "false",
                                 "all_collisions" : "false"},
@@ -596,10 +602,8 @@ def get_quad_args():
                                             (('quad', 'foot_center_link_back_right'),[('ground','ground_link')]),
                                             (('quad', 'foot_center_link_front_left'),[('ground','ground_link')]),
                                             (('quad', 'foot_center_link_front_right'),[('ground','ground_link')])],
-            "feet_links" : [('quad', 'foot_center_link_back_left'),
-                            ('quad', 'foot_center_link_back_right'),
-                            ('quad', 'foot_center_link_front_left'),
-                            ('quad', 'foot_center_link_front_right')]
+            "feet_contact_links" : feet_links,
+            "feet_bottom_links" : feet_links
             }
 robot_args_registry["quad"] = get_quad_args
 
@@ -657,6 +661,10 @@ def get_kyon_args(enable_arms : bool = False,):
     format = "xacro"
     # file = adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_mjx/kyon_mjx.xml")
     # format = "mjcf"
+    feet_links  = [ ('kyon', 'contact_1'),
+                    ('kyon', 'contact_2'),
+                    ('kyon', 'contact_3'),
+                    ('kyon', 'contact_4')],
     return {"model_file" : file,
             "robot_description_format" : format,
             "model_kwargs" : {"upper_body" : f"{enable_arms}",
@@ -691,10 +699,8 @@ def get_kyon_args(enable_arms : bool = False,):
                                             (('kyon', 'contact_2'),[('ground','ground_link')]),
                                             (('kyon', 'contact_3'),[('ground','ground_link')]),
                                             (('kyon', 'contact_4'),[('ground','ground_link')])],
-            "feet_links" : [('kyon', 'contact_1'),
-                            ('kyon', 'contact_2'),
-                            ('kyon', 'contact_3'),
-                            ('kyon', 'contact_4')],
+            "feet_contact_links" : feet_links,
+            "feet_bottom_links" : feet_links,
             "safe_stiffness" : 500.0,
             "safe_damping" : 20.0,
             "default_max_joint_impedance_ctrl_torque" : 150.0,
@@ -780,6 +786,10 @@ def get_go1_args():
     go1_string = set_asset_texture_paths(raw_model_string,
                             menagerie_go1_assets_folder,
                             menagerie_go1_assets_folder)
+    feet_links = [  (rname, 'FL'),
+                    (rname, 'FR'),
+                    (rname, 'RL'),
+                    (rname, 'RR')]
     ggLog.info(f"Using go1 model string: \n{go1_string}")
     return {"robot_description_string" : go1_string,
             "robot_description_format" : "mjcf",
@@ -819,10 +829,8 @@ def get_go1_args():
                                                     (rname,"RR_calf_joint") :  max_calf_torque,
                                                     (rname,"FL_calf_joint") :  max_calf_torque,
                                                     (rname,"FR_calf_joint") :  max_calf_torque},
-            "feet_links" : [(rname, 'FL'),
-                            (rname, 'FR'),
-                            (rname, 'RL'),
-                            (rname, 'RR')],
+            "feet_contact_links" : feet_links,
+            "feet_bottom_links" : feet_links,
             "safe_stiffness" : 50.0,
             "safe_damping" : 2.5
         }
@@ -902,6 +910,10 @@ def get_spot_args():
     spot_string = set_asset_texture_paths(raw_model_string,
                             menagerie_spot_assets_folder,
                             menagerie_spot_assets_folder)
+    feet_links = [  (rname, 'fl_lleg'),
+                    (rname, 'fr_lleg'),
+                    (rname, 'hl_lleg'),
+                    (rname, 'hr_lleg')]
     ggLog.info(f"Using spot model string: \n{spot_string}")
     return {"robot_description_string" : spot_string,
             "robot_description_format" : "mjcf",
@@ -942,10 +954,8 @@ def get_spot_args():
                                                     (rname,"hr_kn") :  max_knee_torque,
                                                     (rname,"hl_kn") :  max_knee_torque},
             "default_max_joint_impedance_ctrl_torque" : 100.0,
-            "feet_links" : [(rname, 'fl_lleg'),
-                            (rname, 'fr_lleg'),
-                            (rname, 'hl_lleg'),
-                            (rname, 'hr_lleg')],
+            "feet_links" : feet_links,
+            "feet_bottom_links" : feet_links,
             "safe_stiffness" : 300.0,
             "safe_damping" : 20.0,
             "mjx_opt_override" : {"impratio" : 1.0,
@@ -1057,6 +1067,16 @@ def get_centauro_args(control_arms=False):
     if control_arms:
         controlled_joints += arms
 
+    use_contact_lnks = True
+    feet_bottom_links = [   ('centauro', 'wheel_contact_1'),
+                            ('centauro', 'wheel_contact_2'),
+                            ('centauro', 'wheel_contact_3'),
+                            ('centauro', 'wheel_contact_4')]
+    feet_contact_links = [  ('centauro', 'wheel_1'),
+                            ('centauro', 'wheel_2'),
+                            ('centauro', 'wheel_3'),
+                            ('centauro', 'wheel_4')]
+
     j_vel_ctrl_lim = 7.0
     j_eff_ctrl_lim_leg_a = 200.0
     j_eff_ctrl_lim_leg_b = 100.0
@@ -1084,7 +1104,7 @@ def get_centauro_args(control_arms=False):
             "model_kwargs" : {  "realsense":"false",
                                 "velodyne" :"false",
                                 "floating_joint":"true",
-                                "small_sphere_wheel_collision":"true"
+                                "sphere_wheel_collision":use_contact_lnks
                                 },
             "robot_description_format" : "xacro",
             "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf")},
@@ -1112,14 +1132,9 @@ def get_centauro_args(control_arms=False):
             "control_limits_minmax_pve" : {k:th.as_tensor(
                                              [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lim, -j_eff_ctrl_lims[k]],
                                               [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lim,  j_eff_ctrl_lims[k]]]) for k in homing.keys()},            
-            "enable_link_collisions" : [    (('centauro', 'wheel_contact_1'),[('ground','ground_link')]),
-                                            (('centauro', 'wheel_contact_2'),[('ground','ground_link')]),
-                                            (('centauro', 'wheel_contact_3'),[('ground','ground_link')]),
-                                            (('centauro', 'wheel_contact_4'),[('ground','ground_link')])],
-            "feet_links" : [('centauro', 'wheel_contact_1'),
-                            ('centauro', 'wheel_contact_2'),
-                            ('centauro', 'wheel_contact_3'),
-                            ('centauro', 'wheel_contact_4')],
+            "enable_link_collisions" : [(fl,[('ground','ground_link')]) for fl in feet_contact_links],
+            "feet_contact_links" : feet_contact_links,
+            "feet_bottom_links" : feet_bottom_links,
             "safe_stiffness" : 600.0,
             "safe_damping" : 20.0,
             "mjx_opt_preset" : "faster",

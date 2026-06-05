@@ -597,14 +597,26 @@ class GraspVecEnv(RobotVecEnv):
         else:            
             cam_file = "models/simple_camera.sdf.xacro"
         if not hasattr(self,"_head_camera"):
-            self._table_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
-                                            name=self._head_camera_name,
-                                            pose=None,
-                                            format="sdf.xacro",
-                                            kwargs={"camera_width":self._grasping_conf.camera_resolution_hw[0],
-                                                    "camera_height":self._grasping_conf.camera_resolution_hw[1],
-                                                    "frame_rate":1/self._intendedStepLength_sec,
-                                                    "camera_name": self._head_camera_name},
-                                            attachment_link=("centauro","D435_head_camera_link"))
-        spawn_defs.append(self._table_spawn_def)
+            if self._configuration.robot_name == "centauro":
+                self._cam_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
+                                                name=self._head_camera_name,
+                                                pose=None,
+                                                format="sdf.xacro",
+                                                kwargs={"camera_width":self._grasping_conf.camera_resolution_hw[0],
+                                                        "camera_height":self._grasping_conf.camera_resolution_hw[1],
+                                                        "frame_rate":1/self._intendedStepLength_sec,
+                                                        "camera_name": self._head_camera_name},
+                                                attachment_link=("centauro","D435_head_camera_link"))
+            else:
+                self._cam_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
+                                                name=self._head_camera_name,
+                                                pose=None,
+                                                format="sdf.xacro",
+                                                kwargs={"camera_width":self._grasping_conf.camera_resolution_hw[0],
+                                                        "camera_height":self._grasping_conf.camera_resolution_hw[1],
+                                                        "frame_rate":1/self._intendedStepLength_sec,
+                                                        "camera_name": self._head_camera_name,
+                                                        "position_xyz": "1.0 0 1.5",
+                                                        "orientation_wxyz": "0.707 0 0.707 0"},)
+        spawn_defs.append(self._cam_spawn_def)
         return spawn_defs

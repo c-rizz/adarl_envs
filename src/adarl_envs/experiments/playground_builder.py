@@ -119,7 +119,7 @@ def loco_mujoco_playground_runner_builder(seed,
         env_name, config=env_cfg, config_overrides=env_cfg_overrides
     )
 
-    from adarl.adapters.MjxAdapter import print_mj_model
+    from adarl.adapters.mujoco_utils import print_mj_model
     os.makedirs(run_folder, exist_ok=True)
     print_mj_model(raw_env.mj_model, full_dump=True, file=run_folder+"/mj_model_full.txt")
 

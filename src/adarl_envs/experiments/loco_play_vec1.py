@@ -193,7 +193,7 @@ def adarl_builder_and_args():
         "randomized_gains_damping_ratio_epstd"       : 0.0*r,
         "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
-        "randomized_reference_filter_distribution" : ("uniform", (50.0, 50.0)),
+        "randomized_reference_filter_distribution" : ("uniform", (30.0, 30.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
         "reward_superweight_joint_penalties" : 1.0,
@@ -225,6 +225,7 @@ def adarl_builder_and_args():
         "reward_safety_triggered_weight" :    0.5,
         "reward_slip_weight" :                1.0,
         "reward_joint_stand_position_weight" :      5.0,
+        "reward_joint_stand_velocity_weight" :      1.0,
         "reward_joint_torque_limit_weight" :        eps,
         "reward_joint_torque_weight" :              0.0001*p,
         "reward_joint_torquediff_weight" :          0.0001*p,
@@ -279,7 +280,7 @@ def adarl_builder_and_args():
         "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
         "randomized_dof_armature_ratios" : 0.0*r,
-        "randomized_reference_filter_distribution" : ("uniform", (50.0, 50.0)),
+        "randomized_reference_filter_distribution" : ("uniform", (30.0, 30.0)),
         "impulse_probability_per_sec" : 0.0,
         "show_gui" : args["gui"],
         "just_health_reward" : realworld,
@@ -465,6 +466,10 @@ def play(seed, folderName, run_id, args,
                 cmd_xys = [np.cos(direction), np.sin(direction), speed]
                 cmd_yawvel = 0 #(np.random.rand()*2-1)*0.5*(np.random.rand()>0.5)
                 cmd_height = h
+            cmd_xys[2] = cmd_xys[2]*args["speed_scale"]
+            if cmd_xys[2] == 0.0:
+                cmd_xys[0] = 1.0
+                cmd_xys[1] = 0.0
             options["goal_rel_linvel_xys"] = tuple(cmd_xys)
             options["goal_yaw_vel"] = cmd_yawvel
             options["goal_abs_height"] = cmd_height
@@ -536,7 +541,6 @@ def play(seed, folderName, run_id, args,
                         cmd_yawvel = -math.copysign(1,pad.rx)*pad.rx**2*args["speed_scale"]
                         cmd_height += pad.ry**2 * 0.005
 
-                        cmd_xys[2] = speed
                         # right stick -> yaw velocity (x) and height rate (y)
                         # d-pad -> camera pitch/yaw,  bumpers -> camera distance
                         if pad.LN: cam_dist_pitch_yaw_diff[1] =  5*3.14159/180
@@ -549,19 +553,24 @@ def play(seed, folderName, run_id, args,
                         if gamepad.pressed_edge("RS"):
                             zero_all_commands = not zero_all_commands
                         if zero_all_commands:
-                            cmd_xys[2] = 0.0
+                            speed = 0.0
                             cmd_yawvel = 0.0
                         flip = gamepad.pressed_edge("RE")
                         if gamepad.pressed_edge("RN"):
                             truncated = True
                     cmd_xys[0] = np.cos(cmd_angle)
                     cmd_xys[1] = np.sin(cmd_angle)
+                    cmd_xys[2] = speed
+                    if cmd_xys[2] == 0.0:
+                        cmd_xys[0] = 1.0
+                        cmd_xys[1] = 0.0
                     cmd_height = np.clip(cmd_height, minmax_height[0], minmax_height[1])
                     if flip:
                         cmd_xys = [-cmd_xys[0], -cmd_xys[1], -cmd_xys[2]]
 
                     if isinstance(base_env, LocomotionVecEnv):
-                        base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
+                        curr_pose = base_env.get_cam_pose()
+                        base_env.set_cam_pose(curr_pose + th.as_tensor(cam_dist_pitch_yaw_diff, device=curr_pose.device))
                         base_env.set_goal(goal_rel_linvel_xys = tuple(cmd_xys),
                                           goal_abs_height = cmd_height,
                                           goal_yaw_vel = cmd_yawvel,

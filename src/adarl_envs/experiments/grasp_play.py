@@ -21,7 +21,7 @@ import adarl.utils.dbg.dbg_img as dbg_img
 from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
 import adarl.utils.sigint_handler
-from adarl_envs.experiments.centgrasp_builder import centgrasp_singleenv_builder
+from adarl_envs.experiments.grasp_builder import centgrasp_singleenv_builder
 from adarl_envs.env.GraspVecEnv import GraspVecEnv
 from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
 from adarl.utils.base_utils import record_time, clear_recorded_times, print_recorded_times, isinstance_noimport, set_disable_clear_recorded_times
@@ -236,7 +236,7 @@ def grasp_builder_and_args():
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
-        "robot_model" : "centauro",
+        "robot_model" : args["robot"],
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : False,
         "stepLength_sec" : step_length_sec,
@@ -494,7 +494,7 @@ def play(seed, folderName, run_id, args,
                     if keyboard_listener.get_key_press_count("k")>0: cam_dist_pitch_yaw_diff[1] = -5*3.14159/180
                     if keyboard_listener.get_key_press_count("j")>0: cam_dist_pitch_yaw_diff[2] = -5*3.14159/180
                     if keyboard_listener.get_key_press_count("l")>0: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
-                    if keyboard_listener.get_key_press_count("z")>0: truncated = True
+                    manual_stop = keyboard_listener.get_key_press_count("z")>0
                     keyboard_listener.reset_key_press_counters()
                     if isinstance(base_env, GraspVecEnv):
                         base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
@@ -509,6 +509,11 @@ def play(seed, folderName, run_id, args,
                 step_count += 1
 
                 done = terminated or truncated
+                if manual:
+                    # Manual control: ignore the env's normal termination/truncation and keep the
+                    # episode running until the user presses 'z'. autoreset is off for the single-env
+                    # runner, so the sim keeps stepping safely past a "done".
+                    done = manual_stop or terminated
                 ep_reward += reward
                 step_wallduration = time.monotonic()-t0
                 ep_wall_duration += step_wallduration
@@ -560,6 +565,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--model", required = False, default=None, type=str, help="Model to load")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
+    ap.add_argument("--robot", default="centauro", type=str, help="Robot to be used ('centauro'/'franka')")
     ap.add_argument("--rt-factor", default=1.0, type=float, help="Tentative realtime factor")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
     ap.add_argument("--gui", default=False, action='store_true', help="Start the gui, instead of streaming renderings")

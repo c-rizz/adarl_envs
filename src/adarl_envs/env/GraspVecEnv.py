@@ -59,6 +59,7 @@ class GrapVecEnvInitArgs():
     reward_joint_actacc_weight : float
     reward_joint_actdiff_weight : float
     reward_joint_position_limit_weight : float
+    reward_joint_position_weight : float
     reward_joint_power_weight : float
     reward_joint_torque_weight : float
     reward_safety_weight : float
@@ -93,6 +94,7 @@ class GraspVecEnv(RobotVecEnv):
         joint_actdiff : th.Tensor
         joint_power : th.Tensor
         joint_torque : th.Tensor
+        joint_position : th.Tensor
         joint_position_limit : th.Tensor
         safety_triggered : th.Tensor
         reward_object_pose : th.Tensor
@@ -151,6 +153,7 @@ class GraspVecEnv(RobotVecEnv):
                 joint_power = self._thtens(grasp_init_args.reward_joint_power_weight),
                 joint_torque = self._thtens(grasp_init_args.reward_joint_torque_weight),
                 joint_position_limit = self._thtens(grasp_init_args.reward_joint_position_limit_weight),
+                joint_position = self._thtens(grasp_init_args.reward_joint_position_weight),
                 safety_triggered = self._thtens(grasp_init_args.reward_safety_weight),
                 reward_object_pose = self._thtens(grasp_init_args.reward_object_pose_weight),
                 reward_gripper_pose = self._thtens(grasp_init_args.reward_gripper_pose_weight)
@@ -319,7 +322,7 @@ class GraspVecEnv(RobotVecEnv):
 
         # ---------------- JOINT-LEVEL PENALTIES ----------------
 
-        reward_position         = flattened_joint_penalty_reward(norm_posstathomingdiff,max_rew=max_rew, exponent=2.0, flattening_scale=0.02)
+        reward_position         = joint_penalty_reward(norm_posstathomingdiff,max_rew=max_rew, exponent=2.0)
         reward_actdiff          = joint_penalty_reward(actdiff,max_rew=1, exponent=2, presquash_factor=10)
         reward_actacc           = joint_penalty_reward(act_acc,max_rew=1, exponent=2, presquash_factor=100)
         reward_position_limit   = joint_penalty_reward(position_safenorm,max_rew=1,exponent=50)
@@ -371,7 +374,8 @@ class GraspVecEnv(RobotVecEnv):
             safety_triggered = reward_safety_triggered,
             reward_object_pose = reward_object_pose,
             reward_gripper_pose = reward_gripper_pose,
-            joint_position_limit = reward_position_limit
+            joint_position_limit = reward_position_limit,
+            joint_position = reward_position
         )
         sub_rew_unscaled = th.stack([dataclasses.asdict(raw_rewards)[k] for k in self._sub_rewards_enabled], dim=1)
         sub_rew_scaled = sub_rew_unscaled*self._sub_rewards_enabled_weights_th.unsqueeze(0)*self._grasping_conf.reward_scale
@@ -608,6 +612,10 @@ class GraspVecEnv(RobotVecEnv):
                                                         "camera_name": self._head_camera_name},
                                                 attachment_link=("centauro","D435_head_camera_link"))
             else:
+                table_view_xyz =  "1.25  0      1.25"
+                table_view_wxyz = "0.0  -0.383  0.0     0.924"
+                full_view_xyz =   "2.0   0      2.0"
+                full_view_wxyz =  "0.0  -0.383  0       0.924"
                 self._cam_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
                                                 name=self._head_camera_name,
                                                 pose=None,
@@ -616,7 +624,7 @@ class GraspVecEnv(RobotVecEnv):
                                                         "camera_height":self._grasping_conf.camera_resolution_hw[1],
                                                         "frame_rate":1/self._intendedStepLength_sec,
                                                         "camera_name": self._head_camera_name,
-                                                        "position_xyz": "1.0 0 1.5",
-                                                        "orientation_wxyz": "0.707 0 0.707 0"},)
+                                                        "position_xyz": full_view_xyz,
+                                                        "orientation_wxyz": full_view_wxyz},)
         spawn_defs.append(self._cam_spawn_def)
         return spawn_defs

@@ -139,7 +139,7 @@ def adarl_builder_and_args():
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n) if not realworld else (0.0, 0.0, 0.0),
+        "action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n),
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
@@ -249,15 +249,18 @@ def adarl_builder_and_args():
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
         "minimal_infos" : True,
-        "playground_style_reward" : False
+        "playground_style_reward" : False,
+        "no_infos" : False
     }
 
     env_builder_args.update({
+        "action_delay_mustd_std" : (0.0, 0.0, 0.0) if realworld else env_builder_args["action_delay_mustd_std"],
         "offset_envs_ep_starts" : False,
         "enable_rendering" : args["record"] or args["publishimg"],
         "record_video" : not realworld,
         "verbose_infos" : (not skip_optionals) or record,
         "minimal_infos" : skip_optionals or not record,
+        "no_infos" : skip_optionals or not record,
         "video_save_freq" : 1 if record else 0,
         "action_delay_mustd_std" : (0.0,0.0,0.0),
         "action_noise_mustd" : (0.0,0.0),
@@ -269,7 +272,6 @@ def adarl_builder_and_args():
         "obs_abs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : (not skip_optionals) or record,
-        # "minimal_infos" : skip_optionals or not record,
         "initial_joint_pose_randomization_range" : 0.0,
         "initial_height_randomization_range_meters" : 0.0,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
@@ -280,10 +282,10 @@ def adarl_builder_and_args():
         "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
         "randomized_dof_armature_ratios" : 0.0*r,
-        "randomized_reference_filter_distribution" : ("uniform", (30.0, 30.0)),
+        "randomized_reference_filter_distribution" : ("uniform", (40.0, 40.0)),
         "impulse_probability_per_sec" : 0.0,
         "show_gui" : args["gui"],
-        "just_health_reward" : realworld,
+        "just_health_reward" : skip_optionals,
         "goal_resampling_probability_per_sec" : 0.0,
         "walltime_factor" : args["rt_factor"],
         "record_whole_joint_trajectories" : False,
@@ -595,7 +597,7 @@ def play(seed, folderName, run_id, args,
                 record_time("step end")
                 full_step_wallduration = time.monotonic()-t0
                 set_disable_clear_recorded_times(False)
-                # print_recorded_times(False)
+                print_recorded_times(False)
                 clear_recorded_times()
                 ggLog.info(f"step = {step_count: 3d} rtfactor = {step_length_sec/full_step_wallduration:.2f}"
                            f" max_rtfactor = {step_length_sec/step_wallduration:.2f} tpred={t0_step-t0_pred:1.4f}"

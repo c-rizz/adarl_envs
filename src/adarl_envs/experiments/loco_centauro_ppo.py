@@ -40,7 +40,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
-        "desired_foot_clearance" : 0.05,
+        "desired_foot_clearance" : 0.1,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
         "enable_rendering" : False,

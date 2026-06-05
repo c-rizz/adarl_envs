@@ -358,6 +358,7 @@ class RobotVecEnvInitArgs():
     saturate_jimp_ref_limits : bool = True
     ui_camera_resolution_hw : tuple[int,int] = (144,256)
     minimal_infos : bool = False
+    no_infos : bool = False
     single_reward_space : ThBox | None = None
 
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
@@ -471,6 +472,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         velref_from_posref : bool
         verbose_infos : bool
         minimal_infos : bool
+        no_infos : bool
 
 
     metadata = {'render.modes': ['rgb_array']}
@@ -719,7 +721,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_size=init_args.adapter.vec_size(),
                                                     velref_from_posref=False,
                                                     verbose_infos = init_args.verbose_infos,
-                                                    minimal_infos=init_args.minimal_infos
+                                                    minimal_infos=init_args.minimal_infos,
+                                                    no_infos = init_args.no_infos
                                                     )
         self._initial_pose_randomization_enabled = self._configuration.initial_joint_pose_randomization_range > 0 or self._configuration.initial_height_randomization_range_meters > 0
         self._last_pose_randomization : th.Tensor | None = None
@@ -2471,6 +2474,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     @override
     def get_infos(self,state, labels : dict[str, th.Tensor] | None = None) -> dict[str, th.Tensor]:
         record_region_start("RobotVecEnv.get_infos")
+        if self._configuration.no_infos:
+            record_region_end("RobotVecEnv.get_infos")
+            return {}
         sub_rews = {}
         reward = self.compute_rewards(state, sub_rews)
         state_internal = state[self.STATE_INTERNAL]

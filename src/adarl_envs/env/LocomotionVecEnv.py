@@ -511,6 +511,15 @@ class LocomotionVecEnv(RobotVecEnv):
                                             reward_weight_acc_on_vel   = self._thzeros((num_envs,1)),
                                             reward_weight_posref_acc   = self._thzeros((num_envs,1)))
         robot_init_args.single_reward_space = single_reward_space
+        if init_args.robot_init_args.just_health_reward:
+            rews_num = len(self._loco_conf.enabled_rewards)
+            self._fixed_sub_rewards = {k:self._thones((num_envs,))/rews_num for k in self._loco_conf.enabled_rewards}
+            if self._loco_conf.split_rewards:
+                self._fixed_reward = self._thones((num_envs, rews_num))/rews_num
+            else:
+                self._fixed_reward = self._thones((num_envs, 1))
+            
+            
         super().__init__(robot_init_args)
 
         sub_rewards = {}
@@ -564,14 +573,15 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_Z,
                             self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED,
                             self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT,
-                            self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X,
-                            self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_Y,
-                            self.LOCOMOTION_FIELDS.GOAL_YAW_VEL,
-                            self.LOCOMOTION_FIELDS.SMOOTHED_YAW_VEL_ERROR]
+                            self.LOCOMOTION_FIELDS.GOAL_YAW_VEL
+                            ]
         privileged_loco_fields = [  self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR,
+                                    self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_X,
+                                    self.LOCOMOTION_FIELDS.GOAL_REL_HEADING_YAW_Y,
+                                    self.LOCOMOTION_FIELDS.SMOOTHED_YAW_VEL_ERROR,
                                     self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR_VELOCITY]
         self._locomotion_state_helper = ThBoxStateHelper( field_names=[e for e in self.LOCOMOTION_FIELDS],
                                                     fields_minmax={ self.LOCOMOTION_FIELDS.GOAL_LINVEL_REL_DIRECTION_X : [-1,1],
@@ -696,16 +706,6 @@ class LocomotionVecEnv(RobotVecEnv):
             feet_abs_pos_vec_foot_xyz = lstates[:,:nfeet,0:3] # (nenvs,nfeet,3)
             feet_rel_pos_vec_foot_xyz = th_quat_rotate(feet_abs_pos_vec_foot_xyz - body_pos_vec_xyz,
                                                    th_quat_conj(borient_quat_vec_xyzw).unsqueeze(1).expand(-1,nfeet,-1)) # (nenvs,nfeet,3)
-            
-
-
-            jpos = super_adapter_data[1][0,:,0]
-            self._robot_model.set_joint_pose_by_names({jn[1]:jpos[i] for i,jn in enumerate(self._configuration.joints_agent_controlled)} )
-            fk_feet_poses_dict = self._robot_model.get_frame_poses_xyzxyzw(self._configuration.main_body_link[1],[l[1] for l in self._loco_conf.feet_bottom_links])
-            fk_feet_positions_xyz = self._thtens([fp[:3] for fp in fk_feet_poses_dict.values()])
-            fk_feet_rel_pos_vec_foot_xyz = fk_feet_positions_xyz.unsqueeze(0)
-            ggLog.info(f"Feet abs pos from adapter = \n{feet_rel_pos_vec_foot_xyz}")
-            ggLog.info(f"Feet rel pos from adapter FK = \n{fk_feet_rel_pos_vec_foot_xyz}")
         else:
             if self.num_envs == 1:
                 jpos = super_adapter_data[1][0,:,0]
@@ -1218,6 +1218,9 @@ class LocomotionVecEnv(RobotVecEnv):
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
+        if self._configuration.fixed_reward:
+            sub_rewards_return.update(self._fixed_sub_rewards)
+            return self._fixed_reward
         rewards, sub_rewards_dict = self._compute_rewards(state) # Avoid input mutation for compiled function
         sub_rewards_return.update(sub_rewards_dict)
         return rewards
@@ -1226,18 +1229,9 @@ class LocomotionVecEnv(RobotVecEnv):
                                     #   skip_eval_unsafe_warmup=100, skip_eval_unsafe_manual_arg_guard=0,
                                       disable=disable_compile)
     def _compute_rewards(self,   state : dict[str,th.Tensor]) -> tuple[th.Tensor, dict[str,th.Tensor]]:
+        sub_rewards_return = {}
         if self._loco_conf.playground_style_reward:
             raise NotImplementedError("playground style reward has been removed")
-
-        sub_rewards_return = {}
-        if self._configuration.fixed_reward:
-            rews_num = len(self._loco_conf.enabled_rewards)
-            sub_rewards_return = {k:self._thones((self.num_envs,))/rews_num for k in self._loco_conf.enabled_rewards}
-            if self._loco_conf.split_rewards:
-                reward = self._thones((self.num_envs, len(sub_rewards_return)))/rews_num
-            else:
-                reward = self._thones((self.num_envs, 1))
-            return reward, sub_rewards_return
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
         max_rew = self._configuration.reward_penalties_max

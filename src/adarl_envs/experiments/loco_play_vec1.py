@@ -250,7 +250,8 @@ def adarl_builder_and_args():
         "walltime_factor" : 1.0,
         "minimal_infos" : True,
         "playground_style_reward" : False,
-        "no_infos" : False
+        "no_infos" : False,
+        "extrinsics_only_privileged" : True
     }
 
     env_builder_args.update({

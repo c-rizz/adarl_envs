@@ -85,14 +85,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "offset_envs_ep_starts" : True,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomized_dof_armature_ratios" :      0.05*r,
-        "randomized_dof_frictionloss_ratios":   0.1*r,
-        "randomized_dof_damping_ratios":        0.2*r,
+        "randomized_dof_armature_ratios" :      ("uniform", [0.8*r,1.5*r]),
+        "randomized_dof_frictionloss_ratios":   ("uniform", [0.8*r,1.5*r]),
+        "randomized_dof_damping_ratios":        ("uniform", [0.8*r,2.0*r]),
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
-        "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
+        "randomized_friction_slide_spin_roll_ratios" : ("uniform", ([0.8*r,0.8*r,0.8*r],[1.5*r,1.5*r,1.5*r])),
         "randomized_gains_damping_ratio_epstd"       : 0.2*r,
         "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
-        "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
+        "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "record_video" : True,
         "recycle_pose_randomization" : True,
@@ -149,7 +149,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
         "minimal_infos" : True,
-        "playground_style_reward" : False
+        "playground_style_reward" : False,
+        "no_infos" : False,
+        "extrinsics_only_privileged" : True
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({        

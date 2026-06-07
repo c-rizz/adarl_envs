@@ -28,7 +28,7 @@ import dataclasses
 import adarl.utils.async_cuda2cpu_queue as async_cuda2cpu_queue
 from adarl.utils.base_utils import record_time, record_region_start, record_region_end
 
-disable_compile = os.environ.get("DISABLE_ENV_TH_COMPILE", False)
+disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
 
 @dataclass
 class LocomotionVecEnvInitArgs():
@@ -487,14 +487,14 @@ class LocomotionVecEnv(RobotVecEnv):
         )
         if self._loco_conf.split_rewards:
             bounds_tensor = th.stack([getattr(self._sub_rewards_bounds, r.lower()) for r in self._loco_conf.enabled_rewards], dim=0)
-            single_reward_space=ThBox( low=bounds_tensor[:,0],
-                                            high=bounds_tensor[:,1],
-                                            torch_device=th_device,
-                                            labels=np.array(self._loco_conf.enabled_rewards))
+            single_reward_space=ThBox(  low=bounds_tensor[:,0],
+                                        high=bounds_tensor[:,1],
+                                        torch_device=th_device,
+                                        labels=np.array(self._loco_conf.enabled_rewards))
         else:
-            single_reward_space=ThBox( low=th.tensor(float("-inf"), device=th_device),
-                                            high=th.tensor(float("inf"), device=th_device),
-                                            shape=tuple(), torch_device=th_device)
+            single_reward_space=ThBox(  low=th.tensor(float("-inf"), device=th_device),
+                                        high=th.tensor(float("inf"), device=th_device),
+                                        shape=tuple(), torch_device=th_device)
         
         self._locomotion_episode_config = LocomotionVecEnv.EpisodeLocomConfiguration(
                                             goal_abs_vel_vec_xys       = None,
@@ -519,7 +519,6 @@ class LocomotionVecEnv(RobotVecEnv):
             else:
                 self._fixed_reward = self._thones((num_envs, 1))
             
-            
         super().__init__(robot_init_args)
 
         sub_rewards = {}
@@ -536,7 +535,7 @@ class LocomotionVecEnv(RobotVecEnv):
     @override
     def _build_stats(self):
         self._stats = {}
-        self._buff_sizes = int(self._configuration.original_max_epsteps/10)
+        self._buff_sizes = int(self._configuration.init_args.maxStepsPerEpisode/10)
         self._stats["vel_errs_vec"] = self._thzeros((self._configuration.vec_size, self._buff_sizes))
         self._stats["height_errs_vec"] = self._thzeros((self._configuration.vec_size, self._buff_sizes))
         self._stats["pitchnroll_errs_vec"] = self._thzeros((self._configuration.vec_size, self._buff_sizes))
@@ -548,6 +547,7 @@ class LocomotionVecEnv(RobotVecEnv):
         self._stats["ep_max_javg_sensed_effort"] = self._thzeros((self._configuration.vec_size,))
         self._stats["ep_max_peak_sensed_effort"] = self._thzeros((self._configuration.vec_size,))
 
+
     @override
     def _build(self):
         # Set up monitored collision pairs for MjxAdapter
@@ -555,15 +555,11 @@ class LocomotionVecEnv(RobotVecEnv):
             from adarl.adapters.MjxAdapter import MjxAdapter
             mjx_adapter : MjxAdapter = self._adapter #type: ignore
             # Create collision pairs: each foot vs ground
-            feet_ground_collision_pairs = [(foot, self._configuration.ground_link) for foot in self._loco_conf.feet_contact_links]
+            feet_ground_collision_pairs = [(foot, self._configuration.init_args.ground_link) for foot in self._loco_conf.feet_contact_links]
             mjx_adapter.set_monitored_collision_pairs(feet_ground_collision_pairs)
         super()._build()
-        # self._feet_link_ids = self._adapter.get_links_ids(self._loco_conf.feet_links)
-        # self._ground_link_id = self._adapter.get_links_ids([self._configuration.ground_link])
         self._adapter.set_monitored_links(self._adapter.get_monitored_links() + self._loco_conf.feet_bottom_links)
         self._feet_and_body_link_ids = self._adapter.get_monitored_links_ids(self._loco_conf.feet_bottom_links + [self._configuration.main_body_link])
-        
-
 
 
     def _build_state_helper(self, adapter : BaseVecJointImpedanceAdapter):
@@ -687,6 +683,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                                  obs_defs={"base":{"observable":True,"concatenate":False,"noise":None}})
         ggLog.info(f"Built state/obs/action helpers")
 
+
     def _reset_state_full(self):
         super()._reset_state_full()
         # These need to be set to something valid to avoid issues at the start
@@ -726,6 +723,7 @@ class LocomotionVecEnv(RobotVecEnv):
             feet_are_touching_ground = self._thzeros((self.num_envs,4))
         return feet_linvels_vec_foot_xyz, feet_rel_pos_vec_foot_xyz, feet_abs_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw
 
+
     @override
     def _get_adapter_data_raw(self):
         record_region_start("LocomotionVecEnv._get_adapter_data_raw")
@@ -733,6 +731,7 @@ class LocomotionVecEnv(RobotVecEnv):
         loco_adapter_data = self._get_loco_adapter_data(super_adapter_data)
         record_region_end("LocomotionVecEnv._get_adapter_data_raw")
         return loco_adapter_data, super_adapter_data
+
 
     @override
     def _get_new_instantaneous_state(self, adapter_data):
@@ -769,7 +768,7 @@ class LocomotionVecEnv(RobotVecEnv):
         prev_goal_abs_gravity_vec_xyz = prev_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X:self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z+1].view((nenvs,3))
         masked_assign(prev_goal_abs_gravity_vec_xyz, eps_resetting, curr_goal_abs_gravity_vec_xyz) # at episode start prev state values may be invalid
                 
-        max_goal_height_diff = self._loco_conf.max_goal_height_pos_change_speed*self._configuration.stepLength_sec
+        max_goal_height_diff = self._loco_conf.max_goal_height_pos_change_speed*self._configuration.init_args.stepLength_sec
         goal_height = self._locomotion_episode_config.goal_abs_height_vec_z
         prev_smoothed_goal_height = prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
         smoothed_goal_height = prev_smoothed_goal_height + th.clamp(goal_height - prev_smoothed_goal_height, min=-max_goal_height_diff, max=max_goal_height_diff)
@@ -840,14 +839,14 @@ class LocomotionVecEnv(RobotVecEnv):
         num_feet_on_ground = feet_are_touching_ground.sum(dim=1, keepdim=True)
         is_jumping = (num_feet_on_ground == 0).float()
 
-        a_g = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.stepLength_sec)
+        a_g = self._configuration.goal_err_exp_smoothing_1s**(self._configuration.init_args.stepLength_sec)
         smoothed_tracking_err_vec =         tracking_err_vec*(1-a_g) +        prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR]*a_g
         smoothed_height_error =             height_err_vec*(1-a_g) +          prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEIGHT_ERROR]*a_g
         smoothed_pitchnroll_error =         pitchnroll_err_vec*(1-a_g) +      prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR]*a_g
         smoothed_pitchnroll_error_vel_vec = pitchnroll_err_vel_vec*(1-a_g) +  prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_PITCHNROLL_ERROR_VELOCITY]*a_g
         smoothed_heading_error_vec =        heading_error_vec*(1-a_g) +       prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_HEADING_ERROR]*a_g
         smoothed_yaw_vel_error_vec =        yaw_vel_error_vec*(1-a_g) +       prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_YAW_VEL_ERROR]*a_g
-        a_j = self._loco_conf.is_jumping_alpha_1s**(self._configuration.stepLength_sec)
+        a_j = self._loco_conf.is_jumping_alpha_1s**(self._configuration.init_args.stepLength_sec)
         smoothed_is_jumping =               is_jumping*(1-a_j) +              prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_IS_JUMPING]*a_j
         smoothed_num_feet_on_ground =       num_feet_on_ground*(1-a_j) +      prev_locom_state[:, self.LOCOMOTION_FIELDS.SMOOTHED_NUM_FEET_ON_GROUND]*a_j
 
@@ -882,9 +881,9 @@ class LocomotionVecEnv(RobotVecEnv):
                         crashed = 1
                         break
         else:
-            collision_count_vec = th.zeros(size=(nenvs, 1), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
-            sum_bad_impulses_vec = th.zeros(size=(nenvs, 1), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
-            crashed_vec = th.zeros(size=(nenvs, 1), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
+            collision_count_vec = th.zeros(size=(nenvs, 1), device=self._configuration.init_args.th_device, dtype=self._configuration.obs_dtype)
+            sum_bad_impulses_vec = th.zeros(size=(nenvs, 1), device=self._configuration.init_args.th_device, dtype=self._configuration.obs_dtype)
+            crashed_vec = th.zeros(size=(nenvs, 1), device=self._configuration.init_args.th_device, dtype=self._configuration.obs_dtype)
 
 
 
@@ -1218,7 +1217,7 @@ class LocomotionVecEnv(RobotVecEnv):
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
                                 sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
-        if self._configuration.fixed_reward:
+        if self._configuration.init_args.just_health_reward:
             sub_rewards_return.update(self._fixed_sub_rewards)
             return self._fixed_reward
         rewards, sub_rewards_dict = self._compute_rewards(state) # Avoid input mutation for compiled function
@@ -1454,7 +1453,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
         # FAILURE SCALING
         failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
-        if self._configuration.fail_on_safety:
+        if self._configuration.init_args.fail_on_safety:
             failed = th.logical_or(failed, safety_triggered)
 
         raw_rewards = LocomotionVecEnv.SubRewards(
@@ -1530,7 +1529,7 @@ class LocomotionVecEnv(RobotVecEnv):
         record_region_start("LocomotionVecEnv._update_stats")
         super()._update_stats()
         record_time("LocomotionVecEnv._update_stats: super done")
-        if not self._configuration.minimal_infos:
+        if not self._configuration.init_args.minimal_infos:
             body_rel_linvel_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
                                                                                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y,
                                                                                                         self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z)) #type:ignore
@@ -1629,7 +1628,7 @@ class LocomotionVecEnv(RobotVecEnv):
         i["smoothed_num_feet_on_ground"] = smoothed_num_feet_on_ground
         i["smoothed_height_error"] = smoothed_height_error
 
-        if self._configuration.minimal_infos:
+        if self._configuration.init_args.minimal_infos:
             record_region_end("LocomotionVecEnv.get_infos")
             return i
         curr_rewar_state = state[self.STATE_REWARDS][:,0]
@@ -1701,7 +1700,7 @@ class LocomotionVecEnv(RobotVecEnv):
                     else:
                         labels[k] = to_string_tensor([k])
 
-        if self._configuration.verbose_infos:
+        if self._configuration.init_args.verbose_infos:
             statenorm = self._state_helper.normalize(state)
             for substate in [self.STATE_LOCOMOTION, self.STATE_FEET]:
                 i["state_"+substate] = self._state_helper.sub_helpers[substate].flatten(state[substate])
@@ -1773,10 +1772,10 @@ class LocomotionVecEnv(RobotVecEnv):
         if "goal_abs_linvel_vec_xys" in reset_options:
             if "goal_rel_linvel_xys" in reset_options:
                 raise ValueError("Cannot specify both goal_abs_linvel_vec_xys and goal_rel_linvel_xys in reset options")
-            goal_abs_linvel_vec_xys = th.as_tensor(reset_options["goal_abs_linvel_vec_xys"],device=self._configuration.th_device).view(self.num_envs,3)
+            goal_abs_linvel_vec_xys = th.as_tensor(reset_options["goal_abs_linvel_vec_xys"],device=self._configuration.init_args.th_device).view(self.num_envs,3)
             goal_rel_linvel_xys = None
         elif "goal_rel_linvel_xys" in reset_options:
-            goal_rel_linvel_xys = th.as_tensor(reset_options["goal_rel_linvel_xys"],device=self._configuration.th_device).view(self.num_envs,3)
+            goal_rel_linvel_xys = th.as_tensor(reset_options["goal_rel_linvel_xys"],device=self._configuration.init_args.th_device).view(self.num_envs,3)
             goal_abs_linvel_vec_xys = None
         else:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
@@ -1787,12 +1786,12 @@ class LocomotionVecEnv(RobotVecEnv):
                 goal_rel_linvel_xys = sampled_goal_linvel_vec_xys
 
         if "goal_abs_height" in reset_options:
-            goal_abs_height = th.as_tensor(reset_options["goal_abs_height"],device=self._configuration.th_device).view(self.num_envs)
+            goal_abs_height = th.as_tensor(reset_options["goal_abs_height"],device=self._configuration.init_args.th_device).view(self.num_envs)
         else:
             goal_abs_height = sampled_goal_height
 
         if "goal_yaw_vels" in reset_options:
-            goal_yaw_vels = th.as_tensor(reset_options["goal_yaw_vels"],device=self._configuration.th_device).view(self.num_envs)
+            goal_yaw_vels = th.as_tensor(reset_options["goal_yaw_vels"],device=self._configuration.init_args.th_device).view(self.num_envs)
         else:
             goal_yaw_vels = sampled_goal_yaw_vels
         self.set_goal(  goal_abs_linvel_vec_xys=goal_abs_linvel_vec_xys, 
@@ -1905,7 +1904,7 @@ class LocomotionVecEnv(RobotVecEnv):
         super()._initialize_episodes(vec_mask=vec_mask, options=options)
         if self._loco_conf.use_contacts:
             raise NotImplementedError("Contacts not implemented yet")
-            self._adapter.monitor_contacts([(self._configuration.robot_name, None)])
+            self._adapter.monitor_contacts([(self._configuration.init_args.robot_name, None)])
 
     def _set_arrow_pose(self, vec_mask : th.Tensor):
         if isinstance(self._adapter, BaseVecSimulationAdapter):

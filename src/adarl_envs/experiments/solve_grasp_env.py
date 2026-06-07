@@ -31,7 +31,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
 
-    eval_freq = 10
+    eval_freq = 5
     r = 0.0
     n = 0.0
     env_builder_args = {
@@ -39,12 +39,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
         "reward_joint_power_weight" : 0.0,
         "reward_joint_actacc_weight" :  0.0,
-        "reward_joint_actdiff_weight" : 0.0,
+        "reward_joint_actdiff_weight" : 0.5,
         "reward_joint_torque_weight" :  0.0, 
         "reward_joint_position_limit_weight" : 0.0,
-        "reward_joint_position_weight" : 1.0,
+        "reward_joint_position_weight" : 0.0,
         "reward_object_pose_weight" : 0.0,
-        "reward_gripper_pose_weight" : 0.0,
+        "reward_gripper_pose_weight" : 1.0,
         "reward_safety_weight" : 0.0,     
 
         "target_object_link" : ("cube","cube"),
@@ -55,7 +55,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position_delta",
-        "control_mode_position_delta_max" : 0.05,
+        "control_mode_position_delta_max" : 0.025,
         "desired_foot_clearance" : 0.05,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
@@ -77,7 +77,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 0.7,
         "initial_height_randomization_range_meters" : 0.1,
-        "initial_joint_pose_randomization_range" : 0.1,
+        "initial_joint_pose_randomization_range" : 0.9,
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
@@ -131,6 +131,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_eval_env_builder_args["minimal_infos"] = False
     video_eval_env_builder_args["video_save_freq"] = 1
     video_eval_env_builder_args["ui_camera_resolution_hw"] = (270,480)
+    video_eval_env_builder_args["recycle_pose_randomization"] = False
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,

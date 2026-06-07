@@ -63,24 +63,33 @@ def runner_builder(seed,
         ground_link = ("ground","ground_link")
         sim_dt = 1/1024
         iterations_per_ep = int(max_steps*stepLength_sec/sim_dt)
+        opt_override = {}
+        opt_override.update(env_builder_args.pop("mjx_opt_override", {}))
         adapter = MjxJointImpedanceAdapter( vec_size=num_envs,
                                             enable_rendering=env_builder_args.pop("enable_rendering"),
-                                            jax_device=jax.devices("gpu")[0],
+                                            jax_device=jax.devices("gpu")[th_device.index] if th_device.type == "cuda" else jax.devices("cpu")[0],
                                             output_th_device = th_device,
                                             sim_step_dt=sim_dt,
                                             step_length_sec=stepLength_sec,
                                             realtime_factor=-1.0,
                                             gui_env_index=0,
-                                            default_max_joint_impedance_ctrl_torque=100.0,
+                                            default_max_joint_impedance_ctrl_torque=env_builder_args.pop("default_max_joint_impedance_ctrl_torque", 100.0),
+                                            max_joint_impedance_ctrl_torques=env_builder_args.pop("max_joint_impedance_ctrl_torques", {}),
                                             show_gui=show_gui,
                                             log_freq=iterations_per_ep,
-                                            record_whole_joint_trajectories = False,
-                                            log_freq_joints_trajectories = int(iterations_per_ep),
+                                            record_whole_joint_trajectories = env_builder_args.get("record_whole_joint_trajectories", False),
+                                            log_freq_joints_trajectories = iterations_per_ep,
                                             log_folder=run_folder,
-                                            revolute_dof_armature_override=0.5,
-                                            safe_revolute_dof_armature=0.1,
-                                            opt_preset="fast",
-                                            opt_override = {"impratio" : 1.0})
+                                            revolute_dof_frictionloss_override  = env_builder_args.get("revolute_dof_frictionloss_override", 1.0),
+                                            revolute_dof_armature_override      = env_builder_args.get("revolute_dof_armature_override", 0.1),
+                                            revolute_dof_damping_override       = env_builder_args.get("revolute_dof_damping_override", 1.0),
+                                            safe_revolute_dof_armature          = env_builder_args.get("safe_revolute_dof_armature", 0.1),
+                                            opt_preset=env_builder_args.pop("mjx_opt_preset"),
+                                            opt_override=opt_override,
+                                            geom_overrides=env_builder_args.get("mjx_geom_overrides", None),
+                                            reference_filter_cutoff_frequency=20.0,
+                                            reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none",
+                                            mjx_impl="jax")
     elif mode == "mujoco":
         from adarl.adapters.MujocoJointImpedanceAdapter import MujocoJointImpedanceAdapter
         if num_envs != 1:
@@ -184,7 +193,7 @@ def runner_builder(seed,
                                                     safety_limits_ratios_minmax_pve=env_builder_args.pop("safety_limits_ratios_minmax_pve"),
                                                     control_limits_ratios_minmax_pve=env_builder_args.pop("control_limits_ratios_minmax_pve"),
                                                     control_limits_minmax_pve=env_builder_args.pop("control_limits_minmax_pve"),
-                                                    saturate_jimp_ref_limits = env_builder_args.pop("saturate_jimp_ref_limits"),
+                                                    saturate_jimp_posref_limits = env_builder_args.pop("saturate_jimp_ref_limits"),
                                                     seed=seed,
                                                     stepLength_sec=stepLength_sec,
                                                     step_precision_tolerance=0 if isinstance(adapter, BaseSimulationAdapter) else 0.001,

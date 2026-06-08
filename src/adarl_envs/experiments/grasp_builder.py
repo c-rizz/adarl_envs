@@ -371,7 +371,7 @@ def get_centauro_args():
             "model_kwargs" : {  "realsense":"false",
                                 "velodyne" :"false",
                                 "floating_joint":f"{spawn_legs}".lower(),
-                                "sphere_wheel_collision":"true",
+                                "sphere_or_ellipsoid_wheel_collision":"true",
                                 "end_effector_left":"dagana",
                                 "fixed_base_joint":"true",
                                 "legs":f"{spawn_legs}".lower(),

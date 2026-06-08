@@ -178,7 +178,7 @@ class GraspVecEnv(RobotVecEnv):
     @override
     def _build_stats(self):
         self._stats = {}
-        self._buff_sizes = int(self._configuration.init_args.original_max_epsteps/10)
+        self._buff_sizes = int(self._configuration.init_args.maxStepsPerEpisode/10)
         self._stats["obj2hand_dist"] = self._thzeros((self._configuration.vec_size, self._buff_sizes))
         self._stats["obj2goal_dist"] = self._thzeros((self._configuration.vec_size, self._buff_sizes))
         self._stats["ep_obj2hand_dist"] = self._thzeros((self._configuration.vec_size,))

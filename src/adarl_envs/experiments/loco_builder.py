@@ -1106,7 +1106,7 @@ def get_centauro_args(control_arms=False):
             "model_kwargs" : {  "realsense":"false",
                                 "velodyne" :"false",
                                 "floating_joint":"true",
-                                "sphere_wheel_collision":use_contact_lnks
+                                "sphere_or_ellipsoid_wheel_collision":use_contact_lnks
                                 },
             "robot_description_format" : "xacro",
             "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf")},
@@ -1141,7 +1141,7 @@ def get_centauro_args(control_arms=False):
             "safe_damping" : 20.0,
             "mjx_opt_preset" : "faster",
             "revolute_dof_frictionloss_override" : 4.68,
-            "revolute_dof_damping_override" : 1.7,
+            "revolute_dof_damping_override" :  1.7,
             "revolute_dof_armature_override" : 0.234
         }
 robot_args_registry["centauro"] = get_centauro_args

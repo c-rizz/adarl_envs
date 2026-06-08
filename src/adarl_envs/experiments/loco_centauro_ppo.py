@@ -85,9 +85,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "offset_envs_ep_starts" : True,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomized_dof_armature_ratios" :      ("uniform", [0.8*r,1.5*r]),
-        "randomized_dof_frictionloss_ratios":   ("uniform", [0.8*r,1.5*r]),
-        "randomized_dof_damping_ratios":        ("uniform", [0.8*r,2.0*r]),
+        "randomized_dof_armature_ratios" :      ("uniform", [0.1*r,10.0*r]),
+        "randomized_dof_frictionloss_ratios":   ("uniform", [0.1*r,10.0*r]),
+        "randomized_dof_damping_ratios":        ("uniform", [0.1*r,10.0*r]),
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : ("uniform", ([0.8*r,0.8*r,0.8*r],[1.5*r,1.5*r,1.5*r])),
         "randomized_gains_damping_ratio_epstd"       : 0.2*r,
@@ -399,7 +399,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         #             no_wandb=args["no_wandb"],
         #             debug_level=2)                           
     elif algo.lower() == "ppo" or algo.lower() == "ppo_small":
-        from rreal.algorithms.ppo2 import ppo_train, PPO_hyperparams
+        from rreal.algorithms.ppo2 import ppo_train, PPO_init_hyperparams
         ppo_train(  seed=seed,
                 folderName=folderName,
                 run_id=run_id,
@@ -407,7 +407,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 env_builder=None,
                 vec_env_builder=named_loco_venv_builder,
                 env_builder_args=env_builder_args,
-                agent_hyperparams=PPO_hyperparams(  minibatch_size=train_envs*24//4,
+                agent_hyperparams=PPO_init_hyperparams(  minibatch_size=train_envs*24//4,
                                                     minibatch_num=4,
                                                     th_device=th.device("cuda"),
                                                     actor_network_arch=(512,256),
@@ -429,6 +429,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     init_actor_logstd=-1.0,
                                                     actor_observation_filter=["base.vec"], #, "base.reward_weights"],
                                                     critic_observation_filter=["privileged.vec", "base.reward_weights"],
+                                                    reference_init_args = {   "env_builder_args" : env_builder_args},
                                                     ),
                 max_episode_duration=max_steps_per_episode,
                 validation_batch_size=0,

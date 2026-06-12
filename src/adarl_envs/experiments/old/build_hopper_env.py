@@ -87,7 +87,7 @@ def env_builder(seed,
     urdf_string = adarl.utils.utils.compile_xacro_string(  model_definition_string=Path(model_file).read_text())
 
     lrenv = LocomotionEnv(  action_delay_mustd = env_builder_args.pop("action_delay_mustd"),
-                            action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
+                            noise_action_mustd = env_builder_args.pop("noise_action_mustd"), 
                             action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                             adapter=env_controller,
                             control_mode = env_builder_args.pop("control_mode"),

@@ -32,7 +32,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     eval_freq = 5
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
-        "action_noise_mustd" : (0.0,0.0),
+        "noise_action_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
         "enable_limits_safety" : True,
@@ -51,17 +51,17 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_mean_std" : (20.0,50.0),
         "impulse_probability_per_sec" : 0.1,
         "init_on_reset_ratio" : 0.5,
-        "initial_height_randomization_range_meters" : 0.0,
-        "initial_joint_pose_randomization_range" : 0.001,
+        "randomization_initial_height_range_meters" : 0.0,
+        "randomization_initial_joint_pose_range" : 0.001,
         "initial_pose_randomization_range" : 0.0,
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 0.05, # Averaging of the joint pose for the position reward
         "max_goal_height_speed" : 0.5,
-        "max_good_step_duration" : 1.,
+        "step_max_good_air_duration" : 1.,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
-        "min_good_step_duration" : 0.2,
+        "step_min_good_air_duration" : 0.2,
         "mode" : mode,
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
@@ -80,7 +80,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_gains_stiffness_ratio_epstd" : 0.,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1)),
         "record_video" : True,
-        "recycle_pose_randomization" : True,
+        "randomization_recycle_init_pose" : True,
         "reward_joint_acceleration_weight" :      0.0,
         "reward_joint_actacc_weight" :            0.,
         "reward_joint_actdiff_weight" :           0.,
@@ -125,7 +125,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_eval_env_builder_args["init_on_reset_ratio"] = 1.0
     video_eval_env_builder_args["initial_pose_randomization_range"] = 0.02
     video_eval_env_builder_args["mass_randomization_ratio"] = 0.0
-    video_eval_env_builder_args["recycle_pose_randomization"] = False
+    video_eval_env_builder_args["randomization_recycle_init_pose"] = False
     video_eval_env_builder_args["friction_slide_spin_roll_randomization_ratios"] = (0.0,0.0,0.0)
     # video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
     # video_norand_eval_env_builder_args["enable_rendering"] = True

@@ -101,7 +101,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         action_delay_mustd : th.Tensor
         action_exp_smoothing_1s : float
         action_len : int
-        action_noise_mustd : th.Tensor
+        noise_action_mustd : th.Tensor
         bstate_minmax : th.Tensor
         control_mode : JointImpedanceActionHelper.CONTROL_MODES
         damping_minmax : tuple[float,float]
@@ -312,7 +312,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                                                                                               device=th_device),
                                                             action_exp_smoothing_1s = action_exp_smoothing_1s,
                                                             action_len = JointImpedanceActionHelper.action_lengths[control_mode_enum]*2,
-                                                            action_noise_mustd=th.empty((0,)),
+                                                            noise_action_mustd=th.empty((0,)),
                                                             bstate_minmax = th.empty((0,)),
                                                             control_mode=control_mode_enum,
                                                             damping_minmax=(1,30),
@@ -503,7 +503,7 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
         observation_space = self._state_helper.get_obs_space()
         action_space = self._action_helper.action_space(seed=seed)
 
-        self._configuration.action_noise_mustd = 0.0 * th.ones(size=(self._action_helper.action_len(),), dtype=th.float32, device=self._configuration.th_device)
+        self._configuration.noise_action_mustd = 0.0 * th.ones(size=(self._action_helper.action_len(),), dtype=th.float32, device=self._configuration.th_device)
         
 
         if not isinstance(adapter , BaseJointImpedanceAdapter):

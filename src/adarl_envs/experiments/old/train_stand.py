@@ -31,7 +31,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     eval_freq = 5
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.01),
-        "action_noise_mustd" : (0.0,0.001),
+        "noise_action_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.2,
         "control_mode" : "position",
         "robot_model" : args["robot"],

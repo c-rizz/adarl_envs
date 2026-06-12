@@ -5,7 +5,8 @@ from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAda
 from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter, ModelSpawnDef
 from adarl.utils.utils import (LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection, isinstance_noimport, 
-                               quat_xyzw_between_vecs_py, masked_assign, quat_mul_xyzw, quat_angle_xyzw, ros_rpy_to_quaternion_xyzw_th)
+                               quat_xyzw_between_vecs_py, masked_assign, quat_mul_xyzw, quat_angle_xyzw, ros_rpy_to_quaternion_xyzw_th,
+                               average_two_quaternions)
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
 import adarl.utils.utils
 from adarl.utils.vec_state_helper import ThBoxStateHelper, unnormalize, normalize
@@ -129,11 +130,11 @@ class GraspVecEnv(RobotVecEnv):
         self._grasp_ui_camera_name = "ui_camera"
         self._table_height = 0.8
         cube_spawn_height = self._table_height + 0.031
-        spawn_area_minmax_xyz = [[ 0.50,  0.0, cube_spawn_height],
-                                        [ 0.60,  0.1, cube_spawn_height]]
+        spawn_area_minmax_xyz = [[ 0.45,  -0.15, cube_spawn_height],
+                                 [ 0.65,   0.15, cube_spawn_height]]
         
-        manipulation_area_minmax_xyz = [[ 0.50,  0.0, cube_spawn_height],
-                                        [ 0.60,  0.1, self._table_height + 0.1]]
+        manipulation_area_minmax_xyz = [[ 0.45,  -0.15, cube_spawn_height],
+                                        [ 0.65,   0.15, self._table_height + 0.15]]
         self._grasping_conf = GraspVecEnv.GraspingConfiguration(
                         reward_scale = self._thtens(grasp_init_args.reward_scale),
                         target_object_link=grasp_init_args.target_object_link,
@@ -171,8 +172,8 @@ class GraspVecEnv(RobotVecEnv):
         cube_colliding_links = [self._grasping_conf.table_link]
         # cube_colliding_links += self._grasping_conf.manipulator_links
         robot_init_args.enable_link_collisions.append((self._grasping_conf.target_object_link, cube_colliding_links))
-        robot_init_args.initial_height_randomization_range_meters=0.0
-        robot_init_args.obs_abs_noise_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
+        robot_init_args.randomization_initial_height_range_meters=0.0
+        robot_init_args.noise_abs_obs_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
         super().__init__(robot_init_args)
 
     @override
@@ -252,7 +253,12 @@ class GraspVecEnv(RobotVecEnv):
         super_adapter_data, (current_object_pose, current_gripper_poses) = adapter_data
         new_inst_state = super()._get_new_instantaneous_state(super_adapter_data)
 
-        current_gripper_pose = current_gripper_poses.mean(dim=1)
+        gripper_pos = current_gripper_poses[:,:,:3].mean(dim=1)
+        # gripper_quat = average_quaternions(current_gripper_poses[:,:,3:7])
+        gripper_quat = current_gripper_poses[:,0,3:7] # for now just take the first gripper link's orientation as the gripper orientation, averaging can be weird if the gripper is closed and the fingers are in contact with the object, resulting in noisy orientations
+        current_gripper_pose = th.cat([gripper_pos, gripper_quat], dim=1)
+
+        current_object_pose[:,2].clamp_(min=0.0) # if it falls off the table dont let it go negative into the abyss
         # ggLog.info(f"current_object_pose = {current_object_pose}")
         # ggLog.info(f"current_gripper_pose = {current_gripper_pose}")
         new_grasping_state = {self.GRASPING_FIELDS.GOAL_POSE   : self._grasping_episode_config.goal_object_pose.expand(self.num_envs,7),

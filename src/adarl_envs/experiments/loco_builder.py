@@ -65,6 +65,8 @@ def make_asset_texture_paths_absolute(mjcf_string: str, model_file_path: str) ->
 def format_tensor(t, float_precision):
     if t is None:
         return "None"
+    if isinstance(t, str):
+        return t
     if isinstance(t, float) or isinstance(t, int):
         t = th.as_tensor(t)
     t = t.squeeze().cpu().tolist()
@@ -90,16 +92,16 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
     goal_abs_linvel_xyz = info.get('goal_abs_xyz_vec', None)
     vel_norm = f"{th.linalg.norm(goal_abs_linvel_xyz):.3f}" if goal_abs_linvel_xyz is not None else "N/A"
     return  (   f"\n"
-                f"Step    {info['ep_step_count']: .3f}\n"+
+                f"Step                  {info.get('ep_step_count', -1): .3f}\n"+
                 f"body_abs_linvel       {body_abs_linvel_str} ({body_abs_linvel_norm_str} m/s)\n"
                 f"goal_vel_abs          {format_tensor(goal_abs_linvel_xyz, 3)} ({vel_norm} m/s)\n"
-                f"goal_vel_rel          {format_tensor(info.get('goal_rel_xyz_vec',None), 3)}\n"
-                f"smoothed_linvel_error {format_tensor(info.get('smoothed_linvel_error',None), 3)}\n"
-                f"linvel_error          {format_tensor(info.get('linvel_error',None), 3)}\n"
-                f"goal_yaw_vel          {format_tensor(info.get('goal_yaw_vel',None), 3)}\n"
-                f"smoothed_yawvel_error {format_tensor(info.get('smoothed_yawvel_error',None), 3)}\n"
-                f"goal_height           {format_tensor(info.get('goal_height',None), 3)}\n"
-                f"height_error          {format_tensor(info.get('height_err',None), 3)}\n"
+                f"goal_vel_rel          {format_tensor(info.get('goal_rel_xyz_vec','N/A'), 3)}\n"
+                f"smoothed_linvel_error {format_tensor(info.get('smoothed_linvel_error','N/A'), 3)}\n"
+                f"linvel_error          {format_tensor(info.get('linvel_error','N/A'), 3)}\n"
+                f"goal_yaw_vel          {format_tensor(info.get('goal_yaw_vel','N/A'), 3)}\n"
+                f"smoothed_yawvel_error {format_tensor(info.get('smoothed_yawvel_error','N/A'), 3)}\n"
+                f"goal_height           {format_tensor(info.get('goal_height','N/A'), 3)}\n"
+                f"height_error          {format_tensor(info.get('height_err','N/A'), 3)}\n"
                 f"log_prob              {format_tensor(extra_info.get('act_log_prob',th.as_tensor(float('nan'))), 3)}\n"
                 f"posref_safety         {posref_safety_triggered}\n"
                 f"limits_safety         {limits_safety_triggered}\n"
@@ -165,32 +167,32 @@ def loco_runner_builder(seed,
         raise NotImplementedError()
     elif mode == "gazebo":
         raise NotImplementedError()
-    elif mode == "xbot":
-        from adarl_ros.adapters.RosXbotAdapter import RosXbotAdapter
-        from adarl_ros.adapters.VecRosXBotAdapterWrapper import VecRosXBotAdapterWrapper
-        forced_ros_master_uri="http://127.0.0.1:11311"
-        ground_link = ("ground_plane","ground_link")
-        adapter = VecRosXBotAdapterWrapper(   adapter = RosXbotAdapter( model_name = robot_name,
-                                                                        stepLength_sec = stepLength_sec,
-                                                                        forced_ros_master_uri = forced_ros_master_uri,
-                                                                        maxObsDelay = float("+inf"),
-                                                                        blocking_observation = False,
-                                                                        is_floating_base = True,
-                                                                        reference_frame = "world",
-                                                                        torch_device = th.device("cpu"),
-                                                                        fallback_cmd_stiffness = 200.0,
-                                                                        fallback_cmd_damping = 10.0,
-                                                                        allow_fallback = False,
-                                                                        jpos_cmd_max_vel = {},
-                                                                        jpos_cmd_max_vel_default = 5.0,
-                                                                        jpos_cmd_max_acc = {},
-                                                                        jpos_cmd_max_acc_default = 5.0,
-                                                                        enable_filters=True,
-                                                                        position_commands_stiffness = 400.0,
-                                                                        position_commands_damping = 10.0,
-                                                                        walltime_factor=walltime_factor),
-                                                vec_size = 1,
-                                                th_device = th_device)
+    # elif mode == "xbot":
+    #     from adarl_ros.adapters.RosXbotAdapter import RosXbotAdapter
+    #     from adarl_ros.adapters.VecRosXBotAdapterWrapper import VecRosXBotAdapterWrapper
+    #     forced_ros_master_uri="http://127.0.0.1:11311"
+    #     ground_link = ("ground_plane","ground_link")
+    #     adapter = VecRosXBotAdapterWrapper(   adapter = RosXbotAdapter( model_name = robot_name,
+    #                                                                     stepLength_sec = stepLength_sec,
+    #                                                                     forced_ros_master_uri = forced_ros_master_uri,
+    #                                                                     maxObsDelay = float("+inf"),
+    #                                                                     blocking_observation = False,
+    #                                                                     is_floating_base = True,
+    #                                                                     reference_frame = "world",
+    #                                                                     torch_device = th.device("cpu"),
+    #                                                                     fallback_cmd_stiffness = 200.0,
+    #                                                                     fallback_cmd_damping = 10.0,
+    #                                                                     allow_fallback = False,
+    #                                                                     jpos_cmd_max_vel = {},
+    #                                                                     jpos_cmd_max_vel_default = 5.0,
+    #                                                                     jpos_cmd_max_acc = {},
+    #                                                                     jpos_cmd_max_acc_default = 5.0,
+    #                                                                     enable_filters=True,
+    #                                                                     position_commands_stiffness = 400.0,
+    #                                                                     position_commands_damping = 10.0,
+    #                                                                     walltime_factor=walltime_factor),
+    #                                             vec_size = 1,
+    #                                             th_device = th_device)
     elif mode == "xbot-zmq":
         from adarl.adapters.VecZmqXbotAdapter import VecZmqXbotAdapter
         from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter
@@ -222,20 +224,20 @@ def loco_runner_builder(seed,
                                                                 robot_urdf=robot_description_string),
                                                 vec_size = 1,
                                                 th_device = th_device)
-    elif mode == "pybullet":
-        from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
-        from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
-        ground_link = ("ground_plane","ground_link")
-        env_builder_args["enable_link_collisions"] = None
-        adapter = VecSimJointImpedanceAdapterWrapper(adapters = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
-                                                                            restore_on_reset=False,
-                                                                            debug_gui=show_gui,
-                                                                            simulation_step=1/1024,
-                                                                            enable_rendering=env_builder_args.pop("enable_rendering"),
-                                                                            global_max_torque_position_control = 100,
-                                                                            real_time_factor=None,
-                                                                            th_device=th_device),
-                                                            th_device = th_device)
+    # elif mode == "pybullet":
+    #     from adarl.adapters.PyBulletJointImpedanceAdapter import PyBulletJointImpedanceAdapter
+    #     from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
+    #     ground_link = ("ground_plane","ground_link")
+    #     env_builder_args["enable_link_collisions"] = None
+    #     adapter = VecSimJointImpedanceAdapterWrapper(adapters = PyBulletJointImpedanceAdapter(stepLength_sec=stepLength_sec,
+    #                                                                         restore_on_reset=False,
+    #                                                                         debug_gui=show_gui,
+    #                                                                         simulation_step=1/1024,
+    #                                                                         enable_rendering=env_builder_args.pop("enable_rendering"),
+    #                                                                         global_max_torque_position_control = 100,
+    #                                                                         real_time_factor=None,
+    #                                                                         th_device=th_device),
+    #                                                         th_device = th_device)
     elif mode == "mjx":
         from adarl.adapters.MjxJointImpedanceAdapter import MjxJointImpedanceAdapter
         import jax
@@ -332,8 +334,8 @@ def loco_runner_builder(seed,
     
     lrenv = LocomotionVecEnv(LocomotionVecEnvInitArgs(
                                 robot_init_args = RobotVecEnvInitArgs(
-                                    action_delay_mustd_std = env_builder_args.pop("action_delay_mustd_std"),
-                                    action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
+                                    noise_action_delay_mustd_std = env_builder_args.pop("noise_action_delay_mustd_std"),
+                                    noise_action_mustd = env_builder_args.pop("noise_action_mustd"), 
                                     action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                                     adapter=adapter,
                                     control_mode = env_builder_args.pop("control_mode"),
@@ -356,20 +358,20 @@ def loco_runner_builder(seed,
                                     impulse_mean_std=env_builder_args.pop("impulse_mean_std"),
                                     impulse_probability_per_sec=env_builder_args.pop("impulse_probability_per_sec"),
                                     init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
-                                    initial_height_randomization_range_meters = env_builder_args.pop("initial_height_randomization_range_meters"),
-                                    initial_joint_pose_randomization_range = env_builder_args.pop("initial_joint_pose_randomization_range"),
+                                    randomization_initial_height_range_meters = env_builder_args.pop("randomization_initial_height_range_meters"),
+                                    randomization_initial_joint_pose_range = env_builder_args.pop("randomization_initial_joint_pose_range"),
                                     just_health_reward = env_builder_args.pop("just_health_reward"),
                                     longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
                                     maxStepsPerEpisode=max_steps,
                                     merge_privileged = env_builder_args.pop("merge_privileged"),
                                     minmax_damping=(0.0,30.0),
                                     minmax_stiffness=(0.0,1000.0),
-                                    obs_abs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_angvel_ep_mustd_step_std"),
-                                    obs_abs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_gravity_ep_mustd_step_std"),
-                                    obs_abs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_joints_pve_ep_mustd_step_std"),
-                                    obs_abs_noise_linacc_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_linacc_ep_mustd_step_std"),
-                                    obs_abs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_linvel_ep_mustd_step_std"),
-                                    obs_abs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_abs_noise_posz_ep_mustd_step_std"),
+                                    noise_abs_obs_angvel_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_angvel_ep_mustd_step_std"),
+                                    noise_abs_obs_gravity_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_gravity_ep_mustd_step_std"),
+                                    noise_abs_obs_joints_pve_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_joints_pve_ep_mustd_step_std"),
+                                    noise_abs_obs_linacc_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_linacc_ep_mustd_step_std"),
+                                    noise_abs_obs_linvel_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_linvel_ep_mustd_step_std"),
+                                    noise_abs_obs_posz_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_posz_ep_mustd_step_std"),
                                     observe_full_robot_state = env_builder_args.pop("observe_full_robot_state"),
                                     offset_envs_ep_starts = env_builder_args.pop("offset_envs_ep_starts"),
                                     posref_safety_period = env_builder_args.pop("posref_safety_period"),
@@ -389,7 +391,7 @@ def loco_runner_builder(seed,
                                     randomized_mass_links=env_builder_args.pop("randomized_mass_links"),
                                     randomized_mass_ratios_distr=env_builder_args.pop("randomized_mass_ratios"),
                                     randomized_reference_filter_distribution=env_builder_args.pop("randomized_reference_filter_distribution"),
-                                    recycle_pose_randomization=env_builder_args.pop("recycle_pose_randomization"),
+                                    randomization_recycle_init_pose=env_builder_args.pop("randomization_recycle_init_pose"),
                                     robot_main_body_link=env_builder_args.pop("robot_main_body_link"),
                                     robot_name=robot_name,
                                     robot_root_link=env_builder_args.pop("robot_root_link"),
@@ -411,7 +413,11 @@ def loco_runner_builder(seed,
                                     verbose_infos=env_builder_args.pop("verbose_infos"),
                                     minimal_infos=env_builder_args.pop("minimal_infos"),
                                     no_infos=env_builder_args.pop("no_infos"),
-                                    extrinsics_only_privileged=env_builder_args.pop("extrinsics_only_privileged",False)),
+                                    extrinsics_only_privileged=env_builder_args.pop("extrinsics_only_privileged",False),
+                                    history_length_action_raw=env_builder_args.pop("history_length_action_raw"),
+                                    history_length_action_smoothed=env_builder_args.pop("history_length_action_smoothed"),
+                                    observe_actor_safety_state=env_builder_args.pop("observe_actor_safety_state"),
+                                    posref_err_history_length=env_builder_args.pop("posref_err_history_length")),
                                 desired_foot_clearance = env_builder_args.pop("desired_foot_clearance"),
                                 disallowed_contact_links = env_builder_args.pop("disallowed_contact_links"),
                                 feet_contact_links=env_builder_args.pop("feet_contact_links"),
@@ -421,8 +427,11 @@ def loco_runner_builder(seed,
                                 goal_speed_minmax=env_builder_args.pop("goal_speed_minmax"),
                                 goal_yaw_minmax=env_builder_args.pop("goal_yaw_minmax"),
                                 max_goal_height_pos_change_speed=env_builder_args.pop("max_goal_height_pos_change_speed"),
-                                max_good_step_duration=env_builder_args.pop("max_good_step_duration"),
-                                min_good_step_duration=env_builder_args.pop("min_good_step_duration"),
+                                max_good_step_air_duration=env_builder_args.pop("step_max_good_air_duration"),
+                                min_good_step_air_duration=env_builder_args.pop("step_min_good_air_duration"),
+                                step_max_good_ground_duration=env_builder_args.pop("step_max_good_ground_duration"),
+                                step_min_good_ground_duration=env_builder_args.pop("step_min_good_ground_duration"),
+                                pitchnroll_reward_settle_point=env_builder_args.pop("pitchnroll_reward_settle_point"),
                                 reward_superweight_joint_penalties = env_builder_args.pop("reward_superweight_joint_penalties"),    
                                 reward_contacts_weight = env_builder_args.pop("reward_contacts_weight"),
                                 reward_failure_weight = env_builder_args.pop("reward_failure_weight"),
@@ -975,7 +984,8 @@ def union(dicts : list[dict]):
     return out
 
 
-def get_centauro_args(control_arms=False):
+def get_centauro_args(control_arms=False, robot_options : dict | None = None):
+    add_twisting_pelvis = robot_options is not None and robot_options.get("add_twisting_pelvis", False)
     # # Standard homing
     # hip_yaw =      0.75
     # hip_pitch =    1.25
@@ -1030,6 +1040,8 @@ def get_centauro_args(control_arms=False):
                 # ("centauro","dagana_1_claw_joint") : 0.3,
                 # ("centauro","dagana_2_claw_joint") : 0
                 }
+    if add_twisting_pelvis:
+        homing[("centauro","twisting_pelvis_joint")] = 0.0
     homing_ref = homing.copy()
     legs = ["hip_yaw_1"
             ,"hip_pitch_1"
@@ -1099,14 +1111,18 @@ def get_centauro_args(control_arms=False):
                             [{  ("centauro",f"j_wheel_{i}") : j_eff_ctrl_lim_leg_c} for i in range(1,5)]+
                             [{  ("centauro","torso_yaw") : 140.0,
                                 ("centauro","velodyne_joint") : 35.0,
-                                ("centauro","d435_head_joint") : 35.0}])
-    j_pos_range = 0.3
+                                ("centauro","d435_head_joint") : 35.0
+                                }])
+    if add_twisting_pelvis:
+        j_eff_ctrl_lims[("centauro","twisting_pelvis_joint")] = 10000.0
+    j_pos_range = 0.5
     j_pos_ctrl_lims = {k:np.array([-1.0,1.0])*j_pos_range+homing[k] for k in homing.keys()}
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf/urdf/centauro.urdf.xacro"),
             "model_kwargs" : {  "realsense":"false",
                                 "velodyne" :"false",
                                 "floating_joint":"true",
-                                "sphere_or_ellipsoid_wheel_collision":use_contact_lnks
+                                "sphere_or_ellipsoid_wheel_collision":use_contact_lnks,
+                                "add_twisting_pelvis" : "true" if add_twisting_pelvis else "false"
                                 },
             "robot_description_format" : "xacro",
             "xacro_extra_pkg_paths" : {"centauro_urdf" : adarl.utils.utils.pkgutil_get_path("pycentauro","iit-centauro-ros-pkg/centauro_urdf")},
@@ -1152,7 +1168,7 @@ def named_loco_venv_builder(seed : int,
                     num_envs : int, 
                     env_builder_args : dict,
                     env_name : str = "") -> gym.vector.VectorEnv:
-    full_args = robot_args_registry[env_builder_args["robot_model"]]()
+    full_args = robot_args_registry[env_builder_args["robot_model"]](robot_options=env_builder_args["robot_options"])
     full_args.update(env_builder_args)
     return loco_venv_builder(seed = seed,
                             log_folder = run_folder,
@@ -1164,7 +1180,7 @@ def named_loco_single_env_builder(seed : int,
                     log_folder : str,
                     is_eval : bool, 
                     env_builder_args : dict) -> tuple[gym.Env,float]:
-    full_args = robot_args_registry[env_builder_args["robot_model"]]()
+    full_args = robot_args_registry[env_builder_args["robot_model"]](robot_options=env_builder_args["robot_options"])
     full_args.update(env_builder_args)
     return single_env_builder(seed = seed,
                             log_folder = log_folder,

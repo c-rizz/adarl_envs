@@ -87,8 +87,8 @@ def robot_env_builder(  seed,
     urdf_string = adarl.utils.utils.compile_xacro_string(   model_definition_string=Path(model_file).read_text(),
                                                             model_kwargs={"use_cylinders" : "false"})
 
-    lrenv = RobotVecEnv(init_args.action_delay_mustd_std = env_builder_args.pop("action_delay_mustd"),
-                        init_args.action_noise_mustd = env_builder_args.pop("action_noise_mustd"), 
+    lrenv = RobotVecEnv(init_args.noise_action_delay_mustd_std = env_builder_args.pop("action_delay_mustd"),
+                        init_args.noise_action_mustd = env_builder_args.pop("noise_action_mustd"), 
                         init_args.action_smoothing_halflife_sec=env_builder_args.pop("action_smoothing_halflife_sec"),
                         init_args.adapter=env_controller,
                         init_args.control_mode = env_builder_args.pop("control_mode"),
@@ -117,13 +117,13 @@ def robot_env_builder(  seed,
                         init_args.verbose_infos=env_builder_args.pop("verbose_infos"),
                         init_args.quiet=quiet,
                         init_args.enable_dbg_checks=True,
-                        init_args.initial_joint_pose_randomization_range = env_builder_args.pop("initial_pose_randomization_range"),
+                        init_args.randomization_initial_joint_pose_range = env_builder_args.pop("initial_pose_randomization_range"),
                         init_args.init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
-                        init_args.obs_abs_noise_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_noise_joints_pve_ep_mustd_step_std"),
-                        init_args.obs_abs_noise_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),
-                        init_args.obs_abs_noise_angvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_angvel_ep_mustd_step_std"),
-                        init_args.obs_abs_noise_posz_ep_mustd_step_std = env_builder_args.pop("obs_noise_posz_ep_mustd_step_std"),
-                        init_args.obs_abs_noise_gravity_ep_mustd_step_std = env_builder_args.pop("obs_noise_gravity_ep_mustd_step_std"),
+                        init_args.noise_abs_obs_joints_pve_ep_mustd_step_std = env_builder_args.pop("obs_noise_joints_pve_ep_mustd_step_std"),
+                        init_args.noise_abs_obs_linvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_linvel_ep_mustd_step_std"),
+                        init_args.noise_abs_obs_angvel_ep_mustd_step_std = env_builder_args.pop("obs_noise_angvel_ep_mustd_step_std"),
+                        init_args.noise_abs_obs_posz_ep_mustd_step_std = env_builder_args.pop("obs_noise_posz_ep_mustd_step_std"),
+                        init_args.noise_abs_obs_gravity_ep_mustd_step_std = env_builder_args.pop("obs_noise_gravity_ep_mustd_step_std"),
                         init_args.ui_camera_resolution_hw=env_builder_args.pop("ui_camera_resolution_hw")
                         )
     # ggLog.info(f"state_space = {lrenv.state_space}")
@@ -248,7 +248,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     eval_freq = 5
     env_builder_args = {
         "action_delay_mustd" : (0.0,0.0),
-        "action_noise_mustd" : (0.0,0.0),
+        "noise_action_mustd" : (0.0,0.0),
         "action_smoothing_halflife_sec" : 0.1,
         "control_mode" : "position",
         "enable_rendering" : True,

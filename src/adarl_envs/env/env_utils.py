@@ -247,7 +247,7 @@ def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
     return 1-error/zero_rew_dist
 
 
-def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
+def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor | float):
     """A bell-shaped reward function. It's 1 at error = 0, it reaches about zero (~0.0183) at error = zero_rew_dist
 
     Parameters

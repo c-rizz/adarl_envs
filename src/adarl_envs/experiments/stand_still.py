@@ -30,7 +30,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     eval_freq = 5
     env_builder_args = {
         "action_delay_mustd" : (step_length_sec,0.01),
-        "action_noise_mustd" : (0.0,0.001),
+        "noise_action_mustd" : (0.0,0.001),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
         "enable_limits_safety" : True,
@@ -51,10 +51,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 0.1, # Averaging of the joint pose for the position reward
-        "max_good_step_duration" : 1.5,
+        "step_max_good_air_duration" : 1.5,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
-        "min_good_step_duration" : 0.2,
+        "step_min_good_air_duration" : 0.2,
         "mode" : mode,
         "obs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.005, 0.02),
         "obs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.02, 0.02),
@@ -74,7 +74,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_mass_ratios" : 0.3,
         "record_video" : True,
         "record_video" : True,
-        "recycle_pose_randomization" : True,
+        "randomization_recycle_init_pose" : True,
         "reward_joint_acceleration_weight" :      2.0,
         "reward_joint_actacc_weight" :            0.5,
         "reward_joint_actdiff_weight" :           1.0,
@@ -119,7 +119,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_eval_env_builder_args["initial_pose_randomization_range"] = 0.02
     video_eval_env_builder_args["mass_randomization_ratio"] = 0.0
     video_eval_env_builder_args["friction_slide_spin_roll_randomization_ratios"] = (0.0,0.0,0.0)
-    video_eval_env_builder_args["recycle_pose_randomization"] = False
+    video_eval_env_builder_args["randomization_recycle_init_pose"] = False
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,

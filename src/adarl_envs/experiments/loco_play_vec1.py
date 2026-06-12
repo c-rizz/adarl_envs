@@ -2,6 +2,8 @@
 from __future__ import annotations
 import time
 import inspect
+
+from pprint import pprint
 from adarl.utils.buffers import BaseBuffer
 import adarl.utils.dbg.dbg_img
 from rreal.algorithms.rl_agent import load_agent
@@ -139,15 +141,14 @@ def adarl_builder_and_args():
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n),
-        "action_noise_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
-        "desired_foot_clearance" : 0.05,
+        "desired_foot_clearance" : 0.1,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
         "enable_rendering" : False,
-        "enable_reference_filter" : False,
+        "enable_reference_filter" : True,
+        "extrinsics_only_privileged" : False,
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
@@ -157,34 +158,51 @@ def adarl_builder_and_args():
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
-        "held_joints_damping" : 10.0,
-        "held_joints_stiffness" : 500.0,
+        "held_joints_damping" :   {
+            # ("centauro","twisting_pelvis_joint"):5.0,
+                                   ("centauro","j_wheel_1"):50.0,
+                                   ("centauro","j_wheel_2"):50.0,
+                                   ("centauro","j_wheel_3"):50.0,
+                                   ("centauro","j_wheel_4"):50.0,
+                                    "default": 500.0},
+        "held_joints_stiffness" : {
+            # ("centauro","twisting_pelvis_joint"):2000.0,
+                                   ("centauro","j_wheel_1"):0.0,
+                                   ("centauro","j_wheel_2"):0.0,
+                                   ("centauro","j_wheel_3"):0.0,
+                                   ("centauro","j_wheel_4"):0.0,
+                                    "default": 500.0},
+        "history_length_action_smoothed" : 1,
+        "history_length_action_raw" : 3,
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 1.0,
-        "initial_height_randomization_range_meters" : 0.1,
-        "initial_joint_pose_randomization_range" : 0.1,
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,
         "max_goal_height_speed" : 0.1,
-        "max_good_step_duration" : 0.5,
+        "step_max_good_air_duration" : 0.5,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
-        "min_good_step_duration" : 0.1,
+        "step_min_good_air_duration" : 0.1,
         "mode" : mode,
-        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.1*n],
-        "obs_abs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.0*n, 0.0*n],
-        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.1*n],
-        "obs_abs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
-        "obs_abs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
-        "obs_abs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
+        "noise_abs_obs_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.1*n],
+        "noise_abs_obs_gravity_ep_mustd_step_std" :     [0.0, 0.0*n, 0.0*n],
+        "noise_abs_obs_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.1*n],
+        "noise_abs_obs_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
+        "noise_abs_obs_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
+        "noise_abs_obs_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
+        "noise_action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n),
+        "noise_action_mustd" : (0.0,   0.0),
         "observe_full_robot_state" : False,
         "offset_envs_ep_starts" : True,
         "posref_safety_period" : 0.02,
         "quiet" : False,
+        "randomization_initial_height_range_meters" : 0.1,
+        "randomization_initial_joint_pose_range" : 0.1,
+        "randomization_recycle_init_pose" : True,
         "randomized_dof_armature_ratios" : 0.1*r,
         "randomized_dof_frictionloss_ratios"             : 0.0*r,
         "randomized_dof_damping_ratios":        0.2*r,
@@ -195,46 +213,45 @@ def adarl_builder_and_args():
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
         "randomized_reference_filter_distribution" : ("uniform", (30.0, 30.0)),
         "record_video" : True,
-        "recycle_pose_randomization" : True,
         "reward_superweight_joint_penalties" : 1.0,
         "reward_joint_acceleration_weight" :        eps,
         "reward_joint_acc_on_vel_weight" :          eps,
-        "reward_joint_actacc_weight" :              0.5*p,
-        "reward_joint_actdiff_weight" :             0.5*p,
-        "reward_contacts_weight" :            eps,
+        "reward_joint_actacc_weight" :              1.0*p,
+        "reward_joint_actdiff_weight" :             1.0*p,
+        "reward_contacts_weight" :                  eps,
         "reward_joint_energy_weight" :              eps,
         "reward_joint_power_weight" :               0.002*p,
-        "reward_failure_weight" :             eps,
-        "reward_feet_air_time_weight" :       10.0,
-        "reward_feet_ground_time_weight" :    eps,
-        "reward_feet_on_ground_weight" :      1.0,
-        "reward_feet_step_height_weight" :    0.0,
-        "reward_heading_velocity_weight" :    eps,
-        "reward_heading_weight" :             eps,
-        "reward_health_weight" :              eps,
-        "reward_height_position_weight" :     0.5,
-        "reward_height_velocity_weight" :     0.1,
-        "reward_pitchnroll_velocity_weight" : 0.2,
-        "reward_pitchnroll_weight" :          0.5,
+        "reward_failure_weight" :                   eps,
+        "reward_feet_air_time_weight" :             10.0,
+        "reward_feet_ground_time_weight" :          eps,
+        "reward_feet_on_ground_weight" :            1.0,
+        "reward_feet_step_height_weight" :          0.0,
+        "reward_heading_velocity_weight" :          eps,
+        "reward_heading_weight" :                   eps,
+        "reward_health_weight" :                    eps,
+        "reward_height_position_weight" :           0.5,
+        "reward_height_velocity_weight" :           0.1,
+        "reward_pitchnroll_velocity_weight" :       0.2,
+        "reward_pitchnroll_weight" :                0.5,
         "reward_joint_position_limit_weight" :      eps,
         "reward_joint_position_weight" :            eps,
-        "reward_joint_posref_vel_weight" :          0.05,
+        "reward_joint_posref_vel_weight" :          0.0,
         "reward_joint_posref_acc_weight":           eps,
-        "reward_scale_nolength":              0.01,
+        "reward_scale_nolength":                    0.01,
         "reward_joint_sensed_effort_weight" :       eps,
-        "reward_safety_triggered_weight" :    0.5,
-        "reward_slip_weight" :                1.0,
+        "reward_safety_triggered_weight" :          0.5,
+        "reward_slip_weight" :                      1.0,
         "reward_joint_stand_position_weight" :      5.0,
         "reward_joint_stand_velocity_weight" :      1.0,
         "reward_joint_torque_limit_weight" :        eps,
         "reward_joint_torque_weight" :              0.0001*p,
-        "reward_joint_torquediff_weight" :          0.0001*p,
+        "reward_joint_torquediff_weight" :          0.0*p,
         "reward_joint_torqueref_weight" :           eps,
-        "reward_tracking_weight" :            1.0,
+        "reward_tracking_weight" :                  1.0,
         "reward_joint_velocity_limit_weight" :      eps,
         "reward_joint_velocity_weight" :            eps,
         "reward_joint_velref_weight" :              eps,
-        "reward_yaw_vel_tracking_weight" :    1.0,
+        "reward_yaw_vel_tracking_weight" :          1.0,
         "robot_model" : args["robot"],
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : False,
@@ -251,11 +268,13 @@ def adarl_builder_and_args():
         "minimal_infos" : True,
         "playground_style_reward" : False,
         "no_infos" : False,
-        "extrinsics_only_privileged" : True
+        "robot_options" : {
+            "add_twisting_pelvis" : False
+        }
     }
 
     env_builder_args.update({
-        "action_delay_mustd_std" : (0.0, 0.0, 0.0) if realworld else env_builder_args["action_delay_mustd_std"],
+        "noise_action_delay_mustd_std" : (0.0, 0.0, 0.0) if realworld else env_builder_args["noise_action_delay_mustd_std"],
         "offset_envs_ep_starts" : False,
         "enable_rendering" : args["record"] or args["publishimg"],
         "record_video" : not realworld,
@@ -263,18 +282,18 @@ def adarl_builder_and_args():
         "minimal_infos" : skip_optionals or not record,
         "no_infos" : skip_optionals or not record,
         "video_save_freq" : 1 if record else 0,
-        "action_delay_mustd_std" : (0.0,0.0,0.0),
-        "action_noise_mustd" : (0.0,0.0),
-        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
-        "obs_abs_noise_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_abs_noise_linacc_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_abs_noise_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
-        "obs_abs_noise_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
-        "obs_abs_noise_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
+        "noise_action_delay_mustd_std" : (0.0,0.0,0.0),
+        "noise_action_mustd" : (0.0,0.0),
+        "noise_abs_obs_joints_pve_ep_mustd_step_std" :  (0.0, 0.0, 0.0),
+        "noise_abs_obs_linvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "noise_abs_obs_linacc_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "noise_abs_obs_angvel_ep_mustd_step_std" :      (0.0, 0.0, 0.0),
+        "noise_abs_obs_posz_ep_mustd_step_std" :        (0.0, 0.0, 0.0),
+        "noise_abs_obs_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : (not skip_optionals) or record,
-        "initial_joint_pose_randomization_range" : 0.0,
-        "initial_height_randomization_range_meters" : 0.0,
+        "randomization_initial_joint_pose_range" : 0.0,
+        "randomization_initial_height_range_meters" : 0.0,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
         "randomized_dof_frictionloss_ratios"         : 0.0*r,
@@ -387,16 +406,13 @@ def play(seed, folderName, run_id, args,
     control_mode = args["control"].lower().strip()
     if control_mode=="pretrained":
         model = load_agent(args["model"], device)
-        if isinstance(model, SAC):
-            trained_env_builder_args = model._init_args["init_hparams"].reference_init_args["env_builder_args"]
-            try:
-                equal, diffs = compare_dicts(env_builder_args, trained_env_builder_args)
-                if not equal:
-                    ggLog.warn(f"Loaded model was trained with different env args: \n{diffs}")
-            except Exception as e:
-                ggLog.warn(f"Could not compare env args with trained model: {type(e)}: {e}")
-        elif isinstance(model, PPO):
-            pass
+        trained_env_builder_args = model.get_reference_init_args()["env_builder_args"]
+        try:
+            equal, diffs = compare_dicts(env_builder_args, trained_env_builder_args)
+            if not equal:
+                ggLog.warn(f"Loaded model was trained with different env args: \n{diffs}")
+        except Exception as e:
+            ggLog.warn(f"Could not compare env args with trained model: {type(e)}: {e}")
     elif control_mode=="fixed":
         model = build_fixed_policy(env = env, robot=robot, device= env_device)
     elif control_mode=="random":

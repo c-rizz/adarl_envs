@@ -42,17 +42,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_joint_actdiff_weight" : 0.0,
         "reward_joint_torque_weight" :  0.0, 
         "reward_joint_position_limit_weight" : 0.0,
-        "reward_joint_position_weight" : 0.0,
-        "reward_object_pose_weight" : 0.0,
+        "reward_joint_position_weight" : 0.3,
+        "reward_object_pose_weight" : 1.0,
         "reward_gripper_pose_weight" : 1.0,
         "reward_safety_weight" : 0.0,     
-
         "target_object_link" : ("cube","cube"),
-        "gripper_links" : [("centauro","dagana_1_fixed_palm_center"), ("centauro","dagana_1_claw_palm_center")],
         "observe_object_pose" : True,
-
-        "action_delay_mustd_std" : (0.008, 0.005*n, 0.0025*n),
-        "action_noise_mustd" : (0.0,   0.0),
+        "noise_action_delay_mustd_std" : (0.008, 0.005*n, 0.0025*n),
+        "noise_action_mustd" : (0.0, 0.0),
+        "observe_actor_safety_state" : False,
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position_delta",
         "control_mode_position_delta_max" : 0.05,
@@ -72,28 +70,30 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
         "held_joints_damping" : 20.0,
         "held_joints_stiffness" : 2000.0,
+        "history_length_action_smoothed" : 0,
+        "history_length_action_raw" : 1,
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 0.7,
-        "initial_height_randomization_range_meters" : 0.1,
-        "initial_joint_pose_randomization_range" : 0.9,
+        "randomization_initial_height_range_meters" : 0.1,
+        "randomization_initial_joint_pose_range" : 0.9,
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,
         "max_goal_height_speed" : 0.1,
-        "max_good_step_duration" : 0.5,
+        "step_max_good_air_duration" : 0.5,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
-        "min_good_step_duration" : 0.1,
+        "step_min_good_air_duration" : 0.1,
         "mode" : mode,
-        "obs_abs_noise_angvel_ep_mustd_step_std" :      [0.0, 0.02*n,  0.1*n],
-        "obs_abs_noise_gravity_ep_mustd_step_std" :     [0.0, 0.0*n,   0.1*n],
-        "obs_abs_noise_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.1*n],
-        "obs_abs_noise_linacc_ep_mustd_step_std" :      [0.0, 0.0,     0.0],
-        "obs_abs_noise_linvel_ep_mustd_step_std" :      [0.0, 0.0,     0.0],
-        "obs_abs_noise_posz_ep_mustd_step_std" :        [0.0, 0.0,     0.0],
+        "noise_abs_obs_angvel_ep_mustd_step_std" :      [0.0, 0.02*n,  0.1*n],
+        "noise_abs_obs_gravity_ep_mustd_step_std" :     [0.0, 0.0*n,   0.1*n],
+        "noise_abs_obs_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.1*n],
+        "noise_abs_obs_linacc_ep_mustd_step_std" :      [0.0, 0.0,     0.0],
+        "noise_abs_obs_linvel_ep_mustd_step_std" :      [0.0, 0.0,     0.0],
+        "noise_abs_obs_posz_ep_mustd_step_std" :        [0.0, 0.0,     0.0],
         "observe_full_robot_state" : False,
         "offset_envs_ep_starts" : False,
         "posref_safety_period" : 0.02,
@@ -108,7 +108,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "record_video" : True,
-        "recycle_pose_randomization" : True,
+        "randomization_recycle_init_pose" : True,
         "robot_model" : args["robot"],
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : True if algo=="sac" else False,
@@ -123,7 +123,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
         "minimal_infos" : True,
-        "playground_style_reward" : False
+        "playground_style_reward" : False,
+        "extrinsics_only_privileged" : False,
+        "posref_err_history_length" : 0
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -131,7 +133,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_eval_env_builder_args["minimal_infos"] = False
     video_eval_env_builder_args["video_save_freq"] = 1
     video_eval_env_builder_args["ui_camera_resolution_hw"] = (270,480)
-    video_eval_env_builder_args["recycle_pose_randomization"] = False
+    video_eval_env_builder_args["randomization_recycle_init_pose"] = False
     eval_conf_video_det = {
         "name" : "video_det",
         "deterministic" : True,
@@ -292,8 +294,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     agent_hyperparams=PPO_init_hyperparams(  minibatch_size=train_envs*24//4,
                                                         minibatch_num=4,
                                                         th_device=th.device("cuda"),
-                                                        actor_network_arch=(64,64,64),
-                                                        critic_network_arch=(64,64,64),
+                                                        actor_network_arch=(512,256),
+                                                        critic_network_arch=(512,256),
                                                         q_lr=None,
                                                         policy_lr=3e-4,
                                                         update_epochs=5,

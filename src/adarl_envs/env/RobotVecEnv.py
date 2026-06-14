@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 import pprint
 import scipy.stats
-from gymnasium.vector.utils.spaces import batch_space
+from gymnasium.vector.utils import batch_space
 import os
 from adarl.utils.spaces import get_space_labels
 from adarl.utils.base_utils import record_time, record_region_start, record_region_end, DelayStats
@@ -1386,10 +1386,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                             pose=robot_pose,
                                             format=self._configuration.init_args.robot_description_format,
                                             kwargs={})
-            if adarl.utils.utils.isinstance_noimport(self._adapter, ("MjxAdapter", "MujocoAdapter")):
+            if adarl.utils.utils.isinstance_noimport(self._adapter, ("MjxAdapter", "MujocoAdapter", "GenesisAdapter")):
                 cam_file = "models/simple_camera.mjcf.xacro"
+                cam_format = "mjcf.xacro"
             else:            
                 cam_file = "models/simple_camera.sdf.xacro"
+                cam_format = "sdf.xacro"
             is_pybullet = False
             is_ros = False
             if isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper):
@@ -1404,7 +1406,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             camera_spawn_def = ModelSpawnDef(   definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
                                                 name="simple_camera",
                                                 pose=camera_pose,
-                                                format="sdf.xacro",
+                                                format=cam_format,
                                                 kwargs={"camera_width":self._configuration.init_args.ui_camera_resolution_hw[1],
                                                         "camera_height":self._configuration.init_args.ui_camera_resolution_hw[0],
                                                         "frame_rate":1/self._intendedStepLength_sec})
@@ -1814,6 +1816,17 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 raise NotImplementedError("Unexpected sub adapter "+self._adapter.sub_adapter())
         elif isinstance_noimport(self._adapter, "MujocoAdapter"):
             self._adapter.build_scenario(models = self._get_spawn_defs())
+            self._arrow_base = ("arrow","arrow_link")
+            self._arrow_yellow = ("arrow_yellow","arrow_link")
+        elif isinstance_noimport(self._adapter, "GenesisAdapter"):
+            spawn_defs = self._get_spawn_defs()
+            for sd in spawn_defs:
+                # The visual marker models have no fixed joint in genesis (they are moved around with
+                # setLinksStateDirect), so compensate gravity to keep them in place like mujoco mocap bodies.
+                if sd.name in ("arrow", "arrow_yellow", "axes"):
+                    sd.kwargs["genesis_gravity_compensation"] = 1.0
+            # the ui camera is parsed automatically by the adapter from the camera mjcf model
+            self._adapter.build_scenario(models = spawn_defs)
             self._arrow_base = ("arrow","arrow_link")
             self._arrow_yellow = ("arrow_yellow","arrow_link")
         else:

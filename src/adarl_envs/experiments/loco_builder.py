@@ -325,6 +325,25 @@ def loco_runner_builder(seed,
                                                 opt_override=opt_override,
                                                 reference_filter_cutoff_frequency=20.0,
                                                 reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none")
+    elif mode == "genesis":
+        from adarl.adapters.GenesisJointImpedanceAdapter import GenesisJointImpedanceAdapter
+        ground_link = ("ground","ground_link")
+        robot_model = env_builder_args["robot_model"]
+        sim_dt = {"centauro" : 2/1024, "spot" : 0.004}.get(robot_model, 2/1024)
+        # collision-pair filtering (set_body_collisions) is not implemented in GenesisAdapter
+        env_builder_args["enable_link_collisions"] = None
+        # the ui camera ("simple_camera") is parsed automatically from the camera model spawned by the env
+        adapter = GenesisJointImpedanceAdapter( vec_size=num_envs,
+                                                step_length_sec=stepLength_sec,
+                                                sim_step_dt=sim_dt,
+                                                output_th_device=th_device,
+                                                log_folder=run_folder,
+                                                enable_rendering=env_builder_args.pop("enable_rendering"),
+                                                show_gui=show_gui,
+                                                default_max_joint_impedance_ctrl_torque=env_builder_args.pop("default_max_joint_impedance_ctrl_torque", 100.0),
+                                                max_joint_impedance_ctrl_torques=env_builder_args.pop("max_joint_impedance_ctrl_torques", {}),
+                                                reference_filter_cutoff_frequency=20.0,
+                                                reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none")
     else:
         print(f"Requested unknown adapter '{mode}'")
         exit(0)

@@ -107,6 +107,24 @@ def runner_builder(seed,
                                                 max_joint_impedance_ctrl_torques=env_builder_args.get("max_joint_impedance_ctrl_torques", {}),
                                                 reference_filter_cutoff_frequency=20.0,
                                                 reference_filter_mode="second_order" if env_builder_args.get("enable_reference_filter", True) else "none")
+    elif mode == "genesis":
+        from adarl.adapters.GenesisJointImpedanceAdapter import GenesisJointImpedanceAdapter
+        ground_link = ("ground","ground_link")
+        sim_dt = 1/1024
+        # collision-pair filtering (set_body_collisions) is not implemented in GenesisAdapter
+        env_builder_args["enable_link_collisions"] = None
+        # the ui camera ("simple_camera") is parsed automatically from the camera model spawned by the env
+        adapter = GenesisJointImpedanceAdapter( vec_size=num_envs,
+                                                output_th_device=th_device,
+                                                sim_step_dt=sim_dt,
+                                                step_length_sec=stepLength_sec,
+                                                enable_rendering=env_builder_args.pop("enable_rendering", False),
+                                                show_gui=show_gui,
+                                                log_folder=run_folder,
+                                                default_max_joint_impedance_ctrl_torque=env_builder_args.pop("default_max_joint_impedance_ctrl_torque", 100.0),
+                                                max_joint_impedance_ctrl_torques=env_builder_args.pop("max_joint_impedance_ctrl_torques", {}),
+                                                reference_filter_cutoff_frequency=20.0,
+                                                reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none")
     else:
         print(f"Requested unknown adapter '{mode}'")
         exit(0)
@@ -458,8 +476,8 @@ def get_franka_args():
                     "joint5": (-2.8973,  2.8973),
                     "joint6": (-0.0175,  3.7525),
                     "joint7": (-2.8973,  2.8973),
-                    "finger_joint1": (0.0, 0.04),
-                    "finger_joint2": (0.0, 0.04)}
+                    "finger_joint1": (0.0, 0.05),
+                    "finger_joint2": (0.0, 0.05)}
     eff_lims = {    "joint1": 87.0, "joint2": 87.0, "joint3": 87.0, "joint4": 87.0,
                     "joint5": 12.0, "joint6": 12.0, "joint7": 12.0,
                     "finger_joint1": 100.0, "finger_joint2": 100.0}

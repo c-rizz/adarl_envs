@@ -265,6 +265,9 @@ def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor | float):
     return th.exp(-(2*error/zero_rew_dist)**2)
 
 
-def double_bell_reward(error : th.Tensor, bell_width_a : th.Tensor, bell_width_b : th.Tensor, bell_b_weight : th.Tensor):
+def double_bell_reward(error : th.Tensor,
+                       bell_width_a : th.Tensor | float,
+                       bell_width_b : th.Tensor | float,
+                       bell_b_weight : th.Tensor | float):
     return (   bell_b_weight  * bell_reward(error, zero_rew_dist=bell_width_b)+
             (1-bell_b_weight) * bell_reward(error, zero_rew_dist=bell_width_a))

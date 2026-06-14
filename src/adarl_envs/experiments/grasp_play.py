@@ -168,18 +168,17 @@ def grasp_builder_and_args():
         "reward_joint_power_weight" : 0.0,
         "reward_joint_actacc_weight" :  0.0,
         "reward_joint_actdiff_weight" : 0.0,
-        "reward_joint_torque_weight" :  0.0,
+        "reward_joint_torque_weight" :  0.0, 
         "reward_joint_position_limit_weight" : 0.0,
-        "reward_object_pose_weight" : 0.0,
-        "reward_gripper_pose_weight" : 5.0,
-        "reward_safety_weight" : 0.0,
-
+        "reward_joint_position_weight" : 0.3,
+        "reward_object_pose_weight" : 1.0,
+        "reward_gripper_pose_weight" : 1.0,
+        "reward_safety_weight" : 0.0,     
         "target_object_link" : ("cube","cube"),
-        "gripper_links" : [("centauro","dagana_1_fixed_palm_center"), ("centauro","dagana_1_claw_palm_center")],
         "observe_object_pose" : True,
-
         "noise_action_delay_mustd_std" : (0.008, 0.005*n, 0.0025*n),
-        "noise_action_mustd" : (0.0,   0.0),
+        "noise_action_mustd" : (0.0, 0.0),
+        "observe_actor_safety_state" : False,
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position_delta",
         "control_mode_position_delta_max" : 0.05,
@@ -199,12 +198,14 @@ def grasp_builder_and_args():
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
         "held_joints_damping" : 20.0,
         "held_joints_stiffness" : 2000.0,
+        "history_length_action_smoothed" : 0,
+        "history_length_action_raw" : 1,
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 0.7,
         "randomization_initial_height_range_meters" : 0.1,
-        "randomization_initial_joint_pose_range" : 0.1,
+        "randomization_initial_joint_pose_range" : 0.9,
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
@@ -238,7 +239,7 @@ def grasp_builder_and_args():
         "randomization_recycle_init_pose" : True,
         "robot_model" : args["robot"],
         "saturate_jimp_ref_limits" : False,
-        "split_rewards" : False,
+        "split_rewards" : True, # if algo=="sac" else False,
         "stepLength_sec" : step_length_sec,
         "terminate_on_safety" : False,
         "terminate_on_crash" : True,
@@ -250,7 +251,9 @@ def grasp_builder_and_args():
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
         "minimal_infos" : True,
-        "playground_style_reward" : False
+        "playground_style_reward" : False,
+        "extrinsics_only_privileged" : False,
+        "posref_err_history_length" : 0
     }
 
     env_builder_args.update({

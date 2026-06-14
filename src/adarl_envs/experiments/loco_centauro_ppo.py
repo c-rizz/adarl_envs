@@ -22,13 +22,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unexpected algo '{algo}'")
     
-    
     if mode == "pybullet":
         env_device = th.device("cpu",0)
-    elif mode == "mjx":
+    else: # mode == "mjx":
         env_device = th.device("cuda",0)
-    else:
-        raise RuntimeError(f"Unknown mode '{mode}'")
+    # else:
+    #     raise RuntimeError(f"Unknown mode '{mode}'")
     
     degree2rad = math.pi/180
     eval_freq = 20
@@ -95,7 +94,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "noise_action_mustd" : (0.0,   0.0),
         "observe_actor_safety_state" : True,
         "observe_full_robot_state" : False,
-        "offset_envs_ep_starts" : True,
+        "offset_envs_ep_starts" : algo=="ppo",
         "pitchnroll_reward_settle_point" : 15*degree2rad, # ~zero reward after this angle
         "playground_style_reward" : False,
         "posref_err_history_length" : 5,
@@ -175,13 +174,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "walltime_factor" : 1.0,
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
-    video_eval_env_builder_args.update({        
+    video_eval_env_builder_args.update({
         "enable_rendering" : True,
         "verbose_infos" : True,
+        "minimal_infos" : False,
         "video_save_freq" : 1,
         "init_on_reset_ratio" : 1.0,
         "offset_envs_ep_starts" : False,
-        "minimal_infos" : False,
         # "randomization_initial_joint_pose_range" : 0.02,
         # "mass_randomization_ratio" : 0.0,
         # "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
@@ -441,7 +440,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     num_steps=24,
                                                     gamma=0.99,
                                                     loss_value_weight=1.0,
-                                                    loss_entropy_coeff=1e-3,
+                                                    loss_entropy_coeff=5e-4,
                                                     log_freq_vstep=int(max_steps_per_episode/10),
                                                     epsilon_policy_ratio_clip=0.2,
                                                     epsilon_value_clip_epsilon=0.2,

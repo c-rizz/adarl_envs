@@ -13,7 +13,7 @@ from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionD
 from dataclasses import dataclass, field, asdict
 from enum import Enum, IntEnum
 from git import Tree
-from gymnasium.vector.utils.spaces import batch_space
+from gymnasium.vector.utils import batch_space
 from requests import head
 from typing import Sequence, Literal, TypedDict, Any
 from typing_extensions import override

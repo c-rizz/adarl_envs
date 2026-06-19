@@ -48,6 +48,7 @@ def runner_builder(seed,
     show_gui = env_builder_args.pop("show_gui",False)
     env_builder_args.update({"centauro" : get_centauro_args,
                              "franka" : get_franka_args,
+                             "kyon" : get_kyon_args,
                              }[env_builder_args["robot_model"].lower()]())
     robot_name = env_builder_args["robot_name"]
     max_steps = env_builder_args.pop("max_steps_per_episode")
@@ -63,8 +64,6 @@ def runner_builder(seed,
         ground_link = ("ground","ground_link")
         sim_dt = 1/1024
         iterations_per_ep = int(max_steps*stepLength_sec/sim_dt)
-        opt_override = {}
-        opt_override.update(env_builder_args.pop("mjx_opt_override", {}))
         adapter = MjxJointImpedanceAdapter( vec_size=num_envs,
                                             enable_rendering=env_builder_args.pop("enable_rendering"),
                                             jax_device=jax.devices("gpu")[th_device.index] if th_device.type == "cuda" else jax.devices("cpu")[0],
@@ -85,11 +84,11 @@ def runner_builder(seed,
                                             revolute_dof_damping_override       = env_builder_args.get("revolute_dof_damping_override", 1.0),
                                             safe_revolute_dof_armature          = env_builder_args.get("safe_revolute_dof_armature", 0.1),
                                             opt_preset=env_builder_args.pop("mjx_opt_preset"),
-                                            opt_override=opt_override,
+                                            opt_override=env_builder_args.pop("mjx_opt_override", {}),
                                             geom_overrides=env_builder_args.get("mjx_geom_overrides", None),
                                             reference_filter_cutoff_frequency=20.0,
                                             reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none",
-                                            mjx_impl="jax")
+                                            mjx_impl="warp")
     elif mode == "mujoco":
         from adarl.adapters.MujocoJointImpedanceAdapter import MujocoJointImpedanceAdapter
         if num_envs != 1:
@@ -106,7 +105,11 @@ def runner_builder(seed,
                                                 default_max_joint_impedance_ctrl_torque=env_builder_args.get("default_max_joint_impedance_ctrl_torque", 100.0),
                                                 max_joint_impedance_ctrl_torques=env_builder_args.get("max_joint_impedance_ctrl_torques", {}),
                                                 reference_filter_cutoff_frequency=20.0,
-                                                reference_filter_mode="second_order" if env_builder_args.get("enable_reference_filter", True) else "none")
+                                                reference_filter_mode="second_order" if env_builder_args.get("enable_reference_filter", True) else "none",
+                                                geom_overrides=env_builder_args.get("mjx_geom_overrides", None),
+                                                opt_override=env_builder_args.pop("mjx_opt_override", {}),
+                                                opt_preset=env_builder_args.pop("mjx_opt_preset", "default")
+                                                )
     elif mode == "genesis":
         from adarl.adapters.GenesisJointImpedanceAdapter import GenesisJointImpedanceAdapter
         ground_link = ("ground","ground_link")
@@ -205,9 +208,9 @@ def runner_builder(seed,
                                                     robot_root_link=env_builder_args.pop("robot_root_link"),
                                                     robot_description_string=robot_description_string,
                                                     robot_description_format=robot_description_format,
-                                                    safe_damping=env_builder_args.pop("safe_damping"),
+                                                    ctrl_joints_damping=env_builder_args.pop("ctrl_joints_damping"),
                                                     control_limits_center=env_builder_args.pop("control_limits_center"),
-                                                    safe_stiffness=env_builder_args.pop("safe_stiffness"),
+                                                    ctrl_joints_stiffness=env_builder_args.pop("ctrl_joints_stiffness"),
                                                     safety_limits_ratios_minmax_pve=env_builder_args.pop("safety_limits_ratios_minmax_pve"),
                                                     control_limits_ratios_minmax_pve=env_builder_args.pop("control_limits_ratios_minmax_pve"),
                                                     control_limits_minmax_pve=env_builder_args.pop("control_limits_minmax_pve"),
@@ -224,7 +227,8 @@ def runner_builder(seed,
                                                     history_length_action_smoothed=env_builder_args.pop("history_length_action_smoothed"),
                                                     extrinsics_only_privileged=env_builder_args.pop("extrinsics_only_privileged"),
                                                     posref_err_history_length=env_builder_args.pop("posref_err_history_length"),
-                                                    observe_actor_safety_state=env_builder_args.pop("observe_actor_safety_state")),
+                                                    observe_actor_safety_state=env_builder_args.pop("observe_actor_safety_state"),
+                                                    observe_linvel_nonprivileged=env_builder_args.pop("observe_linvel_nonprivileged",False)),
                                                 reward_gripper_pose_weight = env_builder_args.pop("reward_gripper_pose_weight"),
                                                 reward_health_weight = env_builder_args.pop("reward_health_weight"),
                                                 reward_joint_actacc_weight = env_builder_args.pop("reward_joint_actacc_weight"),
@@ -239,7 +243,8 @@ def runner_builder(seed,
                                                 target_object_link=env_builder_args.pop("target_object_link"),
                                                 gripper_links=env_builder_args.pop("gripper_links"),
                                                 observe_object_pose=env_builder_args.pop("observe_object_pose"),
-                                                manipulator_links=env_builder_args.pop("manipulator_links")))
+                                                manipulator_links=env_builder_args.pop("manipulator_links"),
+                                                gripper_link_transforms=env_builder_args.pop("gripper_link_transforms"),))
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
                         ui_render_envs=[0], autoreset=autoreset,
                         log_freq = max_steps)
@@ -427,6 +432,7 @@ def get_centauro_args():
                                                     [[ j_pos_ctrl_lims[k][0],  0.9,  0.9],
                                                     [  j_pos_ctrl_lims[k][1],  0.9,  0.9]]) for k in fullhoming.keys()},            
             "control_limits_minmax_pve" : None,
+            "control_mode_position_delta_max" : {"default": 0.05},
             "enable_link_collisions" : [    
                                         # (('centauro', 'wheel_1'),[('ground','ground_link')]),
                                         # (('centauro', 'wheel_2'),[('ground','ground_link')]),
@@ -439,12 +445,14 @@ def get_centauro_args():
                             ('centauro', 'wheel_contact_2'),
                             ('centauro', 'wheel_contact_3'),
                             ('centauro', 'wheel_contact_4')],
-                            "safe_stiffness" : 600.0,
-            "safe_damping" : 20.0,
+            "ctrl_joints_stiffness" :600.0,
+            "ctrl_joints_damping" :20.0,
             "mjx_opt_preset" : "faster",
             "revolute_dof_frictionloss_override" : 4.68,
             "revolute_dof_damping_override" : 1.7,
-            "revolute_dof_armature_override" : 0.234
+            "revolute_dof_armature_override" : 0.234,
+            "gripper_link_transforms" : [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                                         (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)],
         }
 
        
@@ -456,9 +464,8 @@ def get_franka_args():
     arm_joints = [f"joint{i}" for i in range(1, 8)]
     finger_joints = ["finger_joint1", "finger_joint2"]
     present_joints = arm_joints + finger_joints
-    # The two fingers are coupled by an equality constraint in the model; we still command both
-    # (with the same reference) so neither is a "held" joint fighting that constraint.
-    controlled_joints = present_joints
+    # The two fingers are coupled by an equality constraint in the model; we only command one
+    controlled_joints = arm_joints + [finger_joints[0]]
 
     home_vals = {   "joint1":  0.0,
                     "joint2":  0.0,
@@ -479,7 +486,7 @@ def get_franka_args():
                     "finger_joint1": (0.0, 0.05),
                     "finger_joint2": (0.0, 0.05)}
     eff_lims = {    "joint1": 87.0, "joint2": 87.0, "joint3": 87.0, "joint4": 87.0,
-                    "joint5": 12.0, "joint6": 12.0, "joint7": 12.0,
+                    "joint5": 87.0, "joint6": 87.0, "joint7": 87.0,
                     "finger_joint1": 100.0, "finger_joint2": 100.0}
     vel_lim = 2.5
 
@@ -518,6 +525,7 @@ def get_franka_args():
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : controlled_joints,
+            "control_mode_position_delta_max" : {"default": 0.05, (rname, "finger_joint1"): 0.01},
             "randomized_dof_armature_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "randomized_mass_links" : [LINK_FILTERS.ALL_ROBOT],
             "randomized_friction_links" : [LINK_FILTERS.ALL],
@@ -535,13 +543,99 @@ def get_franka_args():
             "manipulator_links" : [(rname, "left_finger"), (rname, "right_finger")],
             "gripper_links" : [(rname, "left_finger"), (rname, "right_finger")],
             "feet_links" : [ ],
-            "safe_stiffness" : 600.0,
-            "safe_damping" : 20.0,
+            "ctrl_joints_stiffness" :{"default":600.0, "finger_joint1": 10000.0},
+            "ctrl_joints_damping" :{"default":20.0, "finger_joint1": 100.0},
             "mjx_opt_preset" : "faster",
             # Keep the menagerie model's tuned dof properties (None disables the override).
             "revolute_dof_frictionloss_override" : None,
             "revolute_dof_damping_override" : None,
             "revolute_dof_armature_override" : None,
+            "gripper_link_transforms" : [(0.0, 0.0, 0.045, 0.0, 0.0, 0.0, 1.0),
+                                         (0.0, 0.0, 0.045, 0.0, 0.0, 0.0, 1.0)],
+            "held_joints_damping" :   {(rname,"finger_joint2"):0.0, "default": 500.0},
+            "held_joints_stiffness" : {(rname,"finger_joint2"):0.0, "default": 500.0}
+        }
+
+
+def get_kyon_args(arm : int = 1):
+    """Kyon set up for grasping with a single arm (default arm 1).
+
+    The legs are removed and the floating base disabled, so the pelvis becomes a fixed root
+    placed at homing_body_pose_xyz_xyzw. Kyon's upper body always spawns both arms, so we control
+    only the chosen arm (+ its dagana clamp) and hold the other arm rigidly at its homing pose.
+    The reaching homing and base height likely need tuning so the gripper reaches the table object
+    (the cube spawns on the table at table_height~0.8, x~0.5-0.6) - raise/lower homing_body_pose z
+    to move the whole arm, same idea as the base offset in get_franka_args."""
+    rname = "kyon"
+    other = 2 if arm == 1 else 1
+
+    arm_joints   = [f"shoulder_yaw_{arm}", f"shoulder_pitch_{arm}", f"elbow_pitch_{arm}",
+                    f"wrist_pitch_{arm}", f"wrist_yaw_{arm}"]
+    gripper_joint = f"dagana_{arm}_clamp_joint"
+    other_arm_joints = [f"shoulder_yaw_{other}", f"shoulder_pitch_{other}", f"elbow_pitch_{other}",
+                        f"wrist_pitch_{other}", f"wrist_yaw_{other}"]
+    other_gripper_joint = f"dagana_{other}_clamp_joint"
+
+    # We command only the chosen arm and its gripper; the other arm is held at its homing pose.
+    controlled_joints = arm_joints + [gripper_joint]
+    present_joints    = arm_joints + [gripper_joint] + other_arm_joints + [other_gripper_joint]
+
+    # A forward/down reaching pose for the controlled arm; the idle arm is tucked at zero.
+    reach_vals = [0.0, 0.5, -1.2, -0.5, 0.0]  # shoulder_yaw, shoulder_pitch, elbow_pitch, wrist_pitch, wrist_yaw
+    homing = {(rname, j): v for j, v in zip(arm_joints, reach_vals)}
+    homing[(rname, gripper_joint)] = 0.3  # gripper open
+    homing.update({(rname, j): 0.0 for j in other_arm_joints})
+    homing[(rname, other_gripper_joint)] = 0.1
+
+    j_pos_range = 0.8  # fraction of each joint's range usable around the homing reference
+
+    return {"model_file" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro"),
+            "robot_description_format" : "xacro",
+            "model_kwargs" : {  "upper_body" : "true",
+                                "legs" : "false",
+                                "floating_joint" : "false",
+                                "footonly_collision" : "true",
+                                "varta" : "true"},
+            "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf")},
+            "homing_joint_position" : homing,
+            "homing_joint_position_references" : homing,
+            "robot_name" : rname,
+            "robot_main_body_link" : "pelvis",
+            "robot_root_link" : "pelvis",
+            "homing_body_pose_xyz_xyzw" : (0., 0., 0.8, 0., 0., 0., 1.),
+            "default_max_joint_impedance_ctrl_torque" : 150.0,
+            "max_joint_impedance_ctrl_torques" : {},
+            "disallowed_contact_links" : [ ],
+            "terminating_contact_pairs" : [ ],
+            "controlled_joints" : controlled_joints,
+            "control_mode_position_delta_max" : {"default": 0.05, (rname, gripper_joint): 0.01},
+            "randomized_dof_armature_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "randomized_mass_links" : [LINK_FILTERS.ALL_ROBOT],
+            "randomized_friction_links" : [LINK_FILTERS.ALL],
+            "randomized_com_links" : [(rname, "pelvis")],
+            "randomized_dof_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "randomized_dof_damping_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
+            "safety_limits_ratios_minmax_pve" : {k: [[ 0.9, 0.9, 0.9],
+                                                     [ 0.9, 0.9, 0.9]] for k in homing.keys()},
+            "control_limits_center" : homing,
+            "control_limits_ratios_minmax_pve" : {k: th.as_tensor(
+                                                    [[ j_pos_range, 0.9, 0.9],
+                                                     [ j_pos_range, 0.9, 0.9]]) for k in homing.keys()},
+            "control_limits_minmax_pve" : None,
+            "enable_link_collisions" : [ ],
+            "manipulator_links" : [(rname, f"dagana_{arm}_base"), (rname, f"dagana_{arm}_claw")],
+            "gripper_links" : [(rname, f"dagana_{arm}_base"), (rname, f"dagana_{arm}_claw")],
+            "feet_links" : [ ],
+            "ctrl_joints_stiffness" : 500.0,
+            "ctrl_joints_damping" : 20.0,
+            "mjx_opt_preset" : "faster",
+            "revolute_dof_frictionloss_override" : 4.68,
+            "revolute_dof_damping_override" : 1.7,
+            "revolute_dof_armature_override" : 0.234,
+            "gripper_link_transforms" : [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                                         (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)],
+            "held_joints_damping" :   {"default": 500.0},
+            "held_joints_stiffness" : {"default": 500.0},
         }
 
 

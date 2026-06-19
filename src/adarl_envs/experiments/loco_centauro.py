@@ -32,7 +32,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     eval_freq = 10
     r = 1.0 # randomization strength
     n = 1.0 # noise strength
-    p = 1.0 # penalties strength
+    p = 0.25 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
         "action_smoothing_halflife_sec" : 0.0,
@@ -110,6 +110,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_gains_damping_ratio_epstd"       : 0.2*r,
         "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
         "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
+        "randomization_recycle_model_alterations" : mode=="genesis", # Genesis has an issue with changing the armature, it's super slow
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "record_video" : True,
         "reward_contacts_weight" :                  eps,
@@ -126,10 +127,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_joint_acc_on_vel_weight" :          eps,
         "reward_joint_acceleration_weight" :        eps,
         "reward_joint_actacc_weight" :              1.0*p,
-        "reward_joint_actdiff_weight" :             1.0*p,
+        "reward_joint_actdiff_weight" :             4.0*p,
         "reward_joint_energy_weight" :              eps,
         "reward_joint_position_limit_weight" :      eps,
-        "reward_joint_position_weight" :            eps,
+        "reward_joint_position_weight" :            50.0*p,
         "reward_joint_posref_acc_weight":           eps,
         "reward_joint_posref_vel_weight" :          eps,
         "reward_joint_power_weight" :               0.002*p,
@@ -145,7 +146,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_joint_velref_weight" :              eps,
         "reward_pitchnroll_velocity_weight" :       0.5,
         "reward_pitchnroll_weight" :                0.5,
-        "reward_safety_triggered_weight" :          0.5,
+        "reward_safety_triggered_weight" :          0.1,
         "reward_scale_nolength":                    0.01,
         "reward_slip_weight" :                      1.0,
         "reward_superweight_joint_penalties" :      1.0,
@@ -156,7 +157,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
             "add_twisting_pelvis" : False
         },
         "saturate_jimp_ref_limits" : False,
-        "split_rewards" : True if algo=="sac" else False,
+        "split_rewards" : False,
         "step_max_good_air_duration" : 0.5,
         "step_max_good_ground_duration" : 0.5,
         "step_min_good_air_duration" : 0.2,
@@ -195,18 +196,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # "th_device" : th.device("cpu",0) # this segfaults
         # "reward_superweight_joint_penalties" : 1.0
     })
-    highpen_video_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
-    highpen_video_eval_env_builder_args.update({
-        "reward_superweight_joint_penalties" : 1.0
-    })
-    eval_conf_video_det = {
-        "name" : "video_stoch_highpen",
-        "deterministic" : True,
-        "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 100,
-        "env_builder_args" : highpen_video_eval_env_builder_args,
-        "num_envs" : 100
-    }
     eval_conf_video_stoch = {
         "name" : "video_stoch",
         "deterministic" : False,
@@ -214,6 +203,20 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 100,
         "env_builder_args" : video_eval_env_builder_args,
         "num_envs" : 100,
+        "skip_first_eval": False
+    }
+    det_video_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
+    det_video_eval_env_builder_args.update({
+        "reward_superweight_joint_penalties" : 1.0
+    })
+    eval_conf_video_det = {
+        "name" : "video_stoch_det",
+        "deterministic" : True,
+        "eval_freq_ep" : eval_freq*train_envs,
+        "eval_eps" : 100,
+        "env_builder_args" : det_video_eval_env_builder_args,
+        "num_envs" : 100,
+        "skip_first_eval": True
     }
     # video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
     # video_norand_eval_env_builder_args["enable_rendering"] = True
@@ -320,8 +323,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
                                      start_target=-1.0,
-                                     end_target=-5.0,
-                                     start_reference_threshold=0.5)
+                                     end_target=-3.0,
+                                     start_reference_threshold=0.4)
 
     if algo.lower() == "sac":
         
@@ -334,12 +337,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_init_hparams( model_th_device = "cuda",
                                                     q_network_arch=[512,256],
-                                                    q_lr=0.001,
-                                                    policy_lr=0.001,
+                                                    q_lr=0.0003,
+                                                    policy_lr=0.0003,
                                                     policy_arch=[512,256],
                                                     gamma=gammas,
-                                                    target_tau = 0.001,
-                                                    batch_size=16384,
+                                                    target_tau = 0.005,
+                                                    batch_size=24576,
                                                     buffer_size=(8*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
                                                     total_steps=400_000_000,
                                                     train_freq_vstep=5,
@@ -353,15 +356,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     actor_log_std_init = -1.0,
                                                     actor_observation_filter=["base.vec"],
                                                     critic_observation_filter=["privileged.vec"],
-                                                    target_entropy_factor_annealing= None,#annealer.anneal,
+                                                    target_entropy_factor_annealing=annealer.anneal,
                                                     action_reference_obs_key=None, #"base.last_action_raw",
-                                                    actor_weight_decay=1e-5,
+                                                    actor_weight_decay=0.0,
                                                     critic_weight_decay=0.0,
                                                     policy_update_freq=2,
                                                     deterministic_collection_ratio=0.00,
                                                     actor_mean_bounds_ratio = 0.95,
                                                     alpha_lr_factor = 1.0,
-                                                    independent_entropy_q=True
+                                                    alpha_initial_value = 0.0001,
+                                                    independent_entropy_q=False
                                                     ),
                     checkpoint_freq=20,
                     collector_device=env_device,
@@ -371,7 +375,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_batch_size=0,
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
-                    debug_level=2,
+                    debug_level=0,
                     log_weights_and_grads=False)                             
     elif algo.lower() == "sac_small":
         sac_train(  seed,

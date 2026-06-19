@@ -41,7 +41,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_joint_actacc_weight" :  0.0,
         "reward_joint_actdiff_weight" : 0.0,
         "reward_joint_torque_weight" :  0.0, 
-        "reward_joint_position_limit_weight" : 0.0,
+        "reward_joint_position_limit_weight" : 0.01,
         "reward_joint_position_weight" : 0.3,
         "reward_object_pose_weight" : 1.0,
         "reward_gripper_pose_weight" : 1.0,
@@ -53,7 +53,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "observe_actor_safety_state" : False,
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position_delta",
-        "control_mode_position_delta_max" : 0.05,
         "desired_foot_clearance" : 0.05,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
@@ -102,7 +101,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_dof_frictionloss_ratios":   0.1*r,
         "randomized_dof_damping_ratios":        0.2*r,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
-        "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
+        "randomized_friction_slide_spin_roll_ratios" : ("uniform", ([0.8*r,0.8*r,0.8*r],[1.5*r,1.5*r,1.5*r])),
         "randomized_gains_damping_ratio_epstd"       : 0.2*r,
         "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
         "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
@@ -125,7 +124,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "minimal_infos" : True,
         "playground_style_reward" : False,
         "extrinsics_only_privileged" : False,
-        "posref_err_history_length" : 0
+        "posref_err_history_length" : 0,
+        # "mjx_geom_overrides" : {
+        #     "cube" : {"friction" : [2.0,0.001,0.0005]}
+        # },
+        "mjx_opt_override" : {"impratio" : 10.0}
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -225,9 +228,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     policy_arch=[256,256],
                                                     gamma=0.99,
                                                     target_tau = 0.005,
-                                                    batch_size=4096,
-                                                    buffer_size=3*1024*1000,
-                                                    total_steps=300_000_000,
+                                                    batch_size=16384,
+                                                    buffer_size=5*1024*1000,
+                                                    total_steps=10_00_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=80,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
@@ -235,8 +238,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     log_freq_vstep=max_steps_per_episode,
                                                     reference_init_args =   {   "env_builder_args" : env_builder_args,
                                                                                 "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -1.5,
-                                                    actor_log_std_init = -2.0
+                                                    target_entropy_factor = -1.0,
+                                                    actor_log_std_init = -2.0,
+                                                    actor_mean_bounds_ratio = 0.9
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,

@@ -13,6 +13,7 @@
   <xacro:arg name="add_fixed_joint" default="false" />
   <xacro:arg name="fixed_joint_xyz" default="0 0 0" />
   <xacro:arg name="fixed_joint_rpy" default="0 0 0" />
+  <xacro:arg name="has_collision" default="true" />
   <xacro:property name="mass" value="$(arg mass)" />
   <xacro:property name="size" value="$(arg size)" />
   <xacro:property name="red" value="$(arg red)" />
@@ -24,7 +25,7 @@
   <xacro:property name="add_fixed_joint" value="$(arg add_fixed_joint)" />
   <xacro:property name="fixed_joint_xyz" value="$(arg fixed_joint_xyz)" />
   <xacro:property name="fixed_joint_rpy" value="$(arg fixed_joint_rpy)" />
-
+  <xacro:property name="has_collision" value="$(arg has_collision)" />
 	<material name="color">
 		<color rgba="${red} ${green} ${blue} ${alpha}"/>
 	</material>
@@ -45,12 +46,14 @@
 			</geometry>
 			<material name="color"/>
 	    </visual>
-        <collision>
-            <origin xyz="0 0 0" rpy="0 0 0"/>
-            <geometry>
-                <box size="${size} ${size} ${size}"/>
-            </geometry>
-        </collision>
+        <xacro:if value="${has_collision}">
+            <collision>
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <box size="${size} ${size} ${size}"/>
+                </geometry>
+            </collision>
+        </xacro:if>
         <xacro:box_inertial mass="${mass}" x="0.06" y="0.06" z="0.06" pose_xyz="0 0 0" pose_rpy="0 0 0"/>
         <contact> <!-- for pybullet -->
             <!-- 

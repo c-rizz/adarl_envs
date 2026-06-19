@@ -69,12 +69,12 @@ def build_rand_policy(env, scale : float = 1.0, device : th.device = th.device("
 class KeyboardJointPolicy(RLAgent):
     """Lets the user drive the controlled joints from the keyboard.
 
-    Number keys 1-7 increase joints 1-7, the letters just below (q w e r t y u)
+    Number keys 1-8 increase joints 1-8, the letters just below (q w e r t y u i)
     decrease them. The produced action is a per-joint position delta (clamped to
     the normalized [-1,1] range expected by the position_delta control mode).
     """
-    INC_KEYS = ["1","2","3","4","5","6","7"]
-    DEC_KEYS = ["q","w","e","r","t","y","u"]
+    INC_KEYS = ["1","2","3","4","5","6","7","8"]
+    DEC_KEYS = ["q","w","e","r","t","y","u","i"]
 
     def __init__(self, action_size : int, step : float = 0.5, device : th.device = th.device("cpu")):
         self._action_size = action_size
@@ -88,6 +88,7 @@ class KeyboardJointPolicy(RLAgent):
             inc = keyboard_listener.get_key_press_count(self.INC_KEYS[i])
             dec = keyboard_listener.get_key_press_count(self.DEC_KEYS[i])
             action[i] = float(inc - dec) * self._step
+        print(f"setting action", action.cpu().numpy())
         self._next_action = th.clamp(action, -1.0, 1.0)
 
     def predict_action(self, observation_batch, deterministic = False, extra_returns : dict = None):
@@ -181,7 +182,6 @@ def grasp_builder_and_args():
         "observe_actor_safety_state" : False,
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position_delta",
-        "control_mode_position_delta_max" : 0.05,
         "desired_foot_clearance" : 0.05,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
@@ -253,7 +253,11 @@ def grasp_builder_and_args():
         "minimal_infos" : True,
         "playground_style_reward" : False,
         "extrinsics_only_privileged" : False,
-        "posref_err_history_length" : 0
+        "posref_err_history_length" : 0,
+        # "mjx_geom_overrides" : {
+        #     "cube" : {"friction" : [2.0,0.001,0.0005]}
+        # },
+        "mjx_opt_override" : {"impratio" : 10.0}
     }
 
     env_builder_args.update({
@@ -482,7 +486,8 @@ def play(seed, folderName, run_id, args,
                     keyboard_listener.reset_key_press_counters()
 
                     if isinstance(base_env, GraspVecEnv):
-                        base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
+                        cam_pose = base_env.get_cam_pose()
+                        base_env.set_cam_pose(cam_pose + th.as_tensor(cam_dist_pitch_yaw_diff, device=cam_pose.device))
                         goal_pose[:3] = goal_pose[:3] + th.as_tensor(goal_diff_xyz, device=goal_pose.device)
                         base_env.set_goals(goal_pose.unsqueeze(0).clone())
                         base_env._set_goal_marker_pose(base_env._all_vecs)
@@ -500,7 +505,8 @@ def play(seed, folderName, run_id, args,
                     manual_stop = keyboard_listener.get_key_press_count("z")>0
                     keyboard_listener.reset_key_press_counters()
                     if isinstance(base_env, GraspVecEnv):
-                        base_env.set_cam_pose(base_env.get_cam_pose() + th.as_tensor(cam_dist_pitch_yaw_diff))
+                        cam_pose = base_env.get_cam_pose()
+                        base_env.set_cam_pose(cam_pose + th.as_tensor(cam_dist_pitch_yaw_diff, device=cam_pose.device))
                 if isinstance(base_env, GraspVecEnv):
                     goal_obj_pose = base_env.get_goals()[0].tolist()
                 else:

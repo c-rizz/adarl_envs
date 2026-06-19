@@ -92,7 +92,7 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
     goal_abs_linvel_xyz = info.get('goal_abs_xyz_vec', None)
     vel_norm = f"{th.linalg.norm(goal_abs_linvel_xyz):.3f}" if goal_abs_linvel_xyz is not None else "N/A"
     return  (   f"\n"
-                f"Step                  {info.get('ep_step_count', -1): .3f}\n"+
+                f"Step                  {format_tensor(info.get('ep_step_count', -1), 0)}\n"+
                 f"body_abs_linvel       {body_abs_linvel_str} ({body_abs_linvel_norm_str} m/s)\n"
                 f"goal_vel_abs          {format_tensor(goal_abs_linvel_xyz, 3)} ({vel_norm} m/s)\n"
                 f"goal_vel_rel          {format_tensor(info.get('goal_rel_xyz_vec','N/A'), 3)}\n"
@@ -299,8 +299,8 @@ def loco_runner_builder(seed,
                                         safe_revolute_dof_armature=0.1,
                                         opt_preset=env_builder_args.pop("mjx_opt_preset"),
                                         opt_override=opt_override,
-                                        default_actuator_kp=env_builder_args.get("safe_stiffness", 100.0),
-                                        default_actuator_kv=env_builder_args.get("safe_damping", 10.0),
+                                        default_actuator_kp=env_builder_args.get("ctrl_joints_stiffness", 100.0) if not isinstance(env_builder_args.get("ctrl_joints_stiffness", 100.0), dict) else env_builder_args.get("ctrl_joints_stiffness",{}).get("default", 100.0),
+                                        default_actuator_kv=env_builder_args.get("ctrl_joints_damping", 10.0) if not isinstance(env_builder_args.get("ctrl_joints_damping", 10.0), dict) else env_builder_args.get("ctrl_joints_damping",{}).get("default", 10.0),
                                         default_max_actuator_force=env_builder_args.pop("default_max_joint_impedance_ctrl_torque", 100.0),
                                         max_actuator_forces=env_builder_args.get("max_joint_impedance_ctrl_torques", {}))
     elif mode == "mujoco":
@@ -324,7 +324,8 @@ def loco_runner_builder(seed,
                                                 opt_preset=env_builder_args.get("mjx_opt_preset", "faster"),
                                                 opt_override=opt_override,
                                                 reference_filter_cutoff_frequency=20.0,
-                                                reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none")
+                                                reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none",                                                
+                                                geom_overrides=env_builder_args.get("mjx_geom_overrides", None))
     elif mode == "genesis":
         from adarl.adapters.GenesisJointImpedanceAdapter import GenesisJointImpedanceAdapter
         ground_link = ("ground","ground_link")
@@ -416,9 +417,9 @@ def loco_runner_builder(seed,
                                     robot_root_link=env_builder_args.pop("robot_root_link"),
                                     robot_description_string=robot_description_string,
                                     robot_description_format=robot_description_format,
-                                    safe_damping=env_builder_args.pop("safe_damping"),
+                                    ctrl_joints_damping=env_builder_args.pop("ctrl_joints_damping"),
                                     control_limits_center=env_builder_args.pop("control_limits_center"),
-                                    safe_stiffness=env_builder_args.pop("safe_stiffness"),
+                                    ctrl_joints_stiffness=env_builder_args.pop("ctrl_joints_stiffness"),
                                     safety_limits_ratios_minmax_pve=env_builder_args.pop("safety_limits_ratios_minmax_pve"),
                                     control_limits_ratios_minmax_pve=env_builder_args.pop("control_limits_ratios_minmax_pve"),
                                     control_limits_minmax_pve=env_builder_args.pop("control_limits_minmax_pve"),
@@ -436,7 +437,9 @@ def loco_runner_builder(seed,
                                     history_length_action_raw=env_builder_args.pop("history_length_action_raw"),
                                     history_length_action_smoothed=env_builder_args.pop("history_length_action_smoothed"),
                                     observe_actor_safety_state=env_builder_args.pop("observe_actor_safety_state"),
-                                    posref_err_history_length=env_builder_args.pop("posref_err_history_length")),
+                                    posref_err_history_length=env_builder_args.pop("posref_err_history_length"),
+                                    observe_linvel_nonprivileged=env_builder_args.pop("observe_linvel_nonprivileged",False),
+                                    randomization_recycle_model_alterations=env_builder_args.pop("randomization_recycle_model_alterations",False)),
                                 desired_foot_clearance = env_builder_args.pop("desired_foot_clearance"),
                                 disallowed_contact_links = env_builder_args.pop("disallowed_contact_links"),
                                 feet_contact_links=env_builder_args.pop("feet_contact_links"),
@@ -731,8 +734,8 @@ def get_kyon_args(enable_arms : bool = False,):
                                             (('kyon', 'contact_4'),[('ground','ground_link')])],
             "feet_contact_links" : feet_links,
             "feet_bottom_links" : feet_links,
-            "safe_stiffness" : 500.0,
-            "safe_damping" : 20.0,
+            "ctrl_joints_stiffness" :500.0,
+            "ctrl_joints_damping" :20.0,
             "default_max_joint_impedance_ctrl_torque" : 150.0,
             "revolute_dof_damping_override" : 1.0,
             "mjx_opt_preset" : "faster",
@@ -861,8 +864,8 @@ def get_go1_args():
                                                     (rname,"FR_calf_joint") :  max_calf_torque},
             "feet_contact_links" : feet_links,
             "feet_bottom_links" : feet_links,
-            "safe_stiffness" : 50.0,
-            "safe_damping" : 2.5
+            "ctrl_joints_stiffness" :50.0,
+            "ctrl_joints_damping" :2.5
         }
 robot_args_registry["go1"] = get_go1_args
 
@@ -986,8 +989,8 @@ def get_spot_args():
             "default_max_joint_impedance_ctrl_torque" : 100.0,
             "feet_links" : feet_links,
             "feet_bottom_links" : feet_links,
-            "safe_stiffness" : 300.0,
-            "safe_damping" : 20.0,
+            "ctrl_joints_stiffness" :300.0,
+            "ctrl_joints_damping" :20.0,
             "mjx_opt_override" : {"impratio" : 1.0,
                                   "iterations" : 1,
                                   "ls_iterations" : 5,
@@ -1172,8 +1175,8 @@ def get_centauro_args(control_arms=False, robot_options : dict | None = None):
             "enable_link_collisions" : [(fl,[('ground','ground_link')]) for fl in feet_contact_links],
             "feet_contact_links" : feet_contact_links,
             "feet_bottom_links" : feet_bottom_links,
-            "safe_stiffness" : 600.0,
-            "safe_damping" : 20.0,
+            "ctrl_joints_stiffness" :600.0,
+            "ctrl_joints_damping" :20.0,
             "mjx_opt_preset" : "faster",
             "revolute_dof_frictionloss_override" : 4.68,
             "revolute_dof_damping_override" :  1.7,

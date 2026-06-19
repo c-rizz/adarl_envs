@@ -2273,10 +2273,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self._configuration.init_args.stepLength_sec,
                                 vec_time_from_start - prev_vec_time_from_start.view((self.num_envs,)))
         prev_posref_safety_violation_count = prev_posref_safety_violation_count.view(self.num_envs,)
+        prev_posref_safety_violation_count = prev_posref_safety_violation_count * th.logical_not(is_resetting) # reset violation count if resetting
         posref_violation_count = prev_posref_safety_violation_count + posref_safety_violation
-        posref_violation_rate = th.where(vec_step_count <= 0,
-                                         th.zeros_like(posref_violation_count),
-                                         posref_violation_count/vec_step_count)
+        # print(f"prev_posref_safety_violation_count = {prev_posref_safety_violation_count}")
+        # print(f"posref_violation_count = {posref_violation_count}")
+        # print(f"posref_safety_violation = {posref_safety_violation}")
         new_step_count = vec_step_count+1
         new_internal_state = {  self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED : vec_safety_lims_state.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED : vec_safety_posref_state.view(self.num_envs,1),

@@ -29,7 +29,7 @@ def format_tensor(t, float_precision):
 
 def overlay_text_func(vo, a, r, te, tr, info, extra_info):
     return  (   f"\n"
-                f"Step    {info['ep_step_count']: .3f}\n"+
+                f"Step                   {format_tensor(info.get('ep_step_count', -1), 0)}\n"+
                 f"obj2hand_dist          {format_tensor(info.get('obj2hand_dist',None), 3)}\n"
                 f"obj2goal_dist          {format_tensor(info.get('obj2goal_dist',None), 3)}\n")
 
@@ -557,7 +557,7 @@ def get_franka_args():
         }
 
 
-def get_kyon_args(arm : int = 1):
+def get_kyon_args(arm : str = "left"):
     """Kyon set up for grasping with a single arm (default arm 1).
 
     The legs are removed and the floating base disabled, so the pelvis becomes a fixed root
@@ -567,14 +567,17 @@ def get_kyon_args(arm : int = 1):
     (the cube spawns on the table at table_height~0.8, x~0.5-0.6) - raise/lower homing_body_pose z
     to move the whole arm, same idea as the base offset in get_franka_args."""
     rname = "kyon"
-    other = 2 if arm == 1 else 1
 
-    arm_joints   = [f"shoulder_yaw_{arm}", f"shoulder_pitch_{arm}", f"elbow_pitch_{arm}",
-                    f"wrist_pitch_{arm}", f"wrist_yaw_{arm}"]
-    gripper_joint = f"dagana_{arm}_clamp_joint"
-    other_arm_joints = [f"shoulder_yaw_{other}", f"shoulder_pitch_{other}", f"elbow_pitch_{other}",
-                        f"wrist_pitch_{other}", f"wrist_yaw_{other}"]
-    other_gripper_joint = f"dagana_{other}_clamp_joint"
+    disabled_arm = "right" if arm == "left" else "left"
+    arm_id =          1 if arm == "left" else 2
+    disabled_arm_id = 1 if disabled_arm == "left" else 1
+
+    arm_joints   = [f"shoulder_yaw_{arm_id}", f"shoulder_pitch_{arm_id}", f"elbow_pitch_{arm_id}",
+                    f"wrist_pitch_{arm_id}", f"wrist_yaw_{arm_id}"]
+    gripper_joint = f"dagana_{arm_id}_clamp_joint"
+    other_arm_joints = [f"shoulder_yaw_{disabled_arm_id}", f"shoulder_pitch_{disabled_arm_id}", f"elbow_pitch_{disabled_arm_id}",
+                        f"wrist_pitch_{disabled_arm_id}", f"wrist_yaw_{disabled_arm_id}"]
+    other_gripper_joint = f"dagana_{disabled_arm_id}_clamp_joint"
 
     # We command only the chosen arm and its gripper; the other arm is held at its homing pose.
     controlled_joints = arm_joints + [gripper_joint]
@@ -623,8 +626,8 @@ def get_kyon_args(arm : int = 1):
                                                      [ j_pos_range, 0.9, 0.9]]) for k in homing.keys()},
             "control_limits_minmax_pve" : None,
             "enable_link_collisions" : [ ],
-            "manipulator_links" : [(rname, f"dagana_{arm}_base"), (rname, f"dagana_{arm}_claw")],
-            "gripper_links" : [(rname, f"dagana_{arm}_base"), (rname, f"dagana_{arm}_claw")],
+            "manipulator_links" : [(rname, f"dagana_{arm_id}_base"), (rname, f"dagana_{arm_id}_claw")],
+            "gripper_links" : [(rname, f"dagana_{arm_id}_base"), (rname, f"dagana_{arm_id}_claw")],
             "feet_links" : [ ],
             "ctrl_joints_stiffness" : 500.0,
             "ctrl_joints_damping" : 20.0,

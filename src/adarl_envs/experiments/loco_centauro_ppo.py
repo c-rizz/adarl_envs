@@ -441,7 +441,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     num_steps=24,
                                                     gamma=0.99,
                                                     loss_value_weight=1.0,
-                                                    loss_entropy_coeff=5e-4,
+                                                    loss_entropy_coeff=1e-3,
                                                     log_freq_vstep=int(max_steps_per_episode/10),
                                                     epsilon_policy_ratio_clip=0.2,
                                                     epsilon_value_clip_epsilon=0.2,

@@ -55,8 +55,8 @@ def ramp_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
 @dataclass
 class GrapVecEnvInitArgs():
     robot_init_args : RobotVecEnvInitArgs
-    gripper_links : list[tuple[str,str]]
-    manipulator_links : list[tuple[str,str]]
+    manipulator_tip_links : list[tuple[str,str]]
+    manipulator_all_links : list[tuple[str,str]]
     reward_health_weight : float
     reward_joint_actacc_weight : float
     reward_joint_actdiff_weight : float
@@ -90,14 +90,14 @@ class GraspVecEnv(RobotVecEnv):
     class GraspingConfiguration:
         reward_scale : th.Tensor
         target_object_link : tuple[str,str]
-        gripper_links : list[tuple[str,str]]
+        manipulator_tip_links : list[tuple[str,str]]
         observe_object_pose : bool
         obs_camera_resolution_hw : tuple[int,int]
         ui_camera_resolution_hw : tuple[int,int]
         init_obj_area_minmax_xyz : th.Tensor
         goal_obj_area_minmax_xyz : th.Tensor
         table_link : tuple[str,str]
-        manipulator_links : list[tuple[str,str]]
+        manipulator_all_links : list[tuple[str,str]]
         use_head_cam_as_ui_camera : bool
         split_rewards : bool
         gripper_link_transforms : th.Tensor
@@ -159,7 +159,7 @@ class GraspVecEnv(RobotVecEnv):
         manipulation_area_minmax_xyz = [[ 0.45,  -0.15, cube_spawn_height],
                                         [ 0.65,   0.15, self._table_height + 0.3]]
 
-        num_gripper_links = len(grasp_init_args.gripper_links)
+        num_gripper_links = len(grasp_init_args.manipulator_tip_links)
         if grasp_init_args.gripper_link_transforms is None:
             gripper_link_transforms = th.zeros((num_gripper_links, 7), device=th_device, dtype=th.float32)
             gripper_link_transforms[:, 6] = 1.0 # identity quaternion (qw = 1)
@@ -173,14 +173,14 @@ class GraspVecEnv(RobotVecEnv):
         self._grasping_conf = GraspVecEnv.GraspingConfiguration(
                         reward_scale = self._thtens(grasp_init_args.reward_scale),
                         target_object_link=grasp_init_args.target_object_link,
-                        gripper_links=grasp_init_args.gripper_links,
                         observe_object_pose=grasp_init_args.observe_object_pose,
                         obs_camera_resolution_hw = (64,64),
                         ui_camera_resolution_hw = (480,480),
                         init_obj_area_minmax_xyz = th.as_tensor(spawn_area_minmax_xyz, device=th_device),
                         goal_obj_area_minmax_xyz = th.as_tensor(manipulation_area_minmax_xyz, device=th_device),
                         table_link = ("table","cube"),
-                        manipulator_links = grasp_init_args.manipulator_links,
+                        manipulator_tip_links=grasp_init_args.manipulator_tip_links,
+                        manipulator_all_links = grasp_init_args.manipulator_all_links,
                         use_head_cam_as_ui_camera = False,
                         split_rewards = False,
                         gripper_link_transforms = gripper_link_transforms,
@@ -208,7 +208,7 @@ class GraspVecEnv(RobotVecEnv):
         if robot_init_args.enable_link_collisions is None:
             robot_init_args.enable_link_collisions = []
         cube_colliding_links = [self._grasping_conf.table_link]
-        cube_colliding_links += self._grasping_conf.manipulator_links
+        cube_colliding_links += self._grasping_conf.manipulator_all_links
         robot_init_args.enable_link_collisions.append((self._grasping_conf.target_object_link, cube_colliding_links))
         robot_init_args.randomization_initial_height_range_meters=0.0
         robot_init_args.noise_abs_obs_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
@@ -227,10 +227,10 @@ class GraspVecEnv(RobotVecEnv):
     @override
     def _build(self):
         super()._build()
-        self._adapter.set_monitored_links(self._adapter.get_monitored_links() + [self._grasping_conf.target_object_link] + self._grasping_conf.gripper_links)
+        self._adapter.set_monitored_links(self._adapter.get_monitored_links() + [self._grasping_conf.target_object_link] + self._grasping_conf.manipulator_tip_links)
         self._object_link_id = self._adapter.get_monitored_links_ids([self._grasping_conf.target_object_link])
-        self._gripper_link_ids = self._adapter.get_monitored_links_ids(self._grasping_conf.gripper_links)
-        self._obj_and_gripper_link_ids = self._adapter.get_monitored_links_ids([self._grasping_conf.target_object_link]+self._grasping_conf.gripper_links)
+        self._gripper_link_ids = self._adapter.get_monitored_links_ids(self._grasping_conf.manipulator_tip_links)
+        self._obj_and_gripper_link_ids = self._adapter.get_monitored_links_ids([self._grasping_conf.target_object_link]+self._grasping_conf.manipulator_tip_links)
 
 
 
@@ -719,7 +719,7 @@ class GraspVecEnv(RobotVecEnv):
                                                 pose=None,
                                                 format="urdf.xacro",
                                                 kwargs={"add_world_link":str(is_pybullet),
-                                                        "size" :  0.01,
+                                                        "size" :  0.04,
                                                         "red" :   0.0,
                                                         "green" : 1.0,
                                                         "blue" :  0.0,

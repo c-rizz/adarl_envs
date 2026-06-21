@@ -241,9 +241,9 @@ def runner_builder(seed,
                                                 reward_safety_weight = env_builder_args.pop("reward_safety_weight"),
                                                 reward_scale=1000/max_steps,
                                                 target_object_link=env_builder_args.pop("target_object_link"),
-                                                gripper_links=env_builder_args.pop("gripper_links"),
+                                                manipulator_tip_links=env_builder_args.pop("gripper_links"),
                                                 observe_object_pose=env_builder_args.pop("observe_object_pose"),
-                                                manipulator_links=env_builder_args.pop("manipulator_links"),
+                                                manipulator_all_links=env_builder_args.pop("manipulator_links"),
                                                 gripper_link_transforms=env_builder_args.pop("gripper_link_transforms"),))
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
                         ui_render_envs=[0], autoreset=autoreset,
@@ -570,7 +570,7 @@ def get_kyon_args(arm : str = "left"):
 
     disabled_arm = "right" if arm == "left" else "left"
     arm_id =          1 if arm == "left" else 2
-    disabled_arm_id = 1 if disabled_arm == "left" else 1
+    disabled_arm_id = 1 if disabled_arm == "left" else 2
 
     arm_joints   = [f"shoulder_yaw_{arm_id}", f"shoulder_pitch_{arm_id}", f"elbow_pitch_{arm_id}",
                     f"wrist_pitch_{arm_id}", f"wrist_yaw_{arm_id}"]
@@ -584,8 +584,8 @@ def get_kyon_args(arm : str = "left"):
     present_joints    = arm_joints + [gripper_joint] + other_arm_joints + [other_gripper_joint]
 
     # A forward/down reaching pose for the controlled arm; the idle arm is tucked at zero.
-    reach_vals = [0.0, 0.5, -1.2, -0.5, 0.0]  # shoulder_yaw, shoulder_pitch, elbow_pitch, wrist_pitch, wrist_yaw
-    homing = {(rname, j): v for j, v in zip(arm_joints, reach_vals)}
+    homingp = [0.0, -0.5, 1.2, 0.5, 0.0]  # shoulder_yaw, shoulder_pitch, elbow_pitch, wrist_pitch, wrist_yaw
+    homing = {(rname, j): v for j, v in zip(arm_joints, homingp)}
     homing[(rname, gripper_joint)] = 0.3  # gripper open
     homing.update({(rname, j): 0.0 for j in other_arm_joints})
     homing[(rname, other_gripper_joint)] = 0.1
@@ -639,8 +639,8 @@ def get_kyon_args(arm : str = "left"):
             "revolute_dof_frictionloss_override" : 4.68,
             "revolute_dof_damping_override" : 1.7,
             "revolute_dof_armature_override" : 0.234,
-            "gripper_link_transforms" : [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
-                                         (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)],
+            "gripper_link_transforms" : [(0.0,   -0.0145,  0.151, 0.0, 0.0, 0.0, 1.0),
+                                         (-0.107, 0.0,    -0.0362125, 0.0, 0.0, 0.0, 1.0)],
             "held_joints_damping" :   {"default": 500.0},
             "held_joints_stiffness" : {"default": 500.0},
         }

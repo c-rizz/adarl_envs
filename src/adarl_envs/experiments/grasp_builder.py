@@ -46,10 +46,7 @@ def runner_builder(seed,
     stepLength_sec = env_builder_args.pop("stepLength_sec")
     th_device = env_builder_args["th_device"]
     show_gui = env_builder_args.pop("show_gui",False)
-    env_builder_args.update({"centauro" : get_centauro_args,
-                             "franka" : get_franka_args,
-                             "kyon" : get_kyon_args,
-                             }[env_builder_args["robot_model"].lower()]())
+    env_builder_args.update(robot_args_registry[env_builder_args["robot_model"].lower()](robot_options=env_builder_args.get("robot_options", {})))
     robot_name = env_builder_args["robot_name"]
     max_steps = env_builder_args.pop("max_steps_per_episode")
 
@@ -244,7 +241,9 @@ def runner_builder(seed,
                                                 manipulator_tip_links=env_builder_args.pop("gripper_links"),
                                                 observe_object_pose=env_builder_args.pop("observe_object_pose"),
                                                 manipulator_all_links=env_builder_args.pop("manipulator_links"),
-                                                gripper_link_transforms=env_builder_args.pop("gripper_link_transforms"),))
+                                                gripper_link_transforms=env_builder_args.pop("gripper_link_transforms"),
+                                                table_height=env_builder_args.pop("table_height"),
+                                                feet_contact_links=env_builder_args.pop("feet_contact_links")))
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
                         ui_render_envs=[0], autoreset=autoreset,
                         log_freq = max_steps)
@@ -264,6 +263,8 @@ def runner_builder(seed,
 
 from adarl_envs.experiments.loco_builder import union
 import numpy as np
+
+robot_args_registry = {}
 
 def get_centauro_args():
     # # Standard homing
@@ -455,7 +456,8 @@ def get_centauro_args():
                                          (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)],
         }
 
-       
+robot_args_registry["centauro"] = get_centauro_args
+
 
 def get_franka_args():
     """Franka Emika Panda (7-dof arm + parallel gripper), loaded from mujoco_menagerie
@@ -556,8 +558,10 @@ def get_franka_args():
             "held_joints_stiffness" : {(rname,"finger_joint2"):0.0, "default": 500.0}
         }
 
+robot_args_registry["franka"] = get_franka_args
 
-def get_kyon_args(arm : str = "left"):
+
+def get_kyon_args(ctrl_arm : str = "left", robot_options : dict = {}):
     """Kyon set up for grasping with a single arm (default arm 1).
 
     The legs are removed and the floating base disabled, so the pelvis becomes a fixed root
@@ -567,55 +571,99 @@ def get_kyon_args(arm : str = "left"):
     (the cube spawns on the table at table_height~0.8, x~0.5-0.6) - raise/lower homing_body_pose z
     to move the whole arm, same idea as the base offset in get_franka_args."""
     rname = "kyon"
+    spawn_legs = robot_options.get("spawn_legs", False)
 
-    disabled_arm = "right" if arm == "left" else "left"
-    arm_id =          1 if arm == "left" else 2
-    disabled_arm_id = 1 if disabled_arm == "left" else 2
+    held_arm = "right" if ctrl_arm == "left" else "left"
+    ctrl_arm_id = 1 if ctrl_arm == "left" else 2
+    held_arm_id = 1 if held_arm == "left" else 2
 
-    arm_joints   = [f"shoulder_yaw_{arm_id}", f"shoulder_pitch_{arm_id}", f"elbow_pitch_{arm_id}",
-                    f"wrist_pitch_{arm_id}", f"wrist_yaw_{arm_id}"]
-    gripper_joint = f"dagana_{arm_id}_clamp_joint"
-    other_arm_joints = [f"shoulder_yaw_{disabled_arm_id}", f"shoulder_pitch_{disabled_arm_id}", f"elbow_pitch_{disabled_arm_id}",
-                        f"wrist_pitch_{disabled_arm_id}", f"wrist_yaw_{disabled_arm_id}"]
-    other_gripper_joint = f"dagana_{disabled_arm_id}_clamp_joint"
+    generic_arm_joint_names = ["shoulder_yaw_", "shoulder_pitch_", "elbow_pitch_", "wrist_pitch_", "wrist_yaw_"]
+    generic_leg_joint_names = ["hip_roll_", "hip_pitch_", "knee_pitch_"]
+
+    ctrl_arm_joints   = [f"{jn}{ctrl_arm_id}" for jn in generic_arm_joint_names]
+    ctrl_gripper_joint = f"dagana_{ctrl_arm_id}_clamp_joint"
+    held_arm_joints = [f"{jn}{held_arm_id}" for jn in generic_arm_joint_names]
+    held_gripper_joint = f"dagana_{held_arm_id}_clamp_joint"
+    leg_joints = [f"{jn}{i}" for jn in generic_leg_joint_names for i in range(1,5)]
 
     # We command only the chosen arm and its gripper; the other arm is held at its homing pose.
-    controlled_joints = arm_joints + [gripper_joint]
-    present_joints    = arm_joints + [gripper_joint] + other_arm_joints + [other_gripper_joint]
+    controlled_joints = ctrl_arm_joints + [ctrl_gripper_joint]
+    present_joints    = ctrl_arm_joints + [ctrl_gripper_joint] + held_arm_joints + [held_gripper_joint]
+    if spawn_legs:
+        present_joints += leg_joints
 
     # A forward/down reaching pose for the controlled arm; the idle arm is tucked at zero.
     homingp = [0.0, -0.5, 1.2, 0.5, 0.0]  # shoulder_yaw, shoulder_pitch, elbow_pitch, wrist_pitch, wrist_yaw
-    homing = {(rname, j): v for j, v in zip(arm_joints, homingp)}
-    homing[(rname, gripper_joint)] = 0.3  # gripper open
-    homing.update({(rname, j): 0.0 for j in other_arm_joints})
-    homing[(rname, other_gripper_joint)] = 0.1
+    homing = {(rname, j): v for j, v in zip(ctrl_arm_joints, homingp)}
+    homing[(rname, ctrl_gripper_joint)] = 0.3  # gripper open
+    homing.update({(rname, j): 0.0 for j in held_arm_joints})
+    homing[(rname, held_gripper_joint)] = 0.1
+    homing_ref = homing.copy()
+    if spawn_legs:
+        hip_pitch = -0.8727 # = -50/180*3.14159
+        hip_roll =   0.0349 # = 2/180*3.14159
+        knee =      -1.5707 # = -90/180*3.14159
+        legs_homing_ref = {  
+                        ("kyon","hip_roll_1") :     -hip_roll,
+                        ("kyon","hip_pitch_1") :     hip_pitch,
+                        ("kyon","knee_pitch_1") :   -knee,
+                        ("kyon","hip_roll_2") :      hip_roll,
+                        ("kyon","hip_pitch_2") :    -hip_pitch,
+                        ("kyon","knee_pitch_2") :    knee,
+                        ("kyon","hip_roll_3") :      hip_roll,
+                        ("kyon","hip_pitch_3") :     hip_pitch,
+                        ("kyon","knee_pitch_3") :   -knee,
+                        ("kyon","hip_roll_4") :     -hip_roll,
+                        ("kyon","hip_pitch_4") :    -hip_pitch,
+                        ("kyon","knee_pitch_4") :    knee,
+                        }
+        # These are correct for stifness=500 and no arms
+        legs_homing = { ("kyon","hip_roll_1") :   -0.1115,
+                        ("kyon","hip_roll_2") :    0.1115,
+                        ("kyon","hip_roll_3") :    0.0930,
+                        ("kyon","hip_roll_4") :   -0.0930,
+                        ("kyon","hip_pitch_1") :  -0.8840,
+                        ("kyon","hip_pitch_2") :   0.8840,
+                        ("kyon","hip_pitch_3") :  -0.8795,
+                        ("kyon","hip_pitch_4") :   0.8795,
+                        ("kyon","knee_pitch_1") :  1.6495,
+                        ("kyon","knee_pitch_2") : -1.6495,
+                        ("kyon","knee_pitch_3") :  1.6330,
+                        ("kyon","knee_pitch_4") : -1.6330
+                        }
+        homing.update(legs_homing)
+        homing_ref.update(legs_homing_ref)
 
     j_pos_range = 0.8  # fraction of each joint's range usable around the homing reference
 
+    feet_links  = [ ('kyon', 'contact_1'),
+                    ('kyon', 'contact_2'),
+                    ('kyon', 'contact_3'),
+                    ('kyon', 'contact_4')]
+    bool_to_xacro = {True : "true", False : "false"}
     return {"model_file" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro"),
             "robot_description_format" : "xacro",
             "model_kwargs" : {  "upper_body" : "true",
-                                "legs" : "false",
-                                "floating_joint" : "false",
-                                "footonly_collision" : "true",
+                                "legs" : bool_to_xacro[spawn_legs],
+                                "floating_joint" : bool_to_xacro[spawn_legs],
                                 "varta" : "true",
-                                "add_fixed_base_joint" : "true",
+                                "add_fixed_base_joint" : bool_to_xacro[not spawn_legs],
                                 "fixed_base_x" : -0.2,
                                 "fixed_base_y" : 0.0,
-                                "fixed_base_z" : 0.8},
+                                "fixed_base_z" : 0.45},
             "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf")},
             "homing_joint_position" : homing,
-            "homing_joint_position_references" : homing,
+            "homing_joint_position_references" : homing_ref,
             "robot_name" : rname,
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
-            "homing_body_pose_xyz_xyzw" : (0., 0., 0.0, 0., 0., 0., 1.),
+            "homing_body_pose_xyz_xyzw" : (-0.20, 0., 0.45, 0., 0., 0., 1.),
             "default_max_joint_impedance_ctrl_torque" : 150.0,
             "max_joint_impedance_ctrl_torques" : {},
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : controlled_joints,
-            "control_mode_position_delta_max" : {"default": 0.05, (rname, gripper_joint): 0.01},
+            "control_mode_position_delta_max" : {"default": 0.05, (rname, ctrl_gripper_joint): 0.01},
             "randomized_dof_armature_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "randomized_mass_links" : [LINK_FILTERS.ALL_ROBOT],
             "randomized_friction_links" : [LINK_FILTERS.ALL],
@@ -630,9 +678,9 @@ def get_kyon_args(arm : str = "left"):
                                                      [ j_pos_range, 0.9, 0.9]]) for k in homing.keys()},
             "control_limits_minmax_pve" : None,
             "enable_link_collisions" : [ ],
-            "manipulator_links" : [(rname, f"dagana_{arm_id}_base"), (rname, f"dagana_{arm_id}_claw")],
-            "gripper_links" : [(rname, f"dagana_{arm_id}_base"), (rname, f"dagana_{arm_id}_claw")],
-            "feet_links" : [ ],
+            "manipulator_links" : [(rname, f"dagana_{ctrl_arm_id}_base"), (rname, f"dagana_{ctrl_arm_id}_claw")],
+            "gripper_links" : [(rname, f"dagana_{ctrl_arm_id}_base"), (rname, f"dagana_{ctrl_arm_id}_claw")],
+            "feet_contact_links" : feet_links,
             "ctrl_joints_stiffness" : 500.0,
             "ctrl_joints_damping" : 20.0,
             "mjx_opt_preset" : "faster",
@@ -643,7 +691,12 @@ def get_kyon_args(arm : str = "left"):
                                          (-0.107, 0.0,    -0.0362125, 0.0, 0.0, 0.0, 1.0)],
             "held_joints_damping" :   {"default": 500.0},
             "held_joints_stiffness" : {"default": 500.0},
+            "table_height" : 0.45
         }
+
+robot_args_registry["kyon"]       = get_kyon_args
+robot_args_registry["kyon_right"] = lambda : get_kyon_args(ctrl_arm="right")
+robot_args_registry["kyon_legs"]  = lambda : get_kyon_args(spawn_legs=True)
 
 
 def runner_builder_to_vecenv(runner_builder: VecEnvRunnerBuilderProtocol) -> VecEnvBuilderProtocol:

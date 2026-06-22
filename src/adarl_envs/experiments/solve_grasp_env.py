@@ -35,16 +35,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     r = 0.0
     n = 0.0
     env_builder_args = {
-        "reward_health_weight" : 0.0,
-
-        "reward_joint_power_weight" : 0.0,
-        "reward_joint_actacc_weight" :  0.0,
-        "reward_joint_actdiff_weight" : 0.0,
-        "reward_joint_torque_weight" :  0.0, 
-        "reward_joint_position_limit_weight" : 0.01,
-        "reward_joint_position_weight" : 0.3,
-        "reward_object_pose_weight" : 1.0,
-        "reward_gripper_pose_weight" : 1.0,
+        "reward_health_weight" :                0.0,
+        "reward_joint_power_weight" :           0.0,
+        "reward_joint_actacc_weight" :          0.0,
+        "reward_joint_actdiff_weight" :         0.1,
+        "reward_joint_torque_weight" :          0.0, 
+        "reward_joint_position_limit_weight" :  0.01,
+        "reward_joint_position_weight" :        0.3,
+        "reward_object_pose_weight" :           1.0,
+        "reward_gripper_pose_weight" :          1.0,
         "reward_safety_weight" : 0.0,     
         "target_object_link" : ("cube","cube"),
         "observe_object_pose" : True,
@@ -128,7 +127,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # "mjx_geom_overrides" : {
         #     "cube" : {"friction" : [2.0,0.001,0.0005]}
         # },
-        "mjx_opt_override" : {"impratio" : 10.0}
+        "mjx_opt_override" : {"impratio" : 10.0},
+        "robot_options" : {
+            "spawn_legs" : True
+        }
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

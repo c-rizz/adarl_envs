@@ -69,6 +69,8 @@ class GrapVecEnvInitArgs():
     reward_object_pose_weight : float
     reward_gripper_pose_weight : float
     target_object_link : tuple[str,str]
+    table_height : float
+    feet_contact_links : list[tuple[str,str]]
     observe_object_pose : bool = False
     gripper_link_transforms : list[tuple[float,float,float,float,float,float,float]] | None = None
     """Per gripper-link transform applied when computing the overall gripper pose.
@@ -151,7 +153,7 @@ class GraspVecEnv(RobotVecEnv):
         self._zero = self._thtens([0.0])
         self._head_camera_name = "head_camera"
         self._grasp_ui_camera_name = "ui_camera"
-        self._table_height = 0.8
+        self._table_height = grasp_init_args.table_height
         cube_spawn_height = self._table_height + 0.031
         spawn_area_minmax_xyz = [[ 0.45,  -0.15, cube_spawn_height],
                                  [ 0.65,   0.15, cube_spawn_height]]
@@ -210,6 +212,10 @@ class GraspVecEnv(RobotVecEnv):
         cube_colliding_links = [self._grasping_conf.table_link]
         cube_colliding_links += self._grasping_conf.manipulator_all_links
         robot_init_args.enable_link_collisions.append((self._grasping_conf.target_object_link, cube_colliding_links))
+        # Enable physical collisions between each foot and the ground so the feet (e.g. the legs,
+        # when spawned) rest on the floor instead of passing through it.
+        for foot in grasp_init_args.feet_contact_links:
+            robot_init_args.enable_link_collisions.append((foot, [robot_init_args.ground_link]))
         robot_init_args.randomization_initial_height_range_meters=0.0
         robot_init_args.noise_abs_obs_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
         super().__init__(robot_init_args)

@@ -645,18 +645,20 @@ def get_kyon_args(enable_arms : bool = False,):
     hip_pitch = -0.8727 # = -50/180*3.14159
     hip_roll =   0.0349 # = 2/180*3.14159
     knee =      -1.5707 # = -90/180*3.14159
-    homing_ref = {  ("kyon","hip_roll_3") :  hip_roll,
-                    ("kyon","hip_roll_4") : -hip_roll,
-                    ("kyon","hip_roll_1") : -hip_roll,
-                    ("kyon","hip_roll_2") :  hip_roll,
-                    ("kyon","hip_pitch_3") :  hip_pitch,
-                    ("kyon","hip_pitch_4") : -hip_pitch,
-                    ("kyon","hip_pitch_1") :  hip_pitch,
-                    ("kyon","hip_pitch_2") : -hip_pitch,
-                    ("kyon","knee_pitch_3") : -knee,
-                    ("kyon","knee_pitch_4") :  knee,
-                    ("kyon","knee_pitch_1") : -knee,
-                    ("kyon","knee_pitch_2") :  knee}
+    homing_ref = {  
+                    ("kyon","hip_roll_1") :     -hip_roll,
+                    ("kyon","hip_pitch_1") :     hip_pitch,
+                    ("kyon","knee_pitch_1") :   -knee,
+                    ("kyon","hip_roll_2") :      hip_roll,
+                    ("kyon","hip_pitch_2") :    -hip_pitch,
+                    ("kyon","knee_pitch_2") :    knee,
+                    ("kyon","hip_roll_3") :      hip_roll,
+                    ("kyon","hip_pitch_3") :     hip_pitch,
+                    ("kyon","knee_pitch_3") :   -knee,
+                    ("kyon","hip_roll_4") :     -hip_roll,
+                    ("kyon","hip_pitch_4") :    -hip_pitch,
+                    ("kyon","knee_pitch_4") :    knee,
+                    }
     # These are correct for stifness=500
     homing = {  ("kyon","hip_roll_3") :    0.0930,
                 ("kyon","hip_roll_4") :   -0.0930,

@@ -39,12 +39,17 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_joint_power_weight" :           0.0,
         "reward_joint_actacc_weight" :          0.0,
         "reward_joint_actdiff_weight" :         0.1,
-        "reward_joint_torque_weight" :          0.0, 
-        "reward_joint_position_limit_weight" :  0.01,
-        "reward_joint_position_weight" :        0.3,
+        "reward_joint_torque_weight" :          0.002, 
+        "reward_joint_position_limit_weight" :  0.0,
+        "reward_joint_position_weight" :        2.0,
         "reward_object_pose_weight" :           1.0,
         "reward_gripper_pose_weight" :          1.0,
-        "reward_safety_weight" : 0.0,     
+        "reward_height_position_weight" :       1.0,
+        "reward_pitchnroll_weight" :            1.0,
+        "reward_velocity_tracking_weight" :     0.0,
+        "reward_yaw_vel_track_weight" :         0.0,
+        "neutral_body_height" : 0.45,
+        "reward_safety_weight" : 0.0,
         "target_object_link" : ("cube","cube"),
         "observe_object_pose" : True,
         "noise_action_delay_mustd_std" : (0.008, 0.005*n, 0.0025*n),
@@ -74,11 +79,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 0.7,
-        "randomization_initial_height_range_meters" : 0.1,
-        "randomization_initial_joint_pose_range" : 0.9,
+        "randomization_initial_height_range_meters" : 0.0,
+        "randomization_initial_joint_pose_range" : {"default" : 0.05, 
+                                                    **{("kyon",jn) : 0.9 for jn in ["shoulder_yaw_", "shoulder_pitch_", "elbow_pitch_", "wrist_pitch_", "wrist_yaw_"]}},
         "just_health_reward" : False,
         "log_info_stats" : True,
-        "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
+        "longterm_states_decimation_time" : 0.0, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,
         "max_goal_height_speed" : 0.1,
         "step_max_good_air_duration" : 0.5,
@@ -127,10 +133,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # "mjx_geom_overrides" : {
         #     "cube" : {"friction" : [2.0,0.001,0.0005]}
         # },
-        "mjx_opt_override" : {"impratio" : 10.0},
+        "mjx_opt_override" : {"impratio" : 1.0,
+                            #   "ccd_iterations" : 50
+                              },
         "robot_options" : {
-            "spawn_legs" : True
-        }
+            "spawn_legs" : True,
+            "ctrl_legs" : True
+        },
+        "mjx_warp_nccdmax" : 20,
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

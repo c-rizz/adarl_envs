@@ -257,7 +257,12 @@ def grasp_builder_and_args():
         # "mjx_geom_overrides" : {
         #     "cube" : {"friction" : [2.0,0.001,0.0005]}
         # },
-        "mjx_opt_override" : {"impratio" : 10.0}
+        "mjx_opt_override" : {"impratio" : 10.0},
+        "robot_options" : {
+            "spawn_legs" : True,
+            "ctrl_legs" : True
+        },
+        "mjx_warp_nccdmax" : 20
     }
 
     env_builder_args.update({

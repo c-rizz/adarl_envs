@@ -24,11 +24,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     if mode == "pybullet":
         env_device = th.device("cpu",0)
-    else: # mode == "mjx":
+    else:
         env_device = th.device("cuda",0)
-    # else:
-    #     raise RuntimeError(f"Unknown mode '{mode}'")
-    
     degree2rad = math.pi/180
     eval_freq = 20
     r = 1.0 # randomization strength
@@ -47,15 +44,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
+        "goal_height_minmax" : {"kyon" : [0.47,0.47],
+                                "go1" : [0.30,0.30],
+                                "centauro" : [0.79,0.79],
+                                }.get(args["robot"].lower(), [0.5,0.5]),
         "goal_resampling_probability_per_sec" : 0.1,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
         "goal_yaw_vel_zero_ratio" : 0.25,
-        "goal_height_minmax" : {"kyon" : [0.47,0.47],
-                                "go1" : [0.30,0.30],
-                                "centauro" : [0.79,0.79],
-                                }.get(args["robot"].lower(), [0.5,0.5]),
         "held_joints_damping" :   {("centauro","twisting_pelvis_joint"):5.0,
                                    ("centauro","j_wheel_1"):50.0,
                                    ("centauro","j_wheel_2"):50.0,
@@ -104,9 +101,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomization_initial_joint_pose_range" : 0.1,
         "randomization_recycle_init_pose" : True,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
-        "randomized_dof_armature_ratios" :      ("uniform", [0.1*r,10.0*r]),
-        "randomized_dof_damping_ratios":        ("uniform", [0.1*r,10.0*r]),
-        "randomized_dof_frictionloss_ratios":   ("uniform", [0.1*r,10.0*r]),
+        "randomized_dof_armature_ratios" :       ("uniform", [0.1*r,10.0*r]),
+        "randomized_dof_damping_ratios":         ("uniform", [0.1*r,10.0*r]),
+        "randomized_dof_frictionloss_ratios":    ("uniform", [0.1*r,10.0*r]),
         "randomized_friction_slide_spin_roll_ratios" : ("uniform", ([0.8*r,0.8*r,0.8*r],[1.5*r,1.5*r,1.5*r])),
         "randomized_gains_damping_ratio_epstd"       : 0.2*r,
         "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,

@@ -28,6 +28,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
     
+    split_rewards = True
     degree2rad = math.pi/180
     eval_freq = 10
     r = 1.0 # randomization strength
@@ -126,19 +127,19 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_height_velocity_weight" :           0.1,
         "reward_joint_acc_on_vel_weight" :          eps,
         "reward_joint_acceleration_weight" :        eps,
-        "reward_joint_actacc_weight" :              1.0*p,
-        "reward_joint_actdiff_weight" :             2.0*p,
+        "reward_joint_actacc_weight" :              0.0*p,
+        "reward_joint_actdiff_weight" :             0.0*p,
         "reward_joint_energy_weight" :              eps,
         "reward_joint_position_limit_weight" :      eps,
-        "reward_joint_position_weight" :            50.0*p,
+        "reward_joint_position_weight" :            0.0*p,
         "reward_joint_posref_acc_weight":           eps,
-        "reward_joint_posref_vel_weight" :          1.0,
-        "reward_joint_power_weight" :               0.002*p,
+        "reward_joint_posref_vel_weight" :          eps,
+        "reward_joint_power_weight" :               0.0*p,
         "reward_joint_sensed_effort_weight" :       eps,
         "reward_joint_stand_position_weight" :      5.0,
         "reward_joint_stand_velocity_weight" :      1.0,
         "reward_joint_torque_limit_weight" :        eps,
-        "reward_joint_torque_weight" :              0.0004*p,
+        "reward_joint_torque_weight" :              0.0*p,
         "reward_joint_torquediff_weight" :          eps,
         "reward_joint_torqueref_weight" :           eps,
         "reward_joint_velocity_limit_weight" :      eps,
@@ -157,10 +158,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
             "add_twisting_pelvis" : False
         },
         "saturate_jimp_ref_limits" : False,
-        "split_rewards" : False,
+        "split_rewards" : split_rewards,
         "step_max_good_air_duration" : 0.5,
         "step_max_good_ground_duration" : 0.5,
-        "step_min_good_air_duration" : 0.2,
+        "step_min_good_air_duration" : 0.3,
         "step_min_good_ground_duration" : 0.1,
         "stepLength_sec" : step_length_sec,
         "terminate_on_body_contact" : False,
@@ -268,38 +269,48 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "num_envs" : 1
     # }
 
+    # gamma_long =    0.99
+    # gamma_short =   0.90
+    # gamma_instant = 0.0
     # gammas = {
-    #     "acceleration" :        0.98,
-    #     "actacc" :              0.0,
-    #     "actdiff" :             0.0,
-    #     "contacts" :            0.98,
-    #     "failure" :             0.98,
-    #     "feet_air_time" :       0.98,
-    #     "feet_ground_time" :    0.98,
-    #     "feet_on_ground" :      0.98,
-    #     "feet_step_height" :    0.98,
-    #     "heading" :             0.98,
-    #     "heading_velocity" :    0.98,
-    #     "health" :              0.98,
-    #     "height_position" :     0.98,
-    #     "height_velocity" :     0.98,
-    #     "pitchnroll" :          0.98,
-    #     "pitchnroll_velocity" : 0.98,
-    #     "position" :            0.98,
-    #     "position_limit" :      0.98,
-    #     "posref_vel" :          0.0,
-    #     "posref_acc" :          0.0,
-    #     "sensed_effort" :       0.98,
-    #     "slip" :                0.98,
-    #     "stand_position" :      0.98,
-    #     "torque" :              0.98,
-    #     "torque_limit" :        0.98,
-    #     "torque_refs" :         0.0,
-    #     "torquediff" :          0.9,
-    #     "tracking" :            0.98,
-    #     "velocity" :            0.9,
-    #     "velocity_refs" :       0.0,
-    #     "velocity_limit" :      0.98
+    #     "contacts" :                  gamma_long,
+    #     "failure" :                   gamma_long,
+    #     "feet_air_time" :             gamma_long,
+    #     "feet_ground_time" :          gamma_long,
+    #     "feet_on_ground" :            gamma_long,
+    #     "feet_step_height" :          gamma_long,
+    #     "heading_velocity" :          gamma_long,
+    #     "heading" :                   gamma_long,
+    #     "health" :                    gamma_long,
+    #     "height_position" :           gamma_long,
+    #     "height_velocity" :           gamma_long,
+    #     "joint_acc_on_vel" :          gamma_long,
+    #     "joint_acceleration" :        gamma_long,
+    #     "joint_actacc" :              gamma_instant,
+    #     "joint_actdiff" :             gamma_instant,
+    #     "joint_energy" :              gamma_long,
+    #     "joint_position_limit" :      gamma_long,
+    #     "joint_position" :            gamma_long,
+    #     "joint_posref_acc":           gamma_instant,
+    #     "joint_posref_vel" :          gamma_instant,
+    #     "joint_power" :               gamma_short,
+    #     "joint_sensed_effort" :       gamma_long,
+    #     "joint_stand_position" :      gamma_long,
+    #     "joint_stand_velocity" :      gamma_long,
+    #     "joint_torque_limit" :        gamma_long,
+    #     "joint_torque" :              gamma_long,
+    #     "joint_torquediff" :          gamma_short,
+    #     "joint_torqueref" :           gamma_instant,
+    #     "joint_velocity_limit" :      gamma_long,
+    #     "joint_velocity" :            gamma_short,
+    #     "joint_velref" :              gamma_instant,
+    #     "pitchnroll_velocity" :       gamma_long,
+    #     "pitchnroll" :                gamma_long,
+    #     "safety_triggered" :          gamma_long,
+    #     "scale_n":                    gamma_long,
+    #     "slip" :                      gamma_long,
+    #     "tracking" :                  gamma_long,
+    #     "yaw_vel_tracking" :          gamma_long,
     # }
     gammas = 0.99
 
@@ -324,10 +335,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
                                      start_target=-1.0,
                                      end_target=-3.0,
-                                     start_reference_threshold=0.4)
+                                     start_reference_threshold=0.4,
+                                     end_reference_threshold=0.0)
 
     if algo.lower() == "sac":
-        
         sac_train(  seed,
                     folderName,
                     run_id,
@@ -365,7 +376,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     actor_mean_bounds_ratio = 0.95,
                                                     alpha_lr_factor = 1.0,
                                                     alpha_initial_value = 0.0001,
-                                                    independent_entropy_q=False
+                                                    independent_entropy_q=split_rewards
                                                     ),
                     checkpoint_freq=20,
                     collector_device=env_device,

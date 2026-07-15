@@ -91,11 +91,13 @@ def overlay_text_func(vo, a, r, te, tr, info, extra_info):
         limits_safety_triggered = 'N/A'
     goal_abs_linvel_xyz = info.get('goal_abs_xyz_vec', None)
     vel_norm = f"{th.linalg.norm(goal_abs_linvel_xyz):.3f}" if goal_abs_linvel_xyz is not None else "N/A"
+    goal_rel_linvel_xyz = info.get('goal_rel_xyz_vec', None)
+    rel_vel_norm = f"{th.linalg.norm(goal_rel_linvel_xyz):.3f}" if goal_rel_linvel_xyz is not None else "N/A"
     return  (   f"\n"
                 f"Step                  {format_tensor(info.get('ep_step_count', -1), 0)}\n"+
                 f"body_abs_linvel       {body_abs_linvel_str} ({body_abs_linvel_norm_str} m/s)\n"
                 f"goal_vel_abs          {format_tensor(goal_abs_linvel_xyz, 3)} ({vel_norm} m/s)\n"
-                f"goal_vel_rel          {format_tensor(info.get('goal_rel_xyz_vec','N/A'), 3)}\n"
+                f"goal_vel_rel          {format_tensor(goal_rel_linvel_xyz, 3)} ({rel_vel_norm} m/s)\n"
                 f"smoothed_linvel_error {format_tensor(info.get('smoothed_linvel_error','N/A'), 3)}\n"
                 f"linvel_error          {format_tensor(info.get('linvel_error','N/A'), 3)}\n"
                 f"goal_yaw_vel          {format_tensor(info.get('goal_yaw_vel','N/A'), 3)}\n"
@@ -641,7 +643,8 @@ def get_quad_args():
 robot_args_registry["quad"] = get_quad_args
 
 
-def get_kyon_args(enable_arms : bool = False,):
+def get_kyon_args(robot_options : dict = {}):
+    enable_arms = robot_options.get("enable_arms", False)
     hip_pitch = -0.8727 # = -50/180*3.14159
     hip_roll =   0.0349 # = 2/180*3.14159
     knee =      -1.5707 # = -90/180*3.14159
@@ -677,21 +680,29 @@ def get_kyon_args(enable_arms : bool = False,):
     j_pos_ctrl_range = 0.3
     j_vel_ctrl_lim = j_vel_phys_lim*0.9
     j_eff_ctrl_lim = j_eff_phys_lim*0.9
-    j_pos_ctrl_lims = {k:np.array([-1.0,1.0])*j_pos_ctrl_range+homing[k] for k in homing.keys()}
 
     if enable_arms:
-        homing_ref.update({ ("kyon","shoulder_yaw_1") : 0.0,
-                        ("kyon","shoulder_pitch_1") : 0.0,
-                        ("kyon","elbow_pitch_1") : 0.0,
-                        ("kyon","wrist_pitch_1") : 0.0,
-                        ("kyon","wrist_yaw_1") : 0.0,
-                        ("kyon","shoulder_yaw_2") : 0.0,
-                        ("kyon","shoulder_pitch_2") : 0.0,
-                        ("kyon","elbow_pitch_2") : 0.0,
-                        ("kyon","wrist_pitch_2") : 0.0,
-                        ("kyon","wrist_yaw_2") : 0.0,
-                        ("kyon","dagana_1_clamp_joint") : 0.1,
-                        ("kyon","dagana_2_clamp_joint") : 0.1})
+        generic_arm_joint_names = ["shoulder_yaw_", "shoulder_pitch_", "elbow_pitch_", "wrist_pitch_", "wrist_yaw_"]
+        left_arm_joints =  [("kyon", f"{jn}1") for jn in generic_arm_joint_names]
+        right_arm_joints = [("kyon", f"{jn}2") for jn in generic_arm_joint_names]
+        left_arm_homing =  [0.0,  1,  2,  1, 0.0]  # shoulder_yaw, shoulder_pitch, elbow_pitch, wrist_pitch, wrist_yaw
+        right_arm_homing = [0.0, -1, -2, -1, 0.0]  # shoulder_yaw, shoulder_pitch, elbow_pitch, wrist_pitch, wrist_yaw
+        left_arm_pos = {j: v for j,v in zip(left_arm_joints, left_arm_homing)}
+        dagana_left_pos = {("kyon","dagana_1_clamp_joint") : 0.1}
+        right_arm_pos = {j: v for j,v in zip(right_arm_joints, right_arm_homing)}
+        dagana_right_pos = {("kyon","dagana_2_clamp_joint") : 0.1}
+
+        homing_ref.update(left_arm_pos)
+        homing_ref.update(right_arm_pos)
+        homing_ref.update(dagana_left_pos)
+        homing_ref.update(dagana_right_pos)
+
+        homing.update(left_arm_pos)
+        homing.update(right_arm_pos)
+        homing.update(dagana_left_pos)
+        homing.update(dagana_right_pos)
+
+    j_pos_ctrl_lims = {k:np.array([-1.0,1.0])*j_pos_ctrl_range+homing[k] for k in homing.keys()}
     file = adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro")
     format = "xacro"
     # file = adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_mjx/kyon_mjx.xml")
@@ -699,7 +710,7 @@ def get_kyon_args(enable_arms : bool = False,):
     feet_links  = [ ('kyon', 'contact_1'),
                     ('kyon', 'contact_2'),
                     ('kyon', 'contact_3'),
-                    ('kyon', 'contact_4')],
+                    ('kyon', 'contact_4')]
     return {"model_file" : file,
             "robot_description_format" : format,
             "model_kwargs" : {"upper_body" : f"{enable_arms}",
@@ -730,10 +741,7 @@ def get_kyon_args(enable_arms : bool = False,):
                                              [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lim, -j_eff_ctrl_lim],
                                               [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lim,  j_eff_ctrl_lim]]) for k,v in homing_ref.items()},
             "control_limits_center" : None, #homing_ref,
-            "enable_link_collisions" : [    (('kyon', 'contact_1'),[('ground','ground_link')]),
-                                            (('kyon', 'contact_2'),[('ground','ground_link')]),
-                                            (('kyon', 'contact_3'),[('ground','ground_link')]),
-                                            (('kyon', 'contact_4'),[('ground','ground_link')])],
+            "enable_link_collisions" : [(fl,[('ground','ground_link')]) for fl in feet_links],
             "feet_contact_links" : feet_links,
             "feet_bottom_links" : feet_links,
             "ctrl_joints_stiffness" :500.0,
@@ -758,7 +766,7 @@ def get_kyon_args(enable_arms : bool = False,):
             #                                             "friction" : np.array([0.8, 0.005, 0.0001])}}
         }
 robot_args_registry["kyon"] = get_kyon_args
-robot_args_registry["kyon_arms"] = lambda : get_kyon_args(enable_arms=True)
+robot_args_registry["kyon_arms"] = lambda : get_kyon_args(robot_options={"enable_arms": True})
 
 def get_go1_args():
 

@@ -19,7 +19,7 @@ import numpy as np
 import torch as th
 import math
 import quaternion
-from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionDef, RobotVecEnvInitArgs
+from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionDefTh, DistributionDef, RobotVecEnvInitArgs
 from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import adarl.utils.tensor_trees
 import traceback
@@ -74,10 +74,14 @@ class GrapVecEnvInitArgs():
     reward_pitchnroll_weight : float
     reward_velocity_tracking_weight : float
     reward_yaw_vel_track_weight : float
+    reward_feet_linvel_weight : float
     target_object_link : tuple[str,str]
-    table_height : float
+    table_height : DistributionDef
     feet_contact_links : list[tuple[str,str]]
+    feet_bottom_links : list[tuple[str,str]]
+    """ Links representing the contact point of the feet, should be on the bottom of the foot, it is used for position-related logic"""
     neutral_body_height : float
+    max_reach_height : float
     observe_object_pose : bool = False
     gripper_link_transforms : list[tuple[float,float,float,float,float,float,float]] | None = None
     """Per gripper-link transform applied when computing the overall gripper pose.
@@ -89,18 +93,20 @@ class GrapVecEnvInitArgs():
     instead of the link origin reported by the robot description.
     If ``None``, an identity transform is used for every gripper link.
     """
+    
 
 class GraspVecEnv(RobotVecEnv):
     STATE_GRASPING = "grasp"
     STATE_GRASPING_VELOCITIES = "grasp_velocities"
+    STATE_FEET = "feet"
     STATE_CAMERA = "camera"
 
     @dataclass
     class GraspingConfiguration:
         obs_camera_resolution_hw : tuple[int,int]
         ui_camera_resolution_hw : tuple[int,int]
-        init_obj_area_minmax_xyz : th.Tensor
-        goal_obj_area_minmax_xyz : th.Tensor
+        init_obj_area_minmax_xy : th.Tensor
+        goal_obj_area_minmax_xy : th.Tensor
         table_link : tuple[str,str]
         use_head_cam_as_ui_camera : bool
         split_rewards : bool
@@ -108,6 +114,7 @@ class GraspVecEnv(RobotVecEnv):
         show_gripper_marker : bool
         show_goal_marker : bool
         grasping_init_args : GrapVecEnvInitArgs
+        table_height : DistributionDefTh
 
     @dataclass
     class SubRewards:
@@ -125,24 +132,29 @@ class GraspVecEnv(RobotVecEnv):
         pitchnroll : th.Tensor
         velocity_tracking : th.Tensor
         yaw_vel_track : th.Tensor
+        feet_linvel : th.Tensor
 
 
     @dataclass
     class EpisodeGraspingConfiguration:
         initial_object_pose : th.Tensor
         goal_object_pose : th.Tensor
+        table_height : th.Tensor
 
-    GRASPING_POSES = IntEnum("GRASPING_POSES", [
+    GRASPING_POSES = IntEnum(       "GRASPING_POSES", [
                                     "GOAL_POSE",
                                     "OBJECT_POSE",
                                     "GRIPPER_POSE"
                                     ], start=0)
-    GRASPING_VELOCITIES = IntEnum("GRASPING_VELOCITIES", [
+    GRASPING_VELOCITIES = IntEnum(  "GRASPING_VELOCITIES", [
                                     "OBJECT_LINVEL",
                                     "OBJECT_ANGVEL",
                                     "GRIPPER_LINVEL",
                                     "GRIPPER_ANGVEL"
                                     ], start=0)
+    FEET = IntEnum("FEET", [        "FEET_VEL_X",
+                                    "FEET_VEL_Y",
+                                    "FEET_ON_GROUND"], start=0)
 
     CAMERA_FIELDS = IntEnum("CAMERA_FIELDS",   ["IMAGE"], start=0)
 
@@ -150,24 +162,20 @@ class GraspVecEnv(RobotVecEnv):
     def __init__(self,  grasp_init_args : GrapVecEnvInitArgs):
         robot_init_args = grasp_init_args.robot_init_args
         adapter = robot_init_args.adapter
+        num_envs = adapter.vec_size()
         th_device = robot_init_args.th_device
         self._th_device = th_device
         self._obs_dtype = th.float32
-        self._all_vecs = th.ones((adapter.vec_size(),), device=th_device, dtype=th.bool)
-        self._no_vecs = th.zeros((adapter.vec_size(),), device=th_device, dtype=th.bool)
+        self._all_vecs = th.ones((num_envs,), device=th_device, dtype=th.bool)
+        self._no_vecs = th.zeros((num_envs,), device=th_device, dtype=th.bool)
         self._unit_3d_vector = self._thtens([1.0, 0.0, 0.0])
         self._unit_quaternion = self._thtens([0.0, 0.0, 0.0, 1.0])
         self._zero = self._thtens([0.0])
         self._head_camera_name = "head_camera"
         self._grasp_ui_camera_name = "ui_camera"
-        self._table_height = grasp_init_args.table_height
         self._cube_size = 0.04
-        cube_spawn_height = self._table_height + self._cube_size/2+0.005
-        spawn_area_minmax_xyz = [[ 0.45,  -0.15, cube_spawn_height],
-                                 [ 0.65,   0.15, cube_spawn_height]]
-
-        manipulation_area_minmax_xyz = [[ 0.45,  -0.15, cube_spawn_height],
-                                        [ 0.65,   0.15, self._table_height + 0.3]]
+        manipulation_area_minmax_xy = [[ 0.45,  -0.15],
+                                        [ 0.65,   0.15]]
 
         num_gripper_links = len(grasp_init_args.manipulator_tip_links)
         if grasp_init_args.gripper_link_transforms is None:
@@ -183,15 +191,16 @@ class GraspVecEnv(RobotVecEnv):
         self._grasping_conf = GraspVecEnv.GraspingConfiguration(
                         obs_camera_resolution_hw = (64,64),
                         ui_camera_resolution_hw = (480,480),
-                        init_obj_area_minmax_xyz = th.as_tensor(spawn_area_minmax_xyz, device=th_device),
-                        goal_obj_area_minmax_xyz = th.as_tensor(manipulation_area_minmax_xyz, device=th_device),
+                        init_obj_area_minmax_xy = th.as_tensor(manipulation_area_minmax_xy, device=th_device),
+                        goal_obj_area_minmax_xy = th.as_tensor(manipulation_area_minmax_xy, device=th_device),
                         table_link = ("table","cube"),
                         use_head_cam_as_ui_camera = False,
                         split_rewards = False,
                         gripper_link_transforms = gripper_link_transforms,
                         show_gripper_marker = True, # spawn a small cube and place it at the computed gripper pose when rendering
                         show_goal_marker = True, # spawn a small cube and place it at the object goal pose when rendering
-                        grasping_init_args = grasp_init_args)
+                        grasping_init_args = grasp_init_args,
+                        table_height = self._distr_to_tensor(grasp_init_args.table_height, size=(num_envs,)))
 
         self._sub_rewards_weights2 = GraspVecEnv.SubRewards(
                 health = self._thtens(grasp_init_args.reward_health_weight),
@@ -207,13 +216,16 @@ class GraspVecEnv(RobotVecEnv):
                 height_position = self._thtens(grasp_init_args.reward_height_position_weight),
                 pitchnroll = self._thtens(grasp_init_args.reward_pitchnroll_weight),
                 velocity_tracking = self._thtens(grasp_init_args.reward_velocity_tracking_weight),
-                yaw_vel_track = self._thtens(grasp_init_args.reward_yaw_vel_track_weight)
+                yaw_vel_track = self._thtens(grasp_init_args.reward_yaw_vel_track_weight),
+                feet_linvel = self._thtens(grasp_init_args.reward_feet_linvel_weight)
         )
         self._sub_rewards_enabled = {k:v for k,v in dataclasses.asdict(self._sub_rewards_weights2).items() if v!=0.0}
         self._sub_rewards_enabled_weights_th = self._thtens([v for v in self._sub_rewards_enabled.values()])
 
-        self._grasping_episode_config = GraspVecEnv.EpisodeGraspingConfiguration(initial_object_pose = self._thzeros((adapter.vec_size(), 7)),
-                                                                                   goal_object_pose = self._thzeros((adapter.vec_size(), 7)))
+        self._grasping_episode_config = GraspVecEnv.EpisodeGraspingConfiguration(
+                                                        initial_object_pose = self._thzeros((num_envs, 7)),
+                                                        goal_object_pose = self._thzeros((num_envs, 7)),
+                                                        table_height = self._thzeros((num_envs,)))
         if robot_init_args.enable_link_collisions is None:
             robot_init_args.enable_link_collisions = []
         cube_colliding_links = [self._grasping_conf.table_link]
@@ -239,11 +251,23 @@ class GraspVecEnv(RobotVecEnv):
 
     @override
     def _build(self):
+        # Monitored collision pairs must be registered before the scenario is built (super()._build()).
+        # They provide the feet-vs-ground contact signal used to gate the feet-slip penalty.
+        if isinstance(self._adapter, BaseVecSimulationAdapter):
+            feet_ground_collision_pairs = [(foot, self._configuration.init_args.ground_link)
+                                           for foot in self._grasping_conf.grasping_init_args.feet_contact_links]
+            self._adapter.set_monitored_collision_pairs(feet_ground_collision_pairs)
         super()._build()
-        self._adapter.set_monitored_links(self._adapter.get_monitored_links() + [self._grasping_conf.grasping_init_args.target_object_link] + self._grasping_conf.grasping_init_args.manipulator_tip_links)
+        self._adapter.set_monitored_links(self._adapter.get_monitored_links() +
+                                          [self._grasping_conf.grasping_init_args.target_object_link] + 
+                                          self._grasping_conf.grasping_init_args.manipulator_tip_links + 
+                                          self._grasping_conf.grasping_init_args.feet_bottom_links)
         self._object_link_id = self._adapter.get_monitored_links_ids([self._grasping_conf.grasping_init_args.target_object_link])
         self._gripper_link_ids = self._adapter.get_monitored_links_ids(self._grasping_conf.grasping_init_args.manipulator_tip_links)
-        self._obj_and_gripper_link_ids = self._adapter.get_monitored_links_ids([self._grasping_conf.grasping_init_args.target_object_link]+self._grasping_conf.grasping_init_args.manipulator_tip_links)
+        self._feet_bottom_link_ids = self._adapter.get_monitored_links_ids(self._grasping_conf.grasping_init_args.feet_bottom_links)
+        self._obj_and_gripper_and_feetbottom_link_ids = self._adapter.get_monitored_links_ids([self._grasping_conf.grasping_init_args.target_object_link]+
+                                                                                              self._grasping_conf.grasping_init_args.manipulator_tip_links+
+                                                                                              self._grasping_conf.grasping_init_args.feet_bottom_links)
 
 
 
@@ -265,10 +289,10 @@ class GraspVecEnv(RobotVecEnv):
                                                                     self.GRASPING_POSES.GRIPPER_POSE : [-10, 10]},
                                                     vec_size=adapter.vec_size(),
                                                     history_length=2,
-                                                    observation_definitions={"base":
-                                                                             ThBoxStateHelper.SimpleObsDef( obs_history_length=1,
-                                                                                                            observable_fields=observable_fields,
-                                                                                                            observable_subfields=None)})
+                                                    observation_definitions={
+                                                        "base": ThBoxStateHelper.SimpleObsDef(  obs_history_length=1,
+                                                                                                observable_fields=observable_fields,
+                                                                                                observable_subfields=None)})
         self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_GRASPING,
                                                             grasping_state_helper,
                                                         obs_defs={"base":{"observable":True,"concatenate":True,"noise":None}})
@@ -283,13 +307,34 @@ class GraspVecEnv(RobotVecEnv):
                                                                     self.GRASPING_VELOCITIES.GRIPPER_ANGVEL : [-10, 10]},
                                                     vec_size=adapter.vec_size(),
                                                     history_length=1,
-                                                    observation_definitions={"base":
-                                                                             ThBoxStateHelper.SimpleObsDef( obs_history_length=1,
-                                                                                                            observable_fields=None,
-                                                                                                            observable_subfields=None)})
+                                                    observation_definitions={
+                                                        "base": ThBoxStateHelper.SimpleObsDef(  obs_history_length=1,
+                                                                                                observable_fields=None,
+                                                                                                observable_subfields=None)})
         self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_GRASPING_VELOCITIES,
                                                              velocities_state_helper,
                                                              obs_defs={"base":{"observable":True,"concatenate":True,"noise":None}})
+
+        num_feet = len(self._grasping_conf.grasping_init_args.feet_bottom_links)
+        feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET],
+                                              dtype=self._obs_dtype,
+                                              th_device=self._th_device,
+                                              field_size=(num_feet,),
+                                              fields_minmax={ self.FEET.FEET_VEL_X :    [-10, 10],
+                                                              self.FEET.FEET_VEL_Y :    [-10, 10],
+                                                              self.FEET.FEET_ON_GROUND: [0, 1]},
+                                              vec_size=adapter.vec_size(),
+                                              history_length=1,
+                                              observation_definitions={
+                                                  "base": ThBoxStateHelper.SimpleObsDef(  obs_history_length=1,
+                                                                                          observable_fields=None,
+                                                                                          observable_subfields=None)})
+        # Feet horizontal velocity and ground contact are tracked only to drive the feet-slip penalty, so they are not observed.
+        self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_FEET,
+                                                             feet_state_helper,
+                                                             obs_defs={"base":{"observable":False,"concatenate":False,"noise":None}})
+        
+        
 
 
 
@@ -314,19 +359,31 @@ class GraspVecEnv(RobotVecEnv):
 
     def _get_adapter_data_raw(self):
         super_adapter_data =  super()._get_adapter_data_raw()
-        poses = self._adapter.getLinksState(self._obj_and_gripper_link_ids, use_com_pose=False)
+        poses = self._adapter.getLinksState(self._obj_and_gripper_and_feetbottom_link_ids, use_com_pose=False)
+        # poses is ordered as [target_object] + manipulator_tip_links + feet_bottom_links (see _build)
+        num_gripper_links = len(self._grasping_conf.grasping_init_args.manipulator_tip_links)
+        feet_start = 1 + num_gripper_links
         current_object_pose = poses[:,0, :7]
-        current_gripper_poses = poses[:,1:, :7]
+        current_gripper_poses = poses[:,1:feet_start, :7]
 
         current_object_linvel_angvel = poses[:,0, 7:13]
-        current_gripper_linvel_angvel = poses[:,1:, 7:13]
+        current_gripper_linvel_angvel = poses[:,1:feet_start, 7:13]
+        current_feetbottom_linvel_angvel = poses[:,feet_start:, 7:13]
 
-        grasp_adapter_data = current_object_pose, current_gripper_poses, current_object_linvel_angvel, current_gripper_linvel_angvel
+        # Feet-vs-ground contact, used to gate the feet-slip penalty. check_colliding_links returns one column
+        # per monitored pair, ordered as feet_contact_links, which must align 1:1 with feet_bottom_links.
+        if isinstance(self._adapter, BaseVecSimulationAdapter):
+            feet_touching_ground = self._adapter.check_colliding_links() # (vec_size, nfeet)
+        else:
+            feet_touching_ground = self._thzeros((self.num_envs, len(self._grasping_conf.grasping_init_args.feet_contact_links)))
+        # ggLog.info(f"feet_touching_ground = {feet_touching_ground}")
+        # ggLog.info(f"current_feetbottom_linvel_angvel = {current_feetbottom_linvel_angvel}")
+        grasp_adapter_data = current_object_pose, current_gripper_poses, current_object_linvel_angvel, current_gripper_linvel_angvel, current_feetbottom_linvel_angvel, feet_touching_ground
         return super_adapter_data, grasp_adapter_data
 
     @override
     def _get_new_instantaneous_state(self, adapter_data):
-        super_adapter_data, (current_object_pose, current_gripper_poses, current_object_linvel_angvel, current_gripper_linvel_angvel) = adapter_data
+        super_adapter_data, (current_object_pose, current_gripper_poses, current_object_linvel_angvel, current_gripper_linvel_angvel, current_feetbottom_linvel_angvel, feet_touching_ground) = adapter_data
         new_inst_state = super()._get_new_instantaneous_state(super_adapter_data)
 
         # Apply the per-link transforms (expressed in each gripper link frame) before
@@ -383,6 +440,13 @@ class GraspVecEnv(RobotVecEnv):
                                    self.GRASPING_VELOCITIES.GRIPPER_LINVEL: gripper_linvel.expand(self.num_envs,3),
                                    self.GRASPING_VELOCITIES.GRIPPER_ANGVEL: gripper_angvel.expand(self.num_envs,3)}
         new_inst_state[self.STATE_GRASPING_VELOCITIES] = new_grasping_velocities
+
+        # World-frame horizontal feet velocity plus the ground-contact flag. The slip penalty uses only the XY
+        # components (matching LocomotionVecEnv), and their norm is frame-invariant so no body-frame transform is needed.
+        feet_linvel_xy = current_feetbottom_linvel_angvel[:, :, :2] # (vec_size, nfeet, 2)
+        new_inst_state[self.STATE_FEET] = {self.FEET.FEET_VEL_X:     feet_linvel_xy[:, :, 0].expand(self.num_envs, -1),
+                                           self.FEET.FEET_VEL_Y:     feet_linvel_xy[:, :, 1].expand(self.num_envs, -1),
+                                           self.FEET.FEET_ON_GROUND: feet_touching_ground.to(self._obs_dtype).expand(self.num_envs, -1)}
 
         if not self._grasping_conf.grasping_init_args.observe_object_pose:
             new_camera_state = self._thzeros((self.num_envs,
@@ -532,6 +596,18 @@ class GraspVecEnv(RobotVecEnv):
         yawvel = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Z]
         reward_yaw_vel_track = -yawvel**2
 
+        # ---- Feet Slip ----
+        # Penalize feet sliding while in contact with the ground (same as LocomotionVecEnv's slip reward):
+        # only the horizontal velocity counts, and only for feet that are touching the ground.
+        feet_state = state[self.STATE_FEET][:,0] # vec_size*history*fields*nfeet -> vec_size*fields*nfeet
+        feet_linvels_xy = th.stack([feet_state[:,self.FEET.FEET_VEL_X],
+                                    feet_state[:,self.FEET.FEET_VEL_Y]], dim=1) # vec_size*2*nfeet
+        feet_speeds = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*2*nfeet -> vec_size*nfeet
+        feet_on_ground = feet_state[:,self.FEET.FEET_ON_GROUND] # vec_size*nfeet
+        feet_sliding_speed = feet_speeds*feet_on_ground
+        reward_feet_linvel = joint_penalty_reward(feet_sliding_speed, max_rew=1, exponent=2)
+        # reward_feet_linvel = th.zeros_like(reward_yaw_vel_track)
+
 
 
         raw_rewards = GraspVecEnv.SubRewards(
@@ -548,7 +624,8 @@ class GraspVecEnv(RobotVecEnv):
             height_position = reward_height_position,
             pitchnroll = reward_pitchnroll,
             velocity_tracking = reward_velocity_tracking,
-            yaw_vel_track = reward_yaw_vel_track
+            yaw_vel_track = reward_yaw_vel_track,
+            feet_linvel = reward_feet_linvel
         )
         sub_rew_unscaled = th.stack([dataclasses.asdict(raw_rewards)[k] for k in self._sub_rewards_enabled], dim=1)
         sub_rew_scaled = sub_rew_unscaled*self._sub_rewards_enabled_weights_th.unsqueeze(0)*self._grasping_conf.grasping_init_args.reward_scale
@@ -642,24 +719,36 @@ class GraspVecEnv(RobotVecEnv):
 
         return i
 
+    @override
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
+        table_height = self._sample_distr((self.num_envs), self._grasping_conf.table_height)
+        min_obj_z = table_height + self._cube_size/2 + 0.005
+        init_obj_minmax_z = min_obj_z.view(self.num_envs,1,1).expand(self.num_envs,2,1)
+        init_obj_area_minmax_xyz = th.cat([self._grasping_conf.init_obj_area_minmax_xy.expand(self.num_envs,2,2),
+                                           init_obj_minmax_z], dim=2)
         if "goal_pose" in reset_options:
             sampled_goal_obj_pose_v_xyzxyzw = th.as_tensor(reset_options["goal_pose"],device=self._configuration.init_args.th_device)
         else:
-            sampled_goal_obj_pose_v_xyzxyzw = unnormalize(self._thrand((self.num_envs,3))*2-1,
-                                                self._grasping_conf.goal_obj_area_minmax_xyz[0],
-                                                self._grasping_conf.goal_obj_area_minmax_xyz[1])
+            max_obj_z = self._thtens(self._grasping_conf.grasping_init_args.max_reach_height).expand(self.num_envs,1)
+            goal_obj_minmax_z = th.stack([min_obj_z.view(self.num_envs,1),
+                                        max_obj_z], dim=1).unsqueeze(2).view(self.num_envs,2,1)
+            goal_obj_area_minmax_xyz = th.cat([self._grasping_conf.goal_obj_area_minmax_xy.expand(self.num_envs,2,2),
+                                                goal_obj_minmax_z], dim=2)
+            sampled_goal_obj_pose_v_xyz = unnormalize(self._thrand((self.num_envs,3))*2-1,
+                                                            goal_obj_area_minmax_xyz[:,0],
+                                                            goal_obj_area_minmax_xyz[:,1])
             goal_obj_quat = ros_rpy_to_quaternion_xyzw_th(self._thrand((self.num_envs,3))*math.pi*2)
-            sampled_goal_obj_pose_v_xyzxyzw = th.cat([sampled_goal_obj_pose_v_xyzxyzw, goal_obj_quat], dim=1).view((self.num_envs,7))
+            sampled_goal_obj_pose_v_xyzxyzw = th.cat([sampled_goal_obj_pose_v_xyz, goal_obj_quat], dim=1).view((self.num_envs,7))
 
         sampled_initial_object_position = unnormalize(self._thrand((self.num_envs,3))*2-1,
-                                              self._grasping_conf.init_obj_area_minmax_xyz[0],
-                                              self._grasping_conf.init_obj_area_minmax_xyz[1])
+                                                      init_obj_area_minmax_xyz[:,0],
+                                                      init_obj_area_minmax_xyz[:,1])
         sampled_initial_object_yaw = self._thrand((self.num_envs,))*math.pi*2
         sampled_initial_obj_quat = ros_rpy_to_quaternion_xyzw_th(th.cat([self._thzeros((self.num_envs,2)),sampled_initial_object_yaw.unsqueeze(1)], dim=1))
         sampled_initial_obj_pose = th.cat([sampled_initial_object_position,
                                    sampled_initial_obj_quat], dim=1).view((self.num_envs,7))
         super()._set_current_ep_config(vec_mask=vec_mask, reset_options=reset_options)
+        masked_assign(self._grasping_episode_config.table_height, vec_mask, table_height)
         masked_assign(self._grasping_episode_config.initial_object_pose, vec_mask, sampled_initial_obj_pose)
         # masked_assign(self._grasping_episode_config.goal_object_pose, vec_mask, sampled_goal_obj_pose_v_xyzxyzw)
         self.set_max_episode_steps(reset_options.get("reset_options",self._current_episode_config.vec_max_ep_steps))
@@ -681,13 +770,6 @@ class GraspVecEnv(RobotVecEnv):
     @override
     def are_states_terminal(self, states) -> th.Tensor:
         return super().are_states_terminal(states)
-
-    def _set_goal_marker_pose(self, vec_mask : th.Tensor):
-        if isinstance(self._adapter, BaseVecSimulationAdapter):
-            self._adapter.setLinksStateDirect(  link_names=[self._goal_marker_base_link],
-                                                link_states_pose_vel=th.cat([self._grasping_episode_config.goal_object_pose,
-                                                                             self._thzeros((self.num_envs,6,))], dim = 1).unsqueeze(1),
-                                                vec_mask=vec_mask)
 
     def _set_gripper_marker_pose(self, vec_mask : th.Tensor):
         if isinstance(self._adapter, BaseVecSimulationAdapter) and self._grasping_conf.show_gripper_marker:
@@ -714,6 +796,15 @@ class GraspVecEnv(RobotVecEnv):
     def _simulation_initialization(self, vec_mask : th.Tensor):
         super()._simulation_initialization(vec_mask = vec_mask)
         if isinstance(self._adapter, BaseVecSimulationAdapter):
+            table_state = self._thzeros((self.num_envs,1,13))
+            table_state[:,0,0] = 0.8
+            table_state[:,0,1] = 0.0
+            table_state[:,0,2] = self._grasping_episode_config.table_height-0.5
+            table_state[:,0,6] = 1.0
+            self._adapter.setLinksStateDirect(link_names=[self._grasping_conf.table_link],
+                                              link_states_pose_vel=table_state,
+                                              vec_mask=vec_mask)
+            
             obj_state = self._thzeros((self.num_envs,1,13))
             obj_state[:,0,:7] = self._grasping_episode_config.initial_object_pose[:]
             self._adapter.setLinksStateDirect(link_names=[self._grasping_conf.grasping_init_args.target_object_link],
@@ -813,7 +904,7 @@ class GraspVecEnv(RobotVecEnv):
                                                     "blue" :  0.5,
                                                     "add_floating_joint" : False,
                                                     "add_fixed_joint" : True,
-                                                    "fixed_joint_xyz" : f"0.8 0.0 {self._table_height-0.5}",
+                                                    "fixed_joint_xyz" : f"0.0 0.0 0.0",
                                                     "fixed_joint_rpy" : "0 0 0"},)
         spawn_defs.append(self._table_spawn_def)
         if adarl.utils.utils.isinstance_noimport(self._adapter, ("MjxAdapter", "MujocoAdapter")):

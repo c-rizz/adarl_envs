@@ -1638,8 +1638,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                vec_mask=reinit_vecs)
             record_time(f"RobotVecEnv._simulation_initialization: setted joint states")
             if self._model_randomization_enabled and not (self._tot_init_counter > 1 and self._configuration.init_args.randomization_recycle_model_alterations):
-                mjx_adapter = self._adapter # type: ignore
-                mjx_adapter.alter_model(link_masses =
+                self._adapter.alter_model(link_masses =
                                             (self._randomized_mass_link_ids, self._current_episode_config.link_masses_ratios) if len(self._randomized_mass_link_ids) > 0 else None,
                                         link_frictions =
                                             (self._randomized_friction_links_ids, self._current_episode_config.link_frictions_ratios) if len(self._randomized_friction_links_ids) > 0 else None,

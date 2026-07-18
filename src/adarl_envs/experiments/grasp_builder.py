@@ -242,6 +242,7 @@ def runner_builder(seed,
                                                 reward_pitchnroll_weight = env_builder_args.pop("reward_pitchnroll_weight"),
                                                 reward_velocity_tracking_weight = env_builder_args.pop("reward_velocity_tracking_weight"),
                                                 reward_yaw_vel_track_weight = env_builder_args.pop("reward_yaw_vel_track_weight"),
+                                                reward_feet_linvel_weight = env_builder_args.pop("reward_feet_linvel_weight"),
                                                 reward_scale=1000/max_steps,
                                                 neutral_body_height=env_builder_args.pop("neutral_body_height"),
                                                 target_object_link=env_builder_args.pop("target_object_link"),
@@ -250,7 +251,9 @@ def runner_builder(seed,
                                                 manipulator_all_links=env_builder_args.pop("manipulator_links"),
                                                 gripper_link_transforms=env_builder_args.pop("gripper_link_transforms"),
                                                 table_height=env_builder_args.pop("table_height"),
-                                                feet_contact_links=env_builder_args.pop("feet_contact_links")))
+                                                feet_contact_links=env_builder_args.pop("feet_contact_links"),
+                                                feet_bottom_links=env_builder_args.pop("feet_bottom_links"),
+                                                max_reach_height=env_builder_args.pop("max_reach_height")))
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
                         ui_render_envs=[0], autoreset=autoreset,
                         log_freq = max_steps)
@@ -681,6 +684,7 @@ def get_kyon_args(robot_options : dict = {}):
             "homing_body_pose_xyz_xyzw" : (-0.20, 0., 0.45, 0., 0.02, 0., 1.),
             "default_max_joint_impedance_ctrl_torque" : 150.0,
             "max_joint_impedance_ctrl_torques" : {},
+            "max_reach_height" : 0.8,
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : controlled_joints,
@@ -707,6 +711,7 @@ def get_kyon_args(robot_options : dict = {}):
             "manipulator_links" : [(rname, f"dagana_{ctrl_arm_id}_base"), (rname, f"dagana_{ctrl_arm_id}_claw")],
             "gripper_links" : [(rname, f"dagana_{ctrl_arm_id}_base"), (rname, f"dagana_{ctrl_arm_id}_claw")],
             "feet_contact_links" : feet_links,
+            "feet_bottom_links" : feet_links,
             "ctrl_joints_stiffness" : 500.0,
             "ctrl_joints_damping" : 20.0,
             "mjx_opt_preset" : "faster",
@@ -717,7 +722,7 @@ def get_kyon_args(robot_options : dict = {}):
                                          (-0.107, 0.0,    -0.0362125, 0.0, 0.0, 0.0, 1.0)],
             "held_joints_damping" :   {"default": 500.0},
             "held_joints_stiffness" : {"default": 500.0},
-            "table_height" : 0.45
+            "table_height" : ("uniform", (0.0, 0.5))
         }
 
 robot_args_registry["kyon"]       = get_kyon_args

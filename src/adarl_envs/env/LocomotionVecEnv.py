@@ -1870,7 +1870,7 @@ class LocomotionVecEnv(RobotVecEnv):
 
     def _set_arrow_pose(self, vec_mask : th.Tensor):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
-            bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
+            bstates_vec_13 = self._adapter.getLinksState(requestedLinks = self._main_body_mon_link_ids, use_com_pose = False)[:,0,:]
             goal_abs_vel_vec_xys = self._locomotion_episode_config.goal_abs_vel_vec_xys
             goal_rel_vel_vec_xys = self._locomotion_episode_config.goal_rel_vel_vec_xys
             if goal_abs_vel_vec_xys is None:

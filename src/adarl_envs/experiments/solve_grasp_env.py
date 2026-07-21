@@ -11,7 +11,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import math
 
     mode = args["mode"].lower()
-    step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
+    step_length_sec = 40/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
@@ -134,6 +134,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # "mjx_geom_overrides" : {
         #     "cube" : {"friction" : [2.0,0.001,0.0005]}
         # },
+        "mjx_opt_preset" : "faster",
         "mjx_opt_override" : {"impratio" : 1.0,
                             #   "ccd_iterations" : 50
                               },

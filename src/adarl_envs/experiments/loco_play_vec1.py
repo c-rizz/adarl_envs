@@ -271,7 +271,7 @@ def adarl_builder_and_args():
         "step_min_good_ground_duration" : 0.1,
         "stepLength_sec" : step_length_sec,
         "terminate_on_body_contact" : False,
-        "terminate_on_crash" : True,
+        "terminate_on_crash" : False,
         "terminate_on_safety" : False,
         "th_device" : env_device,
         "ui_camera_resolution_hw" : [144,256],
@@ -563,7 +563,8 @@ def play(seed, folderName, run_id, args,
                         cmd_xy = (pad.lx, pad.ly)
                         # left stick -> linear velocity command (direction + speed)
                         speed = min(1.0, math.hypot(*cmd_xy)**2)*args["speed_scale"]
-                        cmd_angle = math.atan2(cmd_xy[1], cmd_xy[0])-90.0
+                        cmd_angle = math.atan2(cmd_xy[1], cmd_xy[0])-(90.0*math.pi/180)
+                        print(f"pad = {pad.lx, pad.ly}, speed = {speed}, cmd_angle = {cmd_angle}")
 
                         cmd_yawvel = -math.copysign(1,pad.rx)*pad.rx**2*args["speed_scale"]
                         cmd_height += pad.ry**2 * 0.005

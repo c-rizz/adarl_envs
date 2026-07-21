@@ -774,7 +774,7 @@ class GraspVecEnv(RobotVecEnv):
     def _set_gripper_marker_pose(self, vec_mask : th.Tensor):
         if isinstance(self._adapter, BaseVecSimulationAdapter) and self._grasping_conf.show_gripper_marker:
             gripper_pose_body = self._current_state[self.STATE_GRASPING][:,0,self.GRASPING_POSES.GRIPPER_POSE]
-            body_pose = self._adapter.getLinksState(self._main_body_link_ids, use_com_pose=False)[:,0,:7]
+            body_pose = self._adapter.getLinksState(self._main_body_mon_link_ids, use_com_pose=False)[:,0,:7]
             body_pos = body_pose[:, :3]
             body_quat = body_pose[:, 3:7]
             gripper_pos_world  = body_pos + th_quat_rotate(gripper_pose_body[:, :3], body_quat)

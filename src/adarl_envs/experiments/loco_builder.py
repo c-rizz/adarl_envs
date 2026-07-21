@@ -645,9 +645,39 @@ robot_args_registry["quad"] = get_quad_args
 
 def get_kyon_args(robot_options : dict = {}):
     enable_arms = robot_options.get("enable_arms", False)
-    hip_pitch = -0.8727 # = -50/180*3.14159
-    hip_roll =   0.0349 # = 2/180*3.14159
-    knee =      -1.5707 # = -90/180*3.14159
+    # hip_pitch = -0.8727 # = -50/180*3.14159
+    # hip_roll =   0.0349 # = 2/180*3.14159
+    # knee =      -1.5707 # = -90/180*3.14159
+    # # These are correct for stifness=500
+    # homing = {  ("kyon","hip_roll_3") :    0.0930,
+    #             ("kyon","hip_roll_4") :   -0.0930,
+    #             ("kyon","hip_roll_1") :   -0.1115,
+    #             ("kyon","hip_roll_2") :    0.1115,
+    #             ("kyon","hip_pitch_3") :  -0.8795,
+    #             ("kyon","hip_pitch_4") :   0.8795,
+    #             ("kyon","hip_pitch_1") :  -0.8840,
+    #             ("kyon","hip_pitch_2") :   0.8840,
+    #             ("kyon","knee_pitch_3") :  1.6330,
+    #             ("kyon","knee_pitch_4") : -1.6330,
+    #             ("kyon","knee_pitch_1") :  1.6495,
+    #             ("kyon","knee_pitch_2") : -1.6495}
+    
+    hip_pitch = -0.70 # = -50/180*3.14159
+    hip_roll =   0.02 # = 2/180*3.14159
+    knee =      -1.4 # = -90/180*3.14159
+    # These are correct for stifness=500
+    homing = {  ("kyon","hip_roll_3") :    0.0955,
+                ("kyon","hip_roll_4") :   -0.0953,
+                ("kyon","hip_roll_1") :   -0.0919,
+                ("kyon","hip_roll_2") :    0.0917,
+                ("kyon","hip_pitch_3") :  -0.6916,
+                ("kyon","hip_pitch_4") :   0.6917,
+                ("kyon","hip_pitch_1") :  -0.6918,
+                ("kyon","hip_pitch_2") :   0.6919,
+                ("kyon","knee_pitch_3") :  1.4750,
+                ("kyon","knee_pitch_4") : -1.4741,
+                ("kyon","knee_pitch_1") :  1.4715,
+                ("kyon","knee_pitch_2") : -1.4707}
     homing_ref = {  
                     ("kyon","hip_roll_1") :     -hip_roll,
                     ("kyon","hip_pitch_1") :     hip_pitch,
@@ -662,22 +692,9 @@ def get_kyon_args(robot_options : dict = {}):
                     ("kyon","hip_pitch_4") :    -hip_pitch,
                     ("kyon","knee_pitch_4") :    knee,
                     }
-    # These are correct for stifness=500
-    homing = {  ("kyon","hip_roll_3") :    0.0930,
-                ("kyon","hip_roll_4") :   -0.0930,
-                ("kyon","hip_roll_1") :   -0.1115,
-                ("kyon","hip_roll_2") :    0.1115,
-                ("kyon","hip_pitch_3") :  -0.8795,
-                ("kyon","hip_pitch_4") :   0.8795,
-                ("kyon","hip_pitch_1") :  -0.8840,
-                ("kyon","hip_pitch_2") :   0.8840,
-                ("kyon","knee_pitch_3") :  1.6330,
-                ("kyon","knee_pitch_4") : -1.6330,
-                ("kyon","knee_pitch_1") :  1.6495,
-                ("kyon","knee_pitch_2") : -1.6495}
     j_vel_phys_lim = 7.6
     j_eff_phys_lim = 185
-    j_pos_ctrl_range = 0.3
+    j_pos_ctrl_range = 0.5
     j_vel_ctrl_lim = j_vel_phys_lim*0.9
     j_eff_ctrl_lim = j_eff_phys_lim*0.9
 
@@ -722,7 +739,7 @@ def get_kyon_args(robot_options : dict = {}):
             "robot_name" : "kyon",
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
-            "homing_body_pose_xyz_xyzw" : (0.,0.,0.45,0.,0.,0.,1.),
+            "homing_body_pose_xyz_xyzw" : (0.,0.,0.493,0.,0.,0.,1.),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],

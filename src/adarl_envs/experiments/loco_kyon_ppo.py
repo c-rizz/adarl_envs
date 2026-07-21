@@ -27,7 +27,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         env_device = th.device("cuda",0)
     degree2rad = math.pi/180
-    eval_freq = 20
+    eval_freq = 10
     r = 1.0 # randomization strength
     n = 1.0 # noise strength
     p = 1.0 # penalties strength
@@ -38,13 +38,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "desired_foot_clearance" : 0.1,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
-        "enable_reference_filter" : False,
+        "enable_reference_filter" : True,
         "enable_rendering" : False,
         "extrinsics_only_privileged" : False,
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : {"kyon" : [0.47,0.47],
+        "goal_height_minmax" : {"kyon" : [0.493,0.493],
                                 "go1" : [0.30,0.30],
                                 "centauro" : [0.79,0.79],
                                 }.get(args["robot"].lower(), [0.5,0.5]),
@@ -59,7 +59,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "history_length_action_smoothed" : 1,
         "impulse_duration_minmax" : [0.01, 2.5],
         "impulse_mean_std" : [20.0,50.0],
-        "impulse_probability_per_sec" : 0.0,
+        "impulse_probability_per_sec" : 0.1,
         "init_on_reset_ratio" : 0.7,
         "just_health_reward" : False,
         "log_info_stats" : True,
@@ -142,7 +142,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_yaw_vel_tracking_weight" :          1.0,
         "robot_model" : args["robot"],
         "robot_options" : {
-            "enable_arms" : True
+            "enable_arms" : args["arms"]
         }, 
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : True if algo=="sac" else False,
@@ -466,6 +466,7 @@ if __name__ == "__main__":
     ap.add_argument("--algorithm", default="ppo", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
     ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
+    ap.add_argument("--arms", default=False, action='store_true', help="Enable arms")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

@@ -1767,7 +1767,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._monitored_joints = self._configuration.joints_all_env_controlled
         self._adapter.set_monitored_links([self._configuration.main_body_link])
         self._adapter.set_impedance_controlled_joints(self._configuration.joints_all_env_controlled)
-        self._main_body_link_ids = self._adapter.get_monitored_links_ids([self._configuration.main_body_link])
+        self._main_body_ids = self._adapter.get_links_ids([self._configuration.main_body_link])
+        self._main_body_mon_link_ids = self._adapter.get_monitored_links_ids([self._configuration.main_body_link])
         self._controlled_joints_ids = self._adapter.get_monitored_joints_ids(self._configuration.joints_agent_controlled)
         self._held_joints_ids = self._adapter.get_monitored_joints_ids(self._configuration.joints_env_held)
         self._all_controlled_joints_ids = self._adapter.get_monitored_joints_ids(self._configuration.joints_all_env_controlled)
@@ -1814,7 +1815,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"cam quat = {cam_rel_quat}")
         try:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
-                body_states13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
+                body_states13 = self._adapter.getLinksState(requestedLinks = self._main_body_mon_link_ids, use_com_pose = False)[:,0,:]
                 cam_link_state[:3] += body_states13[0,:3] #body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all links
                 cam_link_state = cam_link_state.expand(self._adapter.vec_size(),1,13)
                 # cam_link_state[:,:,:3] += body_states13[:,:,:3] # Camera is on a fixed link, so it must be set to the same pose across all sims
@@ -1846,7 +1847,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     @th.compiler.disable
     def _apply_impulses(self, forcevector: th.Tensor, torque: th.Tensor, duration: th.Tensor, delays: th.Tensor, apply_impulse: th.Tensor):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
-            self._adapter.set_link_impulses(self._main_body_link_ids,
+            self._adapter.set_link_impulses(self._main_body_ids,
                                             force_torque_xyzxyz=th.cat([forcevector, torque], dim = 1).view((self.num_envs,1,6)),
                                             durations=duration.view((self.num_envs,1)),
                                             delays=delays.view((self.num_envs,1)),
@@ -1855,7 +1856,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def pre_step(self):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             if self._impulse_disturbances_enabled:
-                impulse_prob_per_env_dt = 1-th.pow(1-self._configuration.impulse_probability_per_sec, self._intendedStepLength_sec)
+                impulse_prob_per_env_dt = 1-(1-self._configuration.init_args.impulse_probability_per_sec)**self._intendedStepLength_sec
                 apply_impulse = self._thrand((self.num_envs,1)) < impulse_prob_per_env_dt
                 # impulse = self._thrandn_truncnorm((self.num_envs,1),
                 #                                 mean = self._configuration.impulse_mean_std[0],
@@ -1927,7 +1928,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         mjx_adapter : MjxAdapter = self._adapter # type: ignore
         states = mjx_adapter.get_sim_elements_state(
                                             joint_ids=self._all_controlled_joints_ids,
-                                            link_ids=self._main_body_link_ids,
+                                            link_ids=self._main_body_mon_link_ids,
                                             )
         record_time("RobotVecEnv._get_adapter_data_raw_mjx: get_sim_elements_state done")
         vec_jstates_j_pveae =               states.joint_state_pveae[:,:len(self._configuration.joints_agent_controlled)]
@@ -1975,7 +1976,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"jstates_v_j_pve = {jstates_v_j_pve}")
         # th.cuda.synchronize()
         if isinstance(self._adapter, BaseVecSimulationAdapter):
-            vec_bodystates_13 = self._adapter.getLinksState(requestedLinks = self._main_body_link_ids, use_com_pose = False)[:,0,:]
+            vec_bodystates_13 = self._adapter.getLinksState(requestedLinks = self._main_body_mon_link_ids, use_com_pose = False)[:,0,:]
             record_time("RobotVecEnv._get_adapter_data_raw: getLinksState done")
             body_abs_quat_xyzw_vec  = vec_bodystates_13[:,3:7]
             vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
@@ -1988,7 +1989,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                                                            body_abs_angvel_xyz_vec = vec_body_abs_angvel_xyz,
                                                                                                                            body_abs_quat_xyzw_vec = body_abs_quat_xyzw_vec)
             vec_body_ground_dist = vec_bodystates_13[:,2]              
-            vec_body_rel_linacc_xyz = self._adapter.get_local_link_linear_acceleration(self._main_body_link_ids)[:,0,:]
+            vec_body_rel_linacc_xyz = self._adapter.get_local_link_linear_acceleration(self._main_body_mon_link_ids)[:,0,:]
             if self._configuration.init_args.enable_dbg_checks:
                 dbg_check(lambda: th.all(th.isfinite(vec_bodystates_13)),
                         lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(vec_bodystates_13)).nonzero()}: {vec_bodystates_13[th.logical_not(th.isfinite(vec_bodystates_13))]} : {vec_bodystates_13}",
@@ -1997,8 +1998,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         assert_msg="non finite values in body link state")                
         else:
             vec_bodystates_13 = None
-            vec_body_rel_gravity_dir = self._adapter.get_link_gravity_direction(self._main_body_link_ids)[:,0,:]
-            vec_body_rel_angvel_xyz = self._adapter.get_link_relative_angular_velocity(self._main_body_link_ids)[:,0,:]
+            vec_body_rel_gravity_dir = self._adapter.get_link_gravity_direction(self._main_body_mon_link_ids)[:,0,:]
+            vec_body_rel_angvel_xyz = self._adapter.get_link_relative_angular_velocity(self._main_body_mon_link_ids)[:,0,:]
             example_vec_3d_tens = vec_jstates_j_pveae[:,0,:3]
             vec_body_abs_linvel_xyz = th.zeros_like(example_vec_3d_tens)
             vec_body_abs_angvel_xyz = th.zeros_like(example_vec_3d_tens)

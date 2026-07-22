@@ -7,6 +7,7 @@ from adarl.adapters.BaseSimulationAdapter import ModelSpawnDef
 from adarl.envs.vec.ControlledVecEnv import ControlledVecEnv
 from adarl.envs.vec.BaseVecEnv import Observation
 from adarl.utils.robot_helpers import Robot
+from adarl.utils.robot_helpers import ModelDescription
 from adarl.utils.robot_helpers import find_poses
 from adarl.utils.utils import expand_default_dict
 from adarl.utils.vec_state_helper import    JointImpedanceActionHelper, ThBoxStateHelper,\
@@ -144,6 +145,18 @@ class RobotVecEnvInitArgs():
     saturate_jimp_posref_limits : bool = False
     single_reward_space : ThBox | None = None
     ui_camera_resolution_hw : tuple[int,int] = (144,256)
+    world : str | None = "flat_ground"
+    """Name of a predefined world in RobotVecEnv.PREDEFINED_WORLDS. "flat_ground" (the default)
+    means no explicit world model: the robot_model gets a flat collision box and the simulation
+    keeps its built-in ground plane. Ignored when world_description_string is provided."""
+    world_description_string : str | None = None
+    """Custom world description (urdf/mjcf text). Overrides `world` when provided."""
+    world_description_format : Literal["urdf", "mjcf"] | None = None
+    """Format of world_description_string. Required when world_description_string is provided."""
+    world_name : str = "world"
+    """Model name used for the world both in the robot_model and when spawned in the scenario."""
+    world_placement_xyz_xyzw : tuple[float,float,float,float,float,float,float] | None = None
+    """Optional pose of the world root (position + xyzw quaternion). None means identity/origin."""
 
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
@@ -271,6 +284,25 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     link_filters  = {LINK_FILTERS.ALL : lambda link_name, robot_model: True}
 
     @dataclass
+    class WorldDef:
+        """A predefined world, usable both in the pinocchio robot_model and spawned in simulation.
+
+        A description_string of None means "no explicit world model": the robot_model gets a flat
+        collision box and the simulation adapter keeps its built-in ground plane (legacy behavior).
+        Otherwise the world (urdf/mjcf) is merged into the robot_model for collision detection and
+        spawned into the scenario, and the adapter's built-in ground plane is disabled.
+        """
+        description_string : str | None = None
+        format : Literal["urdf", "mjcf"] = "mjcf"
+        placement_xyz_xyzw : tuple[float,float,float,float,float,float,float] | None = None
+
+    PREDEFINED_WORLDS : dict[str, "RobotVecEnv.WorldDef"] = {
+        "flat_ground" : WorldDef(description_string=None),
+        "pyramids" : WorldDef(description_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs"),"/models/world_pyramids.xml").read_text(),
+                              format="mjcf"),
+    }
+
+    @dataclass
     class EpisodeConfiguration:
         vec_initial_ctrl_joint_pose : th.Tensor
         vec_max_ep_steps : th.Tensor
@@ -311,8 +343,23 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._rng.manual_seed(init_args.seed)
         self._th_device = init_args.th_device
         self._obs_dtype = th.float32
+        world_string, world_format, world_placement = self._resolve_world(init_args)
+        self._use_simple_flat_ground = world_string is None
+        self._world_name = init_args.world_name
+        self._world_string = world_string
+        self._world_format = world_format
+        self._world_placement_xyz_xyzw = tuple(world_placement) if world_placement is not None else None
+        additional_models = None
+        if world_string is not None:
+            additional_models = [ModelDescription(description_string=world_string,
+                                                  format=world_format,
+                                                  placement_xyz_xyzw=(np.asarray(self._world_placement_xyz_xyzw, dtype=float)
+                                                                      if self._world_placement_xyz_xyzw is not None else None),
+                                                  attach_frame=None)]
+            ggLog.info(f"Including world '{init_args.world_name}' ({world_format}) in the robot model")
         self._robot_model = Robot(robot_description_string=init_args.robot_description_string,
-                                    robot_description_format=init_args.robot_description_format)
+                                    robot_description_format=init_args.robot_description_format,
+                                    additional_models=additional_models)
         ggLog.info(f"urdf: {init_args.robot_description_string}")
         ggLog.info(f"Robot has links: {self._robot_model.get_frame_names()}")
         ggLog.info(f"Robot has joints: {self._robot_model.get_joint_names()}")
@@ -579,6 +626,27 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         ggLog.info(f"Adapter started.")
         self.initialize_episodes()
         
+    def _resolve_world(self, init_args : RobotVecEnvInitArgs) -> tuple[str | None, Literal["urdf","mjcf"], tuple[float,...] | None]:
+        """Resolve the world selection to (description_string, format, placement_xyz_xyzw).
+
+        A returned description_string of None means "no explicit world model": the pinocchio model
+        gets a flat collision box and the simulation adapter keeps its built-in ground plane.
+        A custom world_description_string takes precedence over the predefined `world` name.
+        """
+        if init_args.world_description_string is not None:
+            if init_args.world_description_format not in ("urdf", "mjcf"):
+                raise ValueError(f"world_description_format must be 'urdf' or 'mjcf' when world_description_string "
+                                 f"is provided, got {init_args.world_description_format}")
+            return init_args.world_description_string, init_args.world_description_format, init_args.world_placement_xyz_xyzw
+        if init_args.world is None:
+            return None, "mjcf", None
+        if init_args.world not in self.PREDEFINED_WORLDS:
+            raise ValueError(f"Unknown world '{init_args.world}'. Known predefined worlds: {list(self.PREDEFINED_WORLDS.keys())}. "
+                             f"To use a custom world set world_description_string and world_description_format.")
+        wd = self.PREDEFINED_WORLDS[init_args.world]
+        placement = init_args.world_placement_xyz_xyzw if init_args.world_placement_xyz_xyzw is not None else wd.placement_xyz_xyzw
+        return wd.description_string, wd.format, placement
+
     def _build_joint_limits(self,   robot_name : str,
                                     controlled_joints : Sequence[str | JOINT_FILTERS],
                                     free_joints : Sequence[str],
@@ -1323,7 +1391,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                             pose=None,
                                             format="urdf.xacro",
                                             kwargs={"add_world_link":str(is_pybullet)})
-            self._spawn_defs = [robot_spawn_def,
+            self._spawn_defs = []
+            if not self._use_simple_flat_ground:
+                world_pose = (adarl.utils.utils.build_pose(*self._world_placement_xyz_xyzw)
+                              if self._world_placement_xyz_xyzw is not None else None)
+                self._spawn_defs.append(ModelSpawnDef(definition_string=self._world_string,
+                                                      name=self._world_name,
+                                                      pose=world_pose,
+                                                      format=self._world_format,
+                                                      kwargs={}))
+            self._spawn_defs += [robot_spawn_def,
                                     camera_spawn_def]
             if self._configuration.show_goal:
                 self._spawn_defs.append(arrow_spawn_def)
@@ -1668,7 +1745,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         envCtrlName = type(self._adapter).__name__
         if adarl.utils.utils.isinstance_noimport(self._adapter, "MjxAdapter"):
             self._adapter.build_scenario(models = self._get_spawn_defs(),
-                                         default_link_group_collisions = self._configuration.init_args.enable_link_collisions)
+                                         default_link_group_collisions = self._configuration.init_args.enable_link_collisions,
+                                         add_ground = self._use_simple_flat_ground)
             self._arrow_base = ("arrow","arrow_link")
             self._arrow_yellow = ("arrow_yellow","arrow_link")
         elif isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper):
@@ -1713,7 +1791,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             else:
                 raise NotImplementedError("Unexpected sub adapter "+self._adapter.sub_adapter())
         elif isinstance_noimport(self._adapter, "MujocoAdapter"):
-            self._adapter.build_scenario(models = self._get_spawn_defs())
+            self._adapter.build_scenario(models = self._get_spawn_defs(), add_ground = self._use_simple_flat_ground)
             self._arrow_base = ("arrow","arrow_link")
             self._arrow_yellow = ("arrow_yellow","arrow_link")
         elif isinstance_noimport(self._adapter, "GenesisAdapter"):
@@ -1724,7 +1802,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 if sd.name in ("arrow", "arrow_yellow", "axes"):
                     sd.kwargs["genesis_gravity_compensation"] = 1.0
             # the ui camera is parsed automatically by the adapter from the camera mjcf model
-            self._adapter.build_scenario(models = spawn_defs)
+            self._adapter.build_scenario(models = spawn_defs, add_ground = self._use_simple_flat_ground)
             self._arrow_base = ("arrow","arrow_link")
             self._arrow_yellow = ("arrow_yellow","arrow_link")
         else:
@@ -1748,9 +1826,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         else:
             self._pinocchio_corrected_homing_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy()
         self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
-        self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
-                                                                    collision_box_size_xyz=(100,100,1),
-                                                                    collision_obj_id="ground_collision")
+        if self._use_simple_flat_ground:
+            self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
+                                                                        collision_box_size_xyz=(100,100,1),
+                                                                        collision_obj_id="ground_collision")
+        else:
+            # The world geometry (merged into the robot model above) provides the environment/ground
+            # for collision detection, so we do not add the legacy flat collision box.
+            self._ground_co_id = None
         ggLog.info(f"Detecting always present self collisions...")
         if self._initial_pose_randomization_enabled:
             self._excluded_collision_pairs : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
@@ -2243,6 +2326,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # th.cuda.synchronize()
         # t0 = time.monotonic()
         instantaneous_state = self._get_new_instantaneous_state(adapter_data)
+        record_time("RobotVecEnv._update_state: get_new_instantaneous_state done")
         # th.cuda.synchronize()
         # t01 = time.monotonic()
         if not th.compiler.is_compiling():
@@ -2254,6 +2338,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(f"Got instantaneous state with sizes: {n.join([str(kv) for kv in sizes.items()])}")
         # t1 = time.monotonic()
         self._state_helper.update(instantaneous_state, state=self._current_state) # rolls down the history and adds current state
+        record_time("RobotVecEnv._update_state: state_helper.update done")
         # ss = {k:t.size() for k,t in self._current_state.items()}
         # ggLog.info(f"state sizes = {ss}")
         dbg_check(lambda: th.all(self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT] >= 0),

@@ -223,7 +223,11 @@ def loco_runner_builder(seed,
                                                                 ipc_pub_path ="/tmp/xbot2_zmq_pub.ipc",
                                                                 ipc_cmd_path ="/tmp/xbot2_zmq_cmd.ipc",
                                                                 ipc_service_path ="/tmp/xbot2_zmq_rep.ipc",
-                                                                robot_urdf=robot_description_string),
+                                                                robot_urdf=robot_description_string,
+                                                                tcp_service_port=env_builder_args.get("xbotzmq_tcp_service_port", 5557),
+                                                                tcp_cmd_port=env_builder_args.get("xbotzmq_tcp_cmd_port", 5558),
+                                                                tcp_state_port=env_builder_args.get("xbotzmq_tcp_state_port", 5559),
+                                                                ),
                                                 vec_size = 1,
                                                 th_device = th_device)
     # elif mode == "pybullet":
@@ -273,7 +277,7 @@ def loco_runner_builder(seed,
                                             geom_overrides=env_builder_args.get("mjx_geom_overrides", None),
                                             reference_filter_cutoff_frequency=20.0,
                                             reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none",
-                                            mjx_impl="jax")
+                                            mjx_impl="warp")
     elif mode == "mjx-act":
         from adarl.adapters.MjxActuatedAdapter import MjxActuatedAdapter
         import jax
@@ -648,7 +652,8 @@ def get_kyon_args(robot_options : dict = {}):
     # hip_pitch = -0.8727 # = -50/180*3.14159
     # hip_roll =   0.0349 # = 2/180*3.14159
     # knee =      -1.5707 # = -90/180*3.14159
-    # # These are correct for stifness=500
+    # height = 0.47
+    # # These are correct for stiffness=500
     # homing = {  ("kyon","hip_roll_3") :    0.0930,
     #             ("kyon","hip_roll_4") :   -0.0930,
     #             ("kyon","hip_roll_1") :   -0.1115,
@@ -665,7 +670,8 @@ def get_kyon_args(robot_options : dict = {}):
     hip_pitch = -0.70 # = -50/180*3.14159
     hip_roll =   0.02 # = 2/180*3.14159
     knee =      -1.4 # = -90/180*3.14159
-    # These are correct for stifness=500
+    height = 0.493
+    # These are correct for stiffness=500
     homing = {  ("kyon","hip_roll_3") :    0.0955,
                 ("kyon","hip_roll_4") :   -0.0953,
                 ("kyon","hip_roll_1") :   -0.0919,
@@ -678,6 +684,26 @@ def get_kyon_args(robot_options : dict = {}):
                 ("kyon","knee_pitch_4") : -1.4741,
                 ("kyon","knee_pitch_1") :  1.4715,
                 ("kyon","knee_pitch_2") : -1.4707}
+    
+    # hip_pitch = -0.91 # = -50/180*3.14159
+    # hip_roll =  -0.10 # = 2/180*3.14159
+    # knee =      -1.62 # = -90/180*3.14159
+    # height = 0.47
+    # # These are correct for stiffness=500
+    # homing = {  ("kyon","hip_roll_3") :   -0.054,
+    #             ("kyon","hip_roll_4") :    0.054,
+    #             ("kyon","hip_roll_1") :    0.0360,
+    #             ("kyon","hip_roll_2") :   -0.0360,
+    #             ("kyon","hip_pitch_3") :  -0.918,
+    #             ("kyon","hip_pitch_4") :   0.917,
+    #             ("kyon","hip_pitch_1") :  -0.923,
+    #             ("kyon","hip_pitch_2") :   0.923,
+    #             ("kyon","knee_pitch_3") :  1.683,
+    #             ("kyon","knee_pitch_4") : -1.682,
+    #             ("kyon","knee_pitch_1") :  1.701,
+    #             ("kyon","knee_pitch_2") : -1.700}
+    
+
     homing_ref = {  
                     ("kyon","hip_roll_1") :     -hip_roll,
                     ("kyon","hip_pitch_1") :     hip_pitch,
@@ -739,7 +765,7 @@ def get_kyon_args(robot_options : dict = {}):
             "robot_name" : "kyon",
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
-            "homing_body_pose_xyz_xyzw" : (0.,0.,0.493,0.,0.,0.,1.),
+            "homing_body_pose_xyz_xyzw" : (0.,0.,height,0.,0.,0.,1.),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],

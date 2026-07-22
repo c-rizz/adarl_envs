@@ -42,12 +42,14 @@ def get_home_action(env, robot : str, device):
         stiffness = 400
         damping = 10
         home_pvesd = {k:[v, 0.0, 0.0, stiffness, damping] for k,v in home_jpose.items()}
-        home_action = base_env._action_helper.pvesd_to_action(home_pvesd)
+        # pvesd_to_action returns (vec_size, action_dim); take the single env's action so the
+        # shape matches the sim branch (action_dim,) and get_act_range().
+        home_action = base_env._action_helper.pvesd_to_action(home_pvesd)[0]
         action_len = base_env._action_helper.single_action_len()
     else:
         action_len = 12
         home_action = th.zeros((action_len,), device=device)
-    return home_action
+    return home_action, action_len
 
 
 def get_act_range(robot : str, device):
@@ -82,11 +84,11 @@ def get_act_range(robot : str, device):
     return act_range
 
 def build_fixed_policy(env, robot : str, scale : float = 0.0, device : th.device = th.device("cpu")):
-    return FixedPolicy(  cmd = get_home_action(env, robot, device))
+    home_action, _ = get_home_action(env, robot, device)
+    return FixedPolicy(  cmd = home_action)
 
 def build_sin_policy(env, robot : str, scale : float = 0.0, device = th.device("cpu")):
-    home_action = get_home_action(env, robot, device)
-    action_len = len(home_action)
+    home_action, action_len = get_home_action(env, robot, device)
     speed = 0.8 if robot!="go1" else 0.5
     act_range = get_act_range(robot, device)
     return SinPolicy(  act_scale=act_range*scale,
@@ -125,7 +127,7 @@ robot_heights = {   "kyon" : [0.47,0.47],
 
 
 
-def adarl_builder_and_args():
+def adarl_builder_and_args(args):
     step_length_sec = 20/1024
     max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
     mode = args["mode"]
@@ -317,12 +319,15 @@ def adarl_builder_and_args():
         "goal_resampling_probability_per_sec" : 0.0,
         "walltime_factor" : args["rt_factor"],
         "record_whole_joint_trajectories" : False,
-        "xbotzmq_remote_ip" : args["xbotzmq_remote_ip"]
+        "xbotzmq_remote_ip" : args["xbotzmq_remote_ip"],
+        "xbotzmq_tcp_service_port" : args["xbotzmq_tcp_service_port"],
+        "xbotzmq_tcp_cmd_port" : args["xbotzmq_tcp_cmd_port"],
+        "xbotzmq_tcp_state_port" : args["xbotzmq_tcp_state_port"]
         # "mjx_opt_override" : {"noslip_iterations": 10, "impratio": 10.0, "iterations" : 20}
         })
     return named_loco_single_env_builder, env_builder_args, step_length_sec
 
-def pg_builder_and_args():
+def pg_builder_and_args(args):
     from adarl_envs.experiments.playground_builder import playground_single_env_builder
 
     step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
@@ -360,9 +365,9 @@ def pg_builder_and_args():
 def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     if args["pg"]:
-        builder, env_builder_args, step_length_sec = pg_builder_and_args()
+        builder, env_builder_args, step_length_sec = pg_builder_and_args(args)
     else:
-        builder, env_builder_args, step_length_sec = adarl_builder_and_args()
+        builder, env_builder_args, step_length_sec = adarl_builder_and_args(args)
 
     return play(seed,
                 folderName,
@@ -685,7 +690,10 @@ if __name__ == "__main__":
     ap.add_argument("--pg", default=False, action='store_true', help="Use playground env")
     ap.add_argument("--verbose-recording", default=False, action='store_true', help="Print detailed infos about the env step timings and outputs")
     ap.add_argument("--agent-device", default="cpu", type=str, help="Device to load the model on (cpu or cuda)")
-    ap.add_argument("--xbotzmq-remote-ip", default="127.0.0.1", type=str, help="If in xbot-zmq mode, the ip to connect to for receiving observations and sending actions")
+    ap.add_argument("-zmqip",  "--xbotzmq-remote-ip", default="127.0.0.1", type=str, help="If in xbot-zmq mode, the ip to connect to for receiving observations and sending actions")
+    ap.add_argument("-zmqsrv", "--xbotzmq-tcp-service-port", default=5557, type=int, help="If in xbot-zmq mode, the TCP service port to connect to")
+    ap.add_argument("-zmqcmd", "--xbotzmq-tcp-cmd-port", default=5558, type=int, help="If in xbot-zmq mode, the TCP command port (for sending actions)")
+    ap.add_argument("-zmqsta", "--xbotzmq-tcp-state-port", default=5559, type=int, help="If in xbot-zmq mode, the TCP state port (for receiving observations)")
     ap.add_argument("--gamepad-addr", default="tcp://localhost:5666", type=str, help="joyzmq gamepad publisher address to connect to for interactive teleop")
     ap.add_argument("--speed-scale", default=0.5, type=float, help="Scale the linvel speed command by this factor")
 

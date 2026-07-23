@@ -647,7 +647,7 @@ def get_kyon_args(robot_options : dict = {}):
     hip_pitch = -0.70 # = -50/180*3.14159
     hip_roll =   0.02 # = 2/180*3.14159
     knee =      -1.4 # = -90/180*3.14159
-    height = 0.47
+    height = 0.493
     # These are correct for stiffness=500
     homing = {  ("kyon","hip_roll_3") :    0.0955,
                 ("kyon","hip_roll_4") :   -0.0953,

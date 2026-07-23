@@ -169,32 +169,6 @@ def loco_runner_builder(seed,
         raise NotImplementedError()
     elif mode == "gazebo":
         raise NotImplementedError()
-    # elif mode == "xbot":
-    #     from adarl_ros.adapters.RosXbotAdapter import RosXbotAdapter
-    #     from adarl_ros.adapters.VecRosXBotAdapterWrapper import VecRosXBotAdapterWrapper
-    #     forced_ros_master_uri="http://127.0.0.1:11311"
-    #     ground_link = ("ground_plane","ground_link")
-    #     adapter = VecRosXBotAdapterWrapper(   adapter = RosXbotAdapter( model_name = robot_name,
-    #                                                                     stepLength_sec = stepLength_sec,
-    #                                                                     forced_ros_master_uri = forced_ros_master_uri,
-    #                                                                     maxObsDelay = float("+inf"),
-    #                                                                     blocking_observation = False,
-    #                                                                     is_floating_base = True,
-    #                                                                     reference_frame = "world",
-    #                                                                     torch_device = th.device("cpu"),
-    #                                                                     fallback_cmd_stiffness = 200.0,
-    #                                                                     fallback_cmd_damping = 10.0,
-    #                                                                     allow_fallback = False,
-    #                                                                     jpos_cmd_max_vel = {},
-    #                                                                     jpos_cmd_max_vel_default = 5.0,
-    #                                                                     jpos_cmd_max_acc = {},
-    #                                                                     jpos_cmd_max_acc_default = 5.0,
-    #                                                                     enable_filters=True,
-    #                                                                     position_commands_stiffness = 400.0,
-    #                                                                     position_commands_damping = 10.0,
-    #                                                                     walltime_factor=walltime_factor),
-    #                                             vec_size = 1,
-    #                                             th_device = th_device)
     elif mode == "xbot-zmq":
         from adarl.adapters.VecZmqXbotAdapter import VecZmqXbotAdapter
         from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter
@@ -445,7 +419,10 @@ def loco_runner_builder(seed,
                                     observe_actor_safety_state=env_builder_args.pop("observe_actor_safety_state"),
                                     posref_err_history_length=env_builder_args.pop("posref_err_history_length"),
                                     observe_linvel_nonprivileged=env_builder_args.pop("observe_linvel_nonprivileged",False),
-                                    randomization_recycle_model_alterations=env_builder_args.pop("randomization_recycle_model_alterations",False)),
+                                    randomization_recycle_model_alterations=env_builder_args.pop("randomization_recycle_model_alterations",False),
+                                    world_description_format=env_builder_args.pop("world_description_format","predefined"),
+                                    world_description_string=env_builder_args.pop("world_description_string","flat_ground"),
+                                    ),
                                 desired_foot_clearance = env_builder_args.pop("desired_foot_clearance"),
                                 disallowed_contact_links = env_builder_args.pop("disallowed_contact_links"),
                                 feet_contact_links=env_builder_args.pop("feet_contact_links"),
@@ -670,7 +647,7 @@ def get_kyon_args(robot_options : dict = {}):
     hip_pitch = -0.70 # = -50/180*3.14159
     hip_roll =   0.02 # = 2/180*3.14159
     knee =      -1.4 # = -90/180*3.14159
-    height = 0.493
+    height = 0.47
     # These are correct for stiffness=500
     homing = {  ("kyon","hip_roll_3") :    0.0955,
                 ("kyon","hip_roll_4") :   -0.0953,

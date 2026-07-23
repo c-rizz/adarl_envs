@@ -145,18 +145,23 @@ class RobotVecEnvInitArgs():
     saturate_jimp_posref_limits : bool = False
     single_reward_space : ThBox | None = None
     ui_camera_resolution_hw : tuple[int,int] = (144,256)
-    world : str | None = "flat_ground"
-    """Name of a predefined world in RobotVecEnv.PREDEFINED_WORLDS. "flat_ground" (the default)
-    means no explicit world model: the robot_model gets a flat collision box and the simulation
-    keeps its built-in ground plane. Ignored when world_description_string is provided."""
     world_description_string : str | None = None
-    """Custom world description (urdf/mjcf text). Overrides `world` when provided."""
-    world_description_format : Literal["urdf", "mjcf"] | None = None
+    """Custom world description (urdf/mjcf text or predefined world name)."""
+    world_description_format : Literal["urdf", "mjcf", "predefined"] | None = None
     """Format of world_description_string. Required when world_description_string is provided."""
     world_name : str = "world"
     """Model name used for the world both in the robot_model and when spawned in the scenario."""
     world_placement_xyz_xyzw : tuple[float,float,float,float,float,float,float] | None = None
     """Optional pose of the world root (position + xyzw quaternion). None means identity/origin."""
+    homing_body_position_minmax_xyz : tuple[tuple[float,float,float],tuple[float,float,float]] | None = None
+    """If set (floating-base only), the homing body position is sampled per-env uniformly in
+    [min_xyz, max_xyz]. x and y are world-absolute; z is added to the local ground height at the
+    sampled (x, y) (see world_ground_baseline_z), i.e. z is a clearance above the ground. Orientation
+    is taken from homing_body_pose_xyz_xyzw. When None, the fixed homing_body_pose_xyz_xyzw is used
+    for all envs (legacy behavior)."""
+    world_ground_baseline_z : float = 0.0
+    """Ground height used where no world collision geometry covers the sampled (x, y) (e.g. flat floor
+    areas, since pinocchio drops infinite ground planes). Defaults to 0.0."""
 
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
@@ -298,7 +303,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     PREDEFINED_WORLDS : dict[str, "RobotVecEnv.WorldDef"] = {
         "flat_ground" : WorldDef(description_string=None),
-        "pyramids" : WorldDef(description_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs"),"/models/world_pyramids.xml").read_text(),
+        "pyramids" : WorldDef(description_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","/models/world_pyramids.xml")).read_text(),
                               format="mjcf"),
     }
 
@@ -320,6 +325,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         joint_dampings_ratios : th.Tensor
         joint_frictionlosses_ratios : th.Tensor
         joint_reference_filter_freqs : th.Tensor
+        vec_body_pose_xyzxyzw : th.Tensor
+        """Per-env homing body pose (position + xyzw quaternion), shape (envs_num, 7)."""
 
     @dataclass
     class PrecomputedSimInitData:
@@ -361,6 +368,15 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     robot_description_format=init_args.robot_description_format,
                                     additional_models=additional_models)
         ggLog.info(f"urdf: {init_args.robot_description_string}")
+
+        # World-frame AABBs of the world collision geoms, used to look up the ground height at an (x,y).
+        world_box_mins_np, world_box_maxs_np = self._robot_model.get_additional_geom_world_aabbs()
+        self._world_box_mins = th.as_tensor(world_box_mins_np, dtype=th.float32, device=self._th_device)
+        self._world_box_maxs = th.as_tensor(world_box_maxs_np, dtype=th.float32, device=self._th_device)
+        self._world_ground_baseline_z = float(init_args.world_ground_baseline_z)
+        self._homing_body_randomization_enabled = init_args.homing_body_position_minmax_xyz is not None
+        if self._homing_body_randomization_enabled:
+            self._homing_body_pos_minmax = th.as_tensor(init_args.homing_body_position_minmax_xyz, dtype=th.float32, device=self._th_device) # (2,3): [min_xyz, max_xyz]
         ggLog.info(f"Robot has links: {self._robot_model.get_frame_names()}")
         ggLog.info(f"Robot has joints: {self._robot_model.get_joint_names()}")
         root_joint_name = self._robot_model.get_parent_joint(init_args.robot_root_link)
@@ -590,7 +606,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     joint_armatures_ratios = self._thones((init_args.adapter.vec_size(), len(self._configuration.randomized_dof_armature_joints))),
                                                     joint_dampings_ratios = self._thones((init_args.adapter.vec_size(), len(self._configuration.randomized_dof_damping_joints))),
                                                     joint_frictionlosses_ratios = self._thones((init_args.adapter.vec_size(), len(self._configuration.randomized_dof_frictionloss_joints))),
-                                                    joint_reference_filter_freqs = self._thzeros((init_args.adapter.vec_size(),))
+                                                    joint_reference_filter_freqs = self._thzeros((init_args.adapter.vec_size(),)),
+                                                    vec_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.unsqueeze(0).expand(init_args.adapter.vec_size(), 7).clone()
                                                     )
 
         # preallocate some things
@@ -633,19 +650,23 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         gets a flat collision box and the simulation adapter keeps its built-in ground plane.
         A custom world_description_string takes precedence over the predefined `world` name.
         """
-        if init_args.world_description_string is not None:
+        if init_args.world_description_format == "predefined":
+            world_def = init_args.world_description_string
+            if world_def is None:
+                return None, "mjcf", None
+            if world_def not in self.PREDEFINED_WORLDS:
+                raise ValueError(f"Unknown world '{world_def}'. Known predefined worlds: {list(self.PREDEFINED_WORLDS.keys())}. "
+                                f"To use a custom world set world_description_string and world_description_format.")
+            wd = self.PREDEFINED_WORLDS[world_def]
+            placement = init_args.world_placement_xyz_xyzw if init_args.world_placement_xyz_xyzw is not None else wd.placement_xyz_xyzw
+            return wd.description_string, wd.format, placement
+        else:
+            if init_args.world_description_string is None:
+                raise ValueError("world_description_string must be provided when world_description_format is not 'predefined'")
             if init_args.world_description_format not in ("urdf", "mjcf"):
                 raise ValueError(f"world_description_format must be 'urdf' or 'mjcf' when world_description_string "
-                                 f"is provided, got {init_args.world_description_format}")
+                                f"is provided, got {init_args.world_description_format}")
             return init_args.world_description_string, init_args.world_description_format, init_args.world_placement_xyz_xyzw
-        if init_args.world is None:
-            return None, "mjcf", None
-        if init_args.world not in self.PREDEFINED_WORLDS:
-            raise ValueError(f"Unknown world '{init_args.world}'. Known predefined worlds: {list(self.PREDEFINED_WORLDS.keys())}. "
-                             f"To use a custom world set world_description_string and world_description_format.")
-        wd = self.PREDEFINED_WORLDS[init_args.world]
-        placement = init_args.world_placement_xyz_xyzw if init_args.world_placement_xyz_xyzw is not None else wd.placement_xyz_xyzw
-        return wd.description_string, wd.format, placement
 
     def _build_joint_limits(self,   robot_name : str,
                                     controlled_joints : Sequence[str | JOINT_FILTERS],
@@ -1462,6 +1483,25 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
 
+    def _ground_z_at_xy(self, xy : th.Tensor) -> th.Tensor:
+        """Ground height at world (x, y) positions, from the world collision geometry.
+
+        xy: (E, 2). Returns (E,). For each point the height is the max top-z over world box geoms whose
+        xy footprint contains the point, falling back to world_ground_baseline_z where none do (flat
+        areas, since pinocchio drops infinite ground planes).
+        """
+        E = xy.shape[0]
+        baseline = th.full((E,), self._world_ground_baseline_z, dtype=xy.dtype, device=xy.device)
+        if self._world_box_mins.shape[0] == 0:
+            return baseline
+        x = xy[:,0:1]; y = xy[:,1:2] # (E,1)
+        inside = (x >= self._world_box_mins[:,0]) & (x <= self._world_box_maxs[:,0]) & \
+                 (y >= self._world_box_mins[:,1]) & (y <= self._world_box_maxs[:,1]) # (E,M)
+        tops = self._world_box_maxs[:,2].unsqueeze(0).expand(E,-1) # (E,M)
+        masked_tops = th.where(inside, tops, th.full_like(tops, float("-inf")))
+        box_ground = masked_tops.max(dim=1).values # (E,), -inf where no box covers the point
+        return th.maximum(baseline, th.where(th.isfinite(box_ground), box_ground, baseline))
+
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
         if self._configuration.init_args.offset_envs_ep_starts and self._init_counter_since_reset == 1 and self._vstep_counter_since_reset == 0:
             # randomize max episode steps for the first episode to decorrelate initial randomizations from episode length, which can be important for some learning algorithms, e.g. RNN training with truncated backpropagation through time, to learn better from the initial randomizations
@@ -1524,6 +1564,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         masked_assign(self._current_episode_config.vec_initial_ctrl_joint_pose, vec_mask, initial_ctrl_jposes)
         masked_assign(self._current_episode_config.vec_init_on_reset,           vec_mask, vec_init_on_reset)
         masked_assign(self._current_episode_config.vec_max_ep_steps,            vec_mask, maxStepsPerEpisode)
+
+        if self._homing_body_randomization_enabled and self._configuration.robot_is_floating:
+            pmin = self._homing_body_pos_minmax[0] # (3,)
+            pmax = self._homing_body_pos_minmax[1] # (3,)
+            xyz = pmin + (pmax - pmin) * self._thrand((self.num_envs, 3)) # x,y world-absolute; z is a ground-relative clearance
+            xyz[:,2] = xyz[:,2] + self._ground_z_at_xy(xyz[:,:2])
+            quat = self._configuration.homing_body_pose_xyz_xyzw[3:7].to(dtype=xyz.dtype).unsqueeze(0).expand(self.num_envs, 4)
+            vec_body_pose = th.cat([xyz, quat], dim=1) # (E,7)
+            masked_assign(self._current_episode_config.vec_body_pose_xyzxyzw, vec_mask, vec_body_pose)
+
         ctrl_joints_num = len(self._configuration.joints_agent_controlled)
         
         damping_ratios =    self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.init_args.randomized_gains_damping_ratio_epstd+1
@@ -1672,9 +1722,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 SetLinksStateDirectCommand(
                         link_names=[self._configuration.main_body_link],
                         link_states_pose_vel=th.cat([
-                            self._configuration.homing_body_pose_xyz_xyzw,
-                            th.zeros((6,), device=self._configuration.init_args.th_device, dtype=th.float32),
-                        ]).expand(self._adapter.vec_size(), 1, 13),
+                            self._current_episode_config.vec_body_pose_xyzxyzw,
+                            th.zeros((self._adapter.vec_size(),6), device=self._configuration.init_args.th_device, dtype=th.float32),
+                        ], dim=1).view(self._adapter.vec_size(), 1, 13),
                         vec_mask=reinit_vecs,
                     ) if do_main_link_homing else None,
                 SetCurrentJointImpedanceCommand(

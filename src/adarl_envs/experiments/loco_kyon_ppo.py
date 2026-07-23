@@ -160,6 +160,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "verbose_infos" : False,
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
+        "world_description_format" : "predefined",
+        "world_description_string" : "pyramids"
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({        

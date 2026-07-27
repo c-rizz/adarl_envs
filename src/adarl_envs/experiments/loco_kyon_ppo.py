@@ -26,6 +26,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         env_device = th.device("cpu",0)
     else:
         env_device = th.device("cuda",0)
+
+
+    world = "flat_ground"
+    if world == "pyramids":
+        terminal_gravity_angle = 60 * math.pi / 180.0
+    else:
+        terminal_gravity_angle = 30 * math.pi / 180.0
+
     degree2rad = math.pi/180
     eval_freq = 10
     r = 1.0 # randomization strength
@@ -87,8 +95,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "posref_err_history_length" : 5,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomization_initial_height_range_meters" : 0.1,
         "randomization_initial_joint_pose_range" : 0.1,
+        "homing_body_position_minmax_xyz" : ((-6, -18, 0.45), (102, 18, 0.55)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
         "randomization_recycle_init_pose" : True,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_dof_armature_ratios" :       ("uniform", [0.9*r,1.1*r]),
@@ -161,7 +169,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
         "world_description_format" : "predefined",
-        "world_description_string" : "pyramids"
+        "world_description_string" : world,
+        "terminal_gravity_angle" : terminal_gravity_angle
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({        

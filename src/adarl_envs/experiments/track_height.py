@@ -49,7 +49,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_mean_std" : [10.0,50.0],
         "impulse_probability_per_sec" : 0.1,
         "init_on_reset_ratio" : 0.2,
-        "randomization_initial_height_range_meters" : 0.15,
         "randomization_initial_joint_pose_range" : 0.8,
         "initial_pose_randomization_range" : 0.0,
         "just_health_reward" : False,

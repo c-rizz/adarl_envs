@@ -204,7 +204,6 @@ def grasp_builder_and_args():
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 0.7,
-        "randomization_initial_height_range_meters" : 0.1,
         "randomization_initial_joint_pose_range" : 0.9,
         "just_health_reward" : False,
         "log_info_stats" : True,
@@ -282,7 +281,7 @@ def grasp_builder_and_args():
         "noise_abs_obs_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
         "randomization_initial_joint_pose_range" : 0.0,
-        "randomization_initial_height_range_meters" : 0.0,
+        "homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
         "randomized_dof_frictionloss_ratios"         : 0.0*r,

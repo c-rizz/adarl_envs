@@ -235,7 +235,9 @@ class GraspVecEnv(RobotVecEnv):
         # when spawned) rest on the floor instead of passing through it.
         for foot in grasp_init_args.feet_contact_links:
             robot_init_args.enable_link_collisions.append((foot, [robot_init_args.ground_link]))
-        robot_init_args.randomization_initial_height_range_meters=0.0
+        # Keep the base at its homing spot (zero-width spawn box = no body-position randomization)
+        _homing_xyz = tuple(robot_init_args.homing_body_pose_xyz_xyzw[:3])
+        robot_init_args.homing_body_position_minmax_xyz=(_homing_xyz, _homing_xyz)
         robot_init_args.noise_abs_obs_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
         super().__init__(robot_init_args)
 

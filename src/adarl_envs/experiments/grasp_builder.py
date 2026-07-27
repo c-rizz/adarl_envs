@@ -140,7 +140,9 @@ def runner_builder(seed,
                                         xacro_extra_pkg_paths = env_builder_args.get("xacro_extra_pkg_paths"))
     robot_description_string = s
     robot_description_format = f
-    
+
+    homing_body_pose_xyz_xyzw = env_builder_args.pop("homing_body_pose_xyz_xyzw")
+
     lrenv = GraspVecEnv(grasp_init_args = GrapVecEnvInitArgs(
                                                 robot_init_args = RobotVecEnvInitArgs(
                                                     noise_action_delay_mustd_std = env_builder_args.pop("noise_action_delay_mustd_std"),
@@ -161,14 +163,15 @@ def runner_builder(seed,
                                                     ground_link=ground_link,
                                                     held_joints_damping=env_builder_args.pop("held_joints_damping"),
                                                     held_joints_stiffness=env_builder_args.pop("held_joints_stiffness"),
-                                                    homing_body_pose_xyz_xyzw=env_builder_args.pop("homing_body_pose_xyz_xyzw"),
+                                                    homing_body_pose_xyz_xyzw=homing_body_pose_xyz_xyzw,
+                                                    # grasping keeps the base at its homing spot (GraspVecEnv forces this too)
+                                                    homing_body_position_minmax_xyz=(tuple(homing_body_pose_xyz_xyzw[:3]), tuple(homing_body_pose_xyz_xyzw[:3])),
                                                     homing_joint_position=env_builder_args.pop("homing_joint_position"),
                                                     homing_joint_position_references=env_builder_args.pop("homing_joint_position_references"),
                                                     impulse_duration_minmax=env_builder_args.pop("impulse_duration_minmax"),
                                                     impulse_mean_std=env_builder_args.pop("impulse_mean_std"),
                                                     impulse_probability_per_sec=env_builder_args.pop("impulse_probability_per_sec"),
                                                     init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
-                                                    randomization_initial_height_range_meters = env_builder_args.pop("randomization_initial_height_range_meters"),
                                                     randomization_initial_joint_pose_range = env_builder_args.pop("randomization_initial_joint_pose_range"),
                                                     just_health_reward = env_builder_args.pop("just_health_reward"),
                                                     longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
@@ -227,7 +230,8 @@ def runner_builder(seed,
                                                     extrinsics_only_privileged=env_builder_args.pop("extrinsics_only_privileged"),
                                                     posref_err_history_length=env_builder_args.pop("posref_err_history_length"),
                                                     observe_actor_safety_state=env_builder_args.pop("observe_actor_safety_state"),
-                                                    observe_linvel_nonprivileged=env_builder_args.pop("observe_linvel_nonprivileged",False)),
+                                                    observe_linvel_nonprivileged=env_builder_args.pop("observe_linvel_nonprivileged",False),
+                                                    terminal_gravity_angle = env_builder_args.pop("terminal_gravity_angle", 30*pi/180.0)),
                                                 reward_gripper_pose_weight = env_builder_args.pop("reward_gripper_pose_weight"),
                                                 reward_health_weight = env_builder_args.pop("reward_health_weight"),
                                                 reward_joint_actacc_weight = env_builder_args.pop("reward_joint_actacc_weight"),

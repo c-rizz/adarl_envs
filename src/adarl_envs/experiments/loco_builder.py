@@ -331,7 +331,12 @@ def loco_runner_builder(seed,
 
     time.sleep(1)
 
-    
+    homing_body_pose_xyz_xyzw = env_builder_args.pop("homing_body_pose_xyz_xyzw")
+    homing_body_position_minmax_xyz = env_builder_args.pop("homing_body_position_minmax_xyz")
+    if homing_body_position_minmax_xyz is None:
+        # No spawn box: keep the robot at its homing position (zero-width range = no randomization).
+        homing_body_position_minmax_xyz = (tuple(homing_body_pose_xyz_xyzw[:3]), tuple(homing_body_pose_xyz_xyzw[:3]))
+
     lrenv = LocomotionVecEnv(LocomotionVecEnvInitArgs(
                                 robot_init_args = RobotVecEnvInitArgs(
                                     noise_action_delay_mustd_std = env_builder_args.pop("noise_action_delay_mustd_std"),
@@ -351,14 +356,14 @@ def loco_runner_builder(seed,
                                     ground_link=ground_link,
                                     held_joints_damping=env_builder_args.pop("held_joints_damping"),
                                     held_joints_stiffness=env_builder_args.pop("held_joints_stiffness"),
-                                    homing_body_pose_xyz_xyzw=env_builder_args.pop("homing_body_pose_xyz_xyzw"),
+                                    homing_body_pose_xyz_xyzw=homing_body_pose_xyz_xyzw,
+                                    homing_body_position_minmax_xyz=homing_body_position_minmax_xyz,
                                     homing_joint_position=env_builder_args.pop("homing_joint_position"),
                                     homing_joint_position_references=env_builder_args.pop("homing_joint_position_references"),
                                     impulse_duration_minmax=env_builder_args.pop("impulse_duration_minmax"),
                                     impulse_mean_std=env_builder_args.pop("impulse_mean_std"),
                                     impulse_probability_per_sec=env_builder_args.pop("impulse_probability_per_sec"),
                                     init_on_reset_ratio = env_builder_args.pop("init_on_reset_ratio"),
-                                    randomization_initial_height_range_meters = env_builder_args.pop("randomization_initial_height_range_meters"),
                                     randomization_initial_joint_pose_range = env_builder_args.pop("randomization_initial_joint_pose_range"),
                                     just_health_reward = env_builder_args.pop("just_health_reward"),
                                     longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
@@ -482,7 +487,8 @@ def loco_runner_builder(seed,
                                 split_rewards=env_builder_args.pop("split_rewards"),
                                 goal_yaw_vel_minmax=env_builder_args.pop("goal_yaw_vel_minmax"),
                                 goal_yaw_vel_zero_ratio=env_builder_args.pop("goal_yaw_vel_zero_ratio"),
-                                playground_style_reward=env_builder_args.pop("playground_style_reward"))
+                                playground_style_reward=env_builder_args.pop("playground_style_reward"),
+                                terminal_gravity_angle = env_builder_args.pop("terminal_gravity_angle", 30*pi/180.0))
                             )
     # ggLog.info(f"state_space = {lrenv.state_space}")
     # ggLog.info(f"observation_space = {lrenv.observation_space}")
@@ -598,6 +604,8 @@ def get_quad_args():
             "robot_main_body_link" : "body_link",
             "robot_root_link" : "body_link",
             "homing_body_pose_xyz_xyzw" : (0.,0.,0.5,0.,0.,0.,1.),
+            # spawn box: x,y fixed at the homing spot, z a clearance above the local terrain
+            "homing_body_position_minmax_xyz" : ((0.,0.,0.5-0.1),(0.,0.,0.5+0.1)),
             "disallowed_contact_links" : [  ("quad","thigh_link_back_left"),
                                             ("quad","shin_link_back_left"),
                                             ("quad","thigh_link_back_right"),
@@ -743,6 +751,8 @@ def get_kyon_args(robot_options : dict = {}):
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
             "homing_body_pose_xyz_xyzw" : (0.,0.,height,0.,0.,0.,1.),
+            # spawn box: x,y fixed at the homing spot, z a clearance above the local terrain
+            "homing_body_position_minmax_xyz" : ((0.,0.,height-0.1),(0.,0.,height+0.1)),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
@@ -761,7 +771,7 @@ def get_kyon_args(robot_options : dict = {}):
                                              [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lim, -j_eff_ctrl_lim],
                                               [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lim,  j_eff_ctrl_lim]]) for k,v in homing_ref.items()},
             "control_limits_center" : None, #homing_ref,
-            "enable_link_collisions" : [(fl,[('ground','ground_link')]) for fl in feet_links],
+            "enable_link_collisions" : [(fl,[('ground','ground_link'),'world']) for fl in feet_links],
             "feet_contact_links" : feet_links,
             "feet_bottom_links" : feet_links,
             "ctrl_joints_stiffness" :500.0,
@@ -864,6 +874,8 @@ def get_go1_args():
             "robot_main_body_link" : "trunk",
             "robot_root_link" : "trunk",
             "homing_body_pose_xyz_xyzw" : (0.,0.,0.4,0.,0.,0.,1.),
+            # spawn box: x,y fixed at the homing spot, z a clearance above the local terrain
+            "homing_body_position_minmax_xyz" : ((0.,0.,0.4-0.1),(0.,0.,0.4+0.1)),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
@@ -988,6 +1000,8 @@ def get_spot_args():
             "robot_main_body_link" : "body",
             "robot_root_link" : "body",
             "homing_body_pose_xyz_xyzw" : (0.,0.,0.460915,0.,0.,0.,1.),
+            # spawn box: x,y fixed at the homing spot, z a clearance above the local terrain
+            "homing_body_position_minmax_xyz" : ((0.,0.,0.460915-0.1),(0.,0.,0.460915+0.1)),
             "disallowed_contact_links" : [ ],
             "terminating_contact_pairs" : [ ],
             "controlled_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
@@ -1184,6 +1198,8 @@ def get_centauro_args(control_arms=False, robot_options : dict | None = None):
             "robot_main_body_link" : "pelvis",
             "robot_root_link" : "pelvis",
             "homing_body_pose_xyz_xyzw" : (0.,0.,0.84,0.,0.,0.,1.),
+            # spawn box: x,y fixed at the homing spot, z a clearance above the local terrain
+            "homing_body_position_minmax_xyz" : ((0.,0.,0.84-0.1),(0.,0.,0.84+0.1)),
             "default_max_joint_impedance_ctrl_torque" : 100.0,
             "max_joint_impedance_ctrl_torques" : j_eff_ctrl_lims,
             "disallowed_contact_links" : [ ],

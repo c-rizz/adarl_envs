@@ -100,7 +100,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "posref_err_history_length" : 5,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomization_initial_height_range_meters" : 0.1,
         "randomization_initial_joint_pose_range" : 0.1,
         "randomization_recycle_init_pose" : True,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),

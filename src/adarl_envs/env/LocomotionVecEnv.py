@@ -25,6 +25,7 @@ import os
 import dataclasses
 import adarl.utils.async_cuda2cpu_queue as async_cuda2cpu_queue
 from adarl.utils.base_utils import record_time, record_region_start, record_region_end
+import math
 
 disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
 
@@ -101,6 +102,7 @@ class LocomotionVecEnvInitArgs():
     terminate_on_crash : bool = True
     playground_style_reward : bool = False
     """ Whether to use a reward structure more similar to the one used in the playground spot environment."""
+    terminal_gravity_angle : float = 30*math.pi/180
     
 class LocomotionVecEnv(RobotVecEnv):
     STATE_LOCOMOTION = "loco"
@@ -1857,7 +1859,7 @@ class LocomotionVecEnv(RobotVecEnv):
             r = th.logical_or(r, states[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.CRASHED,0]).view((self.num_envs,))
             below_ground = states[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,0] < 0.0
             r = th.logical_or(r, below_ground)
-            non_vertical = states[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,0] > -0.85
+            non_vertical = states[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,0] > -math.cos(self._loco_conf.init_args.terminal_gravity_angle)
             r = th.logical_or(r, non_vertical)
         return r
 

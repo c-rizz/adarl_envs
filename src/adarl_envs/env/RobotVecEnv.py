@@ -77,7 +77,10 @@ class RobotVecEnvInitArgs():
     history_length_action_smoothed : int
     history_length_action_raw : int
     init_on_reset_ratio : float
-    randomization_initial_height_range_meters : float
+    homing_body_position_minmax_xyz : tuple[tuple[float,float,float],tuple[float,float,float]]
+    """Box the initial body position is sampled from. x and y are world-absolute, while z is a clearance
+    *above the local terrain* at the sampled (x, y). A zero-width range on an axis fixes that axis, so
+    ((x,y,zmin),(x,y,zmax)) reproduces a pure height randomization around a fixed spot."""
     randomization_initial_joint_pose_range : float | dict[tuple[str,str] | str, float]
     maxStepsPerEpisode : int
     minmax_damping : dict[str,tuple[float,float]] | tuple[float,float]
@@ -108,7 +111,7 @@ class RobotVecEnvInitArgs():
     control_limits_minmax_pve : dict[tuple[str,str], th.Tensor] | None = None
     control_mode_position_delta_max : float | dict[tuple[str,str] | str, float] | None = None
     enable_limits_safety : bool = True
-    enable_link_collisions : list[tuple[tuple[str,str],list[tuple[str,str]]]] | None = dataclasses.field(default_factory=list)
+    enable_link_collisions : list[tuple[tuple[str,str] | str,list[tuple[str,str] | str]]] | None = dataclasses.field(default_factory=list)
     enable_posref_safety : bool = True
     extrinsics_only_privileged : bool = False
     homing_joint_position_references : dict[tuple[str,str], float] | None = None
@@ -153,15 +156,13 @@ class RobotVecEnvInitArgs():
     """Model name used for the world both in the robot_model and when spawned in the scenario."""
     world_placement_xyz_xyzw : tuple[float,float,float,float,float,float,float] | None = None
     """Optional pose of the world root (position + xyzw quaternion). None means identity/origin."""
-    homing_body_position_minmax_xyz : tuple[tuple[float,float,float],tuple[float,float,float]] | None = None
-    """If set (floating-base only), the homing body position is sampled per-env uniformly in
-    [min_xyz, max_xyz]. x and y are world-absolute; z is added to the local ground height at the
-    sampled (x, y) (see world_ground_baseline_z), i.e. z is a clearance above the ground. Orientation
-    is taken from homing_body_pose_xyz_xyzw. When None, the fixed homing_body_pose_xyz_xyzw is used
-    for all envs (legacy behavior)."""
     world_ground_baseline_z : float = 0.0
     """Ground height used where no world collision geometry covers the sampled (x, y) (e.g. flat floor
     areas, since pinocchio drops infinite ground planes). Defaults to 0.0."""
+    spawn_footprint_radius : float = 0.7
+    """Half-side (meters) of the square footprint used to place a randomized spawn above the terrain:
+    the body height is set above the highest terrain within this radius of the sampled (x, y), so the
+    legs (which reach out from the body) clear higher nearby steps instead of penetrating them."""
 
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
@@ -174,6 +175,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         control_mode : JointImpedanceActionHelper.CONTROL_MODES
         goal_err_exp_smoothing_1s : float
         history_length : int
+        homing_body_pose_minmax_xyz : th.Tensor
         homing_body_pose_xyz_xyzw : th.Tensor
         homing_ctrl_joints_position : th.Tensor
         """Actual homing positions for agent-controlled joints (may differ from references in homing_ctrl_joints_pvesd)"""
@@ -369,14 +371,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     additional_models=additional_models)
         ggLog.info(f"urdf: {init_args.robot_description_string}")
 
-        # World-frame AABBs of the world collision geoms, used to look up the ground height at an (x,y).
-        world_box_mins_np, world_box_maxs_np = self._robot_model.get_additional_geom_world_aabbs()
-        self._world_box_mins = th.as_tensor(world_box_mins_np, dtype=th.float32, device=self._th_device)
-        self._world_box_maxs = th.as_tensor(world_box_maxs_np, dtype=th.float32, device=self._th_device)
-        self._world_ground_baseline_z = float(init_args.world_ground_baseline_z)
-        self._homing_body_randomization_enabled = init_args.homing_body_position_minmax_xyz is not None
-        if self._homing_body_randomization_enabled:
-            self._homing_body_pos_minmax = th.as_tensor(init_args.homing_body_position_minmax_xyz, dtype=th.float32, device=self._th_device) # (2,3): [min_xyz, max_xyz]
         ggLog.info(f"Robot has links: {self._robot_model.get_frame_names()}")
         ggLog.info(f"Robot has joints: {self._robot_model.get_joint_names()}")
         root_joint_name = self._robot_model.get_parent_joint(init_args.robot_root_link)
@@ -441,6 +435,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     control_mode = JointImpedanceActionHelper.CONTROL_MODES[init_args.control_mode.upper()],
                                                     goal_err_exp_smoothing_1s = goal_err_exp_smoothing_1s,
                                                     history_length = max(2,init_args.frame_stack_length),
+                                                    homing_body_pose_minmax_xyz = th.as_tensor(init_args.homing_body_position_minmax_xyz, dtype=th.float32, device=self._th_device),
                                                     homing_body_pose_xyz_xyzw = self._thtens(init_args.homing_body_pose_xyz_xyzw),
                                                     homing_ctrl_joints_position = homing_ctrl_joints_position,
                                                     homing_ctrl_joints_pvesd = homing_ctrl_joints_pvesd,
@@ -494,8 +489,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     )
         jrand = self._configuration.init_args.randomization_initial_joint_pose_range
         has_joint_randomization = (isinstance(jrand, dict) and any(r > 0 for r in jrand.values())) or (isinstance(jrand, float) and jrand > 0)
-        has_height_randomization = self._configuration.init_args.randomization_initial_height_range_meters > 0
-        self._initial_pose_randomization_enabled = has_joint_randomization or has_height_randomization
+        body_minmax = self._configuration.homing_body_pose_minmax_xyz
+        has_body_randomization = bool(th.any(body_minmax[1] > body_minmax[0]).item())
+        self._initial_pose_randomization_enabled = has_joint_randomization or has_body_randomization
         self._last_pose_randomization : th.Tensor | None = None
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(init_args.adapter.vec_size(), 1, 1)
         self._excluded_collision_pairs : set[tuple[str,str]] = set()
@@ -578,7 +574,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._configuration.randomized_dof_frictionloss_ratios          = self._distr_to_tensor(init_args.randomized_dof_frictionloss_ratios,   size=(len(init_args.randomized_dof_frictionloss_joints),))
         self._configuration.randomized_reference_filter_distribution    = self._distr_to_tensor(init_args.randomized_reference_filter_distribution, size=(1,)) if init_args.randomized_reference_filter_distribution is not None else None
         self._filters_randomization_enabled = self._configuration.randomized_reference_filter_distribution != None and not distr_is_constant(self._configuration.randomized_reference_filter_distribution)
-
+        self._last_pose_randomization_steps = 0
 
         self._state_helper : DictStateHelper
         self._build_state_helper(init_args.adapter)
@@ -1483,25 +1479,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
 
 
-    def _ground_z_at_xy(self, xy : th.Tensor) -> th.Tensor:
-        """Ground height at world (x, y) positions, from the world collision geometry.
-
-        xy: (E, 2). Returns (E,). For each point the height is the max top-z over world box geoms whose
-        xy footprint contains the point, falling back to world_ground_baseline_z where none do (flat
-        areas, since pinocchio drops infinite ground planes).
-        """
-        E = xy.shape[0]
-        baseline = th.full((E,), self._world_ground_baseline_z, dtype=xy.dtype, device=xy.device)
-        if self._world_box_mins.shape[0] == 0:
-            return baseline
-        x = xy[:,0:1]; y = xy[:,1:2] # (E,1)
-        inside = (x >= self._world_box_mins[:,0]) & (x <= self._world_box_maxs[:,0]) & \
-                 (y >= self._world_box_mins[:,1]) & (y <= self._world_box_maxs[:,1]) # (E,M)
-        tops = self._world_box_maxs[:,2].unsqueeze(0).expand(E,-1) # (E,M)
-        masked_tops = th.where(inside, tops, th.full_like(tops, float("-inf")))
-        box_ground = masked_tops.max(dim=1).values # (E,), -inf where no box covers the point
-        return th.maximum(baseline, th.where(th.isfinite(box_ground), box_ground, baseline))
-
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
         if self._configuration.init_args.offset_envs_ep_starts and self._init_counter_since_reset == 1 and self._vstep_counter_since_reset == 0:
             # randomize max episode steps for the first episode to decorrelate initial randomizations from episode length, which can be important for some learning algorithms, e.g. RNN training with truncated backpropagation through time, to learn better from the initial randomizations
@@ -1523,29 +1500,42 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if self._initial_pose_randomization_enabled:
             never_sampled_poses_yet = self._last_pose_randomization is None
             not_recycling = not self._configuration.init_args.randomization_recycle_init_pose
-            at_least_one_episode_passed = self._configuration.init_args.maxStepsPerEpisode == 0 # approximately, just to avoid doing it too often
-            if (not_recycling and at_least_one_episode_passed) or never_sampled_poses_yet:
-                jp_dict = {k:v for k,v in self._configuration.homing_nonctrl_joints_position.items()}
-                jp_dict.update({k:v for k,v in self._configuration.homing_held_joints_position.items()})
-                recomputed_pose_randomization = True
-                ggLog.info(f"Randomizing initial joint poses for {vec_mask.sum().item()} envs...")
-                _rand_poses = find_poses(   root_joint = self._configuration.robot_root_joint,
-                                            homing_body_pose_xyzxyzw = self._pinocchio_corrected_homing_body_pose_xyzxyzw,
-                                            controlled_joints = self._configuration.joints_agent_controlled,
-                                            initial_pose_randomization_range = self._configuration.init_args.randomization_initial_joint_pose_range,
-                                            initial_height_randomization_range = self._configuration.init_args.randomization_initial_height_range_meters,
-                                            limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.joints_agent_controlled], dim = 1).cpu().numpy(),
-                                            homing_pos = homing_pos.cpu().numpy(),
-                                            noncontrolled_jointpos = {k:v.cpu().numpy() for k,v in jp_dict.items()},
-                                            robot_model = self._robot_model,
-                                            is_floating_base = self._configuration.robot_is_floating,
-                                            seed = th.randint(0, 2**31-1, (1,), generator=self._rng, device=self._rng.device).item(), # type: ignore
-                                            excluded_collision_pairs = self._excluded_collision_pairs,
-                                            num_envs=self.num_envs).to(device=self._configuration.init_args.th_device, non_blocking=True)
-                ggLog.info(f"Randomized initial joint poses for {vec_mask.sum().item()} envs")
-                ggLog.info(f"Randomized initial joint poses = {_rand_poses}")
-                # For randomized poses, set references equal to positions (for now)
-                self._last_pose_randomization = th.stack([_rand_poses, _rand_poses], dim=2)
+            # at_least_one_episode_passed = (self._last_pose_randomization_steps % self._configuration.init_args.maxStepsPerEpisode) == 0 # approximately, just to avoid doing it too often
+            # if never_sampled_poses_yet or (not_recycling and at_least_one_episode_passed):
+            if never_sampled_poses_yet or not_recycling:
+                num_envs_resetting = vec_mask.sum().item() # CUDA sync, keep it inside the not_recycling if
+                if num_envs_resetting > 0:
+                    jp_dict = {k:v for k,v in self._configuration.homing_nonctrl_joints_position.items()}
+                    jp_dict.update({k:v for k,v in self._configuration.homing_held_joints_position.items()})
+                    recomputed_pose_randomization = True
+                    # The search covers joint space and body xyz together, so a joint configuration is only
+                    # accepted if it clears the terrain at that env's actual spawn location.
+                    ggLog.info(f"Randomizing initial poses for {num_envs_resetting} envs...")
+                    _rand_jposes, _rand_bposes = find_poses(root_joint = self._configuration.robot_root_joint,
+                                                body_frame = self._configuration.main_body_link[1],
+                                                default_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy(),
+                                                controlled_joints = self._configuration.joints_agent_controlled,
+                                                joint_randomization_range = self._configuration.init_args.randomization_initial_joint_pose_range,
+                                                body_xyz_minmax = self._configuration.homing_body_pose_minmax_xyz.cpu().numpy(),
+                                                footprint_radius = self._configuration.init_args.spawn_footprint_radius,
+                                                ground_baseline_z = self._configuration.init_args.world_ground_baseline_z,
+                                                limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.joints_agent_controlled], dim = 1).cpu().numpy(),
+                                                homing_pos = homing_pos.cpu().numpy(),
+                                                noncontrolled_jointpos = {k:v.cpu().numpy() for k,v in jp_dict.items()},
+                                                robot_model = self._robot_model,
+                                                is_floating_base = self._configuration.robot_is_floating,
+                                                seed = th.randint(0, 2**31-1, (1,), generator=self._rng, device=self._rng.device).item(), # type: ignore
+                                                excluded_collision_pairs = self._excluded_collision_pairs,
+                                                num_envs=self.num_envs)
+                    _rand_jposes = _rand_jposes.to(device=self._configuration.init_args.th_device, non_blocking=True)
+                    # find_poses already works in main-body-link space, which is what the sim spawns
+                    _rand_bposes = _rand_bposes.to(device=self._configuration.init_args.th_device, non_blocking=True)
+                    masked_assign(self._current_episode_config.vec_body_pose_xyzxyzw, vec_mask, _rand_bposes)
+                    ggLog.info(f"Randomized initial poses for {num_envs_resetting} envs")
+                    ggLog.info(f"Randomized initial joint poses = {_rand_jposes}")
+                    # For randomized poses, set references equal to positions (for now)
+                    self._last_pose_randomization = th.stack([_rand_jposes, _rand_jposes], dim=2)
+                    self._last_pose_randomization_steps = self._tot_step_counter
         else:
             homing_ref = self._configuration.homing_ctrl_joints_pvesd[:,0]
             self._last_pose_randomization = th.stack([homing_pos, homing_ref], dim=-1).unsqueeze(0).expand(self.num_envs, -1, -1)
@@ -1564,15 +1554,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         masked_assign(self._current_episode_config.vec_initial_ctrl_joint_pose, vec_mask, initial_ctrl_jposes)
         masked_assign(self._current_episode_config.vec_init_on_reset,           vec_mask, vec_init_on_reset)
         masked_assign(self._current_episode_config.vec_max_ep_steps,            vec_mask, maxStepsPerEpisode)
-
-        if self._homing_body_randomization_enabled and self._configuration.robot_is_floating:
-            pmin = self._homing_body_pos_minmax[0] # (3,)
-            pmax = self._homing_body_pos_minmax[1] # (3,)
-            xyz = pmin + (pmax - pmin) * self._thrand((self.num_envs, 3)) # x,y world-absolute; z is a ground-relative clearance
-            xyz[:,2] = xyz[:,2] + self._ground_z_at_xy(xyz[:,:2])
-            quat = self._configuration.homing_body_pose_xyz_xyzw[3:7].to(dtype=xyz.dtype).unsqueeze(0).expand(self.num_envs, 4)
-            vec_body_pose = th.cat([xyz, quat], dim=1) # (E,7)
-            masked_assign(self._current_episode_config.vec_body_pose_xyzxyzw, vec_mask, vec_body_pose)
 
         ctrl_joints_num = len(self._configuration.joints_agent_controlled)
         
@@ -1703,7 +1684,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             initial_cmd_vec_j_pvesd=initial_cmd_vec_j_pvesd,
             full_cmd_vec_j_pvesd=full_cmd_vec_j_pvesd
         )
-        ggLog.info(f"Precomputed sim init data: {self._precomputed_sim_init}")
+        # ggLog.info(f"Precomputed sim init data: {self._precomputed_sim_init}")
 
     def _simulation_initialization(self, vec_mask : th.Tensor):
         if not isinstance(self._adapter, BaseVecSimulationAdapter):
@@ -1860,21 +1841,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         
 
 
-        if self._configuration.robot_is_floating:
-                # Correct any offset on the floating joint, to make it as if it is just at the origin
-                # TODO: actually perform some inverse kinematics here, this just work for simple cases
-                self._pinocchio_corrected_homing_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy()
-                self._robot_model.set_joint_pose_by_names({self._configuration.robot_root_joint:np.array([0.,0.,0.,  0.,0.,0.,1.])})
-                root_joint_offset = self._robot_model.get_frame_poses_xyzxyzw(frames=[self._configuration.main_body_link[1]])[self._configuration.main_body_link[1]]
-                self._pinocchio_corrected_homing_body_pose_xyzxyzw = np.concatenate([self._pinocchio_corrected_homing_body_pose_xyzxyzw[:3]-root_joint_offset[:3],
-                                                           quat_mul_xyzw_np(self._pinocchio_corrected_homing_body_pose_xyzxyzw[3:],
-                                                                            quat_conj_xyzw_np(root_joint_offset[3:]).astype(np.float32))])
-                # ggLog.info(f"joint_pose = {self._robot_model.get_joint_pose()}")                
-                # ggLog.info(f"root_joint_offset = {root_joint_offset}")
-                # ggLog.info(f"self._configuration.main_body_link[1] = {self._configuration.main_body_link[1]}")
-                # ggLog.info(f"_corrected_homing_body_pose_xyzxyzw = {self._pinocchio_corrected_homing_body_pose_xyzxyzw}")
-        else:
-            self._pinocchio_corrected_homing_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy()
         self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
         if self._use_simple_flat_ground:
             self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
@@ -1888,7 +1854,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if self._initial_pose_randomization_enabled:
             self._excluded_collision_pairs : set[tuple[str,str]] = self._robot_model.detect_always_present_collisions(
                 moving_joints=[jn[1] for jn in self._configuration.joints_agent_controlled],
-                fixed_joints_pose={self._configuration.robot_root_joint : self._pinocchio_corrected_homing_body_pose_xyzxyzw}
+                # hold the base still, with the main body link at its homing pose
+                fixed_joints_pose={self._configuration.robot_root_joint :
+                                        self._robot_model.root_pose_for_frame_pose(self._configuration.main_body_link[1],
+                                                                                   self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy(),
+                                                                                   self._configuration.robot_root_joint)}
                                                 if self._configuration.robot_is_floating else {},
                 samples=1000,
                 threshold=1.0)

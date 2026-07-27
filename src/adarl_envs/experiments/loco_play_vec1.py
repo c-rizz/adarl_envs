@@ -208,7 +208,6 @@ def adarl_builder_and_args(args):
         "posref_err_history_length" : 5,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomization_initial_height_range_meters" : 0.1,
         "randomization_initial_joint_pose_range" : 0.1,
         "randomization_recycle_init_pose" : True,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
@@ -303,7 +302,7 @@ def adarl_builder_and_args(args):
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : (not skip_optionals) or record,
         "randomization_initial_joint_pose_range" : 0.0,
-        "randomization_initial_height_range_meters" : 0.0,
+        "homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
         "randomized_dof_frictionloss_ratios"         : 0.0*r,
@@ -387,7 +386,14 @@ def play(seed, folderName, run_id, args,
          step_length_sec : float, render : bool,
          robot : str,
          deterministic : bool):
-
+    
+    if args["agent_device"].lower() == "cpu":
+        # Force all torch loads to CPU, even things that are loaded through
+        # other libraries (e.g. yaml, pickle).
+        # TODO: Can this be done better?
+        import torch
+        import functools
+        torch.load = functools.partial(torch.load, map_location=torch.device("cpu"))
     ggLog.info(f"Starting run")
     if render:
         adarl.utils.dbg.dbg_img.helper.enable_web_dbg(True)

@@ -3,8 +3,6 @@ from __future__ import annotations
 import time
 import inspect
 
-from pprint import pprint
-from adarl.utils.buffers import BaseBuffer
 import adarl.utils.dbg.dbg_img
 from rreal.algorithms.rl_agent import load_agent
 from rreal.algorithms.sac import SAC, compare_dicts
@@ -13,24 +11,18 @@ from rreal.algorithms.ppo2 import PPO
 import adarl.utils.dbg.ggLog as ggLog
 import adarl.utils.utils
 import numpy as np
-import gymnasium as gym
 
 import os
 import torch as th
 import adarl.utils.session
 import adarl.utils.dbg.dbg_img as dbg_img
-from adarl.utils.keyboard_listener import KeyboardListener
 from adarl.utils.tensor_trees import map_tensor_tree, TensorTree
-import adarl.utils.sigint_handler
 from adarl_envs.experiments.loco_builder import named_loco_single_env_builder, get_quad_args, get_kyon_args, get_centauro_args, get_go1_args, robot_args_registry
 from adarl_envs.env.LocomotionVecEnv import LocomotionVecEnv
-from rreal.algorithms.rl_agent import RLAgent, TransitionBatch
 from adarl.utils.base_utils import record_time, clear_recorded_times, print_recorded_times, isinstance_noimport, set_disable_clear_recorded_times
 
 import adarl.utils.dbg
 from typing import Any
-from ctypes.util import find_library
-import readline
 import math
 from rreal.algorithms.hardcoded_policies import FixedPolicy, SinPolicy, RandPolicy
 
@@ -138,6 +130,12 @@ def adarl_builder_and_args(args):
     skip_optionals = not args["verbose_recording"]
     realworld = args["mode"] in ["xbot","xbot-zmq"]
 
+    world = "flat_ground"
+    if world == "pyramids":
+        terminal_gravity_angle = 60 * math.pi / 180.0
+    else:
+        terminal_gravity_angle = 30 * math.pi / 180.0
+
     degree2rad = math.pi/180
     r = 0.0 # randomization strength
     n = 1.0 # noise strength
@@ -208,7 +206,7 @@ def adarl_builder_and_args(args):
         "posref_err_history_length" : 5,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomization_initial_joint_pose_range" : 0.1,
+        "randomized_initial_joint_pose_range" : 0.1,
         "randomization_recycle_init_pose" : True,
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_dof_armature_ratios" :      ("uniform", [0.1*r,10.0*r]),
@@ -301,8 +299,8 @@ def adarl_builder_and_args(args):
         "noise_abs_obs_gravity_ep_mustd_step_std" :     (0.0, 0.0, 0.0),
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : (not skip_optionals) or record,
-        "randomization_initial_joint_pose_range" : 0.0,
-        "homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
+        # "randomized_initial_joint_pose_range" : 0.0,
+        "randomized_homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
         "randomized_dof_frictionloss_ratios"         : 0.0*r,
@@ -321,7 +319,10 @@ def adarl_builder_and_args(args):
         "xbotzmq_remote_ip" : args["xbotzmq_remote_ip"],
         "xbotzmq_tcp_service_port" : args["xbotzmq_tcp_service_port"],
         "xbotzmq_tcp_cmd_port" : args["xbotzmq_tcp_cmd_port"],
-        "xbotzmq_tcp_state_port" : args["xbotzmq_tcp_state_port"]
+        "xbotzmq_tcp_state_port" : args["xbotzmq_tcp_state_port"],
+        "world_description_format" : "predefined",
+        "world_description_string" : world,
+        "terminal_gravity_angle" : terminal_gravity_angle
         # "mjx_opt_override" : {"noslip_iterations": 10, "impratio": 10.0, "iterations" : 20}
         })
     return named_loco_single_env_builder, env_builder_args, step_length_sec

@@ -1,4 +1,7 @@
 <mujoco>
+    <!-- default free camera: lookat = center, distance = 1.5 * extent -->
+    <statistic center="0 0 0" extent="3"/>
+
     <default>
         <default class="terrain">
             <geom solref="0.004 1.2" solimp="0.995 0.995 0.001 0.5 2" friction="0.7 0.005 0.001" type="plane" material="grid"/>

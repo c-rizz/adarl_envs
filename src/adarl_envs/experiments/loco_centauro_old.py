@@ -51,8 +51,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_mean_std" : (20.0,50.0),
         "impulse_probability_per_sec" : 0.1,
         "init_on_reset_ratio" : 0.5,
-        "homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
-        "randomization_initial_joint_pose_range" : 0.001,
+        "randomized_homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
+        "randomized_initial_joint_pose_range" : 0.001,
         "initial_pose_randomization_range" : 0.0,
         "just_health_reward" : False,
         "log_info_stats" : True,

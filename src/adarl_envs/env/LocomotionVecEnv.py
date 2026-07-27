@@ -1723,8 +1723,11 @@ class LocomotionVecEnv(RobotVecEnv):
         super().post_step()
         record_time("LocomotionVecEnv.post_step super done")
         linvel_err = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.SMOOTHED_TRACKING_ERROR,0]
-        async_cuda2cpu_queue.run_async_job({"linvel_err": linvel_err},
-                                           self._set_linvel_global_stats)
+        if linvel_err.device.type == "cuda":
+            async_cuda2cpu_queue.run_async_job({"linvel_err": linvel_err},
+                                            self._set_linvel_global_stats)
+        else:
+            self._set_linvel_global_stats({"linvel_err": linvel_err})
         record_region_end("LocomotionVecEnv.post_step")
 
     @override

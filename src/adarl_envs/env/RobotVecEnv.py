@@ -77,11 +77,11 @@ class RobotVecEnvInitArgs():
     history_length_action_smoothed : int
     history_length_action_raw : int
     init_on_reset_ratio : float
-    homing_body_position_minmax_xyz : tuple[tuple[float,float,float],tuple[float,float,float]]
+    randomized_homing_body_position_minmax_xyz : tuple[tuple[float,float,float],tuple[float,float,float]]
     """Box the initial body position is sampled from. x and y are world-absolute, while z is a clearance
     *above the local terrain* at the sampled (x, y). A zero-width range on an axis fixes that axis, so
     ((x,y,zmin),(x,y,zmax)) reproduces a pure height randomization around a fixed spot."""
-    randomization_initial_joint_pose_range : float | dict[tuple[str,str] | str, float]
+    randomized_initial_joint_pose_range : float | dict[tuple[str,str] | str, float]
     maxStepsPerEpisode : int
     minmax_damping : dict[str,tuple[float,float]] | tuple[float,float]
     minmax_stiffness : dict[str,tuple[float,float]] | tuple[float,float]
@@ -235,7 +235,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_jimp_cmd_size : tuple[int,int,int]
         vec_size : int
         velref_from_posref : bool
-
 
     metadata = {'render.modes': ['rgb_array']}
     # STATE_BASE = "b" # component of the state that is a vector and is always the same regardless of the configuration
@@ -435,7 +434,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     control_mode = JointImpedanceActionHelper.CONTROL_MODES[init_args.control_mode.upper()],
                                                     goal_err_exp_smoothing_1s = goal_err_exp_smoothing_1s,
                                                     history_length = max(2,init_args.frame_stack_length),
-                                                    homing_body_pose_minmax_xyz = th.as_tensor(init_args.homing_body_position_minmax_xyz, dtype=th.float32, device=self._th_device),
+                                                    homing_body_pose_minmax_xyz = th.as_tensor(init_args.randomized_homing_body_position_minmax_xyz, dtype=th.float32, device=self._th_device),
                                                     homing_body_pose_xyz_xyzw = self._thtens(init_args.homing_body_pose_xyz_xyzw),
                                                     homing_ctrl_joints_position = homing_ctrl_joints_position,
                                                     homing_ctrl_joints_pvesd = homing_ctrl_joints_pvesd,
@@ -487,7 +486,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     vec_size=init_args.adapter.vec_size(),
                                                     velref_from_posref=False,
                                                     )
-        jrand = self._configuration.init_args.randomization_initial_joint_pose_range
+        jrand = self._configuration.init_args.randomized_initial_joint_pose_range
         has_joint_randomization = (isinstance(jrand, dict) and any(r > 0 for r in jrand.values())) or (isinstance(jrand, float) and jrand > 0)
         body_minmax = self._configuration.homing_body_pose_minmax_xyz
         has_body_randomization = bool(th.any(body_minmax[1] > body_minmax[0]).item())
@@ -1515,7 +1514,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                 body_frame = self._configuration.main_body_link[1],
                                                 default_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy(),
                                                 controlled_joints = self._configuration.joints_agent_controlled,
-                                                joint_randomization_range = self._configuration.init_args.randomization_initial_joint_pose_range,
+                                                joint_randomization_range = self._configuration.init_args.randomized_initial_joint_pose_range,
                                                 body_xyz_minmax = self._configuration.homing_body_pose_minmax_xyz.cpu().numpy(),
                                                 footprint_radius = self._configuration.init_args.spawn_footprint_radius,
                                                 ground_baseline_z = self._configuration.init_args.world_ground_baseline_z,
@@ -1843,9 +1842,18 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         self._robot_model.disable_tree_self_collisions(root_frame=self._configuration.robot_root_link[1])
         if self._use_simple_flat_ground:
-            self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([0.,0.,-0.5,0.,0.,0.,1.]),
-                                                                        collision_box_size_xyz=(100,100,1),
+            # Size the ground so it always covers the whole spawn box (plus the robot's footprint and a
+            # margin). The simulated ground plane is infinite, so a collision box that fell short of a
+            # spawn point would leave the pose search blind to the ground there and let it accept poses
+            # with the legs underground, which the simulator then resolves by ejecting the robot.
+            spawn_minmax_xy = self._configuration.homing_body_pose_minmax_xyz[:,:2].cpu().numpy()
+            margin = 100.0 + self._configuration.init_args.spawn_footprint_radius
+            ground_center_xy = (spawn_minmax_xy[1] + spawn_minmax_xy[0])/2
+            ground_size_xy = np.maximum(spawn_minmax_xy[1] - spawn_minmax_xy[0] + 2*margin, 100.0)
+            self._ground_co_id = self._robot_model.add_collision_box(   pose_xyz_xyzw=np.array([ground_center_xy[0],ground_center_xy[1],-0.5, 0.,0.,0.,1.]),
+                                                                        collision_box_size_xyz=(float(ground_size_xy[0]),float(ground_size_xy[1]),1.0),
                                                                         collision_obj_id="ground_collision")
+            ggLog.info(f"Flat ground collision box: center_xy={ground_center_xy}, size_xy={ground_size_xy} (top at z=0)")
         else:
             # The world geometry (merged into the robot model above) provides the environment/ground
             # for collision detection, so we do not add the legacy flat collision box.

@@ -58,7 +58,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 0.7,
-        "randomization_initial_joint_pose_range" : 0.1,
+        "randomized_initial_joint_pose_range" : 0.1,
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
@@ -149,7 +149,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "init_on_reset_ratio" : 1.0,
         "offset_envs_ep_starts" : False,
         "minimal_infos" : False,
-        # "randomization_initial_joint_pose_range" : 0.02,
+        # "randomized_initial_joint_pose_range" : 0.02,
         # "mass_randomization_ratio" : 0.0,
         # "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
         "randomization_recycle_init_pose" : False,

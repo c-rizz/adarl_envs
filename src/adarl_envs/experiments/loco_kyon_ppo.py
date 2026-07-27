@@ -95,9 +95,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "posref_err_history_length" : 5,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomization_initial_joint_pose_range" : 0.1,
-        "homing_body_position_minmax_xyz" : ((-6, -18, 0.45), (102, 18, 0.55)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
         "randomization_recycle_init_pose" : True,
+        "randomized_initial_joint_pose_range" : 0.3,
+        "randomized_homing_body_position_minmax_xyz" : ((0,0,0.47),(0,0,0.47)),# ((-6, -18, 0.45), (102, 18, 0.55)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_dof_armature_ratios" :       ("uniform", [0.9*r,1.1*r]),
         "randomized_dof_damping_ratios":         ("uniform", [0.9*r,1.1*r]),
@@ -180,7 +180,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "video_save_freq" : 1,
         "init_on_reset_ratio" : 1.0,
         "offset_envs_ep_starts" : False,
-        # "randomization_initial_joint_pose_range" : 0.02,
+        # "randomized_initial_joint_pose_range" : 0.02,
         # "mass_randomization_ratio" : 0.0,
         # "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
         "randomization_recycle_init_pose" : False,

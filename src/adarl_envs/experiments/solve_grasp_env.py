@@ -80,8 +80,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.0,
         "init_on_reset_ratio" : 0.7,
-        "homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
-        "randomization_initial_joint_pose_range" : {"default" : 0.05, 
+        "randomized_homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
+        "randomized_initial_joint_pose_range" : {"default" : 0.05, 
                                                     **{("kyon",jn) : 0.9 for jn in ["shoulder_yaw_", "shoulder_pitch_", "elbow_pitch_", "wrist_pitch_", "wrist_yaw_"]}},
         "just_health_reward" : False,
         "log_info_stats" : True,

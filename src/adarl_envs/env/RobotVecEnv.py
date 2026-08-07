@@ -9,7 +9,7 @@ from adarl.envs.vec.BaseVecEnv import Observation
 from adarl.utils.robot_helpers import Robot
 from adarl.utils.robot_helpers import ModelDescription
 from adarl.utils.robot_helpers import find_poses
-from adarl.utils.utils import expand_default_dict
+from adarl.utils.utils import expand_default_dict, th_compile_ext
 from adarl.utils.vec_state_helper import    JointImpedanceActionHelper, ThBoxStateHelper,\
                                         JointStateHelper, RobotStatsStateHelper,\
                                         StateNoiseGenerator, DictStateHelper, unnormalize, normalize
@@ -17,7 +17,7 @@ from adarl.utils.tensor_trees import space_from_tree
 import adarl.utils.utils
 from adarl.utils.utils import (isinstance_noimport, masked_assign, quat_conj_xyzw_np, quat_mul_xyzw_np,
                                DistributionDef, DistributionDefTh, sample_distr, distr_to_tensor, distr_is_constant,
-                               to_string_tensor, th_quat_rotate_py, th_quat_conj, ros_rpy_to_quaternion_xyzw_th, )
+                               to_string_tensor, th_quat_rotate_py, th_quat_conj, ros_rpy_to_quaternion_xyzw_th, thtens)
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check,  dbg_check_bounded, dbg_check_finite
 from dataclasses import dataclass
 from enum import Enum, IntEnum
@@ -434,7 +434,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     control_mode = JointImpedanceActionHelper.CONTROL_MODES[init_args.control_mode.upper()],
                                                     goal_err_exp_smoothing_1s = goal_err_exp_smoothing_1s,
                                                     history_length = max(2,init_args.frame_stack_length),
-                                                    homing_body_pose_minmax_xyz = th.as_tensor(init_args.randomized_homing_body_position_minmax_xyz, dtype=th.float32, device=self._th_device),
+                                                    homing_body_pose_minmax_xyz = self._thtens(init_args.randomized_homing_body_position_minmax_xyz),
                                                     homing_body_pose_xyz_xyzw = self._thtens(init_args.homing_body_pose_xyz_xyzw),
                                                     homing_ctrl_joints_position = homing_ctrl_joints_position,
                                                     homing_ctrl_joints_pvesd = homing_ctrl_joints_pvesd,
@@ -632,7 +632,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         example_labels : dict[str,th.Tensor] = {}
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels)
-        self.set_seeds(th.as_tensor(init_args.seed))
+        self.set_seeds(thtens(init_args.seed))
         ggLog.info(f"Starting up adapter....")
         self._adapter.startup()
         ggLog.info(f"Adapter started.")
@@ -1476,9 +1476,66 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._last_obs = self._state_helper.observe(self._current_state)
         record_time("RobotVecEnv.initialize_episodes: observed")
 
+    def _get_randomized_jpose_bpose(self, vec_mask : th.Tensor) -> tuple[th.Tensor, th.Tensor, bool]:
+        homing_pos = self._configuration.homing_ctrl_joints_position
+        t0 = time.monotonic()
+        recomputed_pose_randomization = False
+        never_sampled_poses_yet = self._last_pose_randomization is None
+        not_recycling = not self._configuration.init_args.randomization_recycle_init_pose
+        # at_least_one_episode_passed = (self._last_pose_randomization_steps % self._configuration.init_args.maxStepsPerEpisode) == 0 # approximately, just to avoid doing it too often
+        # if never_sampled_poses_yet or (not_recycling and at_least_one_episode_passed):
+        if self._initial_pose_randomization_enabled and (never_sampled_poses_yet or not_recycling):
+            num_envs_resetting = vec_mask.sum().item() # CUDA sync, keep it inside the not_recycling if
+            if num_envs_resetting > 0:
+                jp_dict = {k:v for k,v in self._configuration.homing_nonctrl_joints_position.items()}
+                jp_dict.update({k:v for k,v in self._configuration.homing_held_joints_position.items()})
+                recomputed_pose_randomization = True
+                # The search covers joint space and body xyz together, so a joint configuration is only
+                # accepted if it clears the terrain at that env's actual spawn location.
+                ggLog.info(f"Randomizing initial poses for {num_envs_resetting} envs...")
+                _rand_jposes, _rand_bposes = find_poses(root_joint = self._configuration.robot_root_joint,
+                                            body_frame = self._configuration.main_body_link[1],
+                                            default_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy(),
+                                            controlled_joints = self._configuration.joints_agent_controlled,
+                                            joint_randomization_range = self._configuration.init_args.randomized_initial_joint_pose_range,
+                                            body_xyz_minmax = self._configuration.homing_body_pose_minmax_xyz.cpu().numpy(),
+                                            footprint_radius = self._configuration.init_args.spawn_footprint_radius,
+                                            ground_baseline_z = self._configuration.init_args.world_ground_baseline_z,
+                                            limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.joints_agent_controlled], dim = 1).cpu().numpy(),
+                                            homing_pos = homing_pos.cpu().numpy(),
+                                            noncontrolled_jointpos = {k:v.cpu().numpy() for k,v in jp_dict.items()},
+                                            robot_model = self._robot_model,
+                                            is_floating_base = self._configuration.robot_is_floating,
+                                            seed = th.randint(0, 2**31-1, (1,), generator=self._rng, device=self._rng.device).item(), # type: ignore
+                                            excluded_collision_pairs = self._excluded_collision_pairs,
+                                            num_envs=self.num_envs)
+                _rand_jposes = _rand_jposes.to(device=self._configuration.init_args.th_device, non_blocking=True)
+                # find_poses already works in main-body-link space, which is what the sim spawns
+                bpose = _rand_bposes.to(device=self._configuration.init_args.th_device, non_blocking=True)
+                # ggLog.info(f"Randomized initial poses for {num_envs_resetting} envs")
+                # ggLog.info(f"Randomized initial joint poses = {_rand_jposes}")
+                # For randomized poses, set references equal to positions (for now)
+                jpose_jposeref = th.stack([_rand_jposes, _rand_jposes], dim=2)
+                self._last_pose_randomization_steps = self._tot_step_counter
+                self._last_pose_randomization = jpose_jposeref
+            else:
+                jpose_jposeref = self._last_pose_randomization
+                bpose = self._current_episode_config.vec_body_pose_xyzxyzw.clone()
+        else:
+            homing_ref = self._configuration.homing_ctrl_joints_pvesd[:,0]
+            jpose_jposeref = th.stack([homing_pos, homing_ref], dim=-1).unsqueeze(0).expand(self.num_envs, -1, -1)
+            bpose = self._configuration.homing_body_pose_xyz_xyzw.unsqueeze(0).expand(self.num_envs, 7).clone()
+        rand_time = time.monotonic()-t0
+        if rand_time > 1.0:
+            ggLog.info(f"Pose randomization over {self.num_envs} envs took {rand_time:.6f}s")
+        return jpose_jposeref, bpose, recomputed_pose_randomization
 
-
-    def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
+    # @th_compile_ext(copy_outs=True, fullgraph=True)
+    def _set_current_ep_config_opt(self, vec_mask : th.Tensor,
+                                         jpose_jposeref_randomization,
+                                         bpose,
+                                         recomputed_pose_randomization,
+                                         reset_options : dict = {},):
         if self._configuration.init_args.offset_envs_ep_starts and self._init_counter_since_reset == 1 and self._vstep_counter_since_reset == 0:
             # randomize max episode steps for the first episode to decorrelate initial randomizations from episode length, which can be important for some learning algorithms, e.g. RNN training with truncated backpropagation through time, to learn better from the initial randomizations
             # We env just got resetted
@@ -1489,77 +1546,38 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 device=self._th_device,
                                 dtype=th.int64)
             maxStepsPerEpisode = reset_options.get("max_ep_steps", max_steps)
+            record_time("RobotVecEnv.initialize_episodes: sampled ep length")
         else:
             maxStepsPerEpisode = reset_options.get("max_ep_steps", self._configuration.init_args.maxStepsPerEpisode)
+            record_time("RobotVecEnv.initialize_episodes: used const ep length")
             # ggLog.info(f"Randomizing maxStepsPerEpisode = {maxStepsPerEpisode}, vec_mask = {vec_mask}")
-        
-        homing_pos = self._configuration.homing_ctrl_joints_position
-        t0 = time.monotonic()
-        recomputed_pose_randomization = False
-        if self._initial_pose_randomization_enabled:
-            never_sampled_poses_yet = self._last_pose_randomization is None
-            not_recycling = not self._configuration.init_args.randomization_recycle_init_pose
-            # at_least_one_episode_passed = (self._last_pose_randomization_steps % self._configuration.init_args.maxStepsPerEpisode) == 0 # approximately, just to avoid doing it too often
-            # if never_sampled_poses_yet or (not_recycling and at_least_one_episode_passed):
-            if never_sampled_poses_yet or not_recycling:
-                num_envs_resetting = vec_mask.sum().item() # CUDA sync, keep it inside the not_recycling if
-                if num_envs_resetting > 0:
-                    jp_dict = {k:v for k,v in self._configuration.homing_nonctrl_joints_position.items()}
-                    jp_dict.update({k:v for k,v in self._configuration.homing_held_joints_position.items()})
-                    recomputed_pose_randomization = True
-                    # The search covers joint space and body xyz together, so a joint configuration is only
-                    # accepted if it clears the terrain at that env's actual spawn location.
-                    ggLog.info(f"Randomizing initial poses for {num_envs_resetting} envs...")
-                    _rand_jposes, _rand_bposes = find_poses(root_joint = self._configuration.robot_root_joint,
-                                                body_frame = self._configuration.main_body_link[1],
-                                                default_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy(),
-                                                controlled_joints = self._configuration.joints_agent_controlled,
-                                                joint_randomization_range = self._configuration.init_args.randomized_initial_joint_pose_range,
-                                                body_xyz_minmax = self._configuration.homing_body_pose_minmax_xyz.cpu().numpy(),
-                                                footprint_radius = self._configuration.init_args.spawn_footprint_radius,
-                                                ground_baseline_z = self._configuration.init_args.world_ground_baseline_z,
-                                                limits_minmax = th.stack([self._configuration.joint_safe_limits_minmax_pve[jn][:,0] for jn in self._configuration.joints_agent_controlled], dim = 1).cpu().numpy(),
-                                                homing_pos = homing_pos.cpu().numpy(),
-                                                noncontrolled_jointpos = {k:v.cpu().numpy() for k,v in jp_dict.items()},
-                                                robot_model = self._robot_model,
-                                                is_floating_base = self._configuration.robot_is_floating,
-                                                seed = th.randint(0, 2**31-1, (1,), generator=self._rng, device=self._rng.device).item(), # type: ignore
-                                                excluded_collision_pairs = self._excluded_collision_pairs,
-                                                num_envs=self.num_envs)
-                    _rand_jposes = _rand_jposes.to(device=self._configuration.init_args.th_device, non_blocking=True)
-                    # find_poses already works in main-body-link space, which is what the sim spawns
-                    _rand_bposes = _rand_bposes.to(device=self._configuration.init_args.th_device, non_blocking=True)
-                    masked_assign(self._current_episode_config.vec_body_pose_xyzxyzw, vec_mask, _rand_bposes)
-                    ggLog.info(f"Randomized initial poses for {num_envs_resetting} envs")
-                    ggLog.info(f"Randomized initial joint poses = {_rand_jposes}")
-                    # For randomized poses, set references equal to positions (for now)
-                    self._last_pose_randomization = th.stack([_rand_jposes, _rand_jposes], dim=2)
-                    self._last_pose_randomization_steps = self._tot_step_counter
-        else:
-            homing_ref = self._configuration.homing_ctrl_joints_pvesd[:,0]
-            self._last_pose_randomization = th.stack([homing_pos, homing_ref], dim=-1).unsqueeze(0).expand(self.num_envs, -1, -1)
-        initial_ctrl_jposes = self._last_pose_randomization
-        rand_time = time.monotonic()-t0
-        if rand_time > 1.0:
-            ggLog.info(f"pose randomization took {rand_time:.6f}s")
-        
-        if self._tot_init_counter <= 1 or recomputed_pose_randomization:
-            self._precompute_init_tensors(initial_ctrl_jposes)
         if  self._configuration.init_args.init_on_reset_ratio<1.0 and self._init_counter_since_reset>1:
             vec_init_on_reset = self._thrand((self.num_envs,)) < self._configuration.init_args.init_on_reset_ratio
+            record_time("RobotVecEnv.initialize_episodes: sampled init mask")
         else:
             vec_init_on_reset = th.ones((self.num_envs,), dtype=th.bool).to(device=self._th_device, non_blocking=self._th_device.type=="cuda")
+            record_time("RobotVecEnv.initialize_episodes: set init mask to all ones")
         # ggLog.info(f"initial_jpose = {initial_joint_pose}, homing = {homing}")
-        masked_assign(self._current_episode_config.vec_initial_ctrl_joint_pose, vec_mask, initial_ctrl_jposes)
         masked_assign(self._current_episode_config.vec_init_on_reset,           vec_mask, vec_init_on_reset)
         masked_assign(self._current_episode_config.vec_max_ep_steps,            vec_mask, maxStepsPerEpisode)
+        self.set_max_episode_steps(self._current_episode_config.vec_max_ep_steps)
+        record_time("RobotVecEnv.initialize_episodes: setted init mask and ep length")
+
+        if self._tot_init_counter <= 1 or recomputed_pose_randomization:
+            self._precompute_init_tensors(jpose_jposeref_randomization)
+        masked_assign(self._current_episode_config.vec_body_pose_xyzxyzw,       vec_mask, bpose)
+        masked_assign(self._current_episode_config.vec_initial_ctrl_joint_pose, vec_mask, jpose_jposeref_randomization)
+        record_time("RobotVecEnv.initialize_episodes: setted init jpose randomization")
 
         ctrl_joints_num = len(self._configuration.joints_agent_controlled)
         
         damping_ratios =    self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.init_args.randomized_gains_damping_ratio_epstd+1
         stiffness_ratios =  self._thrandn_truncnorm((self.num_envs,ctrl_joints_num),0,1,-3,+3)*self._configuration.init_args.randomized_gains_stiffness_ratio_epstd+1
+        record_time("RobotVecEnv.initialize_episodes: sampled gains randomization")
+
         masked_assign(self._current_episode_config.randomized_damping_factor,   vec_mask, damping_ratios)
         masked_assign(self._current_episode_config.randomized_stiffness_factor, vec_mask, stiffness_ratios)
+        record_time("RobotVecEnv.initialize_episodes: setted gains randomization")
         # ggLog.info(f"_current_episode_config = {self._current_episode_config}")
         if self._model_randomization_enabled:
             # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")
@@ -1575,14 +1593,25 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             masked_assign(self._current_episode_config.joint_dampings_ratios,       vec_mask, joint_dampings_ratios)
             masked_assign(self._current_episode_config.joint_frictionlosses_ratios, vec_mask, joint_frictionlosses_ratios)
             masked_assign(self._current_episode_config.link_coms_diffs,             vec_mask, link_coms_diffs)
+            record_time("RobotVecEnv.initialize_episodes: computed model randomization")
         new_filters_freqs = self._sample_distr((self.num_envs,), self._configuration.randomized_reference_filter_distribution)
         masked_assign(self._current_episode_config.joint_reference_filter_freqs, vec_mask, new_filters_freqs)
-        
+        record_time("RobotVecEnv.initialize_episodes: computed reference filter randomization")
         delay_mu, delay_std = self._configuration.action_delay_epmustd_ststd[:2]
         action_delay_mu = th.clamp(self._thrandn_clamp(size=(self.num_envs,), min=-5, max=5)*delay_std+delay_mu, min=0)
         masked_assign(self._current_episode_config.action_delay_mu, vec_mask, action_delay_mu)
-
-        self.set_max_episode_steps(self._current_episode_config.vec_max_ep_steps)
+        record_time("RobotVecEnv.initialize_episodes: computed action delay randomization")
+    
+    def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
+        
+        jpose_jposeref_randomization, bpose, recomputed_pose_randomization = self._get_randomized_jpose_bpose(vec_mask)
+        record_time("RobotVecEnv.initialize_episodes: computed init pose randomization")
+        self._set_current_ep_config_opt(vec_mask=vec_mask,
+                                        jpose_jposeref_randomization=jpose_jposeref_randomization,
+                                        bpose=bpose,
+                                        recomputed_pose_randomization=recomputed_pose_randomization,
+                                        reset_options=reset_options)
+        
         
 
     def _realworld_robot_init_move(self, vec_mask : th.Tensor):
@@ -1941,13 +1970,16 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     
     @override
     def get_observations(self, state) -> dict[Any, th.Tensor]:
+        record_region_start("RobotVecEnv.get_observations")
         self._last_obs = self._state_helper.observe(state)
+        record_time("RobotVecEnv.get_observations observe done")
         if self._configuration.init_args.enable_dbg_checks:
             if isinstance(self._adapter, BaseVecSimulationAdapter):
                 dbg_check_finite(state, async_assert=True, assert_msg="Nonfinite state detected in RobotVecEnv")
                 dbg_check_finite(self._last_obs, async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
             else:
                 dbg_check_finite(self._last_obs["base.vec"], async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
+        record_region_end("RobotVecEnv.get_observations")
         return self._last_obs
 
 
@@ -2223,7 +2255,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # ggLog.info(pprint.pformat(map_tensor_tree(new_inst_state, lambda t: t.size())))
         return new_inst_state
 
-    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
+    @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
     def _build_new_instantaneous_state_vec(self,    vec_step_count : th.Tensor,
                                                     prev_lims_safety_triggered : th.Tensor,
                                                     prev_posref_safety_triggered : th.Tensor,
@@ -2249,7 +2281,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # prev_vec_time_from_start = prev_vec_internal_state[:,self.INTERNAL_FIELDS.SIM_TIME]
         # vec_prev_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")
-        pveidx = th.as_tensor([0,1,3]).to(device=vec_stats_minmaxavgstd_j_pvaeep.device, non_blocking=True)
+        pveidx = thtens([0,1,3], device=vec_stats_minmaxavgstd_j_pvaeep.device)
         if self._configuration.init_args.enable_limits_safety:
             vec_triggered_limits = th.logical_or(   vec_stats_minmaxavgstd_j_pvaeep[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
                                                     vec_stats_minmaxavgstd_j_pvaeep[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
@@ -2394,6 +2426,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             return {}
         sub_rews = {}
         reward = self.compute_rewards(state, sub_rews)
+        record_time("RobotVecEnv.get_infos: compute_rewards done")
         state_internal = state[self.STATE_INTERNAL]
         step_count = state_internal[:,0,self.INTERNAL_FIELDS.STEP_COUNT]
         i : dict[str, th.Tensor] = {

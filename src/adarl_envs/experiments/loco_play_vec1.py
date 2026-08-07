@@ -206,8 +206,9 @@ def adarl_builder_and_args(args):
         "posref_err_history_length" : 5,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomized_initial_joint_pose_range" : 0.1,
         "randomization_recycle_init_pose" : True,
+        "randomized_initial_joint_pose_range" : 0.3,
+        "randomized_homing_body_position_minmax_xyz" : ((-6, -18, 0.45), (102, 18, 0.55)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_dof_armature_ratios" :      ("uniform", [0.1*r,10.0*r]),
         "randomized_dof_damping_ratios":        ("uniform", [0.1*r,10.0*r]),
@@ -300,7 +301,7 @@ def adarl_builder_and_args(args):
         "ui_camera_resolution_hw" : pixel_resolution,
         "log_info_stats" : (not skip_optionals) or record,
         # "randomized_initial_joint_pose_range" : 0.0,
-        "randomized_homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
+        # "randomized_homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
         "randomized_dof_frictionloss_ratios"         : 0.0*r,
@@ -572,29 +573,34 @@ def play(seed, folderName, run_id, args,
                     flip = False
                     pad = gamepad.poll()
                     if pad is not None:
-                        cmd_xy = (pad.lx, pad.ly)
-                        # left stick -> linear velocity command (direction + speed)
-                        speed = min(1.0, math.hypot(*cmd_xy)**2)*args["speed_scale"]
-                        cmd_angle = math.atan2(cmd_xy[1], cmd_xy[0])-(90.0*math.pi/180)
-                        print(f"pad = {pad.lx, pad.ly}, speed = {speed}, cmd_angle = {cmd_angle}")
-
-                        cmd_yawvel = -math.copysign(1,pad.rx)*pad.rx**2*args["speed_scale"]
-                        cmd_height += pad.ry**2 * 0.005
-
-                        # right stick -> yaw velocity (x) and height rate (y)
-                        # d-pad -> camera pitch/yaw,  bumpers -> camera distance
                         if pad.LN: cam_dist_pitch_yaw_diff[1] =  5*3.14159/180
                         if pad.LS: cam_dist_pitch_yaw_diff[1] = -5*3.14159/180
                         if pad.LW: cam_dist_pitch_yaw_diff[2] = -5*3.14159/180
                         if pad.LE: cam_dist_pitch_yaw_diff[2] =  5*3.14159/180
                         if pad.lb: cam_dist_pitch_yaw_diff[0] = -0.1
                         if pad.rb: cam_dist_pitch_yaw_diff[0] =  0.1
-                        # discrete actions, only on the rising edge
+
                         if gamepad.pressed_edge("RS"):
                             zero_all_commands = not zero_all_commands
+                        if pad.age>0.5:
+                            zero_all_commands = True
+
                         if zero_all_commands:
                             speed = 0.0
                             cmd_yawvel = 0.0
+                        else:
+                            cmd_xy = (pad.lx, pad.ly)
+                            # left stick -> linear velocity command (direction + speed)
+                            speed = min(1.0, math.hypot(*cmd_xy)**2)*args["speed_scale"]
+                            cmd_angle = math.atan2(cmd_xy[1], cmd_xy[0])-(90.0*math.pi/180)
+
+                            cmd_yawvel = -math.copysign(1,pad.rx)*pad.rx**2*args["speed_scale"]
+                            cmd_height += pad.ry**2 * 0.005
+                            print(f"pad = {pad.lx, pad.ly}, speed = {speed}, cmd_angle = {cmd_angle}, cmd_yawvel = {cmd_yawvel}, cmd_height = {cmd_height}")
+
+                            # right stick -> yaw velocity (x) and height rate (y)
+                            # d-pad -> camera pitch/yaw,  bumpers -> camera distance
+                            # discrete actions, only on the rising edge
                         flip = gamepad.pressed_edge("RE")
                         if gamepad.pressed_edge("RN"):
                             truncated = True

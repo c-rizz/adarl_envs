@@ -6,10 +6,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import copy
     import torch as th
     from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams
-    from adarl_envs.experiments.grasp_builder import centgrasp_vecenv_builder
+    from rreal.feature_extractors.mixed_feature_extractor import MixedFeatureExtractorInitArgs
+    from rreal.feature_extractors.stack_vectors_feature_extractor import StackVectorsFeatureExtractorInitArgs
+    from adarl_envs.experiments.grasp_builder import grasp_vecenv_builder
     import os
     import math
 
+    debug_level = 1
     mode = args["mode"].lower()
     step_length_sec = 40/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
@@ -30,6 +33,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         env_device = th.device("cuda",0)
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
+
+    obs_cam = False
 
     eval_freq = 5
     r = 0.0
@@ -52,7 +57,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "neutral_body_height" : 0.45,
         "reward_safety_weight" : 0.0,
         "target_object_link" : ("cube","cube"),
-        "observe_object_pose" : True,
+        "observe_camera" : obs_cam,
+        "observe_object_pose" : not obs_cam,
+        "observe_initial_object_pose" : False,
         "noise_action_delay_mustd_std" : (0.008, 0.005*n, 0.0025*n),
         "noise_action_mustd" : (0.0, 0.0),
         "observe_actor_safety_state" : False,
@@ -61,7 +68,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "desired_foot_clearance" : 0.05,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
-        "enable_rendering" : False,
+        "enable_rendering" : obs_cam,
         "enable_reference_filter" : True,
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
@@ -158,7 +165,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 1,
         "env_builder_args" : video_eval_env_builder_args,
         "num_envs" : 1,
-        "init_on_reset_ratio" : 1.0
+        "init_on_reset_ratio" : 1.0,
+        "skip_first_eval" : False
     }
     eval_conf_video_stoch = {
         "name" : "video_stoch",
@@ -167,7 +175,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "eval_eps" : 1,
         "env_builder_args" : video_eval_env_builder_args,
         "num_envs" : 1,
-        "init_on_reset_ratio" : 1.0
+        "init_on_reset_ratio" : 1.0,
+        "skip_first_eval" : False
     }
     # video_norand_eval_env_builder_args = copy.deepcopy(env_builder_args)
     # video_norand_eval_env_builder_args["enable_rendering"] = True
@@ -232,10 +241,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     folderName,
                     run_id,
                     args,
-                    vec_env_builder = centgrasp_vecenv_builder,
+                    vec_env_builder = grasp_vecenv_builder,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
-                    hyperparams = SAC_init_hparams(  model_th_device = "cuda",
+                    hyperparams = SAC_init_hparams( model_th_device = "cuda",
                                                     q_network_arch=[512,128],
                                                     q_lr=0.001,
                                                     policy_lr=0.0003,
@@ -243,7 +252,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     gamma=0.99,
                                                     target_tau = 0.005,
                                                     batch_size=16384,
-                                                    buffer_size=5*1024*1000,
+                                                    buffer_size=10*1024*500,
                                                     total_steps=10_00_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=80,
@@ -254,7 +263,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy_factor = -1.0,
                                                     actor_log_std_init = -2.0,
-                                                    actor_mean_bounds_ratio = 0.9
+                                                    actor_mean_bounds_ratio = 0.9,
+                                                    actor_observation_filter=["base.vec", "base.camera"],
+                                                    critic_observation_filter=["privileged.vec"]
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -263,13 +274,22 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_batch_size=0,
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
-                    debug_level=0)
+                    debug_level=debug_level,
+                    actor_feature_extractor_name="MixedFeatureExtractor",
+                    actor_fe_hparams = MixedFeatureExtractorInitArgs(   device=th.device("cuda"),
+                                                                        vec_encoder_arch="identity",
+                                                                        vec_encoding_size=None,
+                                                                        combiner_arch="identity",
+                                                                        encoding_size=None),
+                    critic_feature_extractor_name="StackVectorsFeatureExtractor",
+                    critic_fe_hparams = StackVectorsFeatureExtractorInitArgs(device=th.device("cuda"))
+                    )
     elif algo.lower() == "sac_small":
         sac_train(  seed,
                     folderName,
                     run_id,
                     args,
-                    vec_env_builder = centgrasp_vecenv_builder,
+                    vec_env_builder = grasp_vecenv_builder,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
                     hyperparams = SAC_init_hparams(  model_th_device = "cuda",
@@ -299,7 +319,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     validation_batch_size=0,
                     validation_holdout_ratio=0,
                     no_wandb=args["no_wandb"],
-                    debug_level=0)                       
+                    debug_level=debug_level)                       
     elif algo.lower() == "ppo":
         from rreal.algorithms.ppo2 import ppo_train, PPO_init_hyperparams
         ppo_train(  seed=seed,
@@ -307,7 +327,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     run_id=run_id,
                     args=args,
                     env_builder=None,
-                    vec_env_builder=centgrasp_vecenv_builder,
+                    vec_env_builder=grasp_vecenv_builder,
                     env_builder_args=env_builder_args,
                     agent_hyperparams=PPO_init_hyperparams(  minibatch_size=train_envs*24//4,
                                                         minibatch_num=4,
@@ -339,7 +359,154 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     checkpoint_freq_vec_ep=10,
                     collector_device=env_device,
                     eval_configurations=eval_configurations,
-                    debug_level=1)
+                    debug_level=debug_level)
+    elif algo.lower() == "asac":
+        from autoencoding_rl.experiments.asac3.asac3_train import LatentExtractorInitArgs, asac3_train
+        le_grad_steps = 100
+        sac_grad_steps = 200
+        pretrain_collection_steps = max_steps_per_episode*train_envs*10
+        pretrain_grad_steps = 10_000
+        model_device=th.device("cuda")
+        
+        asac3_train( allow_tf32=True,
+                    allow_tf32_matmul=False,
+                    expl_bonus_weight = 0.0,
+                    expl_bonus_rnd_nn_arch=[128,128],
+                    expl_bonus_rnd_learning_rate = 0.00001,
+                    expl_bonus_running_avg_rew_alpha = 0.9999,
+                    expl_bonus_running_avgs_alpha = 0.999,
+                    expl_bonuse_enable_rnd = False,
+                    buffer_size = 500*1024*2,
+                    buffer_storage_torch_device="cuda",                            
+                    check_infs_nans=False,
+                    checkpointing_freq_ep=100,
+                    collection_device=env_device,
+                    model_th_device=model_device,
+                    comment = args["comment"],
+                    debug_level=debug_level,
+                    env_builder_args = env_builder_args,
+                    eval_configurations=eval_configurations,                           
+                    eval_le_freq_ep=10,
+                    max_episode_duration=max_steps_per_episode,
+                    min_episode_duration=max_steps_per_episode,
+                    parallel_envs=train_envs,
+                    parallelize_experience_collection=True,
+                    pretrained_model_file=resumeModelFile,
+                    random_vsteps = max_steps_per_episode*5,
+                    run_folder=folderName,
+                    run_id = run_id,
+                    seed=seed,
+                    vec_runner_builder=grasp_vecenv_builder,
+                    le_args=LatentExtractorInitArgs(
+                        always_deterministic=False,
+                        arch_dyn_ensemble_size = 1,
+                        arch_dynamics = [128,128],
+                        arch_enable_dyn_conversion_adapter = False,
+                        arch_enc_ensemble_size = 1,
+                        arch_frame_stack_size=1,
+                        arch_img_dec_ensemble_size = 1,
+                        arch_img_dec_learn_background = True,
+                        arch_img_decoder_backbone = "conv_smaller",
+                        arch_img_encoder_backbone = "conv_smaller",
+                        arch_img_encoding_size = 20,
+                        arch_latent_space_size = 20,
+                        arch_optimizer="adamw",
+                        arch_reward = [128],
+                        arch_reward_ensemble_size=1,
+                        arch_state_combiner = "identity",
+                        arch_state_decombiner = "identity",
+                        arch_type = "dvae4_2",
+                        arch_use_coord_conv=True,
+                        arch_vec_decoder=None,
+                        arch_vec_decoder_activation=("scaledtanh", 10),
+                        arch_vec_decoder_ensemble_size=1,
+                        arch_vec_encoder=None,
+                        arch_vec_encoder_ensemble_size=1,
+                        arch_vec_encoding_size=0,
+                        batch_size = 64,
+                        bestModelThreshold = None,
+                        consistency_target = "self",
+                        decoder_weight_decay_lambda=None,
+                        direct_vec_into_latent = False,
+                        dont_train_prediction_decoder=False,
+                        dont_train_prediction_encoder=False,
+                        dont_train_reconstruction_encoder=False,
+                        fake_encoding_noise_std=0.0,
+                        freeze_decoders=False,
+                        freeze_dynamics=False,
+                        freeze_encoders=False,
+                        grad_steps = le_grad_steps,
+                        internal_enc_dropout = 0.0,
+                        latent_space_activation="identity",
+                        loss_img_error_function="l2",
+                        loss_latent_prediction_discount = 0.99,
+                        loss_obs_prediction_discount    = 0.99,
+                        loss_reward_prediction_discount = 0.99,
+                        loss_weight_cons_latent  = 1.0,
+                        loss_weight_cons_cycle   = 1.0,
+                        loss_weight_cons_src_rec = 0.0,
+                        loss_weight_cons_cycle_dynamics=0.0,
+                        loss_weight_consistency  = 1.0,
+                        loss_weight_img = 1.0,
+                        loss_weight_kld = 0.001,
+                        loss_weight_latent_prediction = 0.0,
+                        loss_weight_obs_prediction = 1.0,
+                        loss_weight_reconstruction = 0.1,
+                        loss_weight_reward = 0.1,
+                        loss_weight_vec = 0.2,
+                        loss_use_log=False,
+                        lr = 0.0005,
+                        lr_factor_decoder = 1.0,
+                        no_resampling_on_dynamics=False,
+                        policy_input_resampling=True,
+                        pretrain_collection_steps = pretrain_collection_steps,
+                        pretrain_grad_steps = pretrain_grad_steps,
+                        reset_decoder=True,
+                        reset_dynamics=False,
+                        reset_encoder=True,
+                        reset_obs_stats=True,
+                        reset_on_retrain = False,
+                        residual_dynamics=True,
+                        retrain_period = -1,
+                        reward_scaling = 10.0,
+                        tau=1.0,
+                        train_period_vstep=100,
+                        train_trajectories_length = 5,
+                        traj_eval_batch_size = 1,
+                        use_log_reward = False,
+                        validation_batch_size = 256,
+                        validation_buffer_size = max_steps_per_episode*10,
+                        validation_ratio=1/train_envs,
+                        validation_set_disable = False,
+                        weight_decay = 1e-6,
+                        rnd_imbalance_estimator_learning_rate = 0.0005,
+                        use_rnd_loss_scaler=True),
+                    sac_init_hparams=SAC_init_hparams(
+                                        alpha_lr_factor=1.0,
+                                        alpha_initial_value=0.001,
+                                        q_network_arch=[64,64],
+                                        q_lr=0.001,
+                                        policy_lr=0.001,
+                                        policy_arch=[64,64],
+                                        auto_entropy_temperature=True,
+                                        constant_entropy_temperature=None,
+                                        gamma=0.97,
+                                        target_tau = 0.005,
+                                        policy_update_freq=2,
+                                        target_update_freq=1,
+                                        actor_log_std_init=1.0,
+                                        model_th_device=model_device,
+                                        buffer_size=2*1024*500,
+                                        total_steps=300_000_000,
+                                        train_freq_vstep=100,
+                                        learning_starts=pretrain_collection_steps,
+                                        grad_steps=sac_grad_steps,
+                                        batch_size=2048,
+                                        parallel_envs=train_envs,
+                                        log_freq_vstep=max_steps_per_episode,
+                                        reference_init_args={},
+                                        target_entropy_factor=-1.0)
+                    )
     else:       
         raise RuntimeError(f"Unknown algorithm '{algo}'")
 

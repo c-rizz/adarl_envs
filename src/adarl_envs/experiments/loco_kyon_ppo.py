@@ -65,7 +65,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "held_joints_stiffness" : 500.0,
         "history_length_action_raw" : 3,
         "history_length_action_smoothed" : 1,
-        "impulse_duration_minmax" : [0.01, 2.5],
+        "impulse_duration_minmax" : [0.1, 2.5],
         "impulse_mean_std" : [20.0,50.0],
         "impulse_probability_per_sec" : 0.1,
         "init_on_reset_ratio" : 0.7,
@@ -97,7 +97,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "randomization_recycle_init_pose" : True,
         "randomized_initial_joint_pose_range" : 0.3,
-        "randomized_homing_body_position_minmax_xyz" : ((0,0,0.47),(0,0,0.47)),# ((-6, -18, 0.45), (102, 18, 0.55)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
+        "randomized_homing_body_position_minmax_xyz" : ((-6, -18,0.493),(102, 18,0.493)) , #((-6, -18, 0.48), (102, 18, 0.50)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_dof_armature_ratios" :       ("uniform", [0.9*r,1.1*r]),
         "randomized_dof_damping_ratios":         ("uniform", [0.9*r,1.1*r]),
@@ -263,47 +263,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     #     "env_builder_args" : video_feasible_jump_env_builder_args,
     #     "num_envs" : 1
     # }
-
-    gamma_long = 0.99
-    gamma_short = 0.95
-    if env_builder_args["split_rewards"]:
-        gammas = {
-            "acceleration" :        gamma_long,
-            "acc_on_vel" :          gamma_short,
-            "actacc" :              gamma_short,
-            "actdiff" :             gamma_short,
-            "contacts" :            gamma_long,
-            "failure" :             gamma_long,
-            "feet_air_time" :       gamma_long,
-            "feet_ground_time" :    gamma_long,
-            "feet_on_ground" :      gamma_long,
-            "heading" :             gamma_long,
-            "heading_velocity" :    gamma_long,
-            "health" :              gamma_long,
-            "height_position" :     gamma_long,
-            "height_velocity" :     gamma_long,
-            "pitchnroll" :          gamma_long,
-            "pitchnroll_velocity" : gamma_long,
-            "position" :            gamma_long,
-            "position_limit" :      gamma_long,
-            "posref_vel" :          gamma_short,
-            "posref_acc" :          gamma_short,
-            "power" :               gamma_short,
-            "sensed_effort" :       gamma_long,
-            "slip" :                gamma_long,
-            "stand_position" :      gamma_long,
-            "torque" :              gamma_long,
-            "torque_limit" :        gamma_long,
-            "torque_refs" :         gamma_short,
-            "torquediff" :          gamma_short,
-            "tracking" :            gamma_long,
-            "velocity" :            gamma_long,
-            "velocity_refs" :       gamma_short,
-            "velocity_limit" :      gamma_long,
-            "yaw_vel_tracking" :    gamma_long
-        }
-    else:
-        gammas = gamma_long
     
     eval_configurations = [  
                             # video_stoch_highpen,
@@ -315,108 +274,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                             # #  eval_conf_video_jump_feasible
                         ]
     
-    annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
-                                     start_target=-0.5,
-                                     end_target=-5.0,
-                                     start_reference_threshold=0.4,
-                                     end_reference_threshold=0.05)
-    
-    def transition_augmentor_builder(observation_space, action_space, reward_space):
-        return TransitionAugmentor(reward_space=reward_space,
-                                   reward_weights_distr=("uniform", (0.01, 1.0)),
-                                   augmented_samples=4096).augment_transition
-
-
     if algo.lower() == "sac":
         raise NotImplementedError()
-        # sac_train(  seed,
-        #             folderName,
-        #             run_id,
-        #             args,
-        #             vec_env_builder = named_loco_venv_builder,
-        #             env_builder_args = env_builder_args,
-        #             eval_configurations = eval_configurations,
-        #             hyperparams = SAC_init_hparams( model_th_device = "cuda",
-        #                                             q_network_arch=[1024,512],
-        #                                             q_lr=0.0005,
-        #                                             policy_lr=0.0005,
-        #                                             policy_arch=[512,256],
-        #                                             gamma=gammas,
-        #                                             target_tau = 0.001,
-        #                                             batch_size=4096,
-        #                                             buffer_size=(5*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
-        #                                             total_steps=5_000_000_000,
-        #                                             train_freq_vstep=5,
-        #                                             grad_steps=50,
-        #                                             learning_starts=max_steps_per_episode*max(train_envs*1, 100),
-        #                                             parallel_envs=train_envs,
-        #                                             log_freq_vstep=max_steps_per_episode,
-        #                                             reference_init_args =   {   "env_builder_args" : env_builder_args,
-        #                                                                         "eval_configuration" : eval_configurations},
-        #                                             target_entropy_factor = None,
-        #                                             actor_log_std_init = -2.0,
-        #                                             actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
-        #                                             critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
-        #                                             target_entropy_factor_annealing=annealer.anneal,
-        #                                             action_reference_obs_key="base.last_action_raw",
-        #                                             actor_weight_decay=1e-5,
-        #                                             critic_weight_decay=0.0,
-        #                                             policy_update_freq=2,
-        #                                             deterministic_collection_ratio=0.00,
-        #                                             actor_mean_bounds_ratio = 0.8,
-        #                                             alpha_lr_factor = 1.0,
-        #                                             independent_entropy_q=True
-        #                                             ),
-        #             checkpoint_freq=20,
-        #             collector_device=env_device,
-        #             buffer_device=None,
-        #             max_episode_duration=max_steps_per_episode,
-        #             validation_buffer_size=0,
-        #             validation_batch_size=0,
-        #             validation_holdout_ratio=0,
-        #             no_wandb=args["no_wandb"],
-        #             debug_level=2,
-        #             log_weights_and_grads=False,
-        #             transition_augmentor_builder=transition_augmentor_builder)
     elif algo.lower() == "sac_small":
         raise NotImplementedError()
-        # sac_train(  seed,
-        #             folderName,
-        #             run_id,
-        #             args,
-        #             vec_env_builder = named_loco_venv_builder,
-        #             env_builder_args = env_builder_args,
-        #             eval_configurations = eval_configurations,
-        #             hyperparams = SAC_init_hparams( model_th_device = "cuda",
-        #                                             q_network_arch=[256,128],
-        #                                             q_lr=0.001,
-        #                                             policy_lr=0.0003,
-        #                                             policy_arch=[128,128],
-        #                                             gamma=gammas,
-        #                                             target_tau = 0.005,
-        #                                             batch_size=512,
-        #                                             buffer_size=100_000,
-        #                                             total_steps=300_000_000,
-        #                                             train_freq_vstep=10,
-        #                                             grad_steps=40,
-        #                                             learning_starts=max_steps_per_episode*max(train_envs*1, 50),
-        #                                             parallel_envs=train_envs,
-        #                                             log_freq_vstep=max_steps_per_episode,
-        #                                             reference_init_args =   {   "env_builder_args" : env_builder_args,
-        #                                                                         "eval_configuration" : eval_configurations},
-        #                                             target_entropy_factor = -0.5,
-        #                                             actor_log_std_init = -3.0,
-        #                                             actor_observation_filter=["base.vec"],
-        #                                             critic_observation_filter=["base.vec","privileged.vec"]
-        #                                             ),
-        #             checkpoint_freq=5,
-        #             collector_device=env_device,
-        #             max_episode_duration=max_steps_per_episode,
-        #             validation_buffer_size=0,
-        #             validation_batch_size=0,
-        #             validation_holdout_ratio=0,
-        #             no_wandb=args["no_wandb"],
-        #             debug_level=2)                           
     elif algo.lower() == "ppo" or algo.lower() == "ppo_small":
         from rreal.algorithms.ppo2 import ppo_train, PPO_init_hyperparams
         ppo_train(  seed=seed,
@@ -457,7 +318,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 checkpoint_freq_vec_ep=10,
                 collector_device=env_device,
                 eval_configurations=eval_configurations,
-                debug_level=2)
+                debug_level=1)
     else:
         raise RuntimeError(f"Unknown algorithm '{algo}'")
 

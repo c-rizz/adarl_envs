@@ -86,6 +86,8 @@ def runner_builder(seed,
                                             reference_filter_cutoff_frequency=20.0,
                                             reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none",
                                             mjx_impl="warp",
+                                            render_backend="warp",
+                                            render_znear=0.1,
                                             warp_nccdmax=env_builder_args.pop("mjx_warp_nccdmax", 10),
                                             warp_nconmax=env_builder_args.pop("mjx_warp_nconmax", 20))
     elif mode == "mujoco":
@@ -230,7 +232,9 @@ def runner_builder(seed,
                                                     extrinsics_only_privileged=env_builder_args.pop("extrinsics_only_privileged"),
                                                     posref_err_history_length=env_builder_args.pop("posref_err_history_length"),
                                                     observe_actor_safety_state=env_builder_args.pop("observe_actor_safety_state"),
-                                                    observe_linvel_nonprivileged=env_builder_args.pop("observe_linvel_nonprivileged",False)),
+                                                    observe_linvel_nonprivileged=env_builder_args.pop("observe_linvel_nonprivileged",False),
+                                                    world_description_format="predefined",
+                                                    world_description_string="flat_ground"),
                                                 reward_gripper_pose_weight = env_builder_args.pop("reward_gripper_pose_weight"),
                                                 reward_health_weight = env_builder_args.pop("reward_health_weight"),
                                                 reward_joint_actacc_weight = env_builder_args.pop("reward_joint_actacc_weight"),
@@ -250,7 +254,9 @@ def runner_builder(seed,
                                                 neutral_body_height=env_builder_args.pop("neutral_body_height"),
                                                 target_object_link=env_builder_args.pop("target_object_link"),
                                                 manipulator_tip_links=env_builder_args.pop("gripper_links"),
+                                                observe_camera=env_builder_args.pop("observe_camera"),
                                                 observe_object_pose=env_builder_args.pop("observe_object_pose"),
+                                                observe_initial_object_pose=env_builder_args.pop("observe_initial_object_pose"),
                                                 manipulator_all_links=env_builder_args.pop("manipulator_links"),
                                                 gripper_link_transforms=env_builder_args.pop("gripper_link_transforms"),
                                                 table_height=env_builder_args.pop("table_height"),
@@ -677,7 +683,9 @@ def get_kyon_args(robot_options : dict = {}):
                                 "add_fixed_base_joint" : bool_to_xacro[not spawn_legs],
                                 "fixed_base_x" : -0.2,
                                 "fixed_base_y" : 0.0,
-                                "fixed_base_z" : 0.45},
+                                "fixed_base_z" : 0.45,
+                                # "visual_mesh_subfolder":""
+                                },
             "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf")},
             "homing_joint_position" : homing,
             "homing_joint_position_references" : homing_ref,
@@ -725,7 +733,7 @@ def get_kyon_args(robot_options : dict = {}):
                                          (-0.107, 0.0,    -0.0362125, 0.0, 0.0, 0.0, 1.0)],
             "held_joints_damping" :   {"default": 500.0},
             "held_joints_stiffness" : {"default": 500.0},
-            "table_height" : ("uniform", (0.0, 0.5))
+            "table_height" : ("uniform", (0.0, 0.1))
         }
 
 robot_args_registry["kyon"]       = get_kyon_args
@@ -791,5 +799,5 @@ def runner_builder_to_singleenv(runner_builder: VecEnvRunnerBuilderProtocol) -> 
         return Runner2GymWrapper(runner=vrunner, quiet=quiet), 1/stepLength_sec
     return builder
 
-centgrasp_vecenv_builder = runner_builder_to_vecenv(runner_builder)
+grasp_vecenv_builder = runner_builder_to_vecenv(runner_builder)
 centgrasp_singleenv_builder = runner_builder_to_singleenv(runner_builder)

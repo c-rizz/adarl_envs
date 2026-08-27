@@ -19,7 +19,7 @@ import numpy as np
 import torch as th
 import math
 import quaternion
-from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionDefTh, DistributionDef, RobotVecEnvInitArgs
+from adarl_envs.env.RobotVecEnv import RobotVecEnv, JOINT_FILTERS, DistributionDefTh, DistributionDef, RobotVecEnvInitArgs, RobotAdapterData
 from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import adarl.utils.tensor_trees
 import traceback
@@ -97,6 +97,18 @@ class GrapVecEnvInitArgs():
     If ``None``, an identity transform is used for every gripper link.
     """
     
+
+@dataclass
+class GraspAdapterData:
+    """Raw per-step data read from the adapter by GraspVecEnv, wrapping the RobotVecEnv data."""
+    robot_data : RobotAdapterData
+    current_object_pose : th.Tensor
+    current_gripper_poses : th.Tensor
+    current_object_linvel_angvel : th.Tensor
+    current_gripper_linvel_angvel : th.Tensor
+    current_feetbottom_linvel_angvel : th.Tensor
+    feet_touching_ground : th.Tensor
+    obs_camera_image : th.Tensor | None
 
 class GraspVecEnv(RobotVecEnv):
     STATE_GRASPING = "grasp"
@@ -473,23 +485,25 @@ class GraspVecEnv(RobotVecEnv):
         else:
             obs_camera_image = None
 
-        grasp_adapter_data = (current_object_pose, 
-                              current_gripper_poses, 
-                              current_object_linvel_angvel, 
-                              current_gripper_linvel_angvel, 
-                              current_feetbottom_linvel_angvel, 
-                              feet_touching_ground, 
-                              obs_camera_image)
-        return super_adapter_data, grasp_adapter_data
+        return GraspAdapterData(robot_data = super_adapter_data,
+                                current_object_pose = current_object_pose,
+                                current_gripper_poses = current_gripper_poses,
+                                current_object_linvel_angvel = current_object_linvel_angvel,
+                                current_gripper_linvel_angvel = current_gripper_linvel_angvel,
+                                current_feetbottom_linvel_angvel = current_feetbottom_linvel_angvel,
+                                feet_touching_ground = feet_touching_ground,
+                                obs_camera_image = obs_camera_image)
 
     @override
     def _get_new_instantaneous_state(self, adapter_data):
-        super_adapter_data, (current_object_pose, current_gripper_poses, 
-                             current_object_linvel_angvel, 
-                             current_gripper_linvel_angvel, 
-                             current_feetbottom_linvel_angvel, 
-                             feet_touching_ground, 
-                             obs_camera_image) = adapter_data
+        super_adapter_data                = adapter_data.robot_data
+        current_object_pose               = adapter_data.current_object_pose
+        current_gripper_poses             = adapter_data.current_gripper_poses
+        current_object_linvel_angvel      = adapter_data.current_object_linvel_angvel
+        current_gripper_linvel_angvel     = adapter_data.current_gripper_linvel_angvel
+        current_feetbottom_linvel_angvel  = adapter_data.current_feetbottom_linvel_angvel
+        feet_touching_ground              = adapter_data.feet_touching_ground
+        obs_camera_image                  = adapter_data.obs_camera_image
         new_inst_state = super()._get_new_instantaneous_state(super_adapter_data)
 
         # Apply the per-link transforms (expressed in each gripper link frame) before
@@ -518,15 +532,17 @@ class GraspVecEnv(RobotVecEnv):
         gripper_linvel = transformed_link_linvel.mean(dim=1)
         gripper_angvel = link_angvel.mean(dim=1)
 
-        current_object_pose[:,2].clamp_(min=0.0) # if it falls off the table dont let it go negative into the abyss
+        current_object_pose = current_object_pose.clamp(min=self._thtens([float('-inf'), float('-inf'), 0.0, 
+                                                                          float('-inf'), float('-inf'), float('-inf'), float('-inf')]))
+
         # ggLog.info(f"current_object_pose = {current_object_pose}")
         # ggLog.info(f"current_gripper_pose = {current_gripper_pose}")
         # Express the object/goal/gripper poses in the robot's body reference frame (the same frame
         # used for the extrinsic body-relative quantities), so they are seen relative to the robot:
         # the position is rotated into the body frame and the orientation is made relative to it.
-        # vec_bodystates_13 (body pose+vel) is the second-to-last entry of the base adapter data.
+        # vec_bodystates_13 (body pose+vel) comes from the base RobotVecEnv adapter data.
         # The same rigid transform is applied to all three, so the reward distances are unchanged.
-        body_state_13 = super_adapter_data[10]
+        body_state_13 = super_adapter_data.vec_bodystates_13
         body_pos = body_state_13[:, :3]
         conj_body_quat = th_quat_conj(body_state_13[:, 3:7])
         def _pose_to_body_frame(pose_v7):
@@ -761,13 +777,13 @@ class GraspVecEnv(RobotVecEnv):
 
 
 
-    def _update_stats(self):
-        super()._update_stats()
-        step_counts = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT,0].to(th.long)
+    def _update_stats(self, state):
+        super()._update_stats(state)
+        step_counts = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT,0].to(th.long)
         starting_eps = step_counts==0
         self._stats["ep_obj_travel"] = self._thzeros((self._configuration.vec_size,))
-        obj_pose  = self._current_state[self.STATE_GRASPING][:,0,self.GRASPING_POSES.OBJECT_POSE]
-        prev_obj_pose  = self._current_state[self.STATE_GRASPING][:,1,self.GRASPING_POSES.OBJECT_POSE]
+        obj_pose  =      state[self.STATE_GRASPING][:,0,self.GRASPING_POSES.OBJECT_POSE]
+        prev_obj_pose  = state[self.STATE_GRASPING][:,1,self.GRASPING_POSES.OBJECT_POSE]
         obj_travel = th.linalg.norm(obj_pose[:,:3]-prev_obj_pose[:,:3], dim = -1)
         self._stats["ep_obj_travel"]             = (self._stats["ep_obj_travel"] + obj_travel) # Elements with step_count == 0 will be inf
         masked_assign(self._stats["ep_obj_travel"],         starting_eps, obj_travel)

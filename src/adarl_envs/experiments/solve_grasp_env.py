@@ -8,17 +8,19 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams
     from rreal.feature_extractors.mixed_feature_extractor import MixedFeatureExtractorInitArgs
     from rreal.feature_extractors.stack_vectors_feature_extractor import StackVectorsFeatureExtractorInitArgs
-    from adarl_envs.experiments.grasp_builder import grasp_vecenv_builder
+    from adarl_envs.experiments.grasp_builder import grasp_vecenv_builder, runner_builder
     import os
     import math
 
     debug_level = 1
     mode = args["mode"].lower()
     step_length_sec = 40/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
+        train_envs = 4096
+    elif algo == "asac":
         train_envs = 4096
     elif algo == "sac_small":
         train_envs = 8
@@ -244,29 +246,29 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     vec_env_builder = grasp_vecenv_builder,
                     env_builder_args = env_builder_args,
                     eval_configurations = eval_configurations,
-                    hyperparams = SAC_init_hparams( model_th_device = "cuda",
-                                                    q_network_arch=[512,128],
-                                                    q_lr=0.001,
-                                                    policy_lr=0.0003,
-                                                    policy_arch=[256,256],
-                                                    gamma=0.99,
-                                                    target_tau = 0.005,
-                                                    batch_size=16384,
-                                                    buffer_size=10*1024*500,
-                                                    total_steps=10_00_000_000,
-                                                    train_freq_vstep=5,
-                                                    grad_steps=80,
-                                                    learning_starts=max_steps_per_episode*max(train_envs*1, 100),
-                                                    parallel_envs=train_envs,
-                                                    log_freq_vstep=max_steps_per_episode,
-                                                    reference_init_args =   {   "env_builder_args" : env_builder_args,
-                                                                                "eval_configuration" : eval_configurations},
-                                                    target_entropy_factor = -1.0,
-                                                    actor_log_std_init = -2.0,
-                                                    actor_mean_bounds_ratio = 0.9,
-                                                    actor_observation_filter=["base.vec", "base.camera"],
-                                                    critic_observation_filter=["privileged.vec"]
-                                                    ),
+                    hyperparams = SAC_init_hparams( 
+                        actor_log_std_init = -2.0,
+                        actor_mean_bounds_ratio = 0.9,
+                        actor_observation_filter=["base.vec", "base.camera"],
+                        batch_size=16384,
+                        buffer_size=10*1024*500,
+                        critic_observation_filter=["privileged.vec"],
+                        gamma=0.99,
+                        grad_steps=80,
+                        learning_starts=max_steps_per_episode*max(train_envs*1, 100),
+                        log_freq_vstep=max_steps_per_episode,
+                        model_th_device = "cuda",
+                        parallel_envs=train_envs,
+                        policy_arch=[256,256],
+                        policy_lr=0.0003,
+                        q_lr=0.001,
+                        q_network_arch=[512,128],
+                        reference_init_args =   {   "env_builder_args" : env_builder_args,"eval_configuration" : eval_configurations},
+                        target_entropy_factor = -1.0,
+                        target_tau = 0.005,
+                        total_steps=300_000_000,
+                        train_freq_vstep=5
+                        ),
                     checkpoint_freq=5,
                     collector_device=env_device,
                     max_episode_duration=max_steps_per_episode,
@@ -363,7 +365,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     elif algo.lower() == "asac":
         from autoencoding_rl.experiments.asac3.asac3_train import LatentExtractorInitArgs, asac3_train
         le_grad_steps = 100
-        sac_grad_steps = 200
+        sac_grad_steps = 80
         pretrain_collection_steps = max_steps_per_episode*train_envs*10
         pretrain_grad_steps = 10_000
         model_device=th.device("cuda")
@@ -376,7 +378,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     expl_bonus_running_avg_rew_alpha = 0.9999,
                     expl_bonus_running_avgs_alpha = 0.999,
                     expl_bonuse_enable_rnd = False,
-                    buffer_size = 500*1024*2,
                     buffer_storage_torch_device="cuda",                            
                     check_infs_nans=False,
                     checkpointing_freq_ep=100,
@@ -396,11 +397,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     run_folder=folderName,
                     run_id = run_id,
                     seed=seed,
-                    vec_runner_builder=grasp_vecenv_builder,
+                    vec_runner_builder=runner_builder,
                     le_args=LatentExtractorInitArgs(
                         always_deterministic=False,
                         arch_dyn_ensemble_size = 1,
-                        arch_dynamics = [128,128],
+                        arch_dynamics = [256,256],
                         arch_enable_dyn_conversion_adapter = False,
                         arch_enc_ensemble_size = 1,
                         arch_frame_stack_size=1,
@@ -408,8 +409,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         arch_img_dec_learn_background = True,
                         arch_img_decoder_backbone = "conv_smaller",
                         arch_img_encoder_backbone = "conv_smaller",
-                        arch_img_encoding_size = 20,
-                        arch_latent_space_size = 20,
+                        arch_img_encoding_size = 20 if obs_cam else 0,
+                        arch_latent_space_size = 160,
                         arch_optimizer="adamw",
                         arch_reward = [128],
                         arch_reward_ensemble_size=1,
@@ -417,13 +418,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         arch_state_decombiner = "identity",
                         arch_type = "dvae4_2",
                         arch_use_coord_conv=True,
-                        arch_vec_decoder=None,
-                        arch_vec_decoder_activation=("scaledtanh", 10),
+                        arch_vec_decoder=[256,256],
+                        arch_vec_decoder_activation="identity",
                         arch_vec_decoder_ensemble_size=1,
-                        arch_vec_encoder=None,
+                        arch_vec_encoder="identity",
                         arch_vec_encoder_ensemble_size=1,
-                        arch_vec_encoding_size=0,
-                        batch_size = 64,
+                        arch_vec_encoding_size=160,
+                        batch_size = 128,
                         bestModelThreshold = None,
                         consistency_target = "self",
                         decoder_weight_decay_lambda=None,
@@ -446,12 +447,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         loss_weight_cons_cycle   = 1.0,
                         loss_weight_cons_src_rec = 0.0,
                         loss_weight_cons_cycle_dynamics=0.0,
-                        loss_weight_consistency  = 1.0,
+                        loss_weight_consistency  = 0.0,
                         loss_weight_img = 1.0,
-                        loss_weight_kld = 0.001,
+                        loss_weight_kld = 0.0,
                         loss_weight_latent_prediction = 0.0,
                         loss_weight_obs_prediction = 1.0,
-                        loss_weight_reconstruction = 0.1,
+                        loss_weight_reconstruction = 1.0,
                         loss_weight_reward = 0.1,
                         loss_weight_vec = 0.2,
                         loss_use_log=False,
@@ -476,36 +477,41 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         use_log_reward = False,
                         validation_batch_size = 256,
                         validation_buffer_size = max_steps_per_episode*10,
-                        validation_ratio=1/train_envs,
+                        validation_ratio=0.02,
                         validation_set_disable = False,
                         weight_decay = 1e-6,
                         rnd_imbalance_estimator_learning_rate = 0.0005,
-                        use_rnd_loss_scaler=True),
+                        use_rnd_loss_scaler=False,
+                        latent_passthrough_keys = ("base.vec",),
+                        passthrough_in_encoder = False),
                     sac_init_hparams=SAC_init_hparams(
-                                        alpha_lr_factor=1.0,
+                                        actor_log_std_init=-2.0,
+                                        actor_mean_bounds_ratio = 0.9,
+                                        actor_observation_filter=["privileged.vec","base.vec"],
                                         alpha_initial_value=0.001,
-                                        q_network_arch=[64,64],
-                                        q_lr=0.001,
-                                        policy_lr=0.001,
-                                        policy_arch=[64,64],
+                                        alpha_lr_factor=1.0,
                                         auto_entropy_temperature=True,
-                                        constant_entropy_temperature=None,
-                                        gamma=0.97,
-                                        target_tau = 0.005,
-                                        policy_update_freq=2,
-                                        target_update_freq=1,
-                                        actor_log_std_init=1.0,
-                                        model_th_device=model_device,
-                                        buffer_size=2*1024*500,
-                                        total_steps=300_000_000,
-                                        train_freq_vstep=100,
-                                        learning_starts=pretrain_collection_steps,
+                                        batch_size=16384,
+                                        buffer_size=10*1024*500,
+                                        critic_observation_filter=["privileged.vec","base.vec"],
+                                        gamma=0.99,
                                         grad_steps=sac_grad_steps,
-                                        batch_size=2048,
-                                        parallel_envs=train_envs,
+                                        learning_starts=pretrain_collection_steps,
                                         log_freq_vstep=max_steps_per_episode,
-                                        reference_init_args={},
-                                        target_entropy_factor=-1.0)
+                                        model_th_device=model_device,
+                                        parallel_envs=train_envs,
+                                        policy_arch=[256,256],
+                                        policy_lr=0.001,
+                                        policy_update_freq=2,
+                                        q_lr=0.001,
+                                        q_network_arch=[512,128],
+                                        reference_init_args =   {   "env_builder_args" : env_builder_args,"eval_configuration" : eval_configurations},
+                                        target_entropy_factor=-1.0,
+                                        target_tau = 0.005,
+                                        target_update_freq=1,
+                                        total_steps=300_000_000,
+                                        train_freq_vstep=5,
+                                        )
                     )
     else:       
         raise RuntimeError(f"Unknown algorithm '{algo}'")

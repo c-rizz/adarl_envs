@@ -164,6 +164,22 @@ class RobotVecEnvInitArgs():
     the body height is set above the highest terrain within this radius of the sampled (x, y), so the
     legs (which reach out from the body) clear higher nearby steps instead of penetrating them."""
 
+@dataclass
+class RobotAdapterData:
+    """Raw per-step data read from the simulation adapter by RobotVecEnv."""
+    vec_stats_minmaxavgstd_j_pvaeep : th.Tensor
+    vec_jstates_j_pveae : th.Tensor
+    vec_body_abs_linvel_xyz : th.Tensor # only used for visualization, can be wrong
+    vec_body_abs_angvel_xyz : th.Tensor
+    vec_body_ground_dist : th.Tensor
+    vec_body_rel_gravity_dir : th.Tensor
+    vec_body_rel_linvel_xyz : th.Tensor
+    vec_body_rel_angvel_xyz : th.Tensor
+    vec_body_rel_linacc_xyz : th.Tensor
+    vec_time_from_start : th.Tensor
+    vec_bodystates_13 : th.Tensor | None
+    vec_held_jstates_j_pveae : th.Tensor
+
 class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     @dataclass
@@ -632,6 +648,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         example_labels : dict[str,th.Tensor] = {}
         example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels)
+        ggLog.info(f"Single observation space labels: {get_space_labels(self.single_observation_space)}")
         self.set_seeds(thtens(init_args.seed))
         ggLog.info(f"Starting up adapter....")
         self._adapter.startup()
@@ -1470,7 +1487,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._reinit_state(vec_mask=vec_mask, adapter_data=adapter_data)
         record_time("RobotVecEnv.initialize_episodes: reinitialized state")
 
-        self._update_stats()
+        self._update_stats(self._current_state)
         record_time("RobotVecEnv.initialize_episodes: updated stats")
 
         self._last_obs = self._state_helper.observe(self._current_state)
@@ -1967,18 +1984,24 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         except Exception as e:
             ggLog.warn(f"Exception getting ui image: {adarl.utils.utils.exc_to_str(e)}")
             return [], th.empty((0,))
+
+    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
+    def _get_observations_opt(self, state) -> dict[Any, th.Tensor]:
+        record_region_start("RobotVecEnv.get_observations")
+        obs = self._state_helper.observe(state)
+        record_time("RobotVecEnv.get_observations observe done")
+        if self._configuration.init_args.enable_dbg_checks:
+            if isinstance(self._adapter, BaseVecSimulationAdapter):
+                dbg_check_finite(obs, async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
+            else:
+                dbg_check_finite(obs["base.vec"], async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
+        record_region_end("RobotVecEnv.get_observations")
+        return obs
     
     @override
     def get_observations(self, state) -> dict[Any, th.Tensor]:
         record_region_start("RobotVecEnv.get_observations")
-        self._last_obs = self._state_helper.observe(state)
-        record_time("RobotVecEnv.get_observations observe done")
-        if self._configuration.init_args.enable_dbg_checks:
-            if isinstance(self._adapter, BaseVecSimulationAdapter):
-                dbg_check_finite(state, async_assert=True, assert_msg="Nonfinite state detected in RobotVecEnv")
-                dbg_check_finite(self._last_obs, async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
-            else:
-                dbg_check_finite(self._last_obs["base.vec"], async_assert=True, assert_msg="Nonfinite observation detected in RobotVecEnv")
+        self._last_obs = self._get_observations_opt(state) # avoid setting the global state from inside compile, this way we can copy the output of the graph
         record_region_end("RobotVecEnv.get_observations")
         return self._last_obs
 
@@ -2038,18 +2061,20 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         record_region_start("RobotVecEnv.post_step")
         adapter_data = self._get_adapter_data()
         record_time("RobotVecEnv.post_step get_adapter_data done")
-        self._post_step_optimized(adapter_data)
-        self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # just here out of caution (on 20/11/2025 it was still necessary, maybe...)
+        self._current_state = self._get_new_state_and_stats(adapter_data)
+        # self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # just here out of caution (on 20/11/2025 it was still necessary, maybe...)
         record_region_end("RobotVecEnv.post_step")
 
 
-    # @th.compile(mode="max-autotune", disable=disable_compile) # this seems to cause issues with the rolling buffer used in states with history
-    def _post_step_optimized(self, adapter_data):
-        record_region_start("RobotVecEnv._post_step_optimized")
-        self._update_state(adapter_data)
-        record_time("RobotVecEnv._post_step_optimized: update_state done")
-        self._update_stats()
-        record_region_end("RobotVecEnv._post_step_optimized")
+    # @adarl.utils.utils.th_compile_ext(copy_outs=True, disable=disable_compile, mode="max-autotune",fullgraph=True) # this seems to cause issues with the rolling buffer used in states with history
+    def _get_new_state_and_stats(self, adapter_data):
+        record_region_start("RobotVecEnv._update_state_and_stats")
+        new_state = self._update_state(adapter_data)
+        dbg_check_finite(new_state, async_assert=True, assert_msg="Nonfinite state detected in RobotVecEnv")
+        record_time("RobotVecEnv._update_state_and_stats: update_state done")
+        self._update_stats(new_state)
+        record_region_end("RobotVecEnv._update_state_and_stats")
+        return new_state
 
     # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
     def _compute_extr_from_bodystate(self, body_abs_linvel_xyz_vec, body_abs_angvel_xyz_vec, body_abs_quat_xyzw_vec):
@@ -2092,18 +2117,19 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_time_from_start = self._adapter.getEnvTimeFromStartup() - self._eps_start_stime
 
         record_region_end("RobotVecEnv._get_adapter_data_raw_mjx")
-        return (vec_stats_minmaxavgstd_j_pvaeep,
-                vec_jstates_j_pveae,
-                vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
-                vec_body_abs_angvel_xyz,
-                vec_body_ground_dist,
-                vec_body_rel_gravity_dir,
-                vec_body_rel_linvel_xyz,
-                vec_body_rel_angvel_xyz,
-                vec_body_rel_linacc_xyz,
-                vec_time_from_start,
-                vec_bodystates_13,
-                vec_held_jstates_j_pveae)
+        return RobotAdapterData(
+                vec_stats_minmaxavgstd_j_pvaeep = vec_stats_minmaxavgstd_j_pvaeep,
+                vec_jstates_j_pveae = vec_jstates_j_pveae,
+                vec_body_abs_linvel_xyz = vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
+                vec_body_abs_angvel_xyz = vec_body_abs_angvel_xyz,
+                vec_body_ground_dist = vec_body_ground_dist,
+                vec_body_rel_gravity_dir = vec_body_rel_gravity_dir,
+                vec_body_rel_linvel_xyz = vec_body_rel_linvel_xyz,
+                vec_body_rel_angvel_xyz = vec_body_rel_angvel_xyz,
+                vec_body_rel_linacc_xyz = vec_body_rel_linacc_xyz,
+                vec_time_from_start = vec_time_from_start,
+                vec_bodystates_13 = vec_bodystates_13,
+                vec_held_jstates_j_pveae = vec_held_jstates_j_pveae)
 
     def _get_adapter_data_raw(self):
         if isinstance_noimport(self._adapter, "MjxAdapter"):
@@ -2183,18 +2209,19 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
         record_region_end("RobotVecEnv._get_adapter_data_raw")
         # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} others={t3_1-t3:.6f} tot = {t3_1-t0:.6f}s")
-        return (vec_stats_minmaxavgstd_j_pvaeep,
-                vec_jstates_j_pveae,
-                vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
-                vec_body_abs_angvel_xyz,
-                vec_body_ground_dist,
-                vec_body_rel_gravity_dir,
-                vec_body_rel_linvel_xyz,
-                vec_body_rel_angvel_xyz,
-                vec_body_rel_linacc_xyz,
-                vec_time_from_start,
-                vec_bodystates_13,
-                vec_held_jstates_j_pveae)
+        return RobotAdapterData(
+                vec_stats_minmaxavgstd_j_pvaeep = vec_stats_minmaxavgstd_j_pvaeep,
+                vec_jstates_j_pveae = vec_jstates_j_pveae,
+                vec_body_abs_linvel_xyz = vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
+                vec_body_abs_angvel_xyz = vec_body_abs_angvel_xyz,
+                vec_body_ground_dist = vec_body_ground_dist,
+                vec_body_rel_gravity_dir = vec_body_rel_gravity_dir,
+                vec_body_rel_linvel_xyz = vec_body_rel_linvel_xyz,
+                vec_body_rel_angvel_xyz = vec_body_rel_angvel_xyz,
+                vec_body_rel_linacc_xyz = vec_body_rel_linacc_xyz,
+                vec_time_from_start = vec_time_from_start,
+                vec_bodystates_13 = vec_bodystates_13,
+                vec_held_jstates_j_pveae = vec_held_jstates_j_pveae)
 
 
     def _get_adapter_data(self):
@@ -2205,89 +2232,32 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._obs2act_timings.mark_start()
         return r
 
-    def _get_new_instantaneous_state(self, adapter_data) -> dict[str, dict[Any, th.Tensor] | th.Tensor]:        
-        
-        (   vec_stats_minmaxavgstd_j_pvaeep,
-            vec_jstates_j_pveae,
-            vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
-            vec_body_abs_angvel_xyz,
-            vec_body_ground_dist,
-            vec_body_rel_gravity_dir,
-            vec_body_rel_linvel_xyz,
-            vec_body_rel_angvel_xyz,
-            vec_body_rel_linacc_xyz,
-            vec_time_from_start,
-            vec_bodystates_13,
-            vec_held_jstates_j_pveae) = adapter_data
-        prev_vec_joint_posrefs       = self._current_state[self.STATE_ROBOT][:,0,:,5]
-        vec_step_count               = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT]
-        prev_lims_safety_triggered   = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED].view((self.num_envs,)) > 0
-        prev_posref_safety_triggered = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED].view((self.num_envs,)) > 0
-        prev_posref_safety_violation_count = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_VIOLATION_COUNT].view((self.num_envs,))
-        prev_vec_time_from_start     = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]
-
-        new_inst_state = self._build_new_instantaneous_state_vec(
-                                    vec_step_count=vec_step_count,
-                                    prev_vec_joint_posrefs = prev_vec_joint_posrefs,
-                                    prev_lims_safety_triggered=prev_lims_safety_triggered,
-                                    prev_posref_safety_triggered=prev_posref_safety_triggered,
-                                    prev_posref_safety_violation_count=prev_posref_safety_violation_count,
-                                    prev_vec_time_from_start=prev_vec_time_from_start,
-                                    vec_stats_minmaxavgstd_j_pvaeep = vec_stats_minmaxavgstd_j_pvaeep,
-                                    vec_jstates_j_pveae = vec_jstates_j_pveae,
-                                    vec_held_jstates_j_pveae = vec_held_jstates_j_pveae,
-                                    vec_last_sent_refs_j_pvesd = self._last_sent_v_j_pvesd,
-                                    vec_last_sent_refs_held_j_pvesd = self._homing_held_joints_vec_pvesd,
-                                    vec_body_abs_linvel_xyz = vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
-                                    vec_body_abs_angvel_xyz = vec_body_abs_angvel_xyz,
-                                    vec_body_ground_dist = vec_body_ground_dist,
-                                    vec_body_rel_gravity_dir = vec_body_rel_gravity_dir,
-                                    vec_body_rel_linvel_xyz = vec_body_rel_linvel_xyz,
-                                    vec_body_rel_angvel_xyz = vec_body_rel_angvel_xyz,
-                                    vec_body_rel_linacc_xyz = vec_body_rel_linacc_xyz,
-                                    vec_time_from_start=vec_time_from_start)
-        # ggLog.info(f"insta_state sizes = "+str(map_tensor_tree(new_inst_state,lambda t: t.size())))
-        # th.cuda.synchronize()
-        # if not th.all(th.isfinite(new_inst_state[self.STATE_ROBOT_STATS])):
-        #     ggLog.info(f"nonfinite vals in new_robot_stats_state = {new_inst_state[self.STATE_ROBOT_STATS]}")
-        # dbg_check(lambda: th.all(new_inst_state[self.STATE_ROBOT][:,:,8:10]>=0), lambda: f"negative gains in new_robot_state") #type: ignore
-        # th.cuda.synchronize()
-        # ggLog.info(pprint.pformat(map_tensor_tree(new_inst_state, lambda t: t.size())))
-        return new_inst_state
-
     @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
-    def _build_new_instantaneous_state_vec(self,    vec_step_count : th.Tensor,
-                                                    prev_lims_safety_triggered : th.Tensor,
-                                                    prev_posref_safety_triggered : th.Tensor,
-                                                    prev_posref_safety_violation_count : th.Tensor,
-                                                    prev_vec_joint_posrefs : th.Tensor,
-                                                    prev_vec_time_from_start : th.Tensor,
-                                                    vec_stats_minmaxavgstd_j_pvaeep : th.Tensor,
-                                                    vec_jstates_j_pveae : th.Tensor,
-                                                    vec_held_jstates_j_pveae : th.Tensor,
-                                                    vec_last_sent_refs_j_pvesd : th.Tensor,
-                                                    vec_last_sent_refs_held_j_pvesd : th.Tensor,
-                                                    vec_body_abs_linvel_xyz : th.Tensor,
-                                                    vec_body_abs_angvel_xyz : th.Tensor,
-                                                    vec_body_ground_dist : th.Tensor,
-                                                    vec_body_rel_gravity_dir : th.Tensor,
-                                                    vec_body_rel_linvel_xyz : th.Tensor,
-                                                    vec_body_rel_angvel_xyz : th.Tensor,
-                                                    vec_body_rel_linacc_xyz : th.Tensor,
-                                                    vec_time_from_start : th.Tensor) -> dict[str, dict[Any, th.Tensor] | th.Tensor]:
+    def _get_new_instantaneous_state(self, adapter_data) -> dict[str, dict[Any, th.Tensor] | th.Tensor]:
+        vec_last_sent_refs_j_pvesd          = self._last_sent_v_j_pvesd
+        vec_last_sent_refs_held_j_pvesd     = self._homing_held_joints_vec_pvesd
+        prev_vec_joint_posrefs              = self._current_state[self.STATE_ROBOT][:,0,:,5]
+        vec_step_count                      = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT]
+        prev_lims_safety_triggered          = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED].view((self.num_envs,)) > 0
+        prev_posref_safety_triggered        = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED].view((self.num_envs,)) > 0
+        prev_posref_safety_violation_count  = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_VIOLATION_COUNT].view((self.num_envs,))
+        prev_vec_time_from_start            = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]
+        prev_step_avg_pos                   = self._current_state[self.STATE_JOINT_LONGTERM_STATS][:,0,0]
+
         vec_step_count = vec_step_count.view((self.num_envs,))        
         is_resetting = vec_step_count == -1
         has_settled = vec_step_count >= -10
         # prev_vec_time_from_start = prev_vec_internal_state[:,self.INTERNAL_FIELDS.SIM_TIME]
         # vec_prev_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")
-        pveidx = thtens([0,1,3], device=vec_stats_minmaxavgstd_j_pvaeep.device)
+        pveidx = thtens([0,1,3], device=adapter_data.vec_stats_minmaxavgstd_j_pvaeep.device)
         if self._configuration.init_args.enable_limits_safety:
-            vec_triggered_limits = th.logical_or(   vec_stats_minmaxavgstd_j_pvaeep[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
-                                                    vec_stats_minmaxavgstd_j_pvaeep[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
+            vec_triggered_limits = th.logical_or(   adapter_data.vec_stats_minmaxavgstd_j_pvaeep[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
+                                                    adapter_data.vec_stats_minmaxavgstd_j_pvaeep[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
             vel_limits_safety_violation = th.any(vec_triggered_limits, dim=(1,2))
             triggered = th.logical_and(vel_limits_safety_violation, has_settled)
             vec_safety_lims_state = th.logical_or(prev_lims_safety_triggered,triggered)*1.0
+            vec_safety_lims_state = th.where(is_resetting, self._thzeros((self.num_envs,)), vec_safety_lims_state)
         else:
             vec_safety_lims_state = self._thzeros((self.num_envs,))
         if self._configuration.init_args.enable_posref_safety:
@@ -2297,12 +2267,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             posref_safety_violation = th.any(posref_safety_violation, dim=1)
             posref_triggered = th.logical_and(posref_safety_violation, has_settled)
             vec_safety_posref_state = (th.logical_or(prev_posref_safety_triggered,posref_triggered)*1.0).view(self.num_envs,)
+            vec_safety_posref_state = th.where(is_resetting, self._thzeros((self.num_envs,)), vec_safety_posref_state)
         else:
             posref_safety_violation = self._thzeros((self.num_envs,), dtype=th.bool)
             vec_safety_posref_state = self._thzeros((self.num_envs,))
         last_step_dt = th.where(is_resetting,
                                 self._configuration.init_args.stepLength_sec,
-                                vec_time_from_start - prev_vec_time_from_start.view((self.num_envs,)))
+                                adapter_data.vec_time_from_start - prev_vec_time_from_start.view((self.num_envs,)))
         prev_posref_safety_violation_count = prev_posref_safety_violation_count.view(self.num_envs,)
         prev_posref_safety_violation_count = prev_posref_safety_violation_count * th.logical_not(is_resetting) # reset violation count if resetting
         posref_violation_count = prev_posref_safety_violation_count + posref_safety_violation
@@ -2314,39 +2285,38 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED : vec_safety_posref_state.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.SAFETY_POSREF_VIOLATION_COUNT : posref_violation_count.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.STEP_COUNT : new_step_count.view((self.num_envs,1)),
-                                self.INTERNAL_FIELDS.SIM_TIME : vec_time_from_start.view(self.num_envs,1),
+                                self.INTERNAL_FIELDS.SIM_TIME : adapter_data.vec_time_from_start.view(self.num_envs,1),
                                 self.INTERNAL_FIELDS.LAST_STEP_DT : last_step_dt.view(self.num_envs,1)}
-        new_jreferrs_vec_p_j = (vec_jstates_j_pveae[:,:,0] - vec_last_sent_refs_j_pvesd[:,:,0]).view(self.num_envs, 1, len(self._configuration.joints_agent_controlled))
-        new_robot_state = th.cat([vec_jstates_j_pveae, vec_last_sent_refs_j_pvesd], dim = -1)
-        new_held_joints_state = th.cat([vec_held_jstates_j_pveae, vec_last_sent_refs_held_j_pvesd], dim = -1)
+        new_jreferrs_vec_p_j = (adapter_data.vec_jstates_j_pveae[:,:,0] - vec_last_sent_refs_j_pvesd[:,:,0]).view(self.num_envs, 1, len(self._configuration.joints_agent_controlled))
+        new_robot_state = th.cat([adapter_data.vec_jstates_j_pveae, vec_last_sent_refs_j_pvesd], dim = -1)
+        new_held_joints_state = th.cat([adapter_data.vec_held_jstates_j_pveae, vec_last_sent_refs_held_j_pvesd], dim = -1)
         # build stats:
         # with permute the first dimension becomes the joint (ordered as in set_monitored_joints)
         # with flatten the second dimension becomes minp,minv,mina,mmine,maxp,maxv,...
-        new_robot_stats_state_pvaeep = vec_stats_minmaxavgstd_j_pvaeep.permute(0,2,1,3).flatten(start_dim=2) # exchange minmaxavgstd and joint dim, then flatten minmaxavgstd into one dim
+        new_robot_stats_state_pvaeep = adapter_data.vec_stats_minmaxavgstd_j_pvaeep.permute(0,2,1,3).flatten(start_dim=2) # exchange minmaxavgstd and joint dim, then flatten minmaxavgstd into one dim
         # ggLog.info(f"new_robot_stats_state_pvaee = {new_robot_stats_state_pvaee.size()}, expected {(self.num_envs, len(self._configuration.controlled_joints), 4*5)}")
-        new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : vec_body_rel_linvel_xyz[:,0].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : vec_body_rel_linvel_xyz[:,1].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : vec_body_rel_linvel_xyz[:,2].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : vec_body_rel_angvel_xyz[:,0].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : vec_body_rel_angvel_xyz[:,1].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : vec_body_rel_angvel_xyz[:,2].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : vec_body_rel_linacc_xyz[:,0].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : vec_body_rel_linacc_xyz[:,1].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : vec_body_rel_linacc_xyz[:,2].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : vec_body_abs_linvel_xyz[:,0].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : vec_body_abs_linvel_xyz[:,1].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : vec_body_abs_linvel_xyz[:,2].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_X : vec_body_abs_angvel_xyz[:,0].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Y : vec_body_abs_angvel_xyz[:,1].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Z : vec_body_abs_angvel_xyz[:,2].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : vec_body_ground_dist.view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : vec_body_rel_gravity_dir[:,0].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : vec_body_rel_gravity_dir[:,1].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : vec_body_rel_gravity_dir[:,2].view(self.num_envs,1)}
+        new_extrinsic_state = { self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X : adapter_data.vec_body_rel_linvel_xyz[:,0].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y : adapter_data.vec_body_rel_linvel_xyz[:,1].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z : adapter_data.vec_body_rel_linvel_xyz[:,2].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_X : adapter_data.vec_body_rel_angvel_xyz[:,0].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Y : adapter_data.vec_body_rel_angvel_xyz[:,1].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_ANGVEL_Z : adapter_data.vec_body_rel_angvel_xyz[:,2].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : adapter_data.vec_body_rel_linacc_xyz[:,0].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : adapter_data.vec_body_rel_linacc_xyz[:,1].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : adapter_data.vec_body_rel_linacc_xyz[:,2].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X : adapter_data.vec_body_abs_linvel_xyz[:,0].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y : adapter_data.vec_body_abs_linvel_xyz[:,1].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Z : adapter_data.vec_body_abs_linvel_xyz[:,2].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_X : adapter_data.vec_body_abs_angvel_xyz[:,0].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Y : adapter_data.vec_body_abs_angvel_xyz[:,1].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Z : adapter_data.vec_body_abs_angvel_xyz[:,2].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : adapter_data.vec_body_ground_dist.view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : adapter_data.vec_body_rel_gravity_dir[:,0].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : adapter_data.vec_body_rel_gravity_dir[:,1].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : adapter_data.vec_body_rel_gravity_dir[:,2].view(self.num_envs,1)}
         
         # step_avg_pos = vec_stats_minmaxavgstd_j_pvae[:,2,:,0]
-        step_avg_pos = vec_jstates_j_pveae[:,:,0]
-        prev_step_avg_pos = self._current_state[self.STATE_JOINT_LONGTERM_STATS][:,0,0]
+        step_avg_pos = adapter_data.vec_jstates_j_pveae[:,:,0]
         # print(f"vec_step_count={vec_step_count} step_avg_pos={step_avg_pos}")
         long_alpha = self._configuration.longterm_exp_smoothing_1s**self._configuration.init_args.stepLength_sec
         step_avg_pos = th.where(is_resetting.view((self.num_envs,1)),
@@ -2354,34 +2324,34 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 step_avg_pos*(1-long_alpha) + prev_step_avg_pos*long_alpha)
         new_longterm_stats_state = {self.JOINT_LONGTERM_STATS_FIELDS.AVG_POS : step_avg_pos}
 
-
-        return {    self.STATE_EXTRINSIC    : new_extrinsic_state,
-                    self.STATE_INTERNAL     : new_internal_state,
-                    self.STATE_ROBOT        : new_robot_state,
-                    self.STATE_POS_REF_ERR  : new_jreferrs_vec_p_j,
-                    self.STATE_HELD_JOINTS   : new_held_joints_state,
-                    self.STATE_JOINT_STEP_STATS  : new_robot_stats_state_pvaeep,
-                    self.STATE_JOINT_LONGTERM_STATS : new_longterm_stats_state,
-                    self.STATE_ACT_PREPROC : {self.ACT_FIELDS.ACTION : self._last_preprocessed_actions},
-                    self.STATE_ACT_RAW_HIST : {self.ACT_FIELDS.ACTION : self._last_raw_actions},
-                    self.STATE_LAST_ACT_RAW : {self.ACT_FIELDS.ACTION : self._last_raw_actions}}
+        s = {   self.STATE_EXTRINSIC    : new_extrinsic_state,
+                self.STATE_INTERNAL     : new_internal_state,
+                self.STATE_ROBOT        : new_robot_state,
+                self.STATE_POS_REF_ERR  : new_jreferrs_vec_p_j,
+                self.STATE_HELD_JOINTS   : new_held_joints_state,
+                self.STATE_JOINT_STEP_STATS  : new_robot_stats_state_pvaeep,
+                self.STATE_JOINT_LONGTERM_STATS : new_longterm_stats_state,
+                self.STATE_ACT_PREPROC : {self.ACT_FIELDS.ACTION : self._last_preprocessed_actions},
+                self.STATE_ACT_RAW_HIST : {self.ACT_FIELDS.ACTION : self._last_raw_actions},
+                self.STATE_LAST_ACT_RAW : {self.ACT_FIELDS.ACTION : self._last_raw_actions}}
+        dbg_check_finite(s, async_assert=True, assert_msg="Nonfinite instantaneous state detected in RobotVecEnv.get_new_instantaneous_state")
+        return s
         
+    # @adarl.utils.utils.th_compile_ext(copy_outs=False, mode="max-autotune",fullgraph=True)
     def _reinit_state(self, vec_mask : th.Tensor, adapter_data):
         """Reinitialize the state for the envs specified in vec_mask. This propagates the current instanateous state into the state history,
             it is used at environment resets."""
         record_region_start("RobotVecEnv._reinit_state")
-        step_count = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT]
-        masked_assign(step_count, vec_mask, -1)
+        # step_count = th.where(vec_mask, -1, self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT])
+        step_count = masked_assign(self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT], vec_mask, -1, inplace=False)
+        self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT] = step_count
         record_time("RobotVecEnv._reinit_state: masked_assign step_count done")
         instantaneous_state = self._get_new_instantaneous_state(adapter_data)
         record_time("RobotVecEnv._reinit_state: get_new_instantaneous_state done")
-        # self._state_helper.check_size(instantaneous_state=instantaneous_state)
-        instantaneous_state[self.STATE_INTERNAL][self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED].fill_(0.0)
-        instantaneous_state[self.STATE_INTERNAL][self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED].fill_(0.0)
-        record_time("RobotVecEnv._reinit_state: modified instantaneous_state done")
         self._current_state = self._state_helper.reset_state(instantaneous_state, vec_mask=vec_mask, old_state=self._current_state) # This repeats the instantaneous state across the history dimension
         record_region_end("RobotVecEnv._reinit_state")
 
+    # @adarl.utils.utils.th_compile_ext(copy_outs=True, disable=disable_compile, mode="max-autotune",fullgraph=True)
     def _update_state(self, adapter_data):
         # th.cuda.synchronize()
         # t0 = time.monotonic()
@@ -2397,21 +2367,22 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         # n = "\n"
         # ggLog.info(f"Got instantaneous state with sizes: {n.join([str(kv) for kv in sizes.items()])}")
         # t1 = time.monotonic()
-        self._state_helper.update(instantaneous_state, state=self._current_state) # rolls down the history and adds current state
+        new_state = self._state_helper.update(instantaneous_state, state=self._current_state, inplace=False) # rolls down the history and adds current state
         record_time("RobotVecEnv._update_state: state_helper.update done")
-        # ss = {k:t.size() for k,t in self._current_state.items()}
+        # ss = {k:t.size() for k,t in new_state.items()}
         # ggLog.info(f"state sizes = {ss}")
-        dbg_check(lambda: th.all(self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT] >= 0),
-                  lambda: f"Negative step_counts {self._current_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT]}",
+        dbg_check(lambda: th.all(new_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT] >= 0),
+                  lambda: f"Negative step_counts {new_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT]}",
                   async_assert=True,
                   assert_msg="Negative step_counts detected in state")
-        # map_tensor_tree(self._current_state, lambda t: t.detach().clone())
+        # map_tensor_tree(new_state, lambda t: t.detach().clone())
         # tf = time.monotonic()
         # print(f"newinst = {t01-t0}, check = {t1-t01}, map = {tf-t1}, tot = {tf-t0}")
+        return new_state
 
 
 
-    def _update_stats(self):
+    def _update_stats(self, state):
         # sub_rewards = {}
         # self.compute_rewards(self._current_state, 
         #                         sub_rewards_return=sub_rewards)

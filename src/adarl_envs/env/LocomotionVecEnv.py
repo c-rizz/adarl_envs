@@ -9,7 +9,7 @@ from adarl.utils.utils import (to_string_tensor, th_quat_rotate, th_quat_conj, i
                                 quat_xyzw_between_vecs_py, masked_assign, quat_mul_xyzw, vectors_angle, ros_rpy_to_quaternion_xyzw_th,
                                 DistributionDef, DistributionDefTh, DistributionTh)
 from adarl.utils.vec_state_helper import ThBoxStateHelper, unnormalize, normalize
-from adarl_envs.env.RobotVecEnv import RobotVecEnv, RobotVecEnvInitArgs
+from adarl_envs.env.RobotVecEnv import RobotVecEnv, RobotVecEnvInitArgs, RobotAdapterData
 from dataclasses import dataclass
 from enum import IntEnum
 from gymnasium.vector.utils import batch_space
@@ -104,6 +104,16 @@ class LocomotionVecEnvInitArgs():
     """ Whether to use a reward structure more similar to the one used in the playground spot environment."""
     terminal_gravity_angle : float = 30*math.pi/180
     
+@dataclass
+class LocomotionAdapterData:
+    """Raw per-step data read from the adapter by LocomotionVecEnv, wrapping the RobotVecEnv data."""
+    robot_data : RobotAdapterData
+    feet_linvels_vec_foot_xyz : th.Tensor
+    feet_rel_pos_vec_foot_xyz : th.Tensor
+    feet_abs_pos_vec_foot_xyz : th.Tensor
+    feet_are_touching_ground : th.Tensor
+    borient_quat_vec_xyzw : th.Tensor
+
 class LocomotionVecEnv(RobotVecEnv):
     STATE_LOCOMOTION = "loco"
     STATE_FEET = "feet"
@@ -673,7 +683,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                    th_quat_conj(borient_quat_vec_xyzw).unsqueeze(1).expand(-1,nfeet,-1)) # (nenvs,nfeet,3)
         else:
             if self.num_envs == 1:
-                jpos = super_adapter_data[1][0,:,0]
+                jpos = super_adapter_data.vec_jstates_j_pveae[0,:,0]
                 self._robot_model.set_joint_pose_by_names({jn[1]:jpos[i] for i,jn in enumerate(self._configuration.joints_agent_controlled)} )
                 fk_feet_poses_dict = self._robot_model.get_frame_poses_xyzxyzw(self._configuration.main_body_link[1],[l[1] for l in self._loco_conf.init_args.feet_bottom_links])
                 fk_feet_positions_xyz = self._thtens([fp[:3] for fp in fk_feet_poses_dict.values()])
@@ -694,16 +704,26 @@ class LocomotionVecEnv(RobotVecEnv):
     def _get_adapter_data_raw(self):
         record_region_start("LocomotionVecEnv._get_adapter_data_raw")
         super_adapter_data = super()._get_adapter_data_raw()
-        loco_adapter_data = self._get_loco_adapter_data(super_adapter_data)
+        (feet_linvels_vec_foot_xyz, feet_rel_pos_vec_foot_xyz, feet_abs_pos_vec_foot_xyz,
+         feet_are_touching_ground, borient_quat_vec_xyzw) = self._get_loco_adapter_data(super_adapter_data)
         record_region_end("LocomotionVecEnv._get_adapter_data_raw")
-        return loco_adapter_data, super_adapter_data
+        return LocomotionAdapterData(robot_data = super_adapter_data,
+                                     feet_linvels_vec_foot_xyz = feet_linvels_vec_foot_xyz,
+                                     feet_rel_pos_vec_foot_xyz = feet_rel_pos_vec_foot_xyz,
+                                     feet_abs_pos_vec_foot_xyz = feet_abs_pos_vec_foot_xyz,
+                                     feet_are_touching_ground = feet_are_touching_ground,
+                                     borient_quat_vec_xyzw = borient_quat_vec_xyzw)
 
 
     @override
     def _get_new_instantaneous_state(self, adapter_data):
         nenvs = self.num_envs
-        loco_adapter_data, super_adapter_data = adapter_data
-        feet_linvels_vec_foot_xyz, feet_rel_pos_vec_foot_xyz, feet_abs_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw = loco_adapter_data
+        super_adapter_data = adapter_data.robot_data
+        feet_linvels_vec_foot_xyz     = adapter_data.feet_linvels_vec_foot_xyz
+        feet_rel_pos_vec_foot_xyz     = adapter_data.feet_rel_pos_vec_foot_xyz
+        feet_abs_pos_vec_foot_xyz     = adapter_data.feet_abs_pos_vec_foot_xyz
+        feet_are_touching_ground      = adapter_data.feet_are_touching_ground
+        borient_quat_vec_xyzw         = adapter_data.borient_quat_vec_xyzw
 
         # CAREFUL WITH THESE PREV STATES! Ensure they stay consistent at resets
         prev_locom_state =      self._current_state[self.STATE_LOCOMOTION][:, 0]
@@ -727,12 +747,16 @@ class LocomotionVecEnv(RobotVecEnv):
                                         [self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
                                          self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y,
                                          self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z]], dim = 1)
-        prev_gravity_rel_vec_xyz = prev_extrinsic_state[:,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1].view((nenvs,3))
-        masked_assign(prev_gravity_rel_vec_xyz, eps_resetting, gravity_rel_vec_xyz) # at episode start prev values may be invalid
+        prev_gravity_rel_vec_xyz = masked_assign(prev_extrinsic_state[:,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X:self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z+1].view((nenvs,3)),
+                                                 eps_resetting,
+                                                 gravity_rel_vec_xyz,
+                                                 inplace=False) # at episode start prev values may be invalid
 
         curr_goal_abs_gravity_vec_xyz = self._locomotion_episode_config.goal_abs_gravity_vec_xyz
-        prev_goal_abs_gravity_vec_xyz = prev_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X:self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z+1].view((nenvs,3))
-        masked_assign(prev_goal_abs_gravity_vec_xyz, eps_resetting, curr_goal_abs_gravity_vec_xyz) # at episode start prev state values may be invalid
+        # prev_goal_abs_gravity_vec_xyz = masked_assign(prev_locom_state[:,self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X:self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z+1].view((nenvs,3)),
+        #                                               eps_resetting,
+        #                                               curr_goal_abs_gravity_vec_xyz,
+        #                                               inplace=False) # at episode start prev state values may be invalid
                 
         max_goal_height_diff = self._loco_conf.init_args.max_goal_height_pos_change_speed*self._configuration.init_args.stepLength_sec
         goal_height = self._locomotion_episode_config.goal_abs_height_vec_z
@@ -1484,9 +1508,9 @@ class LocomotionVecEnv(RobotVecEnv):
         return reward, sub_rewards_return
         
 
-    def _update_stats(self):
+    def _update_stats(self, state):
         record_region_start("LocomotionVecEnv._update_stats")
-        super()._update_stats()
+        super()._update_stats(state)
         record_time("LocomotionVecEnv._update_stats: super done")
         if not self._configuration.init_args.minimal_infos:
             body_rel_linvel_xyz_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((  self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X,
@@ -1501,16 +1525,16 @@ class LocomotionVecEnv(RobotVecEnv):
             goal_grav_abs_xyz_idx = self._locomotion_state_helper.field_idx((self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_X,
                                                                             self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Y,
                                                                             self.LOCOMOTION_FIELDS.GOAL_GRAVITY_ABS_Z)) #type:ignore
-            body_rel_linvel_xyz = self._current_state[self.STATE_EXTRINSIC][:,0,body_rel_linvel_xyz_idx,0]
-            gravity_rel_vec_xyz = self._current_state[self.STATE_EXTRINSIC][:,0,body_rel_gravity_xyz_idx,0]
-            goal_rel_linvel_dir_vec_xyz = self._current_state[self.STATE_LOCOMOTION][:,0,goal_vel_rel_dir_xyz_idx,0].view(self.num_envs,3)
-            goal_speed = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED,0].view(self.num_envs,1)
+            body_rel_linvel_xyz = state[self.STATE_EXTRINSIC][:,0,body_rel_linvel_xyz_idx,0]
+            gravity_rel_vec_xyz = state[self.STATE_EXTRINSIC][:,0,body_rel_gravity_xyz_idx,0]
+            goal_rel_linvel_dir_vec_xyz = state[self.STATE_LOCOMOTION][:,0,goal_vel_rel_dir_xyz_idx,0].view(self.num_envs,3)
+            goal_speed = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED,0].view(self.num_envs,1)
             goal_rel_linvel_vec_xyz = goal_rel_linvel_dir_vec_xyz*goal_speed
             body_speed_vec = th.linalg.norm(body_rel_linvel_xyz[:,:2], dim=-1)
-            body_height_vec = self._current_state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,0]
-            goal_height_vec = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT,0]
-            smoothed_goal_height_vec = self._current_state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT,0]
-            goal_gravity_vec = self._current_state[self.STATE_LOCOMOTION][:,0, goal_grav_abs_xyz_idx,0]
+            body_height_vec = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,0]
+            goal_height_vec = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT,0]
+            smoothed_goal_height_vec = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT,0]
+            goal_gravity_vec = state[self.STATE_LOCOMOTION][:,0, goal_grav_abs_xyz_idx,0]
             vel_error_vec = planar_tracking_error_vec(
                                             body_rel_linvel_vec_xyz = body_rel_linvel_xyz,
                                             gravity_rel_vec_xyz = gravity_rel_vec_xyz,
@@ -1518,7 +1542,7 @@ class LocomotionVecEnv(RobotVecEnv):
             dbg_check_size(vel_error_vec, (self._adapter.vec_size(),))
             height_error_vec = th.abs(body_height_vec-smoothed_goal_height_vec)
             pitchnroll_err_vec = th.linalg.norm(gravity_rel_vec_xyz-goal_gravity_vec, dim = -1)
-            step_counts = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT,0].to(th.long)
+            step_counts = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT,0].to(th.long)
             dbg_check_size(pitchnroll_err_vec, (self._adapter.vec_size(),))
             dbg_check_size(step_counts, (self._adapter.vec_size(),))
             
@@ -1547,7 +1571,7 @@ class LocomotionVecEnv(RobotVecEnv):
             set_column(self._stats["pitchnroll_errs_vec"], idx, pitchnroll_err_vec.view(self.num_envs,))
             set_column(self._stats["body_speeds_vec"],  idx, body_speed_vec.view(self.num_envs,))
 
-            state_stats_v_h_j_minmaxavgstd_pvaeep : th.Tensor = self._current_state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 6)
+            state_stats_v_h_j_minmaxavgstd_pvaeep : th.Tensor = state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 6)
             masked_assign(self._stats["ep_max_javg_sensed_effort"], starting_eps, 0)
             masked_assign(self._stats["ep_max_peak_sensed_effort"], starting_eps, 0)
             self._stats["ep_max_javg_sensed_effort"] = th.maximum(self._stats["ep_max_javg_sensed_effort"], state_stats_v_h_j_minmaxavgstd_pvaeep[:,0,:,2,4].mean(dim=1)).view((self.num_envs,)) 

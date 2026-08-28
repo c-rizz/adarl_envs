@@ -7,7 +7,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import copy
     import torch as th
     from rreal.algorithms.sac_helpers import sac_train, SAC_init_hparams
-    from autoencoding_rl.experiments.asac3.asac3_train import asac3_train
+    from autoencoding_rl.asac3_train import asac3_train
     import os
     from adarl_envs.experiments.build_adarl_envs_env import env_builder
     

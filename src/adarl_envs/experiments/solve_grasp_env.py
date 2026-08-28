@@ -363,7 +363,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     eval_configurations=eval_configurations,
                     debug_level=debug_level)
     elif algo.lower() == "asac":
-        from autoencoding_rl.experiments.asac3.asac3_train import LatentExtractorInitArgs, asac3_train
+        from autoencoding_rl.asac3_train import LatentExtractorInitArgs, asac3_train
         le_grad_steps = 100
         sac_grad_steps = 80
         pretrain_collection_steps = max_steps_per_episode*train_envs*10
@@ -398,6 +398,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     run_id = run_id,
                     seed=seed,
                     vec_runner_builder=runner_builder,
+                    use_privileged_critic=True,
                     le_args=LatentExtractorInitArgs(
                         always_deterministic=False,
                         arch_dyn_ensemble_size = 1,
@@ -421,7 +422,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         arch_vec_decoder=[256,256],
                         arch_vec_decoder_activation="identity",
                         arch_vec_decoder_ensemble_size=1,
-                        arch_vec_encoder="identity",
+                        arch_vec_encoder=[256,256],
                         arch_vec_encoder_ensemble_size=1,
                         arch_vec_encoding_size=160,
                         batch_size = 128,
@@ -493,7 +494,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                         auto_entropy_temperature=True,
                                         batch_size=16384,
                                         buffer_size=10*1024*500,
-                                        critic_observation_filter=["privileged.vec","base.vec"],
+                                        critic_observation_filter=["privileged.vec"],
                                         gamma=0.99,
                                         grad_steps=sac_grad_steps,
                                         learning_starts=pretrain_collection_steps,

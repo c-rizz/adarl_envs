@@ -624,8 +624,9 @@ class LegJumpEnv(ControlledEnv[BaseJointImpedanceAdapter]):
                       state : Dict[str,th.Tensor],
                       action : th.Tensor,
                       env_conf,
-                      sub_rewards : Dict[str,th.Tensor] = {}, dbg_info = None) -> th.Tensor:
-
+                      sub_rewards : Dict[str,th.Tensor] | None = None, dbg_info = None) -> th.Tensor:
+        if sub_rewards is None:
+            sub_rewards = {}
         # ggLog.info(f"computeReward state['vec'].size() = {state['vec'].size()}")
 
         max_rew = 100

@@ -1198,7 +1198,9 @@ class LocomotionVecEnv(RobotVecEnv):
 
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
-                                sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
+                                sub_rewards_return : dict[str,th.Tensor] | None = None) -> th.Tensor:
+        if sub_rewards_return is None:
+            sub_rewards_return = {}
         if self._configuration.init_args.just_health_reward:
             sub_rewards_return.update(self._fixed_sub_rewards)
             return self._fixed_reward

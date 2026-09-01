@@ -601,7 +601,9 @@ class GraspVecEnv(RobotVecEnv):
 
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
-                                sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
+                                sub_rewards_return : dict[str,th.Tensor] | None = None) -> th.Tensor:
+        if sub_rewards_return is None:
+            sub_rewards_return = {}
         record_region_start("GraspVecEnv.compute_rewards")
         rewards, sub_rewards_dict = self._compute_rewards(state) # Avoid input mutation for compiled function
         sub_rewards_return.update(sub_rewards_dict)

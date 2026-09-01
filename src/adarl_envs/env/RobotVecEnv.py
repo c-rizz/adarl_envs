@@ -2540,7 +2540,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     @override
     def compute_rewards(self,   state : dict[str,th.Tensor],
-                                sub_rewards_return : dict[str,th.Tensor] = {}) -> th.Tensor:
+                                sub_rewards_return : dict[str,th.Tensor] | None = None) -> th.Tensor:
+        if sub_rewards_return is None:
+            sub_rewards_return = {}
         # reward_health = th.ones((self.num_envs,), device=self._configuration.th_device, dtype=self._configuration.obs_dtype)
         # sub_rewards_return["health"] = reward_health
 

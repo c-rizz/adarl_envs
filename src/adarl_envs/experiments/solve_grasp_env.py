@@ -284,7 +284,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                         combiner_arch="identity",
                                                                         encoding_size=None),
                     critic_feature_extractor_name="StackVectorsFeatureExtractor",
-                    critic_fe_hparams = StackVectorsFeatureExtractorInitArgs(device=th.device("cuda"))
+                    critic_fe_hparams = StackVectorsFeatureExtractorInitArgs(device=th.device("cuda")),
+                    use_rnd_exploration=True
                     )
     elif algo.lower() == "sac_small":
         sac_train(  seed,

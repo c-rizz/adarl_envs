@@ -21,7 +21,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     if algo == "sac" or algo == "ppo":
         train_envs = 4096
     elif algo == "asac":
-        train_envs = 4096
+        train_envs = 1024
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -143,7 +143,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # "mjx_geom_overrides" : {
         #     "cube" : {"friction" : [2.0,0.001,0.0005]}
         # },
-        "mjx_opt_preset" : "faster",
+        "mjx_opt_preset" : "slow",
         "mjx_opt_override" : {"impratio" : 1.0,
                             #   "ccd_iterations" : 50
                               },
@@ -285,7 +285,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                         encoding_size=None),
                     critic_feature_extractor_name="StackVectorsFeatureExtractor",
                     critic_fe_hparams = StackVectorsFeatureExtractorInitArgs(device=th.device("cuda")),
-                    use_rnd_exploration=True
+                    use_rnd_exploration=False
                     )
     elif algo.lower() == "sac_small":
         sac_train(  seed,
@@ -364,27 +364,21 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     eval_configurations=eval_configurations,
                     debug_level=debug_level)
     elif algo.lower() == "asac":
-        from autoencoding_rl.asac3_train import LatentExtractorInitArgs, asac3_train
+        from autoencoding_rl.asac3_train import LatentExtractorInitArgs, asac3_train, SAC_RND_reward_hyperparams
         le_grad_steps = 100
         sac_grad_steps = 80
         pretrain_collection_steps = max_steps_per_episode*train_envs*10
         pretrain_grad_steps = 10_000
         model_device=th.device("cuda")
         
-        asac3_train( allow_tf32=True,
+        asac3_train(run_args = args,
+                    allow_tf32=True,
                     allow_tf32_matmul=False,
-                    expl_bonus_weight = 0.0,
-                    expl_bonus_rnd_nn_arch=[128,128],
-                    expl_bonus_rnd_learning_rate = 0.00001,
-                    expl_bonus_running_avg_rew_alpha = 0.9999,
-                    expl_bonus_running_avgs_alpha = 0.999,
-                    expl_bonuse_enable_rnd = False,
                     buffer_storage_torch_device="cuda",                            
                     check_infs_nans=False,
                     checkpointing_freq_ep=100,
                     collection_device=env_device,
                     model_th_device=model_device,
-                    comment = args["comment"],
                     debug_level=debug_level,
                     env_builder_args = env_builder_args,
                     eval_configurations=eval_configurations,                           
@@ -400,6 +394,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     seed=seed,
                     vec_runner_builder=runner_builder,
                     use_privileged_critic=True,
+                    use_rnd_exploration=True,
+                    rnd_hyperparams = SAC_RND_reward_hyperparams(use_actor_encoding=True),
                     le_args=LatentExtractorInitArgs(
                         always_deterministic=False,
                         arch_dyn_ensemble_size = 1,

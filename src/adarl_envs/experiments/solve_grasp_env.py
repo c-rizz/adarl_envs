@@ -21,7 +21,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     if algo == "sac" or algo == "ppo":
         train_envs = 4096
     elif algo == "asac":
-        train_envs = 1024
+        train_envs = 2048
     elif algo == "sac_small":
         train_envs = 8
     else:
@@ -370,6 +370,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         pretrain_collection_steps = max_steps_per_episode*train_envs*10
         pretrain_grad_steps = 10_000
         model_device=th.device("cuda")
+        train_freq_vstep = 5
         
         asac3_train(run_args = args,
                     allow_tf32=True,
@@ -469,7 +470,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         retrain_period = -1,
                         reward_scaling = 10.0,
                         tau=1.0,
-                        train_period_vstep=100,
+                        train_period_vstep=train_freq_vstep,
                         train_trajectories_length = 5,
                         traj_eval_batch_size = 1,
                         use_log_reward = False,
@@ -508,7 +509,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                         target_tau = 0.005,
                                         target_update_freq=1,
                                         total_steps=300_000_000,
-                                        train_freq_vstep=5,
+                                        train_freq_vstep=train_freq_vstep,
                                         )
                     )
     else:       

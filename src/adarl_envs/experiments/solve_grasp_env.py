@@ -36,7 +36,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         raise RuntimeError(f"Unknown mode '{mode}'")
 
-    obs_cam = False
+    obs_cam = args["obs_cam"]
+    use_rnd = False
 
     eval_freq = 5
     r = 0.0
@@ -365,12 +366,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     debug_level=debug_level)
     elif algo.lower() == "asac":
         from autoencoding_rl.asac3_train import LatentExtractorInitArgs, asac3_train, SAC_RND_reward_hyperparams
-        le_grad_steps = 100
         sac_grad_steps = 80
+        le_grad_steps = 100
+        sac_train_freq_vstep = 5
+        le_train_freq_vstep = 100
         pretrain_collection_steps = max_steps_per_episode*train_envs*10
         pretrain_grad_steps = 10_000
         model_device=th.device("cuda")
-        train_freq_vstep = 5
+
         
         asac3_train(run_args = args,
                     allow_tf32=True,
@@ -395,8 +398,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     seed=seed,
                     vec_runner_builder=runner_builder,
                     use_privileged_critic=True,
-                    use_rnd_exploration=True,
-                    rnd_hyperparams = SAC_RND_reward_hyperparams(use_actor_encoding=True),
+                    use_rnd_exploration=use_rnd,
                     le_args=LatentExtractorInitArgs(
                         always_deterministic=False,
                         arch_dyn_ensemble_size = 1,
@@ -413,8 +415,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         arch_optimizer="adamw",
                         arch_reward = [128],
                         arch_reward_ensemble_size=1,
-                        arch_state_combiner = "identity",
-                        arch_state_decombiner = "identity",
+                        arch_state_combiner = [] if obs_cam else "identity",
+                        arch_state_decombiner = [] if obs_cam else "identity",
                         arch_type = "dvae4_2",
                         arch_use_coord_conv=True,
                         arch_vec_decoder=[256,256],
@@ -422,7 +424,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         arch_vec_decoder_ensemble_size=1,
                         arch_vec_encoder=[256,256],
                         arch_vec_encoder_ensemble_size=1,
-                        arch_vec_encoding_size=160,
+                        arch_vec_encoding_size=160 if not obs_cam else 0,
                         batch_size = 128,
                         bestModelThreshold = None,
                         consistency_target = "self",
@@ -448,7 +450,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         loss_weight_cons_cycle_dynamics=0.0,
                         loss_weight_consistency  = 0.0,
                         loss_weight_img = 1.0,
-                        loss_weight_kld = 0.0,
+                        loss_weight_kld = 0.001,
                         loss_weight_latent_prediction = 0.0,
                         loss_weight_obs_prediction = 1.0,
                         loss_weight_reconstruction = 1.0,
@@ -470,7 +472,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         retrain_period = -1,
                         reward_scaling = 10.0,
                         tau=1.0,
-                        train_period_vstep=train_freq_vstep,
+                        train_period_vstep=le_train_freq_vstep,
                         train_trajectories_length = 5,
                         traj_eval_batch_size = 1,
                         use_log_reward = False,
@@ -486,7 +488,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     sac_init_hparams=SAC_init_hparams(
                                         actor_log_std_init=-2.0,
                                         actor_mean_bounds_ratio = 0.9,
-                                        actor_observation_filter=["privileged.vec","base.vec"],
+                                        actor_observation_filter=(["base.vec","base.camera"] if obs_cam else ["privileged.vec","base.vec"]),
                                         alpha_initial_value=0.001,
                                         alpha_lr_factor=1.0,
                                         auto_entropy_temperature=True,
@@ -509,7 +511,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                         target_tau = 0.005,
                                         target_update_freq=1,
                                         total_steps=300_000_000,
-                                        train_freq_vstep=train_freq_vstep,
+                                        train_freq_vstep=sac_train_freq_vstep,
+                                        rnd_hyperparams = SAC_RND_reward_hyperparams(use_actor_encoding=True) if use_rnd else None
                                         )
                     )
     else:       
@@ -532,6 +535,7 @@ if __name__ == "__main__":
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
     ap.add_argument("--robot", default="centauro", type=str, help="Robot to be used ('centauro'/'franka')")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
+    ap.add_argument("--obs-cam", default=False, action='store_true', help="Use observation camera")
 
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())

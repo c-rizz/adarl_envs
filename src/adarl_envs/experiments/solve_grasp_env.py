@@ -374,7 +374,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         pretrain_grad_steps = 10_000
         model_device=th.device("cuda")
 
-        
         asac3_train(run_args = args,
                     allow_tf32=True,
                     allow_tf32_matmul=False,
@@ -399,6 +398,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     vec_runner_builder=runner_builder,
                     use_privileged_critic=True,
                     use_rnd_exploration=use_rnd,
+                    buffer_min_residual_vram = 14*1024**3,
                     le_args=LatentExtractorInitArgs(
                         always_deterministic=False,
                         arch_dyn_ensemble_size = 1,

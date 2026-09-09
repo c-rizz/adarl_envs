@@ -262,7 +262,8 @@ def runner_builder(seed,
                                                 table_height=env_builder_args.pop("table_height"),
                                                 feet_contact_links=env_builder_args.pop("feet_contact_links"),
                                                 feet_bottom_links=env_builder_args.pop("feet_bottom_links"),
-                                                max_reach_height=env_builder_args.pop("max_reach_height")))
+                                                max_reach_height=env_builder_args.pop("max_reach_height"),
+                                                use_depth_cam=env_builder_args.pop("use_depth_cam")))
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
                         ui_render_envs=[0], autoreset=autoreset,
                         log_freq = max_steps)

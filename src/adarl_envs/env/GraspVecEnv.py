@@ -83,6 +83,7 @@ class GrapVecEnvInitArgs():
     """ Links representing the contact point of the feet, should be on the bottom of the foot, it is used for position-related logic"""
     neutral_body_height : float
     max_reach_height : float
+    use_depth_cam : bool
     observe_object_pose : bool = False
     observe_camera : bool = False
     observe_initial_object_pose : bool = False
@@ -132,6 +133,7 @@ class GraspVecEnv(RobotVecEnv):
         show_goal_marker : bool
         grasping_init_args : GrapVecEnvInitArgs
         table_height : DistributionDefTh
+        use_depth_cam : bool
 
     @dataclass
     class SubRewards:
@@ -222,7 +224,8 @@ class GraspVecEnv(RobotVecEnv):
                         show_gripper_marker = True, # spawn a small cube and place it at the computed gripper pose when rendering
                         show_goal_marker = True, # spawn a small cube and place it at the object goal pose when rendering
                         grasping_init_args = grasp_init_args,
-                        table_height = self._distr_to_tensor(grasp_init_args.table_height, size=(num_envs,)))
+                        table_height = self._distr_to_tensor(grasp_init_args.table_height, size=(num_envs,)),
+                        use_depth_cam = grasp_init_args.use_depth_cam)
 
         self._observation_camera = self._head_camera_name if grasp_init_args.observe_camera else None
         self._ui_camera = self._head_camera_name if self._grasping_conf.use_head_cam_as_ui_camera else self._grasp_ui_camera_name
@@ -303,16 +306,12 @@ class GraspVecEnv(RobotVecEnv):
         ggLog.info(f"setting monitored_cameras to {monitored_cameras}")
         self._adapter.set_monitored_cameras(monitored_cameras)
 
-        # Hide the debug markers (axes + goal marker) from the observation (head) camera while other
-        # cameras (e.g. the UI camera) still see them. Whitelist semantics: tell the observation
-        # camera to see every model EXCEPT those markers. Needs observation and UI to be distinct
-        # cameras (use_head_cam_as_ui_camera=False).
         if (self._grasping_conf.grasping_init_args.observe_camera
-                and not self._grasping_conf.use_head_cam_as_ui_camera
-                and hasattr(self._adapter, "set_body_camera_visibility")):
-            hidden_models = {"goal_axes", "goal_marker_cube"}
+                and hasattr(self._adapter, "set_link_camera_visibility")):
+            hidden_models = {"goal_axes", "goal_marker_cube", "axes", "grippper_marker", "arrow", "arrow_yellow"}
             visible_models = sorted({l[0] for l in self._adapter.get_detected_links()} - hidden_models)
-            self._adapter.set_body_camera_visibility([(self._head_camera_name, visible_models)])
+            ggLog.info(f"setting head camera visibility to {visible_models}")
+            self._adapter.set_link_camera_visibility([(self._head_camera_name, visible_models)])
     
 
 
@@ -468,10 +467,16 @@ class GraspVecEnv(RobotVecEnv):
         # ggLog.info(f"current_feetbottom_linvel_angvel = {current_feetbottom_linvel_angvel}")
 
         if self._grasping_conf.grasping_init_args.observe_camera:
-            obs_camera_images, img_times = self._adapter.getRenderings([self._observation_camera])
-            obs_camera_image = obs_camera_images[0]
-            if not obs_camera_image.dtype.is_floating_point:
-                obs_camera_image = obs_camera_image.to(th.float32) / 255.0
+            obs_camera_images, img_times = self._adapter.getRenderings([self._observation_camera], depth=self._grasping_conf.use_depth_cam)
+            obs_camera_image = obs_camera_images[0] # this sin (vec,H,W,C)
+            if self._grasping_conf.use_depth_cam:
+                if not obs_camera_image.dtype.is_floating_point:
+                    obs_camera_image = obs_camera_image.to(th.float32)/1000.0 # convert mm->m
+                obs_camera_image = th.clamp(obs_camera_image/1.0, 0.0, 1.0) # normalize to 1 meters and clamp
+
+            else:
+                if not obs_camera_image.dtype.is_floating_point:
+                    obs_camera_image = obs_camera_image.to(th.float32) / 255.0
             obs_camera_image = obs_camera_image.permute(0, 3, 1, 2) # to (vec, C, H, W)
             obs_camera_image = th.nn.functional.interpolate(obs_camera_image,
                                                 size=self._grasping_conf.obs_camera_resolution_hw,
@@ -479,9 +484,13 @@ class GraspVecEnv(RobotVecEnv):
                                                 align_corners=False,
                                                 antialias=True)
             obs_camera_image = obs_camera_image.permute(0, 2, 3, 1) # back to (vec, H, W, C)                
-            # getRenderings gives HWC uint8 RGB (vec, H, W, 3); the CAMERA field is a single 64x64 plane,
-            # so collapse RGB -> one grayscale channel scaled to [0,1]: (vec, H, W, 3) -> (vec, H, W).
-            obs_camera_image = ((obs_camera_image[..., :3] @ self._rgb_to_gray_w)*255).to(self._obs_dtype)  # (vec, H, W) in [0,1]
+            if self._grasping_conf.use_depth_cam:
+                obs_camera_image = obs_camera_image[...,0]*255
+            else:
+                # getRenderings gives HWC uint8 RGB (vec, H, W, 3); the CAMERA field is a single 64x64 plane,
+                # so collapse RGB -> one grayscale channel scaled to [0,1]: (vec, H, W, 3) -> (vec, H, W).
+                obs_camera_image = ((obs_camera_image[..., :3] @ self._rgb_to_gray_w)*255).to(self._obs_dtype)  # (vec, H, W) in [0,1]
+            
         else:
             obs_camera_image = None
 

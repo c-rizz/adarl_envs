@@ -153,6 +153,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
             "ctrl_legs" : True
         },
         "mjx_warp_nccdmax" : 20,
+        "use_depth_cam" : True
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -160,6 +161,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     video_eval_env_builder_args["minimal_infos"] = False
     video_eval_env_builder_args["video_save_freq"] = 1
     video_eval_env_builder_args["ui_camera_resolution_hw"] = (270,480)
+    video_eval_env_builder_args["video_step_length_sec"] = step_length_sec
+    video_eval_env_builder_args["ae_video_save_freq_ep"] = 1
     video_eval_env_builder_args["randomization_recycle_init_pose"] = False
     eval_conf_video_det = {
         "name" : "video_det",
@@ -440,7 +443,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         grad_steps = le_grad_steps,
                         internal_enc_dropout = 0.0,
                         latent_space_activation="identity",
-                        loss_img_error_function="l2",
+                        loss_img_error_function="ssim+l1",
                         loss_latent_prediction_discount = 0.99,
                         loss_obs_prediction_discount    = 0.99,
                         loss_reward_prediction_discount = 0.99,
@@ -473,7 +476,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         reward_scaling = 10.0,
                         tau=1.0,
                         train_period_vstep=le_train_freq_vstep,
-                        train_trajectories_length = 5,
+                        train_trajectories_length = 2,
                         traj_eval_batch_size = 1,
                         use_log_reward = False,
                         validation_batch_size = 256,

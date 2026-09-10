@@ -86,6 +86,9 @@ class GrapVecEnvInitArgs():
     use_depth_cam : bool
     observe_object_pose : bool = False
     observe_camera : bool = False
+    use_gray_cam : bool = False
+    """Observe a grayscale camera image. Grayscale is used anyway when use_depth_cam is not set;
+    setting both stacks grayscale and depth as two separate image observations."""
     observe_initial_object_pose : bool = False
     gripper_link_transforms : list[tuple[float,float,float,float,float,float,float]] | None = None
     """Per gripper-link transform applied when computing the overall gripper pose.
@@ -109,13 +112,15 @@ class GraspAdapterData:
     current_gripper_linvel_angvel : th.Tensor
     current_feetbottom_linvel_angvel : th.Tensor
     feet_touching_ground : th.Tensor
-    obs_camera_image : th.Tensor | None
+    obs_gray_image : th.Tensor | None
+    obs_depth_image : th.Tensor | None
 
 class GraspVecEnv(RobotVecEnv):
     STATE_GRASPING = "grasp"
     STATE_GRASPING_VELOCITIES = "grasp_velocities"
     STATE_FEET = "feet"
     STATE_CAMERA = "camera"
+    STATE_DEPTH = "depth"
 
     @dataclass
     class GraspingConfiguration:
@@ -134,6 +139,7 @@ class GraspVecEnv(RobotVecEnv):
         grasping_init_args : GrapVecEnvInitArgs
         table_height : DistributionDefTh
         use_depth_cam : bool
+        use_gray_cam : bool
 
     @dataclass
     class SubRewards:
@@ -225,7 +231,8 @@ class GraspVecEnv(RobotVecEnv):
                         show_goal_marker = True, # spawn a small cube and place it at the object goal pose when rendering
                         grasping_init_args = grasp_init_args,
                         table_height = self._distr_to_tensor(grasp_init_args.table_height, size=(num_envs,)),
-                        use_depth_cam = grasp_init_args.use_depth_cam)
+                        use_depth_cam = grasp_init_args.use_depth_cam,
+                        use_gray_cam = grasp_init_args.use_gray_cam)
 
         self._observation_camera = self._head_camera_name if grasp_init_args.observe_camera else None
         self._ui_camera = self._head_camera_name if self._grasping_conf.use_head_cam_as_ui_camera else self._grasp_ui_camera_name
@@ -410,30 +417,36 @@ class GraspVecEnv(RobotVecEnv):
 
 
         if self._grasping_conf.grasping_init_args.observe_camera:
-            camera_state_helper = ThBoxStateHelper( field_names=[e for e in self.CAMERA_FIELDS],
-                                                    dtype=th.uint8,
-                                                    normalization_range=(0,255),
-                                                    th_device=self._th_device,
-                                                    field_size=self._grasping_conf.obs_camera_resolution_hw,
-                                                    fields_minmax={ self.CAMERA_FIELDS.IMAGE : [0,255]},
-                                                    vec_size=adapter.vec_size(),
-                                                    observation_definitions={"base":
-                                                                            ThBoxStateHelper.SimpleObsDef(  obs_history_length=1,
-                                                                                                            observable_fields=None,
-                                                                                                            observable_subfields=None,
-                                                                                                            skip_history_dim=True)})
-            self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_CAMERA,
-                                                                camera_state_helper,
-                                                                obs_defs={  "base":{
-                                                                                "observable":self._grasping_conf.grasping_init_args.observe_camera,
-                                                                                "concatenate":False,
-                                                                                "noise":None},
-                                                                            # "privileged":{
-                                                                            #     "observable":self._grasping_conf.grasping_init_args.observe_camera,
-                                                                            #     "concatenate":False,
-                                                                            #     "noise":None}
-                                                                        }
-                                                                                )
+            gray_enabled, depth_enabled = self._camera_modalities()
+            # One substate per modality, each with its natural dtype and value range. ObsConverter
+            # stacks the resulting image observations on the channel dimension and normalizes each
+            # channel by its own range, so grayscale and depth mix without rescaling either.
+            camera_substates = []
+            if gray_enabled:
+                camera_substates.append((GraspVecEnv.STATE_CAMERA, th.uint8,   [0, 255]))
+            if depth_enabled:
+                camera_substates.append((GraspVecEnv.STATE_DEPTH,  th.float32, [0.0, 1.0]))
+            for substate_name, camera_dtype, camera_minmax in camera_substates:
+                camera_state_helper = ThBoxStateHelper( field_names=[e for e in self.CAMERA_FIELDS],
+                                                        dtype=camera_dtype,
+                                                        normalization_range=(camera_minmax[0],camera_minmax[1]),
+                                                        th_device=self._th_device,
+                                                        field_size=self._grasping_conf.obs_camera_resolution_hw,
+                                                        fields_minmax={ self.CAMERA_FIELDS.IMAGE : camera_minmax},
+                                                        vec_size=adapter.vec_size(),
+                                                        observation_definitions={"base":
+                                                                                ThBoxStateHelper.SimpleObsDef(  obs_history_length=1,
+                                                                                                                observable_fields=None,
+                                                                                                                observable_subfields=None,
+                                                                                                                skip_history_dim=True)})
+                self._state_helper = self._state_helper.add_substate(substate_name,
+                                                                    camera_state_helper,
+                                                                    obs_defs={  "base":{
+                                                                                    "observable":True,
+                                                                                    "concatenate":False,
+                                                                                    "noise":None}
+                                                                            }
+                                                                                    )
 
         self._grav_xy_idx = self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx((self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X,
                                                                                             self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y))
@@ -443,6 +456,16 @@ class GraspVecEnv(RobotVecEnv):
         
         ggLog.info(f"Built state/obs/action helpers")
 
+
+    def _camera_modalities(self) -> tuple[bool,bool]:
+        """Which (grayscale, depth) camera channels are observed.
+
+        Grayscale is the default when depth is not requested, so that the previous behaviour
+        (grayscale unless use_depth_cam) is preserved.
+        """
+        depth = self._grasping_conf.use_depth_cam
+        gray = self._grasping_conf.use_gray_cam or not depth
+        return gray, depth
 
     def _get_adapter_data_raw(self):
         super_adapter_data =  super()._get_adapter_data_raw()
@@ -467,32 +490,44 @@ class GraspVecEnv(RobotVecEnv):
         # ggLog.info(f"current_feetbottom_linvel_angvel = {current_feetbottom_linvel_angvel}")
 
         if self._grasping_conf.grasping_init_args.observe_camera:
-            obs_camera_images, img_times = self._adapter.getRenderings([self._observation_camera], depth=self._grasping_conf.use_depth_cam)
-            obs_camera_image = obs_camera_images[0] # this sin (vec,H,W,C)
-            if self._grasping_conf.use_depth_cam:
-                if not obs_camera_image.dtype.is_floating_point:
-                    obs_camera_image = obs_camera_image.to(th.float32)/1000.0 # convert mm->m
-                obs_camera_image = th.clamp(obs_camera_image/1.0, 0.0, 1.0) # normalize to 1 meters and clamp
-
+            gray_enabled, depth_enabled = self._camera_modalities()
+            def _resize_to_obs(img_vhwc : th.Tensor) -> th.Tensor:
+                img = img_vhwc.permute(0, 3, 1, 2) # to (vec, C, H, W)
+                img = th.nn.functional.interpolate(img,
+                                                    size=self._grasping_conf.obs_camera_resolution_hw,
+                                                    mode="bilinear",
+                                                    align_corners=False,
+                                                    antialias=True)
+                return img.permute(0, 2, 3, 1) # back to (vec, H, W, C)
+            # One call renders both modalities in a single pass when both are enabled: mjx.render()
+            # produces the color and the depth buffer together.
+            renderings = self._adapter.get_camera_images([self._observation_camera],
+                                                         rgb = gray_enabled,
+                                                         depth = depth_enabled)
+            if gray_enabled:
+                obs_gray_image = renderings.rgb[0] # this is in (vec,H,W,C)
+                if not obs_gray_image.dtype.is_floating_point:
+                    obs_gray_image = obs_gray_image.to(th.float32) / 255.0
+                obs_gray_image = _resize_to_obs(obs_gray_image)
+                # getRenderings gives HWC RGB (vec, H, W, 3); the CAMERA field is a single plane, so
+                # collapse RGB -> one grayscale channel back in [0,255], matching the uint8 substate.
+                obs_gray_image = ((obs_gray_image[..., :3] @ self._rgb_to_gray_w)*255).to(self._obs_dtype) # (vec, H, W)
             else:
-                if not obs_camera_image.dtype.is_floating_point:
-                    obs_camera_image = obs_camera_image.to(th.float32) / 255.0
-            obs_camera_image = obs_camera_image.permute(0, 3, 1, 2) # to (vec, C, H, W)
-            obs_camera_image = th.nn.functional.interpolate(obs_camera_image,
-                                                size=self._grasping_conf.obs_camera_resolution_hw,
-                                                mode="bilinear",
-                                                align_corners=False,
-                                                antialias=True)
-            obs_camera_image = obs_camera_image.permute(0, 2, 3, 1) # back to (vec, H, W, C)                
-            if self._grasping_conf.use_depth_cam:
-                obs_camera_image = obs_camera_image[...,0]*255
+                obs_gray_image = None
+            if depth_enabled:
+                obs_depth_image = renderings.depth[0] # this is in (vec,H,W,C)
+                if not obs_depth_image.dtype.is_floating_point:
+                    obs_depth_image = obs_depth_image.to(th.float32)/1000.0 # convert mm->m
+                obs_depth_image = th.clamp(obs_depth_image/1.0, 0.0, 1.0) # normalize to 1 meters and clamp
+                obs_depth_image = _resize_to_obs(obs_depth_image)
+                # Already normalized to [0,1] by the clamp above; keep it there (and as float32) so it
+                # matches the float32 (0,1) pixel range the autoencoder assumes for this dtype.
+                obs_depth_image = obs_depth_image[...,0].to(th.float32) # (vec, H, W)
             else:
-                # getRenderings gives HWC uint8 RGB (vec, H, W, 3); the CAMERA field is a single 64x64 plane,
-                # so collapse RGB -> one grayscale channel scaled to [0,1]: (vec, H, W, 3) -> (vec, H, W).
-                obs_camera_image = ((obs_camera_image[..., :3] @ self._rgb_to_gray_w)*255).to(self._obs_dtype)  # (vec, H, W) in [0,1]
-            
+                obs_depth_image = None
         else:
-            obs_camera_image = None
+            obs_gray_image = None
+            obs_depth_image = None
 
         return GraspAdapterData(robot_data = super_adapter_data,
                                 current_object_pose = current_object_pose,
@@ -501,7 +536,8 @@ class GraspVecEnv(RobotVecEnv):
                                 current_gripper_linvel_angvel = current_gripper_linvel_angvel,
                                 current_feetbottom_linvel_angvel = current_feetbottom_linvel_angvel,
                                 feet_touching_ground = feet_touching_ground,
-                                obs_camera_image = obs_camera_image)
+                                obs_gray_image = obs_gray_image,
+                                obs_depth_image = obs_depth_image)
 
     @override
     def _get_new_instantaneous_state(self, adapter_data):
@@ -512,7 +548,8 @@ class GraspVecEnv(RobotVecEnv):
         current_gripper_linvel_angvel     = adapter_data.current_gripper_linvel_angvel
         current_feetbottom_linvel_angvel  = adapter_data.current_feetbottom_linvel_angvel
         feet_touching_ground              = adapter_data.feet_touching_ground
-        obs_camera_image                  = adapter_data.obs_camera_image
+        obs_gray_image                    = adapter_data.obs_gray_image
+        obs_depth_image                   = adapter_data.obs_depth_image
         new_inst_state = super()._get_new_instantaneous_state(super_adapter_data)
 
         # Apply the per-link transforms (expressed in each gripper link frame) before
@@ -580,8 +617,10 @@ class GraspVecEnv(RobotVecEnv):
                                            self.FEET.FEET_VEL_Y:     feet_linvel_xy[:, :, 1].expand(self.num_envs, -1),
                                            self.FEET.FEET_ON_GROUND: feet_touching_ground.to(self._obs_dtype).expand(self.num_envs, -1)}
 
-        if self._grasping_conf.grasping_init_args.observe_camera:
-            new_inst_state[self.STATE_CAMERA] = {self.CAMERA_FIELDS.IMAGE: obs_camera_image}
+        if obs_gray_image is not None:
+            new_inst_state[self.STATE_CAMERA] = {self.CAMERA_FIELDS.IMAGE: obs_gray_image}
+        if obs_depth_image is not None:
+            new_inst_state[self.STATE_DEPTH] = {self.CAMERA_FIELDS.IMAGE: obs_depth_image}
         return new_inst_state
 
 

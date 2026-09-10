@@ -263,7 +263,8 @@ def runner_builder(seed,
                                                 feet_contact_links=env_builder_args.pop("feet_contact_links"),
                                                 feet_bottom_links=env_builder_args.pop("feet_bottom_links"),
                                                 max_reach_height=env_builder_args.pop("max_reach_height"),
-                                                use_depth_cam=env_builder_args.pop("use_depth_cam")))
+                                                use_depth_cam=env_builder_args.pop("use_depth_cam"),
+                                                use_gray_cam=env_builder_args.pop("use_gray_cam", False)))
     vrunner = EnvRunner(env=lrenv, verbose=True, quiet=False, episodeInfoLogFile=run_folder+"/vec_runner.log",
                         ui_render_envs=[0], autoreset=autoreset,
                         log_freq = max_steps)
@@ -734,7 +735,7 @@ def get_kyon_args(robot_options : dict = {}):
                                          (-0.107, 0.0,    -0.0362125, 0.0, 0.0, 0.0, 1.0)],
             "held_joints_damping" :   {"default": 500.0},
             "held_joints_stiffness" : {"default": 500.0},
-            "table_height" : ("uniform", (0.0, 0.1))
+            "table_height" : ("uniform", (0.001, 0.001))
         }
 
 robot_args_registry["kyon"]       = get_kyon_args

@@ -37,6 +37,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         raise RuntimeError(f"Unknown mode '{mode}'")
 
     obs_cam = args["obs_cam"]
+    use_depth_cam = True
+    use_gray_cam = True
+    # Grayscale is used anyway when depth is off (mirrors GraspVecEnv._camera_modalities). Each
+    # enabled modality is a separate image observation, so the actor filter must list them all or
+    # the latent extractor never sees them.
+    cam_obs_keys = ((["base.camera"] if (use_gray_cam or not use_depth_cam) else []) +
+                    (["base.depth"] if use_depth_cam else [])) if obs_cam else []
     use_rnd = False
 
     eval_freq = 5
@@ -60,7 +67,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "neutral_body_height" : 0.45,
         "reward_safety_weight" : 0.0,
         "target_object_link" : ("cube","cube"),
-        "observe_camera" : obs_cam,
         "observe_object_pose" : not obs_cam,
         "observe_initial_object_pose" : False,
         "noise_action_delay_mustd_std" : (0.008, 0.005*n, 0.0025*n),
@@ -153,7 +159,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
             "ctrl_legs" : True
         },
         "mjx_warp_nccdmax" : 20,
-        "use_depth_cam" : True
+        "observe_camera" : obs_cam,
+        "use_depth_cam" : use_depth_cam,
+        "use_gray_cam" : use_gray_cam
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -410,7 +418,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         arch_enc_ensemble_size = 1,
                         arch_frame_stack_size=1,
                         arch_img_dec_ensemble_size = 1,
-                        arch_img_dec_learn_background = True,
+                        arch_img_dec_learn_background = False,
                         arch_img_decoder_backbone = "conv_smaller",
                         arch_img_encoder_backbone = "conv_smaller",
                         arch_img_encoding_size = 20 if obs_cam else 0,
@@ -422,6 +430,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         arch_state_decombiner = [] if obs_cam else "identity",
                         arch_type = "dvae4_2",
                         arch_use_coord_conv=True,
+                        arch_img_dec_use_coord_conv=True,
                         arch_vec_decoder=[256,256],
                         arch_vec_decoder_activation="identity",
                         arch_vec_decoder_ensemble_size=1,
@@ -443,7 +452,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         grad_steps = le_grad_steps,
                         internal_enc_dropout = 0.0,
                         latent_space_activation="identity",
-                        loss_img_error_function="ssim+l1",
+                        loss_img_error_function="l2",
                         loss_latent_prediction_discount = 0.99,
                         loss_obs_prediction_discount    = 0.99,
                         loss_reward_prediction_discount = 0.99,
@@ -453,14 +462,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         loss_weight_cons_cycle_dynamics=0.0,
                         loss_weight_consistency  = 0.0,
                         loss_weight_img = 1.0,
-                        loss_weight_kld = 0.001,
+                        loss_weight_kld = 0.0,
                         loss_weight_latent_prediction = 0.0,
                         loss_weight_obs_prediction = 1.0,
                         loss_weight_reconstruction = 1.0,
                         loss_weight_reward = 0.1,
                         loss_weight_vec = 0.2,
                         loss_use_log=False,
-                        lr = 0.0005,
+                        lr = 0.0001,
                         lr_factor_decoder = 1.0,
                         no_resampling_on_dynamics=False,
                         policy_input_resampling=True,
@@ -491,7 +500,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     sac_init_hparams=SAC_init_hparams(
                                         actor_log_std_init=-2.0,
                                         actor_mean_bounds_ratio = 0.9,
-                                        actor_observation_filter=(["base.vec","base.camera"] if obs_cam else ["privileged.vec","base.vec"]),
+                                        actor_observation_filter=(["base.vec"]+cam_obs_keys if obs_cam else ["privileged.vec","base.vec"]),
                                         alpha_initial_value=0.001,
                                         alpha_lr_factor=1.0,
                                         auto_entropy_temperature=True,

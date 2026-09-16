@@ -1,0 +1,93 @@
+<mujoco xmlns:xacro="http://www.ros.org/wiki/xacro" model="pushing">
+  <!--
+    Simplified pushing scene: a planar operating area and a cylindrical end effector carried by two
+    chained prismatic joints whose axes are the world x and y axes. It is the adarl port of
+    panda_pushing/models/urdf/pushing_simplified.urdf.xacro, i.e. the "no robot, just a floating end
+    effector" variant of the panda pushing setup.
+
+    The pushed object is NOT part of this model: it is spawned separately
+    (adarl_envs/models/cube.urdf.xacro) so that it is a free body. The goal marker is part of this
+    model but sits on a free joint, so that it too can be moved per-environment: a body rigidly fixed
+    to the world has its geometry baked into the compiled model and cannot be moved at runtime under
+    mjx_impl="warp".
+
+    The end effector is a capsule rather than a cylinder: MJX's jax backend does not implement
+    cylinder-box collisions. Its cylindrical section spans exactly the same z range the original
+    cylinder did ([ee_ground_distance, ee_ground_distance+ee_height]), so the contact with the cube is
+    the same; the rounded cap sticks out below it, down to ee_ground_distance - ee_diameter/2, which
+    must stay above the ground.
+  -->
+
+  <xacro:arg name="area_size" default="0.45"/>
+  <xacro:arg name="area_center_x" default="0.525"/>
+  <xacro:arg name="area_center_y" default="0.0"/>
+  <xacro:arg name="ee_diameter" default="0.035"/>
+  <xacro:arg name="ee_height" default="0.10"/>
+  <xacro:arg name="ee_ground_distance" default="0.025"/>
+  <xacro:arg name="ee_mass" default="0.1"/>
+  <xacro:arg name="ee_friction" default="1 0.005 0.0001"/>
+  <xacro:arg name="joint_damping" default="1.0"/>
+  <xacro:arg name="goal_radius" default="0.05"/>
+  <xacro:arg name="add_goal_marker" default="true"/>
+  <xacro:arg name="add_area_plate" default="true"/>
+
+  <xacro:property name="area_size" value="$(arg area_size)"/>
+  <xacro:property name="area_center_x" value="$(arg area_center_x)"/>
+  <xacro:property name="area_center_y" value="$(arg area_center_y)"/>
+  <xacro:property name="ee_diameter" value="$(arg ee_diameter)"/>
+  <xacro:property name="ee_height" value="$(arg ee_height)"/>
+  <xacro:property name="ee_ground_distance" value="$(arg ee_ground_distance)"/>
+  <xacro:property name="ee_mass" value="$(arg ee_mass)"/>
+  <xacro:property name="ee_friction" value="$(arg ee_friction)"/>
+  <xacro:property name="joint_damping" value="$(arg joint_damping)"/>
+  <xacro:property name="goal_radius" value="$(arg goal_radius)"/>
+  <xacro:property name="add_goal_marker" value="$(arg add_goal_marker)"/>
+  <xacro:property name="add_area_plate" value="$(arg add_area_plate)"/>
+
+  <xacro:property name="ee_radius" value="${ee_diameter/2}"/>
+  <!-- z of the center of the end effector, i.e. of the center of the capsule's cylindrical section -->
+  <xacro:property name="ee_center_z" value="${ee_ground_distance + ee_height/2}"/>
+
+  <compiler angle="radian"/>
+
+  <worldbody>
+
+    <!-- Visual-only plate marking the operating area. The ground collision comes from the
+         simulator's ground plane. -->
+    <xacro:if value="${add_area_plate}">
+      <body name="area" pos="${area_center_x} ${area_center_y} 0.0005">
+        <inertial pos="0 0 0" mass="0.0001" diaginertia="1e-9 1e-9 1e-9"/>
+        <geom name="area_plate" type="box" size="${area_size/2} ${area_size/2} 0.0005"
+              rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0"/>
+      </body>
+    </xacro:if>
+
+    <!-- Visual-only goal marker, on a free joint so that it can be repositioned per-episode. -->
+    <xacro:if value="${add_goal_marker}">
+      <body name="goal" pos="${area_center_x} ${area_center_y} 0.001">
+        <freejoint name="goal_freejoint"/>
+        <inertial pos="0 0 0" mass="0.0001" diaginertia="1e-9 1e-9 1e-9"/>
+        <geom name="goal_marker" type="cylinder" size="${goal_radius} 0.001"
+              rgba="0.1 0.9 0.1 1" contype="0" conaffinity="0"/>
+      </body>
+    </xacro:if>
+
+    <!-- The end effector is constrained to the xy plane by two chained prismatic joints. -->
+    <body name="arm_link_1" pos="0 0 0">
+      <inertial pos="0 0 0" mass="0.0001" diaginertia="1e-9 1e-9 1e-9"/>
+      <joint name="ee_x_slider" type="slide" axis="1 0 0" damping="${joint_damping}"
+             range="${area_center_x-area_size/2} ${area_center_x+area_size/2}"/>
+      <body name="pushing_ee" pos="0 0 ${ee_center_z}">
+        <joint name="ee_y_slider" type="slide" axis="0 1 0" damping="${joint_damping}"
+               range="${area_center_y-area_size/2} ${area_center_y+area_size/2}"/>
+        <inertial pos="0 0 0" mass="${ee_mass}"
+                  diaginertia="${1/12.0 * ee_mass * (3*ee_radius*ee_radius + ee_height*ee_height)}
+                               ${1/12.0 * ee_mass * (3*ee_radius*ee_radius + ee_height*ee_height)}
+                               ${0.5 * ee_mass * ee_radius*ee_radius}"/>
+        <geom name="pushing_ee_geom" type="capsule" size="${ee_radius} ${ee_height/2}"
+              rgba="0.1 0.1 0.1 1" friction="${ee_friction}"/>
+      </body>
+    </body>
+
+  </worldbody>
+</mujoco>

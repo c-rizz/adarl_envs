@@ -505,7 +505,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                         alpha_lr_factor=1.0,
                                         auto_entropy_temperature=True,
                                         batch_size=16384,
-                                        buffer_size=10*1024*500,
+                                        buffer_size=3*1024*500,
                                         critic_observation_filter=["privileged.vec"],
                                         gamma=0.99,
                                         grad_steps=sac_grad_steps,

@@ -369,8 +369,8 @@ def loco_runner_builder(seed,
                                     longterm_states_decimation_time = env_builder_args.pop("longterm_states_decimation_time"),
                                     maxStepsPerEpisode=max_steps,
                                     merge_privileged = env_builder_args.pop("merge_privileged"),
-                                    minmax_damping=(0.0,30.0),
-                                    minmax_stiffness=(0.0,1000.0),
+                                    minmax_damping=env_builder_args.pop("minmax_ctrl_damping",(0.0,30.0)),
+                                    minmax_stiffness=env_builder_args.pop("minmax_ctrl_stiffness",(0.0,1000.0)),
                                     noise_abs_obs_angvel_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_angvel_ep_mustd_step_std"),
                                     noise_abs_obs_gravity_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_gravity_ep_mustd_step_std"),
                                     noise_abs_obs_joints_pve_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_joints_pve_ep_mustd_step_std"),
@@ -400,6 +400,7 @@ def loco_runner_builder(seed,
                                     robot_main_body_link=env_builder_args.pop("robot_main_body_link"),
                                     robot_name=robot_name,
                                     robot_root_link=env_builder_args.pop("robot_root_link"),
+                                    main_body_gait_frame_quat_xyzw=env_builder_args.pop("main_body_gait_frame_quat_xyzw", (0.,0.,0.,1.)),
                                     robot_description_string=robot_description_string,
                                     robot_description_format=robot_description_format,
                                     ctrl_joints_damping=env_builder_args.pop("ctrl_joints_damping"),
@@ -634,6 +635,11 @@ robot_args_registry["quad"] = get_quad_args
 
 def get_kyon_args(robot_options : dict = {}):
     enable_arms = robot_options.get("enable_arms", False)
+    # Flat feet instead of the contact spheres: the wheeled leg with a triangular foot plate where the
+    # wheel goes, touching the ground with two spheres, and the wheel motor driving an ankle pitch joint.
+    # NOTE: the quadruped homing below was measured with the contact-sphere legs and is not retuned for
+    # this (the legs get 0.068m longer), the humanoid config is the one that uses it.
+    feet = robot_options.get("feet", False)
     # hip_pitch = -0.8727 # = -50/180*3.14159
     # hip_roll =   0.0349 # = 2/180*3.14159
     # knee =      -1.5707 # = -90/180*3.14159
@@ -708,6 +714,10 @@ def get_kyon_args(robot_options : dict = {}):
     j_pos_ctrl_range = 0.5
     j_vel_ctrl_lim = j_vel_phys_lim*0.9
     j_eff_ctrl_lim = j_eff_phys_lim*0.9
+    # The ankles are driven by the wheel motor, which is weaker and faster than the leg ones
+    ankle_vel_ctrl_lim = 30.0*0.9
+    ankle_eff_ctrl_lim = 100.0*0.9
+    ankle_joints = [("kyon",f"ankle_pitch_{i}") for i in range(1,5)]
 
     if enable_arms:
         generic_arm_joint_names = ["shoulder_yaw_", "shoulder_pitch_", "elbow_pitch_", "wrist_pitch_", "wrist_yaw_"]
@@ -730,19 +740,33 @@ def get_kyon_args(robot_options : dict = {}):
         homing.update(dagana_left_pos)
         homing.update(dagana_right_pos)
 
+    if feet:
+        ankle_homing = {jn:0.0 for jn in ankle_joints}
+        homing.update(ankle_homing)
+        homing_ref.update(ankle_homing)
+
     j_pos_ctrl_lims = {k:np.array([-1.0,1.0])*j_pos_ctrl_range+homing[k] for k in homing.keys()}
+    j_vel_ctrl_lims = {k:(ankle_vel_ctrl_lim if k in ankle_joints else j_vel_ctrl_lim) for k in homing.keys()}
+    j_eff_ctrl_lims = {k:(ankle_eff_ctrl_lim if k in ankle_joints else j_eff_ctrl_lim) for k in homing.keys()}
     file = adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro")
     format = "xacro"
     # file = adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_mjx/kyon_mjx.xml")
     # format = "mjcf"
-    feet_links  = [ ('kyon', 'contact_1'),
-                    ('kyon', 'contact_2'),
-                    ('kyon', 'contact_3'),
-                    ('kyon', 'contact_4')]
+    if feet:
+        # the foot plate is what collides, the contact link is the frame at the center of the sole
+        feet_links         = [('kyon', f'foot_{i}') for i in range(1,5)]
+        feet_bottom_links  = [('kyon', f'contact_{i}') for i in range(1,5)]
+    else:
+        feet_links  = [ ('kyon', 'contact_1'),
+                        ('kyon', 'contact_2'),
+                        ('kyon', 'contact_3'),
+                        ('kyon', 'contact_4')]
+        feet_bottom_links = feet_links
     return {"model_file" : file,
             "robot_description_format" : format,
             "model_kwargs" : {"upper_body" : f"{enable_arms}",
                               "footonly_collision" : "true",
+                              "feet" : f"{feet}",
                               "varta" : "true"},
             "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf")},
             "homing_joint_position" : homing,
@@ -768,15 +792,16 @@ def get_kyon_args(robot_options : dict = {}):
                                                 # {k:[[ joint_ranges[k], 0.9, 0.9],
                                                 #     [ joint_ranges[k], 0.9, 0.9]] for k,v in homing_ref.items()},
             "control_limits_minmax_pve" : {k:th.as_tensor(
-                                             [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lim, -j_eff_ctrl_lim],
-                                              [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lim,  j_eff_ctrl_lim]]) for k,v in homing_ref.items()},
+                                             [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lims[k], -j_eff_ctrl_lims[k]],
+                                              [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lims[k],  j_eff_ctrl_lims[k]]]) for k,v in homing_ref.items()},
             "control_limits_center" : None, #homing_ref,
             "enable_link_collisions" : [(fl,[('ground','ground_link'),'world']) for fl in feet_links],
             "feet_contact_links" : feet_links,
-            "feet_bottom_links" : feet_links,
+            "feet_bottom_links" : feet_bottom_links,
             "ctrl_joints_stiffness" :500.0,
             "ctrl_joints_damping" :20.0,
             "default_max_joint_impedance_ctrl_torque" : 150.0,
+            "max_joint_impedance_ctrl_torques" : {jn:ankle_eff_ctrl_lim for jn in ankle_joints} if feet else {},
             "revolute_dof_damping_override" : 1.0,
             "mjx_opt_preset" : "faster",
             "mjx_opt_override" : {  
@@ -796,7 +821,138 @@ def get_kyon_args(robot_options : dict = {}):
             #                                             "friction" : np.array([0.8, 0.005, 0.0001])}}
         }
 robot_args_registry["kyon"] = get_kyon_args
-robot_args_registry["kyon_arms"] = lambda : get_kyon_args(robot_options={"enable_arms": True})
+robot_args_registry["kyon_arms"] = lambda robot_options = {}: get_kyon_args(robot_options={**robot_options, "enable_arms": True})
+
+
+def get_kyon_humanoid_args(robot_options : dict = {}):
+    """Kyon treated as a humanoid: it stands upright on its rear legs (3 and 4), with the front legs
+    (1 and 2) hanging in front of it as arms.
+
+    The pelvis is spawned pitched by 90 degrees, so that the pelvis +x axis (the direction of the front
+    hips) points up and the pelvis +z axis (the belly side) points forward. All four legs stay
+    agent-controlled, only the rear ones are treated as feet.
+
+    By default it stands on the flat feet of the `feet` model option (see get_kyon_args), so that each
+    foot has a +-0.10m support base along the walking direction, worth +-73Nm of pitch authority.
+    Passing robot_options['feet'] = False falls back to the contact-sphere legs, where the two feet only
+    give a support *line*, with no resistance to pitch at all: the robot can then only stay up by
+    actively balancing fore-aft. Each of the two has its own homing pose and standing height.
+
+    The joint homing is the IK solution that puts the rear feet (soles flat on the ground, when there
+    are feet) right below the robot center of mass, with the pelvis at `height` and at least 0.55rad of
+    margin on every joint limit (so that the +-0.5rad position control range around the homing stays
+    inside the physical limits). Note that in this configuration the rear knees bend towards the back of
+    the robot, i.e. away from the walking direction: the solutions that bend them the other way sit
+    within 0.25rad of the hip_pitch limits.
+    """
+    robot_options = {"feet": True, **robot_options}
+    args = get_kyon_args(robot_options=robot_options)
+    feet = robot_options["feet"]
+
+    # Pelvis pitched by 90deg: pelvis +x -> world up, pelvis +z (belly) -> world forward.
+    upright_body_quat_xyzw = (0.70710678, 0.0, 0.70710678, 0.0)
+    # The gait frame (z-up, x-forward while standing) expressed in the pelvis frame is the conjugate of
+    # the upright spawn orientation, so that at spawn the gait frame is aligned with the world.
+    gait_frame_quat_xyzw = (-0.70710678, 0.0, -0.70710678, 0.0)
+    if feet:
+        # Pelvis height with the rear soles flat on the ground in the homing pose. This is 88% of the
+        # kinematic maximum (1.15m): standing more crouched costs a lot of torque just to hold the pose
+        # (77Nm at the knee at 1.00m, against a 150Nm actuator limit, i.e. 3.2cm of sag at stiffness 500)
+        # and needs a bigger ankle angle to keep the sole flat, standing more extended runs out of
+        # vertical authority (6.2rad/m of joint motion per meter of squat here, against 23rad/m at
+        # 1.14m) without buying any meaningful fall time, since that only scales with sqrt(h/g).
+        height = 1.055
+        # Rear soles flat on the ground at (-1.06, +-0.33, 0.02) in the pelvis frame (1.06m below the
+        # pelvis, 0.66m apart, right below the center of mass), hands at (-0.10, +-0.31, 0.25) (0.1m
+        # below and 0.25m in front of the pelvis) with the ankle straight.
+        upright_legs = { ("kyon","hip_roll_1")    : -0.0838,
+                         ("kyon","hip_pitch_1")   : -1.1508,
+                         ("kyon","knee_pitch_1")  : -1.5496,
+                         ("kyon","ankle_pitch_1") :  0.0,
+                         ("kyon","hip_roll_2")    :  0.0838,
+                         ("kyon","hip_pitch_2")   :  1.1508,
+                         ("kyon","knee_pitch_2")  :  1.5496,
+                         ("kyon","ankle_pitch_2") :  0.0,
+                         ("kyon","hip_roll_3")    :  0.0,
+                         ("kyon","hip_pitch_3")   : -1.1196,
+                         ("kyon","knee_pitch_3")  : -1.0511,
+                         ("kyon","ankle_pitch_3") :  0.5998,
+                         ("kyon","hip_roll_4")    :  0.0,
+                         ("kyon","hip_pitch_4")   :  1.1196,
+                         ("kyon","knee_pitch_4")  :  1.0511,
+                         ("kyon","ankle_pitch_4") : -0.5998}
+    else:
+        # Same pose on the contact-sphere legs, which are 0.068m shorter and have no ankle. 87% of the
+        # kinematic maximum of that leg (1.049m), by the same reasoning as above.
+        height = 0.955
+        # Feet at (-0.96, +-0.30, 0.01) in the pelvis frame, hands at (-0.10, +-0.31, 0.25).
+        upright_legs = { ("kyon","hip_roll_1")    :  0.0389,
+                         ("kyon","hip_pitch_1")   : -1.5211,
+                         ("kyon","knee_pitch_1")  : -1.1356,
+                         ("kyon","hip_roll_2")    : -0.0389,
+                         ("kyon","hip_pitch_2")   :  1.5211,
+                         ("kyon","knee_pitch_2")  :  1.1356,
+                         ("kyon","hip_roll_3")    :  0.0,
+                         ("kyon","hip_pitch_3")   : -0.9456,
+                         ("kyon","knee_pitch_3")  : -1.3744,
+                         ("kyon","hip_roll_4")    :  0.0,
+                         ("kyon","hip_pitch_4")   :  0.9456,
+                         ("kyon","knee_pitch_4")  :  1.3744}
+    # Only the legs are moved, so that the upper body joints keep the homing of the quadruped config
+    # when it is enabled. References and initial positions are the same: unlike the quadruped homing
+    # these were not measured after letting the robot settle, so at the episode start the robot sags a
+    # bit under gravity.
+    homing = dict(args["homing_joint_position"])
+    homing.update(upright_legs)
+    homing_ref = dict(args["homing_joint_position_references"])
+    homing_ref.update(upright_legs)
+
+    j_pos_ctrl_range = 0.5
+    ankle_joints = [("kyon",f"ankle_pitch_{i}") for i in range(1,5)]
+    j_pos_ctrl_lims = {k:np.array([-1.0,1.0])*j_pos_ctrl_range+homing[k] for k in homing.keys()}
+    j_vel_ctrl_lims = {k:(30.0 if k in ankle_joints else 7.6)*0.9 for k in homing.keys()}
+    j_eff_ctrl_lims = {k:(100.0 if k in ankle_joints else 185.0)*0.9 for k in homing.keys()}
+
+    # Only the rear legs are feet. With the plates, they are what collides and the contact links are the
+    # sole centers; with the contact spheres the same link is both.
+    feet_links        = [('kyon', f'foot_{i}' if feet else f'contact_{i}') for i in (3,4)]
+    feet_bottom_links = [('kyon', f'contact_{i}') for i in (3,4)]
+    hand_links        = [('kyon', f'foot_{i}' if feet else f'contact_{i}') for i in (1,2)]
+
+    args.update({
+            "homing_joint_position" : homing,
+            "homing_joint_position_references" : homing_ref,
+            "homing_body_pose_xyz_xyzw" : (0.,0.,height)+upright_body_quat_xyzw,
+            # spawn box: x,y fixed at the homing spot, z a clearance above the local terrain
+            "randomized_homing_body_position_minmax_xyz" : ((0.,0.,height-0.1),(0.,0.,height+0.1)),
+            "main_body_gait_frame_quat_xyzw" : gait_frame_quat_xyzw,
+            "control_limits_minmax_pve" : {k:th.as_tensor(
+                                             [[ j_pos_ctrl_lims[k][0], -j_vel_ctrl_lims[k], -j_eff_ctrl_lims[k]],
+                                              [ j_pos_ctrl_lims[k][1],  j_vel_ctrl_lims[k],  j_eff_ctrl_lims[k]]]) for k in homing.keys()},
+            "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
+                                                    [ 0.9, 0.9, 0.9]] for k in homing.keys()},
+            # The hands are not feet, but they must still collide with the ground
+            "feet_contact_links" : feet_links,
+            "feet_bottom_links" : feet_bottom_links,
+            "enable_link_collisions" : [(l,[('ground','ground_link'),'world']) for l in feet_links+hand_links],
+            "goal_height_minmax" : [height, height],
+            # A biped tips over much more easily than a quadruped, give it some room before calling it a crash
+            "terminal_gravity_angle" : 40*pi/180,
+        })
+    if feet:
+        # Standing on flat feet, the body leans by deflecting the ankles, so a soft ankle makes the
+        # upright pose an unstable equilibrium no matter how stiff the rest of the leg is: the restoring
+        # torque of the ankle spring has to beat gravity's m*g*h_com ~= 740Nm/rad. At the default
+        # 500Nm/rad the two cancel almost exactly and the robot slowly topples; 1200Nm/rad gives 1.6x of
+        # margin, and saturates the 90Nm ankle at 0.075rad, well inside the +-0.1rad the sole can
+        # support before the CoP runs off the toe.
+        args.update({
+            "ctrl_joints_stiffness" : {"default" : 500.0, **{jn:1200.0 for jn in ankle_joints}},
+            "ctrl_joints_damping" :   {"default" :  20.0, **{jn:  30.0 for jn in ankle_joints}},
+            "minmax_ctrl_stiffness" : (0.0, 2000.0),
+        })
+    return args
+robot_args_registry["kyon_humanoid"] = get_kyon_humanoid_args
 
 def get_go1_args():
 
@@ -1229,7 +1385,7 @@ def get_centauro_args(control_arms=False, robot_options : dict | None = None):
             "revolute_dof_armature_override" : 0.234
         }
 robot_args_registry["centauro"] = get_centauro_args
-robot_args_registry["centauro_legs_arms"] = lambda : get_centauro_args(control_arms=True)
+robot_args_registry["centauro_legs_arms"] = lambda robot_options = {}: get_centauro_args(control_arms=True, robot_options=robot_options)
 
 def named_loco_venv_builder(seed : int,
                     run_folder : str,

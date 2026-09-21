@@ -671,12 +671,13 @@ class LocomotionVecEnv(RobotVecEnv):
 
         
     def _get_loco_adapter_data(self, super_adapter_data):
+        nfeet = len(self._loco_conf.init_args.feet_bottom_links)
         if isinstance(self._adapter,BaseVecSimulationAdapter):
             lstates = self._adapter.getLinksState(requestedLinks = self._feet_and_body_link_ids, use_com_pose = False)
-            nfeet = lstates.shape[1] - 1  # number of feet links
-            feet_linvels_vec_foot_xyz = lstates[:,:4,7:10]
-            bstate = lstates[:,4]
-            borient_quat_vec_xyzw = bstate[:,3:7] # (nenvs,4)
+            feet_linvels_vec_foot_xyz = lstates[:,:nfeet,7:10]
+            bstate = lstates[:,nfeet] # the body link is requested after the feet links
+            # Body-relative quantities are expressed in the gait frame (see RobotVecEnvInitArgs.main_body_gait_frame_quat_xyzw)
+            borient_quat_vec_xyzw = self.to_gait_frame_orientation(bstate[:,3:7]) # (nenvs,4)
             body_pos_vec_xyz = bstate[:,0:3].unsqueeze(1)  # (nenvs,1,3)
             feet_abs_pos_vec_foot_xyz = lstates[:,:nfeet,0:3] # (nenvs,nfeet,3)
             feet_rel_pos_vec_foot_xyz = th_quat_rotate(feet_abs_pos_vec_foot_xyz - body_pos_vec_xyz,
@@ -687,16 +688,16 @@ class LocomotionVecEnv(RobotVecEnv):
                 self._robot_model.set_joint_pose_by_names({jn[1]:jpos[i] for i,jn in enumerate(self._configuration.joints_agent_controlled)} )
                 fk_feet_poses_dict = self._robot_model.get_frame_poses_xyzxyzw(self._configuration.main_body_link[1],[l[1] for l in self._loco_conf.init_args.feet_bottom_links])
                 fk_feet_positions_xyz = self._thtens([fp[:3] for fp in fk_feet_poses_dict.values()])
-                feet_rel_pos_vec_foot_xyz = fk_feet_positions_xyz.unsqueeze(0)
+                feet_rel_pos_vec_foot_xyz = self.body_vecs_to_gait_frame(fk_feet_positions_xyz).unsqueeze(0)
             else:
                 raise NotImplementedError("Feet positions are only implemented for single env when not using a simulation adapter")
-            feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
-            feet_abs_pos_vec_foot_xyz = self._thzeros((self.num_envs,4,3))
-            borient_quat_vec_xyzw = self._unit_quaternion.expand((self.num_envs,4))
+            feet_linvels_vec_foot_xyz = self._thzeros((self.num_envs,nfeet,3))
+            feet_abs_pos_vec_foot_xyz = self._thzeros((self.num_envs,nfeet,3))
+            borient_quat_vec_xyzw = self.to_gait_frame_orientation(self._unit_quaternion.expand((self.num_envs,4)))
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             feet_are_touching_ground = self._adapter.check_colliding_links()  # Returns all monitored pairs (feet vs ground)
         else:
-            feet_are_touching_ground = self._thzeros((self.num_envs,4))
+            feet_are_touching_ground = self._thzeros((self.num_envs,nfeet))
         return feet_linvels_vec_foot_xyz, feet_rel_pos_vec_foot_xyz, feet_abs_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw
 
 
@@ -1910,7 +1911,7 @@ class LocomotionVecEnv(RobotVecEnv):
                     # Undo the flattening to get the direction in the body frame, then rotate it into
                     # the world frame with the body orientation so the arrow points the right way.
                     # (this is the inverse of the abs->rel conversion done in _get_new_instantaneous_state)
-                    borient_quat_vec_xyzw = bstates_vec_13[:,3:7]
+                    borient_quat_vec_xyzw = self.to_gait_frame_orientation(bstates_vec_13[:,3:7])
                     gravity_rel_vec_xyz = th_quat_rotate(self._abs_gravity_dir.expand(self.num_envs,3), th_quat_conj(borient_quat_vec_xyzw)) # world down expressed in the body frame
                     rel_planar_goal_linvel_direction_xyz = th.cat([goal_rel_vel_vec_xys[:,:2], th.zeros_like(goal_rel_vel_vec_xys[:,:1])], dim=1) # planar in the flattened frame (z=0)
                     swing = quat_xyzw_between_vecs_py(gravity_rel_vec_xyz, self._abs_gravity_dir.expand_as(gravity_rel_vec_xyz)) # flattening rotation: body -> flattened

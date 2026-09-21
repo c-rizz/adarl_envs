@@ -29,8 +29,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
 
     world = "flat_ground"
+    # Standing upright on the rear legs the pelvis is much higher off the ground, and the robot tips
+    # over much more easily than the quadruped
+    is_humanoid = args["robot"].lower() == "kyon_humanoid"
+    humanoid_feet = is_humanoid and not args["no_feet"] # the humanoid stands on flat feet unless asked otherwise
+    humanoid_height = 1.055 if humanoid_feet else 0.955 # it stands taller on the feet, they make the legs longer
+    spawn_clearance_z = humanoid_height if is_humanoid else 0.493 # clearance of the main body link above the local ground at spawn
     if world == "pyramids":
         terminal_gravity_angle = 60 * math.pi / 180.0
+    elif is_humanoid:
+        terminal_gravity_angle = 40 * math.pi / 180.0
     else:
         terminal_gravity_angle = 30 * math.pi / 180.0
 
@@ -53,6 +61,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
         "goal_height_minmax" : {"kyon" : [0.493,0.493],
+                                "kyon_humanoid" : [humanoid_height,humanoid_height], # standing upright on the rear legs
                                 "go1" : [0.30,0.30],
                                 "centauro" : [0.79,0.79],
                                 }.get(args["robot"].lower(), [0.5,0.5]),
@@ -97,7 +106,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "randomization_recycle_init_pose" : True,
         "randomized_initial_joint_pose_range" : 0.3,
-        "randomized_homing_body_position_minmax_xyz" : ((-6, -18,0.493),(102, 18,0.493)) , #((-6, -18, 0.48), (102, 18, 0.50)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
+        "randomized_homing_body_position_minmax_xyz" : ((-6, -18,spawn_clearance_z),(102, 18,spawn_clearance_z)) , #((-6, -18, 0.48), (102, 18, 0.50)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_dof_armature_ratios" :       ("uniform", [0.9*r,1.1*r]),
         "randomized_dof_damping_ratios":         ("uniform", [0.9*r,1.1*r]),
@@ -150,8 +159,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_yaw_vel_tracking_weight" :          1.0,
         "robot_model" : args["robot"],
         "robot_options" : {
-            "enable_arms" : args["arms"]
-        }, 
+            "enable_arms" : args["arms"],
+            "feet" : humanoid_feet
+        },
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : True if algo=="sac" else False,
         "step_max_good_air_duration" : 0.5,
@@ -339,6 +349,7 @@ if __name__ == "__main__":
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
     ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
     ap.add_argument("--arms", default=False, action='store_true', help="Enable arms")
+    ap.add_argument("--no-feet", default=False, action='store_true', help="Stand the humanoid on the contact-sphere legs instead of the flat feet (kyon_humanoid only)")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

@@ -15,7 +15,7 @@ from adarl.utils.vec_state_helper import    JointImpedanceActionHelper, ThBoxSta
                                         StateNoiseGenerator, DictStateHelper, unnormalize, normalize
 from adarl.utils.tensor_trees import space_from_tree
 import adarl.utils.utils
-from adarl.utils.utils import (isinstance_noimport, masked_assign, quat_conj_xyzw_np, quat_mul_xyzw_np,
+from adarl.utils.utils import (isinstance_noimport, masked_assign, quat_conj_xyzw_np, quat_mul_xyzw_np, quat_mul_xyzw,
                                DistributionDef, DistributionDefTh, sample_distr, distr_to_tensor, distr_is_constant,
                                to_string_tensor, th_quat_rotate_py, th_quat_conj, ros_rpy_to_quaternion_xyzw_th, thtens)
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check,  dbg_check_bounded, dbg_check_finite
@@ -120,6 +120,17 @@ class RobotVecEnvInitArgs():
     impulse_probability_per_sec : float = 0.0
     just_health_reward : bool = False
     longterm_states_decimation_time : float = 0.0001
+    main_body_gait_frame_quat_xyzw : tuple[float,float,float,float] = (0.0,0.0,0.0,1.0)
+    """Orientation of the *gait frame* expressed in the main body link frame (xyzw quaternion).
+
+    The gait frame is a virtual frame rigidly attached to the main body link, and it is the frame all
+    body-relative quantities (gravity direction, linear/angular velocity, linear acceleration, feet
+    positions) are expressed in. It is meant to be z-up and x-forward when the robot stands in its
+    nominal posture, which is what the locomotion goals, rewards and termination conditions assume.
+    For a robot whose main body link is already z-up/x-forward when standing (the usual case) this is
+    the identity, and no rotation is performed at all. For a robot spawned in a different attitude
+    (e.g. a quadruped stood up on its hind legs, see the kyon humanoid config in loco_builder) this is
+    the conjugate of the upright spawn orientation."""
     merge_privileged : bool = False
     minimal_infos : bool = False
     no_infos : bool = False
@@ -635,6 +646,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self.vec_observation_space = batch_space(self.single_observation_space, self._adapter.vec_size())
 
         self._abs_gravity_dir = self._thtens([0.0,0.0,-1.0])
+        gait_frame_quat_xyzw = self._thtens(init_args.main_body_gait_frame_quat_xyzw).view(1,4)
+        gait_frame_quat_xyzw = gait_frame_quat_xyzw/th.linalg.norm(gait_frame_quat_xyzw)
+        # The identity is by far the most common case, keep it as None so that no rotation is done in the hot path
+        self._gait_frame_quat_xyzw : th.Tensor | None = (None
+                                                         if th.allclose(gait_frame_quat_xyzw, self._thtens([0.0,0.0,0.0,1.0]).view(1,4), atol=1e-6)
+                                                         else gait_frame_quat_xyzw)
         self._eps_start_stime = self._thzeros(size=(self.num_envs,))
         self._reset_state_full()
         self._set_current_ep_config(reset_options = {}, vec_mask=self._all_envs)
@@ -2076,9 +2093,28 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         record_region_end("RobotVecEnv._update_state_and_stats")
         return new_state
 
-    # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
+    def to_gait_frame_orientation(self, body_abs_quat_xyzw_vec : th.Tensor) -> th.Tensor:
+        """World orientation of the gait frame, given the world orientation of the main body link.
+
+        See RobotVecEnvInitArgs.main_body_gait_frame_quat_xyzw. Returns its argument unchanged when no
+        gait frame offset is configured."""
+        if self._gait_frame_quat_xyzw is None:
+            return body_abs_quat_xyzw_vec
+        return quat_mul_xyzw(body_abs_quat_xyzw_vec, self._gait_frame_quat_xyzw.expand_as(body_abs_quat_xyzw_vec))
+
+    def body_vecs_to_gait_frame(self, vecs_xyz : th.Tensor) -> th.Tensor:
+        """Express vectors given in the main body link frame in the gait frame.
+
+        See RobotVecEnvInitArgs.main_body_gait_frame_quat_xyzw. Returns its argument unchanged when no
+        gait frame offset is configured."""
+        if self._gait_frame_quat_xyzw is None:
+            return vecs_xyz
+        return th_quat_rotate_py(vecs_xyz, th_quat_conj(self._gait_frame_quat_xyzw).expand(vecs_xyz.size()[:-1]+(4,)))
+
     def _compute_extr_from_bodystate(self, body_abs_linvel_xyz_vec, body_abs_angvel_xyz_vec, body_abs_quat_xyzw_vec):
-        conj_body_abs_quat_xyzw_vec = th_quat_conj(body_abs_quat_xyzw_vec)
+        # All the body-relative quantities are expressed in the gait frame, which is the main body link
+        # frame itself unless a gait frame offset was configured
+        conj_body_abs_quat_xyzw_vec = th_quat_conj(self.to_gait_frame_orientation(body_abs_quat_xyzw_vec))
         vec_body_rel_gravity_dir = th_quat_rotate_py(self._abs_gravity_dir.expand_as(body_abs_linvel_xyz_vec), conj_body_abs_quat_xyzw_vec)
         vec_body_rel_linvel_xyz = th_quat_rotate_py(body_abs_linvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
         vec_body_rel_angvel_xyz = th_quat_rotate_py(body_abs_angvel_xyz_vec, conj_body_abs_quat_xyzw_vec)
@@ -2103,7 +2139,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_held_jstates_j_pveae =          states.joint_state_pveae[:,len(self._configuration.joints_agent_controlled):len(self._configuration.joints_all_env_controlled)]
         vec_stats_minmaxavgstd_j_pvaeep =   states.joint_stats_pvaeep[:,:,:len(self._configuration.joints_agent_controlled)]
         vec_bodystates_13 = states.link_state[:,0,:]
-        vec_body_rel_linacc_xyz = states.link_linacc[:,0,:]
+        vec_body_rel_linacc_xyz = self.body_vecs_to_gait_frame(states.link_linacc[:,0,:])
         
         body_abs_quat_xyzw_vec  = vec_bodystates_13[:,3:7]
         vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
@@ -2158,7 +2194,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                                                            body_abs_angvel_xyz_vec = vec_body_abs_angvel_xyz,
                                                                                                                            body_abs_quat_xyzw_vec = body_abs_quat_xyzw_vec)
             vec_body_ground_dist = vec_bodystates_13[:,2]              
-            vec_body_rel_linacc_xyz = self._adapter.get_local_link_linear_acceleration(self._main_body_mon_link_ids)[:,0,:]
+            vec_body_rel_linacc_xyz = self.body_vecs_to_gait_frame(self._adapter.get_local_link_linear_acceleration(self._main_body_mon_link_ids)[:,0,:])
             if self._configuration.init_args.enable_dbg_checks:
                 dbg_check(lambda: th.all(th.isfinite(vec_bodystates_13)),
                         lambda: f"non finite values in body link state at {th.logical_not(th.isfinite(vec_bodystates_13)).nonzero()}: {vec_bodystates_13[th.logical_not(th.isfinite(vec_bodystates_13))]} : {vec_bodystates_13}",
@@ -2167,8 +2203,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         assert_msg="non finite values in body link state")                
         else:
             vec_bodystates_13 = None
-            vec_body_rel_gravity_dir = self._adapter.get_link_gravity_direction(self._main_body_mon_link_ids)[:,0,:]
-            vec_body_rel_angvel_xyz = self._adapter.get_link_relative_angular_velocity(self._main_body_mon_link_ids)[:,0,:]
+            vec_body_rel_gravity_dir = self.body_vecs_to_gait_frame(self._adapter.get_link_gravity_direction(self._main_body_mon_link_ids)[:,0,:])
+            vec_body_rel_angvel_xyz = self.body_vecs_to_gait_frame(self._adapter.get_link_relative_angular_velocity(self._main_body_mon_link_ids)[:,0,:])
             example_vec_3d_tens = vec_jstates_j_pveae[:,0,:3]
             vec_body_abs_linvel_xyz = th.zeros_like(example_vec_3d_tens)
             vec_body_abs_angvel_xyz = th.zeros_like(example_vec_3d_tens)

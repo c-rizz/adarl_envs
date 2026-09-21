@@ -23,11 +23,11 @@ def scripted_actions(env : PushingVecEnv, states : dict[str, th.Tensor]) -> th.T
 
     It uses the privileged state, not the observation, so it works with the camera-based observation too.
     """
-    idx = PushingVecEnv.VEC_STATE_IDX
-    vec = states["vec"]
-    tip_xy = vec[:,[idx.TIP_X, idx.TIP_Y]]
-    cube_xy = vec[:,[idx.CUBE_X, idx.CUBE_Y]]
-    goal_xy = vec[:,[idx.GOAL_X, idx.GOAL_Y]]
+    f = PushingVecEnv.POSE_FIELDS
+    pose = states[PushingVecEnv.STATE_POSE][:,0,:,0] # most recent history step, single-valued fields
+    tip_xy = pose[:,[f.TIP_X, f.TIP_Y]]
+    cube_xy = pose[:,[f.CUBE_X, f.CUBE_Y]]
+    goal_xy = pose[:,[f.GOAL_X, f.GOAL_Y]]
     cube2goal = goal_xy - cube_xy
     direction = cube2goal/th.clamp(th.linalg.vector_norm(cube2goal, dim=-1, keepdim=True), min=1e-6)
     standoff = env._cube_size*0.75 + env._ee_diameter/2

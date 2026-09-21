@@ -9,6 +9,10 @@ end effector and has to push a cube onto a goal position.
 The end effector is position-controlled through a :class:`BaseVecCartesianPositionAdapter` (for MJX,
 :class:`Mjx2DofCartesianAdapter`), whose step is blocking: a step of this environment lasts as long
 as the commanded movement takes, like it did in the original environment.
+
+The state is described by a :class:`DictStateHelper` built in :meth:`_build_state_helper`, like in
+:class:`RobotVecEnv`: each substate declares its fields, their limits, and which of them each
+observation ("base" for the policy, "privileged" for the critic) can see.
 """
 from __future__ import annotations
 
@@ -16,12 +20,13 @@ from adarl.adapters.BaseVecCartesianPositionAdapter import BaseVecCartesianPosit
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter, ModelSpawnDef
 from adarl.envs.vec.ControlledVecEnv import ControlledVecEnv
 from adarl.utils.dbg.dbg_checks import dbg_check
-from adarl.utils.spaces import ThBox, gym_spaces
+from adarl.utils.spaces import ThBox
 from adarl.utils.tensor_trees import space_from_tree
 from adarl.utils.utils import to_string_tensor, th_quat_rotate, ros_rpy_to_quaternion_xyzw
+from adarl.utils.vec_state_helper import ThBoxStateHelper, DictStateHelper
 from enum import IntEnum
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 from typing_extensions import override
 import adarl.utils.dbg.ggLog as ggLog
 import adarl.utils.utils
@@ -33,17 +38,25 @@ import torch as th
 class PushingVecEnv(ControlledVecEnv):
     """Simplified planar pushing environment, vectorized, MJX-first."""
 
-    class VEC_STATE_IDX(IntEnum):
-        TIP_X = 0
-        TIP_Y = 1
-        CUBE_X = 2
-        CUBE_Y = 3
-        CUBE_YAW = 4
-        GOAL_X = 5
-        GOAL_Y = 6
-        STEP = 7
-        CUBE_DISPLACEMENT = 8
-        EE_TRACKING_ERROR = 9
+    STATE_POSE = "pose"
+    STATE_INTERNAL = "internal"
+    STATE_CAMERA = "camera"
+
+    POSE_FIELDS = IntEnum("POSE_FIELDS", ["TIP_X",
+                                          "TIP_Y",
+                                          "CUBE_X",
+                                          "CUBE_Y",
+                                          "CUBE_YAW_COS",
+                                          "CUBE_YAW_SIN",
+                                          "GOAL_X",
+                                          "GOAL_Y"], start=0)
+
+    INTERNAL_FIELDS = IntEnum("INTERNAL_FIELDS", ["STEP_COUNT",
+                                                  "TIME",
+                                                  "CUBE_DISPLACEMENT",
+                                                  "EE_TRACKING_ERROR"], start=0)
+
+    CAMERA_FIELDS = IntEnum("CAMERA_FIELDS", ["IMAGE"], start=0)
 
     def __init__(self,
                  adapter : BaseVecCartesianPositionAdapter,
@@ -52,6 +65,8 @@ class PushingVecEnv(ControlledVecEnv):
                  step_duration_sec : float = 0.5,
                  seed : int = 0,
                  observe_camera : bool = True,
+                 history_length : int = 1,
+                 frame_stack_length : int = 1,
                  obs_camera_resolution_hw : tuple[int,int] = (64,64),
                  obs_camera_render_resolution_hw : tuple[int,int] = (144,256),
                  img_crop_ltrb : tuple[float,float,float,float] = (220/848, 0.0, 708/848, 420/480),
@@ -92,9 +107,14 @@ class PushingVecEnv(ControlledVecEnv):
             Nominal duration of a step. With a blocking (position-controlled) adapter the actual
             duration varies, and this value is only used as a reference (e.g. for camera frame rates).
         observe_camera : bool
-            If True the observation is the camera image plus a minimal vector (end effector position,
-            time and goal), i.e. the cube pose is only visible through the image, like the original
-            environment's default mode. If False the cube pose is observed directly.
+            If True the "base" observation carries the camera image, and the cube pose is left out of
+            its vector part, i.e. the policy can only see the cube through the image, like the
+            original environment's default mode. If False the cube pose is in the vector instead.
+            The "privileged" observation always sees the full state either way.
+        history_length : int
+            How many past steps the state keeps. 1 means only the current one.
+        frame_stack_length : int
+            How many past steps the "privileged" observation sees. Must be <= history_length.
         max_position_change : float
             Maximum end-effector displacement commanded by a single action, in meters.
         """
@@ -115,6 +135,8 @@ class PushingVecEnv(ControlledVecEnv):
         self._operating_area_np = np.stack([area_min, area_max])
 
         self._observe_camera = observe_camera
+        self._history_length = history_length
+        self._frame_stack_length = frame_stack_length
         self._obs_camera_resolution_hw = obs_camera_resolution_hw
         self._obs_camera_render_resolution_hw = obs_camera_render_resolution_hw
         self._img_crop_ltrb = img_crop_ltrb
@@ -150,16 +172,17 @@ class PushingVecEnv(ControlledVecEnv):
         self._obs_camera_name = "obs_camera"
         self._ui_camera_name = "ui_camera"
 
-        single_state_space, single_observation_space, single_reward_space = self._build_spaces(th_device)
+        self._build_state_helper(adapter=adapter, th_device=th_device)
 
         act_max = np.array([1.0, 1.0])
         super().__init__(th_device=th_device,
                          seed=seed,
                          obs_dtype=th.float32,
                          single_action_space=ThBox(-act_max, act_max, torch_device=th_device),
-                         single_observation_space=single_observation_space,
-                         single_state_space=single_state_space,
-                         single_reward_space=single_reward_space,
+                         single_observation_space=self._state_helper.get_single_obs_space(),
+                         single_state_space=self._state_helper.get_single_space(),
+                         single_reward_space=ThBox(low=float("-inf"), high=float("+inf"),
+                                                   shape=tuple(), torch_device=th_device),
                          info_space=None, # type: ignore : set below, it needs the env to be initialized
                          step_duration_sec=step_duration_sec,
                          adapter=adapter, # type: ignore : it is also a BaseVecAdapter
@@ -168,15 +191,19 @@ class PushingVecEnv(ControlledVecEnv):
                          # step duration cannot be checked against the nominal one.
                          step_precision_tolerance=float("+inf"))
 
+        # Cached field index tensors, so that indexing groups of fields does not build a tensor (and
+        # sync) on every step.
+        pose_helper = self._state_helper.sub_helpers[self.STATE_POSE]
+        self._idx_tip_xy = pose_helper.field_idx((self.POSE_FIELDS.TIP_X, self.POSE_FIELDS.TIP_Y))
+        self._idx_cube_xy = pose_helper.field_idx((self.POSE_FIELDS.CUBE_X, self.POSE_FIELDS.CUBE_Y))
+        self._idx_goal_xy = pose_helper.field_idx((self.POSE_FIELDS.GOAL_X, self.POSE_FIELDS.GOAL_Y))
+
         self._area_min_xy = th.as_tensor(area_min, dtype=th.float32, device=th_device)
         self._area_max_xy = th.as_tensor(area_max, dtype=th.float32, device=th_device)
         self._goal_xy = self._thzeros((self.num_envs, 2))
         self._prev_cube_xy = self._thzeros((self.num_envs, 2))
         self._cached_tip_xy = self._thzeros((self.num_envs, 2))
         self._cached_cube_xy = self._thzeros((self.num_envs, 2))
-        self._cached_cube_yaw = self._thzeros((self.num_envs,))
-        self._cached_ee_tracking_error = self._thzeros((self.num_envs,))
-        self._cached_states : dict[str, th.Tensor] | None = None
         self._success = th.zeros((self.num_envs,), dtype=th.bool, device=th_device)
         self._ep_min_cube2goal_dist = self._thfull(float("+inf"), (self.num_envs,))
         self._ep_min_cube2tip_dist = self._thfull(float("+inf"), (self.num_envs,))
@@ -186,68 +213,139 @@ class PushingVecEnv(ControlledVecEnv):
         self._ep_steps_before_success = self._thfull(float(max_episode_steps+1), (self.num_envs,))
         self._no_success_steps = self._thfull(float(max_episode_steps+1), (self.num_envs,))
         self._rgb_to_gray_w = self._thtens([0.299, 0.587, 0.114])
+        self._current_state = self._state_helper.reset_state()
 
         example_labels : dict[str,th.Tensor] = {}
-        example_state = {k : th.as_tensor((s.low+s.high)/2).to(device=th_device).unsqueeze(0).repeat(self.num_envs, *([1]*len(s.shape)))
-                         for k,s in single_state_space.spaces.items()}
-        example_infos = self.get_infos(example_state, example_labels)
+        example_infos = self.get_infos(self._current_state, example_labels)
         self.info_space = space_from_tree(example_infos, example_labels) # needs to be done after super().__init__
 
         self._build()
         self._adapter.startup()
         self.initialize_episodes()
 
-    # ------------------------------------------------------------------ spaces
+    # ------------------------------------------------------------------ state definition
 
-    def _build_spaces(self, th_device : th.device):
-        idx = PushingVecEnv.VEC_STATE_IDX
-        big = 10.0
-        state_vec_max = th.zeros((len(idx),), device=th_device, dtype=th.float32)
-        state_vec_max[idx.TIP_X] = big
-        state_vec_max[idx.TIP_Y] = big
-        state_vec_max[idx.CUBE_X] = big
-        state_vec_max[idx.CUBE_Y] = big
-        state_vec_max[idx.CUBE_YAW] = math.pi
-        state_vec_max[idx.GOAL_X] = big
-        state_vec_max[idx.GOAL_Y] = big
-        state_vec_max[idx.STEP] = 1e6
-        state_vec_max[idx.CUBE_DISPLACEMENT] = big
-        state_vec_max[idx.EE_TRACKING_ERROR] = big
-        state_vec_labels = [e.name.lower() for e in idx]
-        single_vec_state_space = ThBox(-state_vec_max, state_vec_max,
-                                       labels=to_string_tensor(state_vec_labels),
-                                       torch_device=th_device)
-        states_dict : dict[str, gym_spaces.Space] = {"vec" : single_vec_state_space}
-        if self._observe_camera:
-            states_dict["image"] = ThBox(low=0, high=255,
-                                         shape=self._obs_camera_resolution_hw,
-                                         torch_device=th_device)
-        state_space = gym_spaces.Dict(states_dict) # type: ignore : gym Dict uses dict instead of Mapping
+    def _build_state_helper(self, adapter : BaseVecCartesianPositionAdapter, th_device : th.device):
+        """Builds the state helper, which defines how the state is represented and observed."""
 
-        if self._observe_camera:
-            self._obs_vec_fields = [idx.TIP_X, idx.TIP_Y, idx.GOAL_X, idx.GOAL_Y]
-            obs_vec_labels = ["tip_x","tip_y","goal_x","goal_y","time"]
-        else:
-            self._obs_vec_fields = [idx.TIP_X, idx.TIP_Y, idx.CUBE_X, idx.CUBE_Y, idx.GOAL_X, idx.GOAL_Y]
-            obs_vec_labels = ["tip_x","tip_y","cube_x","cube_y","goal_x","goal_y",
-                              "cube_yaw_cos","cube_yaw_sin","time"]
-        # the observation vector is the selected state fields, plus (cube yaw cos/sin if observed) and time
-        obs_vec_max_list = [float(state_vec_max[f]) for f in self._obs_vec_fields]
+        vsize_dev_type = dict(dtype=th.float32, th_device=th_device, vec_size=adapter.vec_size())
+        area_min, area_max = self._operating_area_np[0], self._operating_area_np[1]
+        # Positions are allowed a margin outside the operating area: the cube can be pushed past its
+        # edge, and the limits are what normalize() maps into [-1,1].
+        margin = 0.15
+        x_minmax = [float(area_min[0])-margin, float(area_max[0])+margin]
+        y_minmax = [float(area_min[1])-margin, float(area_max[1])+margin]
+
+        # :::::::::::::::::::::::::::::::::::::::: POSE STATE ::::::::::::::::::::::::::::::::::::::::
+
+        # The cube pose is privileged whenever the policy is supposed to read it off the camera
+        # image, which reproduces the original environment's default observation.
+        base_pose_observable_fields = [self.POSE_FIELDS.TIP_X,
+                                       self.POSE_FIELDS.TIP_Y,
+                                       self.POSE_FIELDS.GOAL_X,
+                                       self.POSE_FIELDS.GOAL_Y]
         if not self._observe_camera:
-            obs_vec_max_list += [1.0, 1.0]
-        obs_vec_max_list += [1.0]
-        obs_vec_max = th.as_tensor(obs_vec_max_list, device=th_device, dtype=th.float32)
-        obs_dict : dict[str, gym_spaces.Space] = {"vec" : ThBox(-obs_vec_max, obs_vec_max,
-                                                                labels=to_string_tensor(obs_vec_labels),
-                                                                torch_device=th_device)}
-        if self._observe_camera:
-            obs_dict["image"] = ThBox(low=0, high=255,
-                                      shape=self._obs_camera_resolution_hw,
-                                      torch_device=th_device)
-        single_observation_space = gym_spaces.Dict(obs_dict) # type: ignore
+            base_pose_observable_fields += [self.POSE_FIELDS.CUBE_X,
+                                            self.POSE_FIELDS.CUBE_Y,
+                                            self.POSE_FIELDS.CUBE_YAW_COS,
+                                            self.POSE_FIELDS.CUBE_YAW_SIN]
+        pose_state_helper = ThBoxStateHelper(
+                field_names=[e for e in self.POSE_FIELDS],
+                field_size=(1,),
+                fields_minmax={
+                        self.POSE_FIELDS.TIP_X : x_minmax,
+                        self.POSE_FIELDS.TIP_Y : y_minmax,
+                        self.POSE_FIELDS.CUBE_X : x_minmax,
+                        self.POSE_FIELDS.CUBE_Y : y_minmax,
+                        self.POSE_FIELDS.CUBE_YAW_COS : [-1.0, 1.0],
+                        self.POSE_FIELDS.CUBE_YAW_SIN : [-1.0, 1.0],
+                        self.POSE_FIELDS.GOAL_X : x_minmax,
+                        self.POSE_FIELDS.GOAL_Y : y_minmax},
+                history_length=self._history_length,
+                **vsize_dev_type, # type: ignore
+                observation_definitions={
+                        "base":ThBoxStateHelper.SimpleObsDef(
+                                observable_fields=base_pose_observable_fields,
+                                obs_history_length=1,
+                                observable_subfields=None),
+                        "privileged":ThBoxStateHelper.SimpleObsDef(
+                                observable_fields=[e for e in self.POSE_FIELDS],
+                                obs_history_length=self._frame_stack_length,
+                                observable_subfields=None)})
 
-        single_reward_space = ThBox(low=float("-inf"), high=float("+inf"), shape=tuple(), torch_device=th_device)
-        return state_space, single_observation_space, single_reward_space
+        # :::::::::::::::::::::::::::::::::::::::: INTERNAL STATE ::::::::::::::::::::::::::::::::::::::::
+
+        internal_state_helper = ThBoxStateHelper(
+                field_names=[e for e in self.INTERNAL_FIELDS],
+                field_size=(1,),
+                fields_minmax={
+                        self.INTERNAL_FIELDS.STEP_COUNT : [0, 100_000],
+                        self.INTERNAL_FIELDS.TIME : [-1.0, 1.0],
+                        self.INTERNAL_FIELDS.CUBE_DISPLACEMENT : [0.0, 0.5],
+                        self.INTERNAL_FIELDS.EE_TRACKING_ERROR : [0.0, 0.5]},
+                history_length=self._history_length,
+                **vsize_dev_type, # type: ignore
+                observation_definitions={
+                        "base":ThBoxStateHelper.SimpleObsDef(
+                                observable_fields=[self.INTERNAL_FIELDS.TIME],
+                                obs_history_length=1,
+                                observable_subfields=None),
+                        "privileged":ThBoxStateHelper.SimpleObsDef(
+                                observable_fields=[self.INTERNAL_FIELDS.TIME,
+                                                   self.INTERNAL_FIELDS.CUBE_DISPLACEMENT,
+                                                   self.INTERNAL_FIELDS.EE_TRACKING_ERROR],
+                                obs_history_length=1,
+                                observable_subfields=None)})
+
+        # :::::::::::::::::::::::::::::::::::::::: STATE AGGREGATION ::::::::::::::::::::::::::::::::::::::::
+
+        vec_substates = [self.STATE_POSE, self.STATE_INTERNAL]
+        self._state_helper = DictStateHelper(
+                {self.STATE_POSE : pose_state_helper,
+                 self.STATE_INTERNAL : internal_state_helper},
+                obs_definitions={
+                        "base" : DictStateHelper.SimpleDictObsDef(
+                                observable_substates=list(vec_substates),
+                                concatenable_substates=list(vec_substates),
+                                concatenated_part_name="vec",
+                                noise_generators={}),
+                        "privileged" : DictStateHelper.SimpleDictObsDef(
+                                observable_substates=list(vec_substates),
+                                concatenable_substates=list(vec_substates),
+                                concatenated_part_name="vec",
+                                noise_generators={})})
+
+        # :::::::::::::::::::::::::::::::::::::::: CAMERA STATE ::::::::::::::::::::::::::::::::::::::::
+
+        # Kept out of the concatenated vector part: it is an image, with its own dtype and range.
+        if self._observe_camera:
+            camera_state_helper = ThBoxStateHelper(
+                    field_names=[e for e in self.CAMERA_FIELDS],
+                    field_size=self._obs_camera_resolution_hw,
+                    fields_minmax={self.CAMERA_FIELDS.IMAGE : [0, 255]},
+                    dtype=th.uint8,
+                    normalization_range=(0, 255),
+                    th_device=th_device,
+                    vec_size=adapter.vec_size(),
+                    history_length=self._history_length,
+                    observation_definitions={
+                            "base":ThBoxStateHelper.SimpleObsDef(
+                                    observable_fields=None,
+                                    obs_history_length=1,
+                                    observable_subfields=None,
+                                    skip_history_dim=True),
+                            # not_observable() would set observable_subfields=[], which the helper
+                            # rejects for multi-dimensional fields such as an image.
+                            "privileged":ThBoxStateHelper.SimpleObsDef(
+                                    observable_fields=[],
+                                    obs_history_length=1,
+                                    observable_subfields=None,
+                                    skip_history_dim=True)})
+            self._state_helper = self._state_helper.add_substate(
+                    self.STATE_CAMERA,
+                    camera_state_helper,
+                    obs_defs={"base" :       {"observable":True,  "concatenate":False, "noise":None},
+                              "privileged" : {"observable":False, "concatenate":False, "noise":None}})
 
     # ------------------------------------------------------------------ scenario
 
@@ -351,46 +449,42 @@ class PushingVecEnv(ControlledVecEnv):
         angle_z = th.acos(th.clamp(rotated_zaxis[:,2], -1.0, 1.0)) # dot(zaxis, rotated_zaxis)
         return th.where(points_mostly_up, angle_z, angle_x)
 
-    def _refresh_geometric_state(self) -> None:
-        """Read the end effector and cube state from the adapter and cache it.
-
-        Cached because it is needed by post_step(), by the action submission and by get_states(),
-        which may be called more than once per step.
-        """
+    def _read_instantaneous_state(self) -> dict[str, dict[Any, th.Tensor]]:
+        """Read the current state from the adapter, as one tensor per state field."""
         # Cloned: getLinksState hands out tensors backed by simulator memory, which MJX donates on
-        # the next step, and these are kept across the step.
+        # the next step, and the end effector position is kept across the step (submit_actions uses it).
         link_states = self._adapter.getLinksState(self._mon_link_ids)
-        self._cached_tip_xy = link_states[:,0,0:2].clone()
-        self._cached_cube_xy = link_states[:,1,0:2].clone()
-        self._cached_cube_yaw = self._cube_yaw_from_quat(link_states[:,1,3:7])
-        self._cached_ee_tracking_error = self._adapter.get_cartesian_position_error()[:,0].clone()
-        self._cached_states = None # the cached state is stale now
+        tip_xy = link_states[:,0,0:2].clone()
+        cube_xy = link_states[:,1,0:2].clone()
+        cube_yaw = self._cube_yaw_from_quat(link_states[:,1,3:7])
+        self._cached_tip_xy = tip_xy
+        self._cached_cube_xy = cube_xy
+        step_count = self.get_ep_step_counter().to(self._obs_dtype)
+        instantaneous_state : dict[str, dict[Any, th.Tensor]] = {
+                self.STATE_POSE : {
+                        self.POSE_FIELDS.TIP_X : tip_xy[:,0],
+                        self.POSE_FIELDS.TIP_Y : tip_xy[:,1],
+                        self.POSE_FIELDS.CUBE_X : cube_xy[:,0],
+                        self.POSE_FIELDS.CUBE_Y : cube_xy[:,1],
+                        self.POSE_FIELDS.CUBE_YAW_COS : th.cos(cube_yaw),
+                        self.POSE_FIELDS.CUBE_YAW_SIN : th.sin(cube_yaw),
+                        self.POSE_FIELDS.GOAL_X : self._goal_xy[:,0],
+                        self.POSE_FIELDS.GOAL_Y : self._goal_xy[:,1]},
+                self.STATE_INTERNAL : {
+                        self.INTERNAL_FIELDS.STEP_COUNT : step_count,
+                        self.INTERNAL_FIELDS.TIME : step_count/self.get_max_episode_steps()*2-1,
+                        self.INTERNAL_FIELDS.CUBE_DISPLACEMENT : th.linalg.vector_norm(cube_xy - self._prev_cube_xy, dim=-1),
+                        self.INTERNAL_FIELDS.EE_TRACKING_ERROR : self._adapter.get_cartesian_position_error()[:,0].clone()}}
+        if self._observe_camera:
+            instantaneous_state[self.STATE_CAMERA] = {self.CAMERA_FIELDS.IMAGE : self._render_observation_image()}
+        dbg_check(lambda: th.isfinite(self._state_helper.sub_helpers[self.STATE_POSE]._mapping_to_tensor(
+                                        instantaneous_state[self.STATE_POSE])).all(),
+                  lambda: f"Non-finite values in pose state: {instantaneous_state[self.STATE_POSE]}")
+        return instantaneous_state
 
     @override
     def get_states(self) -> dict[str, th.Tensor]:
-        # Assembling the state includes rendering the observation camera, so it is cached until the
-        # next step (or episode initialization) invalidates it.
-        if self._cached_states is not None:
-            return self._cached_states
-        # The stacking order below must match PushingVecEnv.VEC_STATE_IDX
-        vec_state = th.stack([self._cached_tip_xy[:,0],
-                              self._cached_tip_xy[:,1],
-                              self._cached_cube_xy[:,0],
-                              self._cached_cube_xy[:,1],
-                              self._cached_cube_yaw,
-                              self._goal_xy[:,0],
-                              self._goal_xy[:,1],
-                              self.get_ep_step_counter().to(self._obs_dtype),
-                              th.linalg.vector_norm(self._cached_cube_xy - self._prev_cube_xy, dim=-1),
-                              self._cached_ee_tracking_error],
-                             dim=1)
-        dbg_check(lambda: th.isfinite(vec_state).all(),
-                  lambda: f"Non-finite values in state vec: {vec_state}")
-        states : dict[str, th.Tensor] = {"vec" : vec_state}
-        if self._observe_camera:
-            states["image"] = self._render_observation_image()
-        self._cached_states = states
-        return states
+        return self._current_state
 
     def _render_observation_image(self) -> th.Tensor:
         renderings = self._adapter.get_camera_images([self._obs_camera_name], rgb=True, depth=False)
@@ -408,22 +502,11 @@ class PushingVecEnv(ControlledVecEnv):
                                            antialias=True)
         img = img.permute(0, 2, 3, 1) # back to (vec, H, W, C)
         gray = (img[..., :3] @ self._rgb_to_gray_w)*255 # (vec, H, W)
-        return gray.to(self._obs_dtype)
+        return gray.to(th.uint8)
 
     @override
     def get_observations(self, states : dict[str, th.Tensor]) -> dict[str, th.Tensor]:
-        idx = PushingVecEnv.VEC_STATE_IDX
-        vec_state = states["vec"]
-        time_norm = vec_state[:,idx.STEP]/self.get_max_episode_steps()*2-1
-        fields = [vec_state[:,f] for f in self._obs_vec_fields]
-        if not self._observe_camera:
-            cube_yaw = vec_state[:,idx.CUBE_YAW]
-            fields += [th.cos(cube_yaw), th.sin(cube_yaw)]
-        fields += [time_norm]
-        obs : dict[str, th.Tensor] = {"vec" : th.stack(fields, dim=1)}
-        if self._observe_camera:
-            obs["image"] = states["image"]
-        return obs
+        return self._state_helper.observe(states)
 
     @override
     def pre_step(self):
@@ -432,7 +515,10 @@ class PushingVecEnv(ControlledVecEnv):
 
     @override
     def post_step(self):
-        self._refresh_geometric_state()
+        instantaneous_state = self._read_instantaneous_state()
+        self._current_state = self._state_helper.update(instantaneous_state,
+                                                        state=self._current_state,
+                                                        inplace=False) # rolls down the history and adds the current state
         cube2goal = th.linalg.vector_norm(self._cached_cube_xy - self._goal_xy, dim=-1)
         cube2tip = th.linalg.vector_norm(self._cached_cube_xy - self._cached_tip_xy, dim=-1)
         self._ep_min_cube2goal_dist = th.minimum(self._ep_min_cube2goal_dist, cube2goal)
@@ -449,6 +535,14 @@ class PushingVecEnv(ControlledVecEnv):
 
     # ------------------------------------------------------------------ reward and termination
 
+    def _pose_xy(self, states : dict[str, th.Tensor], field_idx : th.Tensor) -> th.Tensor:
+        """Most recent value of a pair of pose fields, as a (vec_size, 2) tensor."""
+        return states[self.STATE_POSE][:,0,field_idx,0]
+
+    def _internal(self, states : dict[str, th.Tensor], field : IntEnum) -> th.Tensor:
+        """Most recent value of an internal field, as a (vec_size,) tensor."""
+        return states[self.STATE_INTERNAL][:,0,field,0]
+
     def _reward_terms(self, cube2goal_dist : th.Tensor, tip2cube_dist : th.Tensor,
                       cube_displacement : th.Tensor) -> th.Tensor:
         """Port of PandaPushingEnv2DOF.reward_func (without the gate term, there is no gate here)."""
@@ -462,15 +556,13 @@ class PushingVecEnv(ControlledVecEnv):
     @override
     def compute_rewards(self, states : dict[str, th.Tensor],
                         sub_rewards_return : dict[str, th.Tensor] | None = None) -> th.Tensor:
-        idx = PushingVecEnv.VEC_STATE_IDX
-        vec_state = states["vec"]
-        cube_xy = vec_state[:,[idx.CUBE_X, idx.CUBE_Y]]
-        tip_xy = vec_state[:,[idx.TIP_X, idx.TIP_Y]]
-        goal_xy = vec_state[:,[idx.GOAL_X, idx.GOAL_Y]]
+        cube_xy = self._pose_xy(states, self._idx_cube_xy)
+        tip_xy = self._pose_xy(states, self._idx_tip_xy)
+        goal_xy = self._pose_xy(states, self._idx_goal_xy)
         cube2goal_dist = th.linalg.vector_norm(cube_xy - goal_xy, dim=-1)
         tip2cube_dist = th.linalg.vector_norm(cube_xy - tip_xy, dim=-1)
-        cube_displacement = vec_state[:,idx.CUBE_DISPLACEMENT]
-        step = vec_state[:,idx.STEP]
+        cube_displacement = self._internal(states, self.INTERNAL_FIELDS.CUBE_DISPLACEMENT)
+        step = self._internal(states, self.INTERNAL_FIELDS.STEP_COUNT)
         succeeded = cube2goal_dist < self._goal_tolerance
 
         if sub_rewards_return is not None:
@@ -498,13 +590,13 @@ class PushingVecEnv(ControlledVecEnv):
 
     @override
     def are_states_terminal(self, states : dict[str, th.Tensor]) -> th.Tensor:
-        idx = PushingVecEnv.VEC_STATE_IDX
-        vec_state = states["vec"]
-        cube2goal_dist = th.linalg.vector_norm(vec_state[:,[idx.CUBE_X, idx.CUBE_Y]] -
-                                               vec_state[:,[idx.GOAL_X, idx.GOAL_Y]], dim=-1)
+        cube2goal_dist = th.linalg.vector_norm(self._pose_xy(states, self._idx_cube_xy) -
+                                               self._pose_xy(states, self._idx_goal_xy), dim=-1)
         terminal = th.zeros((self.num_envs,), dtype=th.bool, device=self._th_device)
         if not self._prevent_ee_out:
-            tip_xy = vec_state[:,[idx.TIP_X, idx.TIP_Y]]
+            # Note that the end effector's joint limits coincide with the operating area, so in this
+            # simplified setup it cannot actually leave it, exactly as in the original PyBullet one.
+            tip_xy = self._pose_xy(states, self._idx_tip_xy)
             out_of_area = th.logical_or(th.any(tip_xy < self._area_min_xy, dim=-1),
                                         th.any(tip_xy > self._area_max_xy, dim=-1))
             terminal = th.logical_or(terminal, out_of_area)
@@ -514,7 +606,7 @@ class PushingVecEnv(ControlledVecEnv):
 
     @override
     def are_states_timedout(self, states : dict[str, th.Tensor]) -> th.Tensor:
-        return states["vec"][:,PushingVecEnv.VEC_STATE_IDX.STEP] >= self.get_max_episode_steps()
+        return self._internal(states, self.INTERNAL_FIELDS.STEP_COUNT) >= self.get_max_episode_steps()
 
     # ------------------------------------------------------------------ episode initialization
 
@@ -597,8 +689,16 @@ class PushingVecEnv(ControlledVecEnv):
         self._ep_cube2tip_dist_sum = th.where(vec_mask, zeros, self._ep_cube2tip_dist_sum)
         self._ep_cube_travel = th.where(vec_mask, zeros, self._ep_cube_travel)
         self._ep_steps_before_success = th.where(vec_mask, self._no_success_steps, self._ep_steps_before_success)
-        self._refresh_geometric_state()
-        self._prev_cube_xy = th.where(vec_mask.unsqueeze(-1), self._cached_cube_xy, self._prev_cube_xy)
+
+        # The cube has not moved yet, so read it once before building the state, to get a zero displacement
+        self._prev_cube_xy = th.where(vec_mask.unsqueeze(-1),
+                                      self._adapter.getLinksState(self._mon_link_ids)[:,1,0:2],
+                                      self._prev_cube_xy)
+        instantaneous_state = self._read_instantaneous_state()
+        # This repeats the instantaneous state across the history dimension
+        self._current_state = self._state_helper.reset_state(instantaneous_state,
+                                                             vec_mask=vec_mask,
+                                                             old_state=self._current_state)
 
     # ------------------------------------------------------------------ rendering and infos
 
@@ -615,11 +715,9 @@ class PushingVecEnv(ControlledVecEnv):
     @override
     def get_infos(self, states : dict[str, th.Tensor],
                   labels : dict[str, th.Tensor] | None = None) -> dict[str, th.Tensor]:
-        idx = PushingVecEnv.VEC_STATE_IDX
-        vec_state = states["vec"]
         sub_rewards : dict[str, th.Tensor] = {}
         reward = self.compute_rewards(states, sub_rewards)
-        step_count = vec_state[:,idx.STEP]
+        step_count = self._internal(states, self.INTERNAL_FIELDS.STEP_COUNT)
         steps_done = th.clamp(step_count, min=1.0)
         info = {"success" : self._success.to(self._obs_dtype),
                 "cube2goal_dist" : sub_rewards["cube2goal_dist"],
@@ -630,13 +728,21 @@ class PushingVecEnv(ControlledVecEnv):
                 "avg_tip_dist" : self._ep_cube2tip_dist_sum/steps_done,
                 "total_cube_travel" : self._ep_cube_travel,
                 "steps_before_success" : self._ep_steps_before_success,
-                "ee_tracking_error" : vec_state[:,idx.EE_TRACKING_ERROR],
+                "ee_tracking_error" : self._internal(states, self.INTERNAL_FIELDS.EE_TRACKING_ERROR),
                 "ep_step_count" : step_count,
                 "reward" : reward}
         info.update({"reward_"+k : v for k,v in sub_rewards.items()})
-        info["obs"] = self.get_observations(states)
+        obs = self.get_observations(states)
+        info["obs"] = obs
         if labels is not None:
-            labels["obs"] = {"vec" : self.single_observation_space["vec"].labels} # type: ignore
+            obs_names = self._state_helper.observation_names()
+            obs_labels = {}
+            for k in obs:
+                subobs_names = obs_names[k]
+                if len(subobs_names.shape) == 1:
+                    obs_labels[k] = to_string_tensor([str(n) for n in subobs_names])
+            if obs_labels:
+                labels["obs"] = obs_labels
         return info
 
     def get_configuration(self) -> dict[str, Any]:

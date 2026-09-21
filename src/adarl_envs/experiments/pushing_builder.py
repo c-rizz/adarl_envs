@@ -82,7 +82,8 @@ def build_pushing_env(seed : int, run_folder : str, num_envs : int, env_builder_
     os.makedirs(run_folder, exist_ok=True)
     adapter = build_adapter(num_envs=num_envs, run_folder=run_folder, env_builder_args=env_builder_args)
     env_kwargs = {k:v for k,v in env_builder_args.items()
-                  if k in ("observe_camera", "obs_camera_resolution_hw", "obs_camera_render_resolution_hw",
+                  if k in ("observe_camera", "history_length", "frame_stack_length",
+                           "obs_camera_resolution_hw", "obs_camera_render_resolution_hw",
                            "img_crop_ltrb", "ui_camera_resolution_hw", "operating_area_xy", "goal_tolerance",
                            "max_position_change", "ee_height", "ee_diameter", "cube_size", "cube_mass",
                            "prevent_ee_out", "terminate_on_success", "sparse_reward", "reward_cube_pos_weight",
@@ -141,7 +142,7 @@ def runner_builder(seed,
                                            saveFrequency_ep=args["video_save_freq"],
                                            publish=False,
                                            stream=True,
-                                           vec_obs_keys=["vec"],
+                                           vec_obs_keys=["base.vec","privileged.vec"],
                                            overlay_text_xy=(0.025, 0.025),
                                            overlay_text_height=0.035,
                                            overlay_text_color_rgb=(255, 150, 0),

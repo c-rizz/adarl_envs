@@ -832,11 +832,12 @@ def get_kyon_humanoid_args(robot_options : dict = {}):
     hips) points up and the pelvis +z axis (the belly side) points forward. All four legs stay
     agent-controlled, only the rear ones are treated as feet.
 
-    By default it stands on the flat feet of the `feet` model option (see get_kyon_args), so that each
-    foot has a +-0.10m support base along the walking direction, worth +-73Nm of pitch authority.
-    Passing robot_options['feet'] = False falls back to the contact-sphere legs, where the two feet only
-    give a support *line*, with no resistance to pitch at all: the robot can then only stay up by
-    actively balancing fore-aft. Each of the two has its own homing pose and standing height.
+    By default it stands on the plain contact-sphere legs, where the two feet only give a support
+    *line*, with no resistance to pitch at all, so the robot can only stay up by actively balancing
+    fore-aft. Passing robot_options['feet'] = True switches to the flat feet of the `feet` model option
+    (see get_kyon_args), giving each foot a 0.20m support base along the walking direction, worth about
+    +-73Nm of pitch authority, and adding an ankle pitch joint per leg to the action space. Each of the
+    two has its own homing pose and standing height.
 
     The joint homing is the IK solution that puts the rear feet (soles flat on the ground, when there
     are feet) right below the robot center of mass, with the pelvis at `height` and at least 0.55rad of
@@ -845,7 +846,7 @@ def get_kyon_humanoid_args(robot_options : dict = {}):
     the robot, i.e. away from the walking direction: the solutions that bend them the other way sit
     within 0.25rad of the hip_pitch limits.
     """
-    robot_options = {"feet": True, **robot_options}
+    robot_options = {"feet": False, **robot_options}
     args = get_kyon_args(robot_options=robot_options)
     feet = robot_options["feet"]
 
@@ -862,25 +863,26 @@ def get_kyon_humanoid_args(robot_options : dict = {}):
         # vertical authority (6.2rad/m of joint motion per meter of squat here, against 23rad/m at
         # 1.14m) without buying any meaningful fall time, since that only scales with sqrt(h/g).
         height = 1.055
-        # Rear soles flat on the ground at (-1.06, +-0.33, 0.02) in the pelvis frame (1.06m below the
-        # pelvis, 0.66m apart, right below the center of mass), hands at (-0.10, +-0.31, 0.25) (0.1m
-        # below and 0.25m in front of the pelvis) with the ankle straight.
+        # Rear soles flat on the ground, with their centers (the midpoint between toe and heel, which is
+        # what the contact links mark on the asymmetric foot) at (-1.06, +-0.33, 0.02) in the pelvis
+        # frame: 1.06m below the pelvis, 0.66m apart, right below the center of mass. Hands at
+        # (-0.10, +-0.31, 0.25), i.e. 0.1m below and 0.25m in front of the pelvis, with straight ankles.
         upright_legs = { ("kyon","hip_roll_1")    : -0.0838,
-                         ("kyon","hip_pitch_1")   : -1.1508,
-                         ("kyon","knee_pitch_1")  : -1.5496,
+                         ("kyon","hip_pitch_1")   : -1.1494,
+                         ("kyon","knee_pitch_1")  : -1.5023,
                          ("kyon","ankle_pitch_1") :  0.0,
                          ("kyon","hip_roll_2")    :  0.0838,
-                         ("kyon","hip_pitch_2")   :  1.1508,
-                         ("kyon","knee_pitch_2")  :  1.5496,
+                         ("kyon","hip_pitch_2")   :  1.1494,
+                         ("kyon","knee_pitch_2")  :  1.5023,
                          ("kyon","ankle_pitch_2") :  0.0,
                          ("kyon","hip_roll_3")    :  0.0,
-                         ("kyon","hip_pitch_3")   : -1.1196,
-                         ("kyon","knee_pitch_3")  : -1.0511,
-                         ("kyon","ankle_pitch_3") :  0.5998,
+                         ("kyon","hip_pitch_3")   : -1.0798,
+                         ("kyon","knee_pitch_3")  : -1.0529,
+                         ("kyon","ankle_pitch_3") :  0.5619,
                          ("kyon","hip_roll_4")    :  0.0,
-                         ("kyon","hip_pitch_4")   :  1.1196,
-                         ("kyon","knee_pitch_4")  :  1.0511,
-                         ("kyon","ankle_pitch_4") : -0.5998}
+                         ("kyon","hip_pitch_4")   :  1.0798,
+                         ("kyon","knee_pitch_4")  :  1.0529,
+                         ("kyon","ankle_pitch_4") : -0.5619}
     else:
         # Same pose on the contact-sphere legs, which are 0.068m shorter and have no ankle. 87% of the
         # kinematic maximum of that leg (1.049m), by the same reasoning as above.

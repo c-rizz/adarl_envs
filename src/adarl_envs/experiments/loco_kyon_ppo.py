@@ -32,7 +32,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # Standing upright on the rear legs the pelvis is much higher off the ground, and the robot tips
     # over much more easily than the quadruped
     is_humanoid = args["robot"].lower() == "kyon_humanoid"
-    humanoid_feet = is_humanoid and not args["no_feet"] # the humanoid stands on flat feet unless asked otherwise
+    humanoid_feet = is_humanoid and args["feet"] # the humanoid stands on the contact spheres unless asked for feet
     humanoid_height = 1.055 if humanoid_feet else 0.955 # it stands taller on the feet, they make the legs longer
     spawn_clearance_z = humanoid_height if is_humanoid else 0.493 # clearance of the main body link above the local ground at spawn
     if world == "pyramids":
@@ -349,7 +349,7 @@ if __name__ == "__main__":
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
     ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
     ap.add_argument("--arms", default=False, action='store_true', help="Enable arms")
-    ap.add_argument("--no-feet", default=False, action='store_true', help="Stand the humanoid on the contact-sphere legs instead of the flat feet (kyon_humanoid only)")
+    ap.add_argument("--feet", default=False, action='store_true', help="Stand the humanoid on the flat feet instead of the contact-sphere legs (kyon_humanoid only)")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

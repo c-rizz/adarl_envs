@@ -64,7 +64,10 @@
 
     <!-- Visual-only goal marker, on a free joint so that it can be repositioned per-episode. -->
     <xacro:if value="${add_goal_marker}">
-      <body name="goal" pos="${area_center_x} ${area_center_y} 0.001">
+      <!-- gravcomp keeps the marker where it is put: it is a free body (so that it can be moved
+           per-environment) with collisions disabled, so gravity would otherwise make it fall
+           straight through the floor after the first step. -->
+      <body name="goal" pos="${area_center_x} ${area_center_y} 0.001" gravcomp="1">
         <freejoint name="goal_freejoint"/>
         <inertial pos="0 0 0" mass="0.0001" diaginertia="1e-9 1e-9 1e-9"/>
         <geom name="goal_marker" type="cylinder" size="${goal_radius} 0.001"

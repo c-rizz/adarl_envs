@@ -19,7 +19,7 @@ from __future__ import annotations
 from adarl.adapters.BaseVecCartesianPositionAdapter import BaseVecCartesianPositionAdapter
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter, ModelSpawnDef
 from adarl.envs.vec.ControlledVecEnv import ControlledVecEnv
-from adarl.utils.dbg.dbg_checks import dbg_check
+from adarl.utils.dbg.dbg_checks import dbg_check, dbg_check_finite
 from adarl.utils.spaces import ThBox
 from adarl.utils.tensor_trees import space_from_tree
 from adarl.utils.utils import to_string_tensor, th_quat_rotate, ros_rpy_to_quaternion_xyzw
@@ -71,24 +71,26 @@ class PushingVecEnv(ControlledVecEnv):
                  obs_camera_render_resolution_hw : tuple[int,int] = (144,256),
                  img_crop_ltrb : tuple[float,float,float,float] = (220/848, 0.0, 708/848, 420/480),
                  ui_camera_resolution_hw : tuple[int,int] = (240,426),
-                 operating_area_xy : tuple[tuple[float,float],tuple[float,float]] = ((0.30,-0.225),(0.75,0.225)),
+                 operating_area_xy : tuple[tuple[float,float],tuple[float,float]] = ((0.2975,-0.225),(0.7475,0.225)),
                  goal_tolerance : float = 0.05,
+                 random_goal : bool = False,
+                 goal_position_xy : tuple[float,float] = (0.45,-0.15),
                  max_position_change : float = 0.025,
                  ee_height : float = 0.025,
                  ee_diameter : float = 0.035,
                  cube_size : float = 0.06,
                  cube_mass : float = 0.1,
-                 prevent_ee_out : bool = False,
-                 terminate_on_success : bool = True,
+                 prevent_ee_out : bool = True,
+                 terminate_on_success : bool = False,
                  sparse_reward : bool = False,
                  reward_cube_pos_weight : float = 1.0,
-                 reward_tip_pos_weight : float = 1.0,
-                 reward_cube_move_weight : float = 1.0,
+                 reward_tip_pos_weight : float = 0.0,
+                 reward_cube_move_weight : float = 0.0,
                  reward_scale : float = 0.1,
-                 goal_spawn_border_dist : float = 0.08,
+                 goal_spawn_border_dist : float = 0.01,
                  cube_spawn_border_dist : float = 0.08,
                  ee_spawn_border_dist : float = 0.02,
-                 allow_successful_initial_cube_position : bool = False,
+                 allow_successful_initial_cube_position : bool = True,
                  spawn_rejection_candidates : int = 16,
                  cube_color : tuple[float,float,float] = (0.175, 0.175, 0.175),
                  camera_position_xyz : tuple[float,float,float] = (0.9935, -0.0225, 0.6),
@@ -104,8 +106,10 @@ class PushingVecEnv(ControlledVecEnv):
         max_episode_steps : int
             Episode length, in agent steps.
         step_duration_sec : float
-            Nominal duration of a step. With a blocking (position-controlled) adapter the actual
-            duration varies, and this value is only used as a reference (e.g. for camera frame rates).
+            Nominal duration of a step, i.e. ControlledVecEnv's step length. With a blocking
+            (position-controlled) adapter a step lasts as long as the commanded movement takes, so
+            this value is not enforced: step_precision_tolerance is set to infinity and the adapter
+            decides the actual duration.
         observe_camera : bool
             If True the "base" observation carries the camera image, and the cube pose is left out of
             its vector part, i.e. the policy can only see the cube through the image, like the
@@ -115,6 +119,12 @@ class PushingVecEnv(ControlledVecEnv):
             How many past steps the state keeps. 1 means only the current one.
         frame_stack_length : int
             How many past steps the "privileged" observation sees. Must be <= history_length.
+        random_goal : bool
+            If True a goal position is sampled inside the operating area at every episode. If False
+            (the default, as in the original experiments) the goal is fixed at goal_position_xy.
+        goal_position_xy : tuple[float,float]
+            The goal position used when random_goal is False. The default is the one the original
+            setup used, and is also where the old simplified model's goal marker was fixed.
         max_position_change : float
             Maximum end-effector displacement commanded by a single action, in meters.
         """
@@ -159,6 +169,8 @@ class PushingVecEnv(ControlledVecEnv):
         self._cube_spawn_border_dist = cube_spawn_border_dist
         self._ee_spawn_border_dist = ee_spawn_border_dist
         self._allow_successful_initial_cube_position = allow_successful_initial_cube_position
+        self._random_goal = random_goal
+        self._goal_position_xy = goal_position_xy
         self._spawn_rejection_candidates = spawn_rejection_candidates
         self._cube_color = cube_color
         self._camera_position_xyz = tuple(np.array(camera_position_xyz) + np.array(camera_offset_xyz))
@@ -200,6 +212,7 @@ class PushingVecEnv(ControlledVecEnv):
 
         self._area_min_xy = th.as_tensor(area_min, dtype=th.float32, device=th_device)
         self._area_max_xy = th.as_tensor(area_max, dtype=th.float32, device=th_device)
+        self._fixed_goal_xy = th.as_tensor(goal_position_xy, dtype=th.float32, device=th_device)
         self._goal_xy = self._thzeros((self.num_envs, 2))
         self._prev_cube_xy = self._thzeros((self.num_envs, 2))
         self._cached_tip_xy = self._thzeros((self.num_envs, 2))
@@ -292,8 +305,7 @@ class PushingVecEnv(ControlledVecEnv):
                                 observable_subfields=None),
                         "privileged":ThBoxStateHelper.SimpleObsDef(
                                 observable_fields=[self.INTERNAL_FIELDS.TIME,
-                                                   self.INTERNAL_FIELDS.CUBE_DISPLACEMENT,
-                                                   self.INTERNAL_FIELDS.EE_TRACKING_ERROR],
+                                                   self.INTERNAL_FIELDS.CUBE_DISPLACEMENT],
                                 obs_history_length=1,
                                 observable_subfields=None)})
 
@@ -417,6 +429,8 @@ class PushingVecEnv(ControlledVecEnv):
 
     @override
     def submit_actions(self, actions : th.Tensor) -> None:
+        dbg_check_finite(actions, assert_msg="Non-finite actions submitted to the environment",
+                         async_assert=True)
         action_xy = th.clamp(actions, -1, 1)*self._max_position_change
         # As in the original environment, the displacement is applied to the *measured* end effector
         # position, not to the previous command.
@@ -634,9 +648,12 @@ class PushingVecEnv(ControlledVecEnv):
             vec_mask = th.ones((self.num_envs,), dtype=th.bool, device=self._th_device)
         area_center = (self._area_min_xy + self._area_max_xy)/2
 
-        goal_xy = self._sample_in_area(border_dist=self._goal_spawn_border_dist,
-                                       is_valid=lambda c: th.ones(c.shape[:2], dtype=th.bool, device=self._th_device),
-                                       fallback_xy=area_center.expand(self.num_envs, 2))
+        if self._random_goal:
+            goal_xy = self._sample_in_area(border_dist=self._goal_spawn_border_dist,
+                                           is_valid=lambda c: th.ones(c.shape[:2], dtype=th.bool, device=self._th_device),
+                                           fallback_xy=area_center.expand(self.num_envs, 2))
+        else:
+            goal_xy = self._fixed_goal_xy.expand(self.num_envs, 2)
         self._goal_xy = th.where(vec_mask.unsqueeze(-1), goal_xy, self._goal_xy)
 
         def cube_is_valid(candidates : th.Tensor) -> th.Tensor:

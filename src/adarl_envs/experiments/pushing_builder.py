@@ -18,7 +18,11 @@ Y_JOINT = ("pushing", "ee_y_slider")
 DEFAULT_ENV_BUILDER_ARGS = {
     "mode" : "mjx",
     "th_device" : th.device("cuda", 0),
-    "step_duration_sec" : 20/1024,
+    # Control period: how often the blocking step advances the trajectory reference and checks
+    # whether the end effector arrived. It is NOT the duration of an environment step -- that is
+    # variable, since a step lasts as long as the commanded movement takes (see max_step_duration_sec
+    # for its cap). Keep it a multiple of 1/1024 so it stays representable in binary.
+    "control_period_sec" : 20/1024,
     "max_steps_per_episode" : 50,
     "observe_camera" : True,
     "enable_rendering" : True,
@@ -26,14 +30,29 @@ DEFAULT_ENV_BUILDER_ARGS = {
     "show_gui" : False,
     "record_video" : False,
     "video_save_freq" : -1,
+    # Frames per second of the recorded video. One frame is one environment step, and a step
+    # simulates a variable amount of time (~0.7s under a pushing policy, since it lasts as long as
+    # the commanded movement takes), so no fixed value is real time -- real time would be ~1.4fps,
+    # which is unwatchable. 10fps shows each step for 100ms, i.e. ~5s for a 50-step episode.
+    "video_fps" : 10.0,
     "quiet" : False,
-    # end effector position controller
+    # End effector position controller. Since the step is blocking, the settling time of these gains
+    # sets how much simulation an agent step costs: keep the controller near critical damping, i.e.
+    # actuator_kv ~= 2*sqrt(actuator_kp*ee_mass) (ee_mass is 0.1kg by default). Overdamping it is
+    # expensive -- kv=30 at kp=200 (zeta=3.35) needs ~20 control chunks per step instead of ~6.
     "actuator_kp" : 200.0,
-    "actuator_kv" : 30.0,
+    "actuator_kv" : 9.0,
     "max_actuator_force" : 50.0,
     "position_tolerance" : 0.002,
     "max_step_duration_sec" : 2.0,
     "blocking_movement" : True,
+    # A command is followed as a quintic, velocity/acceleration-limited trajectory, like the original
+    # PyBullet pushing setup did. These defaults are that setup's effective limits (PyBullet's
+    # defaults of 1 m/s and 10 m/s^2, scaled by its velocity_scaling=0.9 and acceleration_scaling=0.5).
+    # They set how long a movement takes, and so how much simulation an agent step costs.
+    "ee_max_velocity" : 0.9,
+    "ee_max_acceleration" : 5.0,
+    "use_trajectory" : True,
     "sim_step_dt" : 1/1024,
 }
 
@@ -47,16 +66,20 @@ def build_adapter(num_envs : int, run_folder : str, env_builder_args : dict):
     from adarl.adapters.Mjx2DofCartesianAdapter import Mjx2DofCartesianAdapter
     import jax
     sim_step_dt = env_builder_args["sim_step_dt"]
-    # The blocking step runs the simulation in chunks of this length, checking the end-effector
-    # tracking error once per chunk. It must stay constant to avoid jit recompilations.
-    control_chunk_sec = env_builder_args["step_duration_sec"]
+    # The blocking step runs the simulation in chunks of this length, advancing the trajectory
+    # reference and checking the end-effector tracking error once per chunk. It must stay constant
+    # to avoid jit recompilations.
+    control_chunk_sec = env_builder_args["control_period_sec"]
     return Mjx2DofCartesianAdapter(end_effector_link=EE_LINK,
                                    xjoint=X_JOINT,
                                    yjoint=Y_JOINT,
                                    position_tolerance=env_builder_args["position_tolerance"],
                                    blocking_movement=env_builder_args["blocking_movement"],
                                    max_step_duration_sec=env_builder_args["max_step_duration_sec"],
-                                   control_chunk_sec=control_chunk_sec,
+                                   sim_dt=control_chunk_sec,
+                                   max_velocity=env_builder_args["ee_max_velocity"],
+                                   max_acceleration=env_builder_args["ee_max_acceleration"],
+                                   use_trajectory=env_builder_args["use_trajectory"],
                                    vec_size=num_envs,
                                    enable_rendering=env_builder_args["enable_rendering"],
                                    jax_device=(jax.devices("gpu")[th_device.index]
@@ -95,7 +118,9 @@ def build_pushing_env(seed : int, run_folder : str, num_envs : int, env_builder_
     return PushingVecEnv(adapter=adapter,
                          th_device=env_builder_args["th_device"],
                          max_episode_steps=env_builder_args["max_steps_per_episode"],
-                         step_duration_sec=env_builder_args["step_duration_sec"],
+                         # ControlledVecEnv's name for its nominal step length; inert for this env,
+                         # whose step duration is decided by the adapter (see PushingVecEnv).
+                         step_duration_sec=env_builder_args["control_period_sec"],
                          seed=seed,
                          **env_kwargs)
 
@@ -136,7 +161,7 @@ def runner_builder(seed,
                                     log_freq=max_steps)
     if args.get("video_save_freq", -1) > 0:
         vrunner = EnvRunnerRecorderWrapper(vrunner,
-                                           fps=1/args["step_duration_sec"],
+                                           fps=args["video_fps"],
                                            outFolder=run_folder+"/RunnerRecorder",
                                            env_index=0,
                                            saveFrequency_ep=args["video_save_freq"],

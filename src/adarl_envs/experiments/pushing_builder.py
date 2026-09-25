@@ -96,7 +96,8 @@ def build_adapter(num_envs : int, run_folder : str, env_builder_args : dict):
                                    opt_override=env_builder_args.get("mjx_opt_override", {}),
                                    default_actuator_kp=env_builder_args["actuator_kp"],
                                    default_actuator_kv=env_builder_args["actuator_kv"],
-                                   default_max_actuator_force=env_builder_args["max_actuator_force"])
+                                   default_max_actuator_force=env_builder_args["max_actuator_force"],
+                                   mjx_impl="warp")
 
 
 def build_pushing_env(seed : int, run_folder : str, num_envs : int, env_builder_args : dict) -> PushingVecEnv:

@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     debug_level = 1
     mode = args["mode"].lower()
     step_length_sec = 40/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=250 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=100 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
@@ -44,7 +44,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # the latent extractor never sees them.
     cam_obs_keys = ((["base.camera"] if (use_gray_cam or not use_depth_cam) else []) +
                     (["base.depth"] if use_depth_cam else [])) if obs_cam else []
-    use_rnd = False
+    use_rnd = True
 
     eval_freq = 5
     r = 0.0
@@ -297,7 +297,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                         encoding_size=None),
                     critic_feature_extractor_name="StackVectorsFeatureExtractor",
                     critic_fe_hparams = StackVectorsFeatureExtractorInitArgs(device=th.device("cuda")),
-                    use_rnd_exploration=False
+                    use_rnd_exploration=use_rnd
                     )
     elif algo.lower() == "sac_small":
         sac_train(  seed,
@@ -505,7 +505,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                         alpha_lr_factor=1.0,
                                         auto_entropy_temperature=True,
                                         batch_size=16384,
-                                        buffer_size=3*1024*500,
+                                        buffer_size=15*train_envs*max_steps_per_episode,
                                         critic_observation_filter=["privileged.vec"],
                                         gamma=0.99,
                                         grad_steps=sac_grad_steps,
@@ -519,7 +519,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                         q_lr=0.001,
                                         q_network_arch=[512,128],
                                         reference_init_args =   {   "env_builder_args" : env_builder_args,"eval_configuration" : eval_configurations},
-                                        target_entropy_factor=-1.0,
+                                        target_entropy_factor=-0.5,
                                         target_tau = 0.005,
                                         target_update_freq=1,
                                         total_steps=300_000_000,

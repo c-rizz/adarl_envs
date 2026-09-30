@@ -97,6 +97,7 @@ class PushingVecEnv(ControlledVecEnv):
                  camera_orientation_rpy : tuple[float,float,float] = (0.0, 55/180*math.pi, math.pi),
                  camera_offset_xyz : tuple[float,float,float] = (0.0, 0.0, 0.0),
                  camera_offset_rpy : tuple[float,float,float] = (0.0, 0.0, 0.0),
+                 light_direction : tuple[float,float,float] = (0.01, 0.01, -1.0),
                  enable_ui_camera : bool = True):
         """
         Parameters
@@ -127,6 +128,9 @@ class PushingVecEnv(ControlledVecEnv):
             setup used, and is also where the old simplified model's goal marker was fixed.
         max_position_change : float
             Maximum end-effector displacement commanded by a single action, in meters.
+        light_direction : tuple[float,float,float]
+            Direction of the scene's directional light. The default is the original setup's. It only
+            fully sets the lighting if the adapter adds no light of its own (add_ground_light=False).
         """
         adapter_types = (BaseVecCartesianPositionAdapter, BaseVecSimulationAdapter)
         for t in adapter_types:
@@ -175,6 +179,7 @@ class PushingVecEnv(ControlledVecEnv):
         self._cube_color = cube_color
         self._camera_position_xyz = tuple(np.array(camera_position_xyz) + np.array(camera_offset_xyz))
         self._camera_orientation_rpy = tuple(np.array(camera_orientation_rpy) + np.array(camera_offset_rpy))
+        self._light_direction = light_direction
 
         self._ee_link = ("pushing", "pushing_ee")
         self._cube_link = ("cube", "cube")
@@ -372,7 +377,8 @@ class PushingVecEnv(ControlledVecEnv):
                                             "area_center_y" : float(self._area_center_xy[1]),
                                             "ee_diameter" : self._ee_diameter,
                                             "ee_ground_distance" : self._ee_height,
-                                            "goal_radius" : self._goal_tolerance})
+                                            "goal_radius" : self._goal_tolerance,
+                                            "light_direction" : " ".join(str(float(v)) for v in self._light_direction)})
         cube_def = ModelSpawnDef(definition_string=Path(adarl.utils.utils.pkgutil_get_path(
                                             "adarl_envs", "models/cube.urdf.xacro")).read_text(),
                                  name="cube",

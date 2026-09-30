@@ -30,6 +30,7 @@
   <xacro:arg name="goal_radius" default="0.05"/>
   <xacro:arg name="add_goal_marker" default="true"/>
   <xacro:arg name="add_area_plate" default="true"/>
+  <xacro:arg name="light_direction" default="0.01 0.01 -1"/>
 
   <xacro:property name="area_size" value="$(arg area_size)"/>
   <xacro:property name="area_center_x" value="$(arg area_center_x)"/>
@@ -51,6 +52,12 @@
   <compiler angle="radian"/>
 
   <worldbody>
+
+    <!-- The scene's light, playing the role of the original setup's sun. Its direction is one of the
+         things the variation presets change, so the pushing builder disables the adapter's own
+         ground light, leaving this as the only light besides MuJoCo's camera headlight. -->
+    <light name="sun" type="directional" pos="${area_center_x} ${area_center_y} 2" dir="$(arg light_direction)"
+           ambient="0.2 0.2 0.2" diffuse="0.7 0.7 0.7" specular="0.1 0.1 0.1" castshadow="true"/>
 
     <!-- Visual-only plate marking the operating area. The ground collision comes from the
          simulator's ground plane. -->

@@ -15,7 +15,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     debug_level = 1
     mode = args["mode"].lower()
     step_length_sec = 40/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
-    max_steps_per_episode=100 #int(ep_duration_sec/step_length_sec)
+    max_steps_per_episode=150 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
     if algo == "sac" or algo == "ppo":
@@ -59,6 +59,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_joint_position_weight" :        4.0,
         "reward_object_pose_weight" :           1.0,
         "reward_gripper_pose_weight" :          1.0,
+        "reward_gripper_close_weight" :         0.5, # close the gripper near the object
+        "reward_gripper_grasp_weight" :         0.0, # close the gripper *on* the object (contact-gated)
+        "gripper_close_distance" :              0.05,
         "reward_height_position_weight" :       2.0,
         "reward_pitchnroll_weight" :            1.0,
         "reward_velocity_tracking_weight" :     0.0,
@@ -377,13 +380,40 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     debug_level=debug_level)
     elif algo.lower() == "asac":
         from autoencoding_rl.asac3_train import LatentExtractorInitArgs, asac3_train, SAC_RND_reward_hyperparams
-        sac_grad_steps = 80
-        le_grad_steps = 100
-        sac_train_freq_vstep = 5
-        le_train_freq_vstep = 100
         pretrain_collection_steps = max_steps_per_episode*train_envs*10
         pretrain_grad_steps = 10_000
         model_device=th.device("cuda")
+        buffer_size = 60*train_envs*max_steps_per_episode
+
+        # Without the camera the latent extractor uses an "identity" state combiner/decombiner, which
+        # requires latent_space_size == vec_encoding_size + img_encoding_size. Tying the two together
+        # keeps that invariant instead of leaving two constants to be kept in sync by hand.
+        if obs_cam:
+            img_encoding_size = 64
+            vec_encoding_size = 0
+            latent_size = 204
+            combiner = []
+            decombiner = []
+            latent_passthrough_keys = ("base.vec",)
+            actor_observation_filter=["base.vec"]+cam_obs_keys
+
+            sac_train_freq_vstep = 5
+            train_iterations = 10
+            sac_grad_steps = 4
+            le_grad_steps = 5
+        else:
+            img_encoding_size = 0
+            vec_encoding_size = 160
+            latent_size = img_encoding_size + vec_encoding_size
+            combiner = "identity"
+            decombiner = "identity"
+            latent_passthrough_keys = tuple()
+            actor_observation_filter=["base.vec"]
+
+            sac_train_freq_vstep = 5
+            train_iterations = 5
+            sac_grad_steps = 4
+            le_grad_steps = 5
 
         asac3_train(run_args = args,
                     allow_tf32=True,
@@ -409,7 +439,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     vec_runner_builder=runner_builder,
                     use_privileged_critic=True,
                     use_rnd_exploration=use_rnd,
-                    buffer_min_residual_vram = 18*1024**3,
+                    buffer_min_residual_vram = 5*1024**3,
+                    train_iterations_per_collection=train_iterations,
                     le_args=LatentExtractorInitArgs(
                         always_deterministic=False,
                         arch_dyn_ensemble_size = 1,
@@ -421,13 +452,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         arch_img_dec_learn_background = False,
                         arch_img_decoder_backbone = "conv_smaller",
                         arch_img_encoder_backbone = "conv_smaller",
-                        arch_img_encoding_size = 64 if obs_cam else 0,
-                        arch_latent_space_size = 204,
+                        arch_img_encoding_size = img_encoding_size,
+                        arch_latent_space_size = latent_size,
                         arch_optimizer="adamw",
                         arch_reward = [128],
                         arch_reward_ensemble_size=1,
-                        arch_state_combiner = [] if obs_cam else "identity",
-                        arch_state_decombiner = [] if obs_cam else "identity",
+                        arch_state_combiner = combiner,
+                        arch_state_decombiner = decombiner,
                         arch_type = "dvae4_2",
                         arch_use_coord_conv=True,
                         arch_img_dec_use_coord_conv=True,
@@ -436,7 +467,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         arch_vec_decoder_ensemble_size=1,
                         arch_vec_encoder=[256,256],
                         arch_vec_encoder_ensemble_size=1,
-                        arch_vec_encoding_size=160 if not obs_cam else 0,
+                        arch_vec_encoding_size=vec_encoding_size,
                         batch_size = 128,
                         bestModelThreshold = None,
                         consistency_target = "self",
@@ -484,7 +515,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         retrain_period = -1,
                         reward_scaling = 10.0,
                         tau=1.0,
-                        train_period_vstep=le_train_freq_vstep,
                         train_trajectories_length = 2,
                         traj_eval_batch_size = 1,
                         use_log_reward = False,
@@ -495,17 +525,17 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         weight_decay = 1e-6,
                         rnd_imbalance_estimator_learning_rate = 0.0005,
                         use_rnd_loss_scaler=False,
-                        latent_passthrough_keys = ("base.vec",),
+                        latent_passthrough_keys = latent_passthrough_keys,
                         passthrough_in_encoder = False),
                     sac_init_hparams=SAC_init_hparams(
                                         actor_log_std_init=-2.0,
                                         actor_mean_bounds_ratio = 0.9,
-                                        actor_observation_filter=(["base.vec"]+cam_obs_keys if obs_cam else ["privileged.vec","base.vec"]),
+                                        actor_observation_filter=actor_observation_filter,
                                         alpha_initial_value=0.001,
                                         alpha_lr_factor=1.0,
                                         auto_entropy_temperature=True,
                                         batch_size=16384,
-                                        buffer_size=15*train_envs*max_steps_per_episode,
+                                        buffer_size=buffer_size,
                                         critic_observation_filter=["privileged.vec"],
                                         gamma=0.99,
                                         grad_steps=sac_grad_steps,

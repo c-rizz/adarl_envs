@@ -54,7 +54,70 @@ DEFAULT_ENV_BUILDER_ARGS = {
     "ee_max_acceleration" : 5.0,
     "use_trajectory" : True,
     "sim_step_dt" : 1/1024,
+    # Visual variation preset of the original setup, chosen from the seed (see sample_variation).
+    # None keeps the scene as configured.
+    "variations_sampler" : None,
 }
+
+# Cube colors of the original setup's variation presets
+_VARIATION_COLORS = [(0.9, 0.1, 0.1), # 0 red
+                     (0.1, 0.9, 0.1), # 1 green
+                     (0.1, 0.1, 0.9), # 2 blue
+                     (0.1, 0.9, 0.9), # 3 cyan
+                     (0.9, 0.9, 0.1), # 4 yellow
+                     (0.9, 0.1, 0.9), # 5 magenta
+                     (0.7, 0.7, 0.7), # 6 grey70
+                     (0.5, 0.5, 0.5), # 7 grey50
+                     (0.3, 0.3, 0.3), # 8 grey30
+                     (0.9, 0.9, 0.9)] # 9 grey90
+
+
+def sample_variation(variations_sampler : str | None, seed : int) -> dict:
+    """Scene settings of one of the original setup's visual variation presets
+    (PandaPushingEnv2DOF's variations_sampler), chosen from the seed.
+
+    Returns the env builder args to override (a subset of cube_color, camera_offset_xyz,
+    camera_offset_rpy and light_direction). Every environment of a run gets the same variation: the
+    seed offsets rreal gives the collector (+100000*i) and evaluation (+100000000) environments leave
+    all the indices below unchanged.
+
+    Presets:
+        sim-minimal : cube color, one of 10.
+        sim-small   : red cube, one of 4 camera position offsets and one of 4 light directions.
+        sim-medium  : one of 4 camera position+orientation offsets, one of 4 light directions and
+                      one of 10 cube colors.
+        sim-large   : red cube, one of 2 camera placements (turned by +-90 degrees).
+        real-minimal, real-small, real-large : no change, they only applied to the real setup.
+    """
+    if variations_sampler is None:
+        return {}
+    if variations_sampler == "sim-minimal":
+        return {"cube_color" : _VARIATION_COLORS[seed%len(_VARIATION_COLORS)]}
+    elif variations_sampler == "sim-small":
+        cam_offsets = [(0.05, 0.00,  0.0),   (-0.05,  0.0, 0.0),  (0.0,  0.0, 0.05),  (0.0,   0.0, -0.05)]
+        light_dirs =  [(0.50, 0.01, -1.0),   (-0.5,  0.01, -1.0), (0.01, 0.5, -1.0),  (0.01, -0.5, -1.0)]
+        return {"cube_color" : _VARIATION_COLORS[0],
+                "camera_offset_xyz" : cam_offsets[(seed*5)%4],
+                "light_direction" : light_dirs[int((seed*5)/4)%4]}
+    elif variations_sampler == "sim-medium":
+        cam_offsets =     [(0.05,  0.0,  0.15), ( 0.10,  0.0, -0.15), (0.05,   0.15,  0.0), (0.05,  -0.15,  0.0)]
+        cam_rpy_offsets = [(0.00,  0.1,  0.00), ( 0.00, -0.2,  0.00), (0.00,   0.00,  0.4), (0.00,   0.00, -0.3)]
+        light_dirs =      [(0.5,   0.01, -1.0), (-0.5,   0.01, -1.0), (0.01,   0.5,  -1.0), (0.01,  -0.5,  -1.0)]
+        return {"camera_offset_xyz" : cam_offsets[(seed*5)%4],
+                "camera_offset_rpy" : cam_rpy_offsets[(seed*5)%4],
+                "light_direction" : light_dirs[int((seed*5)/4)%4],
+                "cube_color" : _VARIATION_COLORS[int((seed/16)%10)]}
+    elif variations_sampler == "sim-large":
+        cam_rpy_offsets = [(0.0, 0.0, 1.5707), (0.0, 0.0, -1.5707)]
+        cam_offsets =     [(-0.45, 0.5, 0.0), (-0.5, -0.5, 0.0)]
+        return {"cube_color" : _VARIATION_COLORS[0],
+                "camera_offset_xyz" : cam_offsets[seed%2],
+                "camera_offset_rpy" : cam_rpy_offsets[seed%2],
+                "light_direction" : (0.01, 0.5, -1.0)}
+    elif variations_sampler in ("real-minimal", "real-small", "real-large"):
+        return {}
+    else:
+        raise AttributeError(f"Unknown variations_sampler {variations_sampler}")
 
 
 def build_adapter(num_envs : int, run_folder : str, env_builder_args : dict):
@@ -91,6 +154,8 @@ def build_adapter(num_envs : int, run_folder : str, env_builder_args : dict):
                                    show_gui=env_builder_args["show_gui"],
                                    gui_env_index=0,
                                    add_ground=True,
+                                   # the scene brings its own light, whose direction the variation presets change
+                                   add_ground_light=False,
                                    log_folder=run_folder,
                                    opt_preset=env_builder_args.get("mjx_opt_preset", "fast"),
                                    opt_override=env_builder_args.get("mjx_opt_override", {}),
@@ -103,6 +168,10 @@ def build_adapter(num_envs : int, run_folder : str, env_builder_args : dict):
 def build_pushing_env(seed : int, run_folder : str, num_envs : int, env_builder_args : dict) -> PushingVecEnv:
     """Build a PushingVecEnv and its adapter. No training-framework dependency."""
     env_builder_args = copy.deepcopy(DEFAULT_ENV_BUILDER_ARGS) | copy.deepcopy(env_builder_args)
+    variation = sample_variation(env_builder_args["variations_sampler"], seed)
+    if variation:
+        ggLog.info(f"Pushing env variation '{env_builder_args['variations_sampler']}' for seed {seed}: {variation}")
+    env_builder_args |= variation
     os.makedirs(run_folder, exist_ok=True)
     adapter = build_adapter(num_envs=num_envs, run_folder=run_folder, env_builder_args=env_builder_args)
     env_kwargs = {k:v for k,v in env_builder_args.items()
@@ -115,7 +184,7 @@ def build_pushing_env(seed : int, run_folder : str, num_envs : int, env_builder_
                            "goal_spawn_border_dist", "cube_spawn_border_dist", "ee_spawn_border_dist",
                            "allow_successful_initial_cube_position", "spawn_rejection_candidates",
                            "cube_color", "camera_position_xyz", "camera_orientation_rpy",
-                           "camera_offset_xyz", "camera_offset_rpy", "enable_ui_camera")}
+                           "camera_offset_xyz", "camera_offset_rpy", "light_direction", "enable_ui_camera")}
     return PushingVecEnv(adapter=adapter,
                          th_device=env_builder_args["th_device"],
                          max_episode_steps=env_builder_args["max_steps_per_episode"],

@@ -164,7 +164,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "mjx_warp_nccdmax" : 20,
         "observe_camera" : obs_cam,
         "use_depth_cam" : use_depth_cam,
-        "use_gray_cam" : use_gray_cam
+        "use_gray_cam" : use_gray_cam,
+        "camera_hide_robot" : False, # ablation: hide the robot from the observation camera
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -383,7 +384,6 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         pretrain_collection_steps = max_steps_per_episode*train_envs*10
         pretrain_grad_steps = 10_000
         model_device=th.device("cuda")
-        buffer_size = 60*train_envs*max_steps_per_episode
 
         # Without the camera the latent extractor uses an "identity" state combiner/decombiner, which
         # requires latent_space_size == vec_encoding_size + img_encoding_size. Tying the two together
@@ -401,6 +401,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
             train_iterations = 10
             sac_grad_steps = 4
             le_grad_steps = 5
+            buffer_size = 12*train_envs*max_steps_per_episode
         else:
             img_encoding_size = 0
             vec_encoding_size = 160
@@ -411,9 +412,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
             actor_observation_filter=["base.vec"]
 
             sac_train_freq_vstep = 5
-            train_iterations = 5
+            train_iterations = 1
             sac_grad_steps = 4
             le_grad_steps = 5
+            buffer_size = 60*train_envs*max_steps_per_episode
+
 
         asac3_train(run_args = args,
                     allow_tf32=True,

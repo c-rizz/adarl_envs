@@ -90,6 +90,10 @@ class GrapVecEnvInitArgs():
     """Observe a grayscale camera image. Grayscale is used anyway when use_depth_cam is not set;
     setting both stacks grayscale and depth as two separate image observations."""
     observe_initial_object_pose : bool = False
+    camera_hide_robot : bool = False
+    """Hide the robot from the observation camera, so that it cannot occlude the object. The arm
+    pose is still observable through proprioception. Only affects the observation camera: the UI
+    camera keeps seeing the robot, so the recorded videos stay interpretable."""
     gripper_joints : tuple[tuple[str,str],...] = ()
     """Agent-controlled gripper/clamp joints, used by the gripper-closing rewards. Leave empty to
     disable them."""
@@ -353,8 +357,18 @@ class GraspVecEnv(RobotVecEnv):
 
         if (self._grasping_conf.grasping_init_args.observe_camera
                 and hasattr(self._adapter, "set_link_camera_visibility")):
+            detected_models = {l[0] for l in self._adapter.get_detected_links()}
             hidden_models = {"goal_axes", "goal_marker_cube", "axes", "grippper_marker", "arrow", "arrow_yellow"}
-            visible_models = sorted({l[0] for l in self._adapter.get_detected_links()} - hidden_models)
+            if self._grasping_conf.grasping_init_args.camera_hide_robot:
+                # Ablation for how much the arm occluding the object hurts: the observation camera
+                # stops seeing the robot entirely. The policy still knows where the arm is from
+                # proprioception, and the UI camera is left untouched.
+                robot_model = self._configuration.init_args.robot_name
+                if robot_model not in detected_models:
+                    raise RuntimeError(f"camera_hide_robot is set, but the robot model '{robot_model}' is not among the "
+                                       f"detected models {sorted(detected_models)}, so the robot would not be hidden")
+                hidden_models.add(robot_model)
+            visible_models = sorted(detected_models - hidden_models)
             ggLog.info(f"setting head camera visibility to {visible_models}")
             self._adapter.set_link_camera_visibility([(self._head_camera_name, visible_models)])
     

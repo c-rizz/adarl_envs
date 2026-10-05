@@ -135,7 +135,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomization_recycle_init_pose" : True,
         "robot_model" : args["robot"],
         "saturate_jimp_ref_limits" : False,
-        "split_rewards" : True if algo=="sac" else False,
+        "split_rewards" : True, #if algo=="sac" else False,
         "stepLength_sec" : step_length_sec,
         "terminate_on_safety" : False,
         "terminate_on_crash" : True,
@@ -166,6 +166,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "use_depth_cam" : use_depth_cam,
         "use_gray_cam" : use_gray_cam,
         "camera_hide_robot" : False, # ablation: hide the robot from the observation camera
+        # None = exact rendered depth. To emulate the ZED, pass a StereoDepthSimParams with
+        # focal_px/baseline_m from its calibration (focal rescaled to the render resolution).
+        "depth_stereo_sim" : None,
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

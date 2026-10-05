@@ -19,6 +19,8 @@ from rreal.algorithms.sac_helpers import build_vec_env, VecEnvRunnerBuilderProto
 from math import pi
 from rreal.algorithms.sac_helpers import VecEnvBuilderProtocol, EnvBuilderProtocol
 from adarl_envs.experiments.loco_builder import get_robot_string_and_format, set_asset_texture_paths
+import pydescriptions
+from adarl_envs.paths import descriptions_dir
 
 def format_tensor(t, float_precision):
     t = t.squeeze().cpu().tolist()
@@ -239,6 +241,7 @@ def runner_builder(seed,
                                                 reward_gripper_close_weight = env_builder_args.pop("reward_gripper_close_weight", 0.0),
                                                 reward_gripper_grasp_weight = env_builder_args.pop("reward_gripper_grasp_weight", 0.0),
                                                 camera_hide_robot = env_builder_args.pop("camera_hide_robot", False),
+                                                depth_stereo_sim = env_builder_args.pop("depth_stereo_sim", None),
                                                 gripper_joints = tuple(env_builder_args.pop("gripper_joints", ())),
                                                 gripper_close_distance = env_builder_args.pop("gripper_close_distance", 0.05),
                                                 gripper_closes_at_lower_limit = env_builder_args.pop("gripper_closes_at_lower_limit", True),
@@ -294,7 +297,7 @@ import numpy as np
 
 robot_args_registry = {}
 
-def get_centauro_args():
+def get_centauro_args(robot_options : dict = {}):
     # # Standard homing
     # hip_yaw =      0.75
     # hip_pitch =    1.25
@@ -487,7 +490,7 @@ def get_centauro_args():
 robot_args_registry["centauro"] = get_centauro_args
 
 
-def get_franka_args():
+def get_franka_args(robot_options : dict = {}):
     """Franka Emika Panda (7-dof arm + parallel gripper), loaded from mujoco_menagerie
     (downloaded by mujoco_playground), the same way the spot configuration is done in loco_builder."""
     rname = "franka"
@@ -682,7 +685,13 @@ def get_kyon_args(robot_options : dict = {}):
                     ('kyon', 'contact_3'),
                     ('kyon', 'contact_4')]
     bool_to_xacro = {True : "true", False : "false"}
-    return {"model_file" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro"),
+    # One call resolves every description this robot needs, and its result is already the dict that
+    # xacro_extra_pkg_paths wants. The checkouts live in adarl_envs' own descriptions directory
+    # (inside the workspace for an editable install), which descriptions_root can override.
+    descriptions = pydescriptions.resolve("kyon_urdf",
+                                        root=robot_options.get("descriptions_root") or descriptions_dir(),
+                                        refs=robot_options.get("description_refs"))
+    return {"model_file" : os.path.join(descriptions["kyon_urdf"], "urdf/kyon.urdf.xacro"),
             "robot_description_format" : "xacro",
             "model_kwargs" : {  "upper_body" : "true",
                                 "legs" : bool_to_xacro[spawn_legs],
@@ -694,7 +703,7 @@ def get_kyon_args(robot_options : dict = {}):
                                 "fixed_base_z" : 0.45,
                                 # "visual_mesh_subfolder":""
                                 },
-            "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf")},
+            "xacro_extra_pkg_paths" : descriptions,
             "homing_joint_position" : homing,
             "homing_joint_position_references" : homing_ref,
             "robot_name" : rname,
@@ -747,9 +756,11 @@ def get_kyon_args(robot_options : dict = {}):
             "table_height" : ("uniform", (0.001, 0.001))
         }
 
+# Every entry is called as entry(robot_options=...), and the variants only change a default, so an
+# explicit robot_options from the config still wins.
 robot_args_registry["kyon"]       = get_kyon_args
-robot_args_registry["kyon_right"] = lambda : get_kyon_args(ctrl_arm="right")
-robot_args_registry["kyon_legs"]  = lambda : get_kyon_args(spawn_legs=True)
+robot_args_registry["kyon_right"] = lambda robot_options={}: get_kyon_args({"ctrl_arm": "right", **robot_options})
+robot_args_registry["kyon_legs"]  = lambda robot_options={}: get_kyon_args({"spawn_legs": True, **robot_options})
 
 
 def runner_builder_to_vecenv(runner_builder: VecEnvRunnerBuilderProtocol) -> VecEnvBuilderProtocol:

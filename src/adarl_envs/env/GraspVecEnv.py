@@ -10,6 +10,7 @@ from adarl.utils.utils import (LinkState, to_string_tensor, th_quat_rotate, th_q
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
 import adarl.utils.utils
 from adarl.utils.vec_state_helper import ThBoxStateHelper, unnormalize, normalize
+from adarl.utils.depth_sim import INVALID_DEPTH, StereoDepthSimParams, stereo_depth_degradation, resize_depth_masked
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any
@@ -90,6 +91,10 @@ class GrapVecEnvInitArgs():
     """Observe a grayscale camera image. Grayscale is used anyway when use_depth_cam is not set;
     setting both stacks grayscale and depth as two separate image observations."""
     observe_initial_object_pose : bool = False
+    depth_stereo_sim : StereoDepthSimParams | None = None
+    """Degrade the rendered depth to look like a passive stereo camera (e.g. a ZED), for sim-to-real
+    transfer. None renders exact depth. Invalid pixels come out as 0, a value a real measurement can
+    never take; the observation keeps that convention after the resize and the [0,1] normalization."""
     camera_hide_robot : bool = False
     """Hide the robot from the observation camera, so that it cannot occlude the object. The arm
     pose is still observable through proprioception. Only affects the observation camera: the UI
@@ -161,6 +166,7 @@ class GraspVecEnv(RobotVecEnv):
         table_height : DistributionDefTh
         use_depth_cam : bool
         use_gray_cam : bool
+        depth_stereo_sim : StereoDepthSimParams | None
 
     @dataclass
     class SubRewards:
@@ -257,7 +263,8 @@ class GraspVecEnv(RobotVecEnv):
                         grasping_init_args = grasp_init_args,
                         table_height = self._distr_to_tensor(grasp_init_args.table_height, size=(num_envs,)),
                         use_depth_cam = grasp_init_args.use_depth_cam,
-                        use_gray_cam = grasp_init_args.use_gray_cam)
+                        use_gray_cam = grasp_init_args.use_gray_cam,
+                        depth_stereo_sim = grasp_init_args.depth_stereo_sim)
 
         self._observation_camera = self._head_camera_name if grasp_init_args.observe_camera else None
         self._ui_camera = self._head_camera_name if self._grasping_conf.use_head_cam_as_ui_camera else self._grasp_ui_camera_name
@@ -596,11 +603,21 @@ class GraspVecEnv(RobotVecEnv):
                 obs_depth_image = renderings.depth[0] # this is in (vec,H,W,C)
                 if not obs_depth_image.dtype.is_floating_point:
                     obs_depth_image = obs_depth_image.to(th.float32)/1000.0 # convert mm->m
+                obs_depth_image = obs_depth_image[...,0].to(th.float32) # (vec, H, W), metric
+                if self._grasping_conf.depth_stereo_sim is not None:
+                    # Degrade the metric depth at render resolution: the stereo artifacts belong to
+                    # the sensor, not to the resolution the policy looks at. Missing measurements
+                    # come back as INVALID_DEPTH (0).
+                    obs_depth_image = stereo_depth_degradation(obs_depth_image,
+                                                               self._grasping_conf.depth_stereo_sim)
+                # Validity-weighted resize: a plain interpolation would average the invalid pixels
+                # together with the valid ones, dragging the depth around every hole towards 0.
+                obs_depth_image = resize_depth_masked(obs_depth_image,
+                                                      self._grasping_conf.obs_camera_resolution_hw)
+                # Normalize to the [0,1] range the float32 substate declares. INVALID_DEPTH is 0, so
+                # it survives the clamp and stays distinguishable from any real measurement (which is
+                # always beyond the sensor's strictly positive minimum range).
                 obs_depth_image = th.clamp(obs_depth_image/1.0, 0.0, 1.0) # normalize to 1 meters and clamp
-                obs_depth_image = _resize_to_obs(obs_depth_image)
-                # Already normalized to [0,1] by the clamp above; keep it there (and as float32) so it
-                # matches the float32 (0,1) pixel range the autoencoder assumes for this dtype.
-                obs_depth_image = obs_depth_image[...,0].to(th.float32) # (vec, H, W)
             else:
                 obs_depth_image = None
         else:

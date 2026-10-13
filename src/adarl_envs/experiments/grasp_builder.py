@@ -241,7 +241,9 @@ def runner_builder(seed,
                                                 reward_gripper_close_weight = env_builder_args.pop("reward_gripper_close_weight", 0.0),
                                                 reward_gripper_grasp_weight = env_builder_args.pop("reward_gripper_grasp_weight", 0.0),
                                                 camera_hide_robot = env_builder_args.pop("camera_hide_robot", False),
-                                                depth_stereo_sim = env_builder_args.pop("depth_stereo_sim", None),
+                                                obs_camera_model = env_builder_args.pop("obs_camera_model", None),
+                                                obs_camera_crop = env_builder_args.pop("obs_camera_crop", None),
+                                                depth_stereo_sim = env_builder_args.pop("depth_stereo_sim", False),
                                                 gripper_joints = tuple(env_builder_args.pop("gripper_joints", ())),
                                                 gripper_close_distance = env_builder_args.pop("gripper_close_distance", 0.05),
                                                 gripper_closes_at_lower_limit = env_builder_args.pop("gripper_closes_at_lower_limit", True),
@@ -600,11 +602,17 @@ def get_kyon_args(robot_options : dict = {}):
     only the chosen arm (+ its dagana clamp) and hold the other arm rigidly at its homing pose.
     The reaching homing and base height likely need tuning so the gripper reaches the table object
     (the cube spawns on the table at table_height~0.8, x~0.5-0.6) - raise/lower homing_body_pose z
-    to move the whole arm, same idea as the base offset in get_franka_args."""
+    to move the whole arm, same idea as the base offset in get_franka_args.
+
+    spawn_zed_cameras adds the two head ZED X Minis. Without it only their mount links exist: the
+    camera and optical frames (zed_front_{up,down}_{left,right}_camera_frame[_optical]) come from
+    the zed_camera macro, which the xacro gates on these args. It also brings the housings' visual
+    *and* collision geometry, which the macro gives no way to separate."""
     rname = "kyon"
     ctrl_arm = robot_options.get("ctrl_arm", "left")
     spawn_legs = robot_options.get("spawn_legs", False)
     ctrl_legs = robot_options.get("ctrl_legs", False)
+    spawn_zed_cameras = robot_options.get("spawn_zed_cameras", False)
     spawn_legs = spawn_legs or ctrl_legs
 
 
@@ -688,8 +696,9 @@ def get_kyon_args(robot_options : dict = {}):
     # One call resolves every description this robot needs, and its result is already the dict that
     # xacro_extra_pkg_paths wants. The checkouts live in adarl_envs' own descriptions directory
     # (inside the workspace for an editable install), which descriptions_root can override.
-    descriptions = pydescriptions.resolve("kyon_urdf",
-                                        root=robot_options.get("descriptions_root") or descriptions_dir(),
+    # zed_description is needed because kyon's xacro includes the ZED mounted on its head.
+    descriptions = pydescriptions.resolve("kyon_urdf", "zed_description",
+                                        root=descriptions_dir(),
                                         refs=robot_options.get("description_refs"))
     return {"model_file" : os.path.join(descriptions["kyon_urdf"], "urdf/kyon.urdf.xacro"),
             "robot_description_format" : "xacro",
@@ -697,6 +706,8 @@ def get_kyon_args(robot_options : dict = {}):
                                 "legs" : bool_to_xacro[spawn_legs],
                                 "floating_joint" : bool_to_xacro[spawn_legs],
                                 "varta" : "true",
+                                "camera_front_up" : bool_to_xacro[spawn_zed_cameras],
+                                "camera_front_down" : bool_to_xacro[spawn_zed_cameras],
                                 "add_fixed_base_joint" : bool_to_xacro[not spawn_legs],
                                 "fixed_base_x" : -0.2,
                                 "fixed_base_y" : 0.0,
@@ -704,6 +715,11 @@ def get_kyon_args(robot_options : dict = {}):
                                 # "visual_mesh_subfolder":""
                                 },
             "xacro_extra_pkg_paths" : descriptions,
+            # The head cameras are ZED X Minis with the 2.2mm lens: this sets the observation
+            # camera's field of view, and the sensor the depth is degraded towards. Confirmed on the
+            # robot: /zed_up/zed_node/depth/camera_info reports fx=fy=730.95 px at 1920x1200, i.e. a
+            # 2.19 mm focal length, 0.8% from this entry's 737 px.
+            "obs_camera_model" : "zedxmini2.2mm",
             "homing_joint_position" : homing,
             "homing_joint_position_references" : homing_ref,
             "robot_name" : rname,

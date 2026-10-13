@@ -39,9 +39,4 @@ def descriptions_dir(create : bool = True) -> Path:
 
     if create:
         root.mkdir(parents=True, exist_ok=True)
-        # In the editable case this sits inside a git repository, and the checkouts are clones of
-        # their own: keep them from showing up as untracked content of adarl_envs.
-        gitignore = root/".gitignore"
-        if not gitignore.exists():
-            gitignore.write_text("# Description checkouts, managed by pydescriptions.\n*\n!.gitignore\n")
     return root

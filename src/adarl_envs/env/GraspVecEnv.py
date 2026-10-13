@@ -10,7 +10,9 @@ from adarl.utils.utils import (LinkState, to_string_tensor, th_quat_rotate, th_q
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
 import adarl.utils.utils
 from adarl.utils.vec_state_helper import ThBoxStateHelper, unnormalize, normalize
-from adarl.utils.depth_sim import INVALID_DEPTH, StereoDepthSimParams, stereo_depth_degradation, resize_depth_masked
+from adarl.utils.depth_sim import (INVALID_DEPTH, StereoDepthSimParams, stereo_depth_degradation,
+                                   resize_depth_masked, stereo_camera_params,
+                                   stereo_camera_hfov_degrees)
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Sequence, Literal, TypedDict, Any
@@ -91,10 +93,26 @@ class GrapVecEnvInitArgs():
     """Observe a grayscale camera image. Grayscale is used anyway when use_depth_cam is not set;
     setting both stacks grayscale and depth as two separate image observations."""
     observe_initial_object_pose : bool = False
-    depth_stereo_sim : StereoDepthSimParams | None = None
-    """Degrade the rendered depth to look like a passive stereo camera (e.g. a ZED), for sim-to-real
-    transfer. None renders exact depth. Invalid pixels come out as 0, a value a real measurement can
-    never take; the observation keeps that convention after the resize and the [0,1] normalization."""
+    obs_camera_model : str | None = None
+    """Which real camera the observation camera stands for, as a name known to adarl.utils.depth_sim
+    (e.g. "zedxmini4mm"). It sets the rendered field of view, and the sensor depth_stereo_sim
+    degrades towards. None keeps a generic camera, and then depth_stereo_sim cannot be used."""
+    obs_camera_crop : float | None = None
+    """Size of the centered window kept from the render, in units of the render's height, before
+    resizing to the observation resolution.
+
+    1.0 is the largest square the frame holds, so the observation is undistorted. Larger values
+    widen it (the height is already exhausted), up to the frame's aspect ratio - 16/10 keeps the
+    whole frame, squashed into the square observation exactly as None does. Anything beyond that is
+    clamped to the frame, since a camera cannot be cropped into seeing more than it does.
+
+    Cropping narrows the field of view, which makes a distant object cover more observation pixels.
+    To transfer, the real images must be cropped to the same field of view."""
+    depth_stereo_sim : bool = False
+    """Degrade the rendered depth to look like obs_camera_model's passive stereo output, for
+    sim-to-real transfer. False renders exact depth. Invalid pixels come out as 0, a value a real
+    measurement can never take; the observation keeps that convention after the resize and the [0,1]
+    normalization."""
     camera_hide_robot : bool = False
     """Hide the robot from the observation camera, so that it cannot occlude the object. The arm
     pose is still observable through proprioception. Only affects the observation camera: the UI
@@ -166,7 +184,10 @@ class GraspVecEnv(RobotVecEnv):
         table_height : DistributionDefTh
         use_depth_cam : bool
         use_gray_cam : bool
+        obs_camera_crop : float | None
+        obs_camera_model : str | None
         depth_stereo_sim : StereoDepthSimParams | None
+        """Resolved from GrapVecEnvInitArgs' obs_camera_model and depth_stereo_sim."""
 
     @dataclass
     class SubRewards:
@@ -247,8 +268,41 @@ class GraspVecEnv(RobotVecEnv):
                                  f"(one (x,y,z,qx,qy,qz,qw) transform per gripper link), "
                                  f"got {tuple(gripper_link_transforms.shape)}")
         obs_cam_render_height = 64
+        obs_cam_render_resolution_hw = (obs_cam_render_height, int(obs_cam_render_height*16/10))
+        depth_stereo_sim = None
+        if grasp_init_args.depth_stereo_sim:
+            if grasp_init_args.obs_camera_model is None:
+                raise ValueError("depth_stereo_sim needs obs_camera_model: the degradation is defined by "
+                                 "the camera it imitates")
+            # Resolved here because the sensor parameters depend on the render resolution, which this
+            # class defines.
+            depth_stereo_sim = stereo_camera_params(grasp_init_args.obs_camera_model,
+                                                    obs_cam_render_resolution_hw[1])
+        # The crop is a fixed window on a fixed render resolution, so resolve it once here.
+        self._obs_camera_crop_rows_cols : tuple[slice,slice] | None = None
+        if grasp_init_args.obs_camera_crop is not None:
+            crop = grasp_init_args.obs_camera_crop
+            if crop <= 0:
+                raise ValueError(f"obs_camera_crop must be positive, got {crop}")
+            render_h, render_w = obs_cam_render_resolution_hw
+            # The window is square until it runs out of frame, and then only widens.
+            side = max(1, int(round(crop*render_h)))
+            crop_h, crop_w = min(side, render_h), min(side, render_w)
+            row0, col0 = (render_h-crop_h)//2, (render_w-crop_w)//2
+            self._obs_camera_crop_rows_cols = (slice(row0, row0+crop_h), slice(col0, col0+crop_w))
+            full_hfov = (70.0 if grasp_init_args.obs_camera_model is None
+                         else stereo_camera_hfov_degrees(grasp_init_args.obs_camera_model))
+            # One focal length for both axes, so each fov follows its own side of the window.
+            half_tan = math.tan(math.radians(full_hfov)/2)/render_w
+            hfov = math.degrees(2*math.atan(half_tan*crop_w))
+            vfov = math.degrees(2*math.atan(half_tan*crop_h))
+            ggLog.info(f"obs camera: keeping {crop_h}x{crop_w} of the {render_h}x{render_w} render "
+                       f"(crop={crop}), {full_hfov:.1f} deg hfov -> {hfov:.1f} deg horizontal, "
+                       f"{vfov:.1f} deg vertical"
+                       + (", squashed into the square observation" if crop_w != crop_h else "")
+                       + ". The real images must be cropped to the same field of view.")
         self._grasping_conf = GraspVecEnv.GraspingConfiguration(
-                        obs_camera_render_resolution_hw = (obs_cam_render_height, int(obs_cam_render_height*16/10)),
+                        obs_camera_render_resolution_hw = obs_cam_render_resolution_hw,
                         obs_camera_resolution_hw = (64,64),
                         ui_camera_resolution_hw = (480,480),
                         init_obj_area_minmax_xy = self._thtens(manipulation_area_minmax_xy),
@@ -264,7 +318,9 @@ class GraspVecEnv(RobotVecEnv):
                         table_height = self._distr_to_tensor(grasp_init_args.table_height, size=(num_envs,)),
                         use_depth_cam = grasp_init_args.use_depth_cam,
                         use_gray_cam = grasp_init_args.use_gray_cam,
-                        depth_stereo_sim = grasp_init_args.depth_stereo_sim)
+                        obs_camera_crop = grasp_init_args.obs_camera_crop,
+                        obs_camera_model = grasp_init_args.obs_camera_model,
+                        depth_stereo_sim = depth_stereo_sim)
 
         self._observation_camera = self._head_camera_name if grasp_init_args.observe_camera else None
         self._ui_camera = self._head_camera_name if self._grasping_conf.use_head_cam_as_ui_camera else self._grasp_ui_camera_name
@@ -364,8 +420,10 @@ class GraspVecEnv(RobotVecEnv):
 
         if (self._grasping_conf.grasping_init_args.observe_camera
                 and hasattr(self._adapter, "set_link_camera_visibility")):
-            detected_models = {l[0] for l in self._adapter.get_detected_links()}
+            detected_links = list(self._adapter.get_detected_links())
+            detected_models = {l[0] for l in detected_links}
             hidden_models = {"goal_axes", "goal_marker_cube", "axes", "grippper_marker", "arrow", "arrow_yellow"}
+            hidden_links : set[tuple[str,str]] = set()
             if self._grasping_conf.grasping_init_args.camera_hide_robot:
                 # Ablation for how much the arm occluding the object hurts: the observation camera
                 # stops seeing the robot entirely. The policy still knows where the arm is from
@@ -375,9 +433,24 @@ class GraspVecEnv(RobotVecEnv):
                     raise RuntimeError(f"camera_hide_robot is set, but the robot model '{robot_model}' is not among the "
                                        f"detected models {sorted(detected_models)}, so the robot would not be hidden")
                 hidden_models.add(robot_model)
-            visible_models = sorted(detected_models - hidden_models)
-            ggLog.info(f"setting head camera visibility to {visible_models}")
-            self._adapter.set_link_camera_visibility([(self._head_camera_name, visible_models)])
+            else:
+                # The camera sits at the ZED's left imager, which is *inside* the housing mesh (its
+                # front wall is ~25mm ahead of it), so without this it renders the inside of its own
+                # body rather than the scene. Only the *_camera_center links carry that geometry;
+                # the UI camera and the collision model keep it. A real camera does not see its own
+                # housing either: it looks out through an aperture the mesh does not model.
+                robot_model = self._configuration.init_args.robot_name
+                hidden_links = {l for l in detected_links
+                                if l[0] == robot_model and l[1].endswith("_camera_center")}
+            # A model with some links hidden cannot be named as a whole, so it is expanded link by
+            # link; the others stay as model names.
+            partly_hidden_models = {l[0] for l in hidden_links}
+            visible_items : list = sorted(detected_models - hidden_models - partly_hidden_models)
+            visible_items += sorted(l for l in detected_links
+                                    if l[0] in partly_hidden_models and l not in hidden_links)
+            ggLog.info(f"setting head camera visibility to {visible_items}"
+                       + (f", hiding {sorted(hidden_links)}" if hidden_links else ""))
+            self._adapter.set_link_camera_visibility([(self._head_camera_name, visible_items)])
     
 
 
@@ -584,6 +657,12 @@ class GraspVecEnv(RobotVecEnv):
                                                     align_corners=False,
                                                     antialias=True)
                 return img.permute(0, 2, 3, 1) # back to (vec, H, W, C)
+            def _crop(img : th.Tensor) -> th.Tensor:
+                """Centered crop of a (vec, H, W, ...) image, as obs_camera_crop asks for."""
+                if self._obs_camera_crop_rows_cols is None:
+                    return img
+                rows, cols = self._obs_camera_crop_rows_cols
+                return img[:, rows, cols]
             # One call renders both modalities in a single pass when both are enabled: mjx.render()
             # produces the color and the depth buffer together.
             renderings = self._adapter.get_camera_images([self._observation_camera],
@@ -593,7 +672,7 @@ class GraspVecEnv(RobotVecEnv):
                 obs_gray_image = renderings.rgb[0] # this is in (vec,H,W,C)
                 if not obs_gray_image.dtype.is_floating_point:
                     obs_gray_image = obs_gray_image.to(th.float32) / 255.0
-                obs_gray_image = _resize_to_obs(obs_gray_image)
+                obs_gray_image = _resize_to_obs(_crop(obs_gray_image))
                 # getRenderings gives HWC RGB (vec, H, W, 3); the CAMERA field is a single plane, so
                 # collapse RGB -> one grayscale channel back in [0,255], matching the uint8 substate.
                 obs_gray_image = ((obs_gray_image[..., :3] @ self._rgb_to_gray_w)*255).to(self._obs_dtype) # (vec, H, W)
@@ -612,7 +691,9 @@ class GraspVecEnv(RobotVecEnv):
                                                                self._grasping_conf.depth_stereo_sim)
                 # Validity-weighted resize: a plain interpolation would average the invalid pixels
                 # together with the valid ones, dragging the depth around every hole towards 0.
-                obs_depth_image = resize_depth_masked(obs_depth_image,
+                # Cropped after the degradation: the artifacts belong to the whole sensor frame,
+                # and the occlusion shadows need the neighbours a crop would cut away.
+                obs_depth_image = resize_depth_masked(_crop(obs_depth_image),
                                                       self._grasping_conf.obs_camera_resolution_hw)
                 # Normalize to the [0,1] range the float32 substate declares. INVALID_DEPTH is 0, so
                 # it survives the clamp and stays distinguishable from any real measurement (which is
@@ -1220,6 +1301,7 @@ class GraspVecEnv(RobotVecEnv):
         full_view_cam_wxyz =  "0.0  -0.383  0       0.924"
         table_view_xyz =  "1.0   0      1.25"
         table_view_wxyz = "0.0  -0.5  0.0     0.866"
+        obs_camera_model = self._grasping_conf.obs_camera_model
         if not hasattr(self,"_head_camera"):
             if self._grasping_conf.use_external_head_camera:
                 attachment_link = None
@@ -1229,8 +1311,18 @@ class GraspVecEnv(RobotVecEnv):
                 attachment_link = ("centauro","D435_head_camera_link")
                 obs_cam_kwargs : dict = {}
             elif self._configuration.init_args.robot_name == "kyon":
-                attachment_link = ("kyon","zed_front_down_mount_link")
-                obs_cam_kwargs = {"position_xyz": "0.0 0.03 0.015"} # +x moves the camera forward
+                # The front-down ZED X Mini's left imager: that is the frame the real camera's depth
+                # is referenced to, so the sim camera must sit there to transfer. The frame follows
+                # the ROS body convention (+x forward, +z up), which is what the camera model uses
+                # too, so no offset or rotation is needed. It exists only when the head cameras are
+                # spawned, through get_kyon_args' spawn_zed_cameras robot option.
+                camera_frame = "zed_front_down_left_camera_frame"
+                if f'name="{camera_frame}"' not in self._configuration.init_args.robot_description_string:
+                    raise RuntimeError(f"the observation camera attaches to '{camera_frame}', but the robot "
+                                       f"description does not define it: set the kyon robot option "
+                                       f"spawn_zed_cameras=True")
+                attachment_link = ("kyon", camera_frame)
+                obs_cam_kwargs = {}
             else:
                 attachment_link = None
                 obs_cam_kwargs={"position_xyz": full_view_cam_xyz,
@@ -1239,7 +1331,10 @@ class GraspVecEnv(RobotVecEnv):
                                     "camera_height":self._grasping_conf.obs_camera_render_resolution_hw[0],
                                     "frame_rate":1/self._intendedStepLength_sec,
                                     "camera_name": self._head_camera_name,
-                                    "horizontal_fov_degrees":78.0})
+                                    # The real camera's own field of view, so that what the policy
+                                    # sees matches it in extent as well as in depth.
+                                    "horizontal_fov_degrees": 70.0 if obs_camera_model is None else
+                                                              stereo_camera_hfov_degrees(obs_camera_model)})
             self._obs_cam_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
                                             name=self._head_camera_name,
                                             pose=None,

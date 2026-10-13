@@ -2,3 +2,6 @@
 *__pycache__*
 *.gch
 build/*
+# Description repository checkouts, cloned on demand by pydescriptions into the
+# directory adarl_envs.paths.descriptions_dir() picks for an editable install.
+src/adarl_envs/descriptions/

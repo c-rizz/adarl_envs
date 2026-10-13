@@ -395,7 +395,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._robot_model = Robot(robot_description_string=init_args.robot_description_string,
                                     robot_description_format=init_args.robot_description_format,
                                     additional_models=additional_models)
-        ggLog.info(f"urdf: {init_args.robot_description_string}")
+        # ggLog.info(f"urdf: {init_args.robot_description_string}")
 
         ggLog.info(f"Robot has links: {self._robot_model.get_frame_names()}")
         ggLog.info(f"Robot has joints: {self._robot_model.get_joint_names()}")

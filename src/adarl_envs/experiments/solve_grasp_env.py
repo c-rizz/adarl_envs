@@ -159,16 +159,22 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                               },
         "robot_options" : {
             "spawn_legs" : True,
-            "ctrl_legs" : True
+            "ctrl_legs" : True,
+            # The observation camera attaches to the front-down ZED's left imager frame, which only
+            # exists when the head cameras are part of the model.
+            "spawn_zed_cameras" : True
         },
         "mjx_warp_nccdmax" : 20,
         "observe_camera" : obs_cam,
         "use_depth_cam" : use_depth_cam,
         "use_gray_cam" : use_gray_cam,
         "camera_hide_robot" : False, # ablation: hide the robot from the observation camera
-        # None = exact rendered depth. To emulate the ZED, pass a StereoDepthSimParams with
-        # focal_px/baseline_m from its calibration (focal rescaled to the render resolution).
-        "depth_stereo_sim" : None,
+        # Crop the camera rendering to a square sized to this propotion of the original height
+        # So if render size is 160x100: crop=1.0->100x100, crop=0.5->50x50, 1.25->125x100
+        "obs_camera_crop" : 1.0,
+        # Degrade the rendered depth into a ZED-X-Mini-like one, for sim-to-real transfer.
+        # False renders exact depth.
+        "depth_stereo_sim" : False,
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True

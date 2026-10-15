@@ -52,6 +52,14 @@ def runner_builder(seed,
     robot_name = env_builder_args["robot_name"]
     max_steps = env_builder_args.pop("max_steps_per_episode")
 
+    s,f = get_robot_string_and_format(model_file_path = env_builder_args.get("model_file", None),
+                                        robot_description_format = env_builder_args["robot_description_format"],
+                                        robot_description_string = env_builder_args.get("robot_description_string", None),
+                                        model_kwargs = env_builder_args.get("model_kwargs"),
+                                        xacro_extra_pkg_paths = env_builder_args.get("xacro_extra_pkg_paths"))
+    robot_description_string = s
+    robot_description_format = f
+
     mode = env_builder_args["mode"]
     if mode == "gz":
         raise NotImplementedError()
@@ -92,6 +100,45 @@ def runner_builder(seed,
                                             render_znear=0.1,
                                             warp_nccdmax=env_builder_args.pop("mjx_warp_nccdmax", 10),
                                             warp_nconmax=env_builder_args.pop("mjx_warp_nconmax", 20))
+    elif mode == "xbot-zmq":
+        from adarl.adapters.VecZmqXbotAdapter import VecZmqXbotAdapter
+        from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter
+        if num_envs != 1:
+            raise RuntimeError(f"The 'xbot-zmq' adapter talks to one real robot, but got num_envs={num_envs}")
+        ground_link = ("ground_plane","ground_link") # Should not be used
+        env_builder_args.pop("enable_rendering", None) # there is nothing to render on the real robot
+        adapter = VecZmqXbotAdapter(adapter = ZmqXbotAdapter(model_name = env_builder_args["robot_name"],
+                                                             stepLength_sec = stepLength_sec,
+                                                             is_floating_base = env_builder_args.get("xbotzmq_is_floating_base", True),
+                                                             reference_frame = "world",
+                                                             torch_device = th.device("cpu"),
+                                                             allow_fallback = False,
+                                                             jpos_cmd_max_vel = {},
+                                                             jpos_cmd_max_vel_default = 5.0,
+                                                             jpos_cmd_max_acc = {},
+                                                             jpos_cmd_max_acc_default = 5.0,
+                                                             enable_filters = True,
+                                                             position_commands_stiffness = 400.0,
+                                                             position_commands_damping = 10.0,
+                                                             is_simulated = False,
+                                                             walltime_factor = 1.0,
+                                                             remote_ip = env_builder_args.get("xbotzmq_remote_ip", "127.0.0.1"),
+                                                             comm_protocol = env_builder_args.get("zmq_protocol", "tcp"),
+                                                             ipc_pub_path = "/tmp/xbot2_zmq_pub.ipc",
+                                                             ipc_cmd_path = "/tmp/xbot2_zmq_cmd.ipc",
+                                                             ipc_service_path = "/tmp/xbot2_zmq_rep.ipc",
+                                                             robot_urdf = robot_description_string,
+                                                             tcp_service_port = env_builder_args.get("xbotzmq_tcp_service_port", 5557),
+                                                             tcp_cmd_port = env_builder_args.get("xbotzmq_tcp_cmd_port", 5558),
+                                                             tcp_state_port = env_builder_args.get("xbotzmq_tcp_state_port", 5559),
+                                                             # Camera images come from a camzmq publisher (the ZED
+                                                             # or a ROS 2 bridge), which must publish at the env's
+                                                             # render resolution: the crop and resize happen here.
+                                                             camzmq_url = env_builder_args.get("camzmq_url"),
+                                                             camzmq_camera_names = env_builder_args.get("camzmq_camera_names"),
+                                                             max_frame_age_sec = env_builder_args.get("camzmq_max_frame_age_sec", 0.25)),
+                                    vec_size = 1,
+                                    th_device = th_device)
     elif mode == "mujoco":
         from adarl.adapters.MujocoJointImpedanceAdapter import MujocoJointImpedanceAdapter
         if num_envs != 1:
@@ -136,14 +183,6 @@ def runner_builder(seed,
         exit(0)
 
     time.sleep(1)
-
-    s,f = get_robot_string_and_format(model_file_path = env_builder_args.get("model_file", None),
-                                        robot_description_format = env_builder_args["robot_description_format"],
-                                        robot_description_string = env_builder_args.get("robot_description_string", None),
-                                        model_kwargs = env_builder_args.get("model_kwargs"),
-                                        xacro_extra_pkg_paths = env_builder_args.get("xacro_extra_pkg_paths"))
-    robot_description_string = s
-    robot_description_format = f
 
     homing_body_pose_xyz_xyzw = env_builder_args.pop("homing_body_pose_xyz_xyzw")
 

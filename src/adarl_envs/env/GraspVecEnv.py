@@ -158,6 +158,19 @@ class GraspAdapterData:
     obs_gray_image : th.Tensor | None
     obs_depth_image : th.Tensor | None
 
+def _camera_hfov_deg(camera_model : str | None) -> float:
+    """Horizontal field of view of the observation camera: the real camera's, or a generic 70 deg."""
+    return 70.0 if camera_model is None else stereo_camera_hfov_degrees(camera_model)
+
+
+def _fov_deg(full_hfov_deg : float, extent_px : int, render_width_px : int) -> float:
+    """Field of view spanned by extent_px pixels of a render render_width_px wide, in degrees.
+
+    One focal length serves both axes, so each side of a window gets its own field of view.
+    """
+    return math.degrees(2*math.atan(math.tan(math.radians(full_hfov_deg)/2)*extent_px/render_width_px))
+
+
 class GraspVecEnv(RobotVecEnv):
     STATE_GRASPING = "grasp"
     STATE_GRASPING_VELOCITIES = "grasp_velocities"
@@ -165,6 +178,20 @@ class GraspVecEnv(RobotVecEnv):
     STATE_GRIPPER = "gripper"
     STATE_CAMERA = "camera"
     STATE_DEPTH = "depth"
+
+    OBJECT_POSE_PLACEHOLDER = (0.0, 0.0, 0.0,   0.0, 0.0, 0.0, 1.0)
+    """Stand-in object pose for adapters that cannot report one: on a real robot the object is not
+    part of the model, so there is nothing to read. It exists only to keep the state tensors shaped
+    as they are; _has_object_state keeps it out of the observation and out of every reward."""
+
+    @property
+    def _has_object_state(self) -> bool:
+        """Whether the adapter can report the target object's pose and velocity.
+
+        Only a simulation can: the object is not part of the robot's model, so on a real robot the
+        pose falls back to OBJECT_POSE_PLACEHOLDER and the velocity to zero.
+        """
+        return isinstance(self._adapter, BaseVecSimulationAdapter)
 
     @dataclass
     class GraspingConfiguration:
@@ -219,6 +246,7 @@ class GraspVecEnv(RobotVecEnv):
     GRASPING_POSES = IntEnum(       "GRASPING_POSES", [
                                     "GOAL_POSE",
                                     "OBJECT_POSE",
+                                    "ABS_OBJECT_POSE",
                                     "GRIPPER_POSE",
                                     "INITIAL_OBJ_POSE"
                                     ], start=0)
@@ -290,12 +318,9 @@ class GraspVecEnv(RobotVecEnv):
             crop_h, crop_w = min(side, render_h), min(side, render_w)
             row0, col0 = (render_h-crop_h)//2, (render_w-crop_w)//2
             self._obs_camera_crop_rows_cols = (slice(row0, row0+crop_h), slice(col0, col0+crop_w))
-            full_hfov = (70.0 if grasp_init_args.obs_camera_model is None
-                         else stereo_camera_hfov_degrees(grasp_init_args.obs_camera_model))
-            # One focal length for both axes, so each fov follows its own side of the window.
-            half_tan = math.tan(math.radians(full_hfov)/2)/render_w
-            hfov = math.degrees(2*math.atan(half_tan*crop_w))
-            vfov = math.degrees(2*math.atan(half_tan*crop_h))
+            full_hfov = _camera_hfov_deg(grasp_init_args.obs_camera_model)
+            hfov = _fov_deg(full_hfov, crop_w, render_w)
+            vfov = _fov_deg(full_hfov, crop_h, render_w)
             ggLog.info(f"obs camera: keeping {crop_h}x{crop_w} of the {render_h}x{render_w} render "
                        f"(crop={crop}), {full_hfov:.1f} deg hfov -> {hfov:.1f} deg horizontal, "
                        f"{vfov:.1f} deg vertical"
@@ -364,7 +389,46 @@ class GraspVecEnv(RobotVecEnv):
         _homing_xyz = tuple(robot_init_args.homing_body_pose_xyz_xyzw[:3])
         robot_init_args.randomized_homing_body_position_minmax_xyz=(_homing_xyz, _homing_xyz)
         robot_init_args.noise_abs_obs_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
-        super().__init__(robot_init_args)
+        super().__init__(robot_init_args) # starts the adapter up
+        self._check_published_camera()
+
+    CAMERA_FOV_TOLERANCE_DEG = 1.0
+    """How far a real camera's field of view may be from the simulated one before it is refused."""
+
+    def _check_published_camera(self):
+        """Check the camera an adapter publishes against the simulated one it stands in for.
+
+        Only adapters that get their images from a real camera can answer (get_camera_info); a
+        simulation renders the camera this class defines, so there is nothing to disagree with. A
+        lens or resolution mismatch feeds the policy images it was never trained on, which is far
+        easier to understand here than as a policy that merely behaves oddly.
+        """
+        if self._observation_camera is None:
+            return
+        get_camera_info = getattr(self._adapter, "get_camera_info", None)
+        if get_camera_info is None:
+            return
+        info = get_camera_info(self._observation_camera)
+        render_hw = self._grasping_conf.obs_camera_render_resolution_hw
+        gray_enabled, depth_enabled = self._camera_modalities()
+        sim_fovy = _fov_deg(_camera_hfov_deg(self._grasping_conf.obs_camera_model),
+                            render_hw[0], render_hw[1])
+        if (info.height, info.width) != tuple(render_hw):
+            raise RuntimeError(f"camera '{self._observation_camera}' is published at {info.height}x{info.width}, "
+                               f"but the policy is trained on {render_hw[0]}x{render_hw[1]}: publish at that "
+                               f"resolution, since the crop and the resize are done here")
+        if abs(info.fovy_deg - sim_fovy) > self.CAMERA_FOV_TOLERANCE_DEG:
+            raise RuntimeError(f"camera '{self._observation_camera}' has a {info.fovy_deg:.2f} deg vertical field "
+                               f"of view, but the simulated one has {sim_fovy:.2f} deg (obs_camera_model="
+                               f"{self._grasping_conf.obs_camera_model}): the lens does not match the one trained on")
+        if depth_enabled and not info.has_depth:
+            raise RuntimeError(f"camera '{self._observation_camera}' publishes no depth, but use_depth_cam is set")
+        if gray_enabled and info.rgb_channels == 0:
+            raise RuntimeError(f"camera '{self._observation_camera}' publishes no color, but a grayscale "
+                               f"observation is requested")
+        ggLog.info(f"camera '{self._observation_camera}' matches the simulated one: {info.height}x{info.width}, "
+                   f"{info.fovy_deg:.2f} deg vertical fov (simulated {sim_fovy:.2f}), rgb_channels="
+                   f"{info.rgb_channels}, has_depth={info.has_depth}")
 
     @override
     def _build_stats(self):
@@ -400,14 +464,17 @@ class GraspVecEnv(RobotVecEnv):
                                f"Agent-controlled joints are {controlled_joints}")
         self._gripper_joint_idxs = [controlled_joints.index(j) for j in gripper_joints]
         self._gripper_joint_idxs_th = th.as_tensor(self._gripper_joint_idxs, dtype=th.long, device=self._th_device)
+        # The object is a model of its own, which only a simulation holds: asking a real robot to
+        # monitor it would be asking for a link it does not have.
+        object_links = [self._grasping_conf.grasping_init_args.target_object_link] if self._has_object_state else []
         self._adapter.set_monitored_links(self._adapter.get_monitored_links() +
-                                          [self._grasping_conf.grasping_init_args.target_object_link] + 
+                                          object_links +
                                           self._grasping_conf.grasping_init_args.manipulator_tip_links + 
                                           self._grasping_conf.grasping_init_args.feet_bottom_links)
-        self._object_link_id = self._adapter.get_monitored_links_ids([self._grasping_conf.grasping_init_args.target_object_link])
+        self._object_link_id = self._adapter.get_monitored_links_ids(object_links) if object_links else None
         self._gripper_link_ids = self._adapter.get_monitored_links_ids(self._grasping_conf.grasping_init_args.manipulator_tip_links)
         self._feet_bottom_link_ids = self._adapter.get_monitored_links_ids(self._grasping_conf.grasping_init_args.feet_bottom_links)
-        self._obj_and_gripper_and_feetbottom_link_ids = self._adapter.get_monitored_links_ids([self._grasping_conf.grasping_init_args.target_object_link]+
+        self._obj_and_gripper_and_feetbottom_link_ids = self._adapter.get_monitored_links_ids(object_links+
                                                                                               self._grasping_conf.grasping_init_args.manipulator_tip_links+
                                                                                               self._grasping_conf.grasping_init_args.feet_bottom_links)
         monitored_cameras = []
@@ -457,6 +524,16 @@ class GraspVecEnv(RobotVecEnv):
 
     def _build_state_helper(self, adapter : BaseVecJointImpedanceAdapter):
         super()._build_state_helper(adapter)
+        if not self._has_object_state:
+            init_args = self._grasping_conf.grasping_init_args
+            if init_args.observe_object_pose or init_args.observe_initial_object_pose:
+                raise ValueError(f"observe_object_pose={init_args.observe_object_pose} and "
+                                 f"observe_initial_object_pose={init_args.observe_initial_object_pose}, but "
+                                 f"{type(self._adapter).__name__} cannot report the object pose, so the "
+                                 f"observation would carry OBJECT_POSE_PLACEHOLDER. Turn them off.")
+            ggLog.warn("No object state available from this adapter: the object pose is a placeholder, its "
+                       "velocity is zero, and every object-derived reward is zeroed. The privileged "
+                       "observation group carries the placeholder and must not be used here.")
         base_observable_fields=[ self.GRASPING_POSES.GOAL_POSE,
                             self.GRASPING_POSES.GRIPPER_POSE]
         if self._grasping_conf.grasping_init_args.observe_object_pose:
@@ -474,6 +551,7 @@ class GraspVecEnv(RobotVecEnv):
                                                     fields_minmax={ 
                                                         self.GRASPING_POSES.GOAL_POSE :         [-10, 10],
                                                         self.GRASPING_POSES.OBJECT_POSE :       [-10, 10],
+                                                        self.GRASPING_POSES.ABS_OBJECT_POSE :   [-10, 10],
                                                         self.GRASPING_POSES.INITIAL_OBJ_POSE :  [-10, 10],
                                                         self.GRASPING_POSES.GRIPPER_POSE :      [-10, 10]},
                                                     vec_size=adapter.vec_size(),
@@ -493,6 +571,15 @@ class GraspVecEnv(RobotVecEnv):
                                                         obs_defs={"base":{"observable":True,"concatenate":True,"noise":None},
                                                                   "privileged":{"observable":True,"concatenate":True,"noise":None}})
 
+        vel_base_observable_fields=[self.GRASPING_VELOCITIES.GRIPPER_LINVEL,
+                                    self.GRASPING_VELOCITIES.GRIPPER_ANGVEL]
+        if self._grasping_conf.grasping_init_args.observe_object_pose:
+            vel_base_observable_fields += [self.GRASPING_VELOCITIES.OBJECT_LINVEL,
+                                           self.GRASPING_VELOCITIES.OBJECT_ANGVEL]
+        vel_privileged_observable_fields = [    self.GRASPING_VELOCITIES.OBJECT_LINVEL,
+                                                self.GRASPING_VELOCITIES.OBJECT_ANGVEL,
+                                                self.GRASPING_VELOCITIES.GRIPPER_LINVEL,
+                                                self.GRASPING_VELOCITIES.GRIPPER_ANGVEL]
         velocities_state_helper = ThBoxStateHelper( field_names=[e for e in self.GRASPING_VELOCITIES],
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
@@ -506,11 +593,11 @@ class GraspVecEnv(RobotVecEnv):
                                                     observation_definitions={
                                                         "base": ThBoxStateHelper.SimpleObsDef(
                                                             obs_history_length=1,
-                                                            observable_fields=None,
+                                                            observable_fields=vel_base_observable_fields,
                                                             observable_subfields=None),
                                                         "privileged": ThBoxStateHelper.SimpleObsDef(
                                                             obs_history_length=1,
-                                                            observable_fields=None,
+                                                            observable_fields=vel_privileged_observable_fields,
                                                             observable_subfields=None),
                                                             })
         self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_GRASPING_VELOCITIES,
@@ -622,18 +709,46 @@ class GraspVecEnv(RobotVecEnv):
         gray = self._grasping_conf.use_gray_cam or not depth
         return gray, depth
 
+    def _gripper_poses_from_fk(self, robot_data : RobotAdapterData) -> th.Tensor:
+        """Gripper link poses, in the body frame, from forward kinematics on the measured joints.
+
+        Without a simulation there is no ground-truth link state, so the poses are computed from the
+        joint positions the robot reports, the same way LocomotionVecEnv does for the feet. The
+        result is already body-relative, which is the frame the grasping state keeps.
+        """
+        if self.num_envs != 1:
+            raise NotImplementedError(f"Gripper poses from forward kinematics are only implemented for a "
+                                      f"single environment, but num_envs={self.num_envs}")
+        tip_links = self._grasping_conf.grasping_init_args.manipulator_tip_links
+        jpos = robot_data.vec_jstates_j_pveae[0,:,0]
+        self._robot_model.set_joint_pose_by_names({jn[1]:jpos[i] for i,jn
+                                                   in enumerate(self._configuration.joints_agent_controlled)})
+        fk_poses = self._robot_model.get_frame_poses_xyzxyzw(self._configuration.main_body_link[1],
+                                                             [l[1] for l in tip_links])
+        return self._thtens([fk_poses[l[1]] for l in tip_links]).unsqueeze(0) # (1, ntips, 7)
+
     def _get_adapter_data_raw(self):
         super_adapter_data =  super()._get_adapter_data_raw()
-        poses = self._adapter.getLinksState(self._obj_and_gripper_and_feetbottom_link_ids, use_com_pose=False)
-        # poses is ordered as [target_object] + manipulator_tip_links + feet_bottom_links (see _build)
         num_gripper_links = len(self._grasping_conf.grasping_init_args.manipulator_tip_links)
-        feet_start = 1 + num_gripper_links
-        current_object_pose = poses[:,0, :7]
-        current_gripper_poses = poses[:,1:feet_start, :7]
+        num_feet = len(self._grasping_conf.grasping_init_args.feet_bottom_links)
+        if self._has_object_state:
+            poses = self._adapter.getLinksState(self._obj_and_gripper_and_feetbottom_link_ids, use_com_pose=False)
+            # poses is ordered as [target_object] + manipulator_tip_links + feet_bottom_links (see _build)
+            feet_start = 1 + num_gripper_links
+            current_object_pose = poses[:,0, :7]
+            current_gripper_poses = poses[:,1:feet_start, :7]
 
-        current_object_linvel_angvel = poses[:,0, 7:13]
-        current_gripper_linvel_angvel = poses[:,1:feet_start, 7:13]
-        current_feetbottom_linvel_angvel = poses[:,feet_start:, 7:13]
+            current_object_linvel_angvel = poses[:,0, 7:13]
+            current_gripper_linvel_angvel = poses[:,1:feet_start, 7:13]
+            current_feetbottom_linvel_angvel = poses[:,feet_start:, 7:13]
+        else:
+            # No simulation: the gripper comes from forward kinematics, the object does not exist,
+            # and link velocities are not measured (as in LocomotionVecEnv's feet fallback).
+            current_gripper_poses = self._gripper_poses_from_fk(super_adapter_data)
+            current_object_pose = self._thtens(self.OBJECT_POSE_PLACEHOLDER).unsqueeze(0).expand(self.num_envs,7)
+            current_object_linvel_angvel = self._thzeros((self.num_envs, 6))
+            current_gripper_linvel_angvel = self._thzeros((self.num_envs, num_gripper_links, 6))
+            current_feetbottom_linvel_angvel = self._thzeros((self.num_envs, num_feet, 6))
 
         # Feet-vs-ground contact, used to gate the feet-slip penalty. check_colliding_links returns one column
         # per monitored pair, ordered as feet_contact_links, which must align 1:1 with feet_bottom_links.
@@ -767,8 +882,14 @@ class GraspVecEnv(RobotVecEnv):
         # vec_bodystates_13 (body pose+vel) comes from the base RobotVecEnv adapter data.
         # The same rigid transform is applied to all three, so the reward distances are unchanged.
         body_state_13 = super_adapter_data.vec_bodystates_13
-        body_pos = body_state_13[:, :3]
-        conj_body_quat = th_quat_conj(body_state_13[:, 3:7])
+        if body_state_13 is None:
+            # Adapters without a body pose (real robots) give poses that are already body-relative,
+            # so the change of frame is the identity.
+            body_pos = self._thzeros((self.num_envs,3))
+            conj_body_quat = self._unit_quaternion.unsqueeze(0).expand(self.num_envs,4)
+        else:
+            body_pos = body_state_13[:, :3]
+            conj_body_quat = th_quat_conj(body_state_13[:, 3:7])
         def _pose_to_body_frame(pose_v7):
             pos_body  = th_quat_rotate(pose_v7[:, :3] - body_pos, conj_body_quat)
             quat_body = quat_mul_xyzw(conj_body_quat, pose_v7[:, 3:7])
@@ -778,6 +899,7 @@ class GraspVecEnv(RobotVecEnv):
         gripper_pose = _pose_to_body_frame(current_gripper_pose)
         new_grasping_state = {self.GRASPING_POSES.GOAL_POSE   : goal_pose.expand(self.num_envs,7),
                               self.GRASPING_POSES.OBJECT_POSE : object_pose.expand(self.num_envs,7),
+                              self.GRASPING_POSES.ABS_OBJECT_POSE : current_object_pose.expand(self.num_envs,7),
                               self.GRASPING_POSES.INITIAL_OBJ_POSE : self._grasping_episode_config.initial_object_pose.expand(self.num_envs,7),
                               self.GRASPING_POSES.GRIPPER_POSE : gripper_pose.expand(self.num_envs,7)}
         new_inst_state[self.STATE_GRASPING] = new_grasping_state
@@ -988,6 +1110,14 @@ class GraspVecEnv(RobotVecEnv):
         # reward_feet_linvel = th.zeros_like(reward_yaw_vel_track)
         record_time("GraspVecEnv.compute_rewards: body posture rewards: feet sliding")
 
+
+        if not self._has_object_state:
+            # Every one of these is a function of the object pose, which is OBJECT_POSE_PLACEHOLDER
+            # here: zero is honest, a plausible-looking number is not.
+            reward_object_pose = th.zeros_like(reward_object_pose)
+            reward_gripper_pose = th.zeros_like(reward_gripper_pose)
+            reward_gripper_close = th.zeros_like(reward_gripper_close)
+            reward_gripper_grasp = th.zeros_like(reward_gripper_grasp)
 
         raw_rewards = GraspVecEnv.SubRewards(
             health = th.ones_like(reward_position),
@@ -1333,8 +1463,7 @@ class GraspVecEnv(RobotVecEnv):
                                     "camera_name": self._head_camera_name,
                                     # The real camera's own field of view, so that what the policy
                                     # sees matches it in extent as well as in depth.
-                                    "horizontal_fov_degrees": 70.0 if obs_camera_model is None else
-                                                              stereo_camera_hfov_degrees(obs_camera_model)})
+                                    "horizontal_fov_degrees": _camera_hfov_deg(obs_camera_model)})
             self._obs_cam_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl",cam_file)).read_text(),
                                             name=self._head_camera_name,
                                             pose=None,

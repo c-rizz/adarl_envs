@@ -1,89 +1,47 @@
 # ADARL ENVIRONMENTS
 
-This repository is a collection of environments and tools for robotic environments implemented with ADARL.
-For now it is focused on an environment for quadruped locomotion.
+This repository is a collection of environments and tools for Reinforcement Learing implemented with ADARL (https://github.com/c-rizz/adarl).
+Environments implemented with adarl can be executed on simulation or real hardware interchangeably.
+No need for deploy implementations or configs.
 
-### Setup - Auto
+## Setup
 
-You can try to install everything using the provided setup script.
-It hasn't been thoroughly tested, so it may not work, but it's worth a try.
+To use the implemented environments and build upon them you will need to set up a python workspace with the aappropriate dependencies.
+I suggest you use uv instead of pip.
 
-```
-bash <(curl -s https://gitlab.com/-/snippets/4863010/raw/main/setup_full.sh)
-```
+You will need to install:
+ * [ADARL](https://github.com/c-rizz/adarl): provides the interfaces to simulators (MJX, Genesis, PyBullet) and real robots (via Xbot zmq)
+ * [RREAL](https://github.com/c-rizz/rreal): provides RL algorithms implementations
+ * [PyDescriptions](https://github.com/c-rizz/pydescriptions): wraps URDF description packages in a python-installable package
 
-You can find the script also in the repo main folder.
-Let me know if it doesn't work.
-
-If you want to use the environments with ROS1+XBOT you will have to create a separate workspace,
-you should be able to do it with:
-
-```
-bash <(curl -s https://gitlab.com/-/snippets/4863010/raw/main/setup_full.sh) ros1xbot
-```
-
-
-### Setup - Manual
-
-If the setup script didn't work, or if you want do do things differently, here are some instructions for setting things manually.
-You will need to create a python virtualenv with adarl, rreal, and optionally pykyon or pycentauro, and their dependencies.
-Notice Some dependencies are "non-standard", maining you cannot use the official version, at least until their upstream repositories don't get updated/fixed (for example mujoco and xacro).
-
-You can use the adarl_envs and its requirements directly on your machine, but I sugegst you use a docker container to manage the environment.
-Some docker images are provided in the adarl_docker_utils at https://github.com/c-rizz/adarl_docker_utils.
-With it you can launch a container with the following:
+For now, I suggest you install those as editable-installs.
 
 ```
 cd ~
-git clone https://github.com/c-rizz/adarl_docker_utils
-./adarl_docker_utils/basic/launch_persisting.sh
-```
-
-Now that you have a suitable docker container, you can create the workspace as follows:
-
-Outside the Docker:
-
-```
-cd ~
-mkdir adarl_ws
-cd adarl_ws
-mkdir src
-cd src
-git clone git@github.com:ADVRHumanoids/adarl_envs.git
-git clone https://github.com/c-rizz/adarl
-git clone https://github.com/c-rizz/rreal
-git clone --recurse-submodules git@github.com:ADVRHumanoids/pykyon.git
-git clone --recurse-submodules https://github.com/c-rizz/pycentauro
-```
-
-Inside the Docker:
-
-```
-cd /home/host/adarl_ws
+mkdir -p adarl_ws/src
+cd adarl_ws/src
+git clone https://github.com/c-rizz/adarl --branch crzz-dev
+git clone https://github.com/c-rizz/adarl_envs --branch crzz-dev
+git clone https://github.com/c-rizz/rreal --branch crzz-dev
+git clone https://github.com/c-rizz/pydescriptions --branch crzz-dev
+cd ..
 mkdir virtualenv
-python3 -m venv virtualenv/adarl
-. virtualev/adarl/bin/activate
-pip install --upgrade pip wheel setuptools
-pip install -e src/adarl -e src/adarl_envs -e src/rreal -e src/pykyon -e src/pycentauro
-pip install -r src/adarl/mjx_requirements_2204_v1.txt
-```
+uv venv --python=3.13 virtualenv/adarl313
+. virtualenv/adarl313/bin/activate
 
+uv pip install -r src/adarl/requirements_py313.txt
+uv pip install -e src/adarl -e src/adarl_envs -e src/rreal -e src/pydescriptions
+uv pip install git+https://github.com/c-rizz/joyzmq # For joystick deployment
+```
 
 # Running an Example
 
-If you followed the instructions before you should be able to start the container with:
+If you followed the instructions before you should be able to launch an example training with:
 
 ```
-~/adarl_ws/src/adarl_docker_utils/basic/launch_persisting.sh
-```
-
-At this point, inside the container, you should be able to train kyon with SAC on MJX with the following command (trains in about 50 minutes on an RTX 4080):
-
-```
-byobu
-cd /home/host/adarl_ws
-. virtualenv/adarl/bin/activate
-./src/adarl_envs/src/adarl_envs/experiments/loco_kyon.py --algorithm sac --mode mjx --comment kyon_training
+cd ~/adarl_ws
+. virtualenv/adarl313/bin/activate
+./src/adarl_envs/src/adarl_envs/experiments/loco_kyon_ppo.py --comment "example training"
 ```
 
 On your first run you may get in the terminal a prompt from wandb asking you to log in.
@@ -92,9 +50,28 @@ You can monitor the training in the terminal and pause it by typing 'pause' and 
 Once it is paused you can resume or stop the training.
 You can also terminate it by repatedly pressing CTRL+C.
 
-Outputs for the runs will be saved in adarl_ws/lrg_exps/vec_loco_env_test. There you can find checkpints, videos, and all information regarding the run.
+Outputs for the runs will be saved in adarl_ws/lrg_exps/loco_kyon_ppo.py. There you can find checkpints, videos, and all information regarding the run.
 
-You can find some info for deploying on Xbot in readme_ros_xbot.md
+# Running a checkpoint
+
+Once the policy is trained you can deploy it through the smae python environment on which it was trained.
+You just need a simple python control loop.
+
+You can deploy the the policy trained with loco_kyon_ppo using loco_play_vec1.py.
+With this script you can deploy to XBot (either simulation or reality ) or Mujoco C++ by using the --mode option.
+For controlling the robot you can use the [joyzmq](https://github.com/c-rizz/joyzmq) package.
+
+```
+cd ~/adarl_ws
+. virtualenv/adarl313/bin/activate
+./src/adarl_envs/src/adarl_envs/experiments/loco_play_vec1.py --comment "example play" --pretrained lrg_exps/loco_kyon_ppo.py/<run_id>/seed_0/checkpoints/
+```
+
+In a separate terminal (use joyzmq-joystick in place of joyzmq-keyboard if you have a proper joystick):
+```
+uvx --from git+https://github.com/c-rizz/joyzmq joyzmq-keyboard --bind tcp://127.0.0.1:5666
+```
+
 
 
 # Framework Overview

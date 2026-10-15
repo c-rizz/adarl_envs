@@ -21,6 +21,8 @@ from math import pi
 import xml.etree.ElementTree as ET
 import numpy as np
 from typing import Literal
+import pydescriptions
+from adarl_envs.paths import descriptions_dir
 
 def set_asset_texture_paths(mjcf_string: str, meshdir: str, texturedir: str) -> str:
     """Set meshdir and texturedir in <compiler> to the given paths. If <compiler> doesn't exist, it is created."""
@@ -748,10 +750,12 @@ def get_kyon_args(robot_options : dict = {}):
     j_pos_ctrl_lims = {k:np.array([-1.0,1.0])*j_pos_ctrl_range+homing[k] for k in homing.keys()}
     j_vel_ctrl_lims = {k:(ankle_vel_ctrl_lim if k in ankle_joints else j_vel_ctrl_lim) for k in homing.keys()}
     j_eff_ctrl_lims = {k:(ankle_eff_ctrl_lim if k in ankle_joints else j_eff_ctrl_lim) for k in homing.keys()}
-    file = adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf/urdf/kyon.urdf.xacro")
+    descriptions = pydescriptions.resolve("kyon_urdf", "zed_description",
+                                            root=descriptions_dir(),
+                                            refs=robot_options.get("description_refs"))
+    file = os.path.join(descriptions["kyon_urdf"], "urdf/kyon.urdf.xacro")
+   
     format = "xacro"
-    # file = adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_mjx/kyon_mjx.xml")
-    # format = "mjcf"
     if feet:
         # the foot plate is what collides, the contact link is the frame at the center of the sole
         feet_links         = [('kyon', f'foot_{i}') for i in range(1,5)]
@@ -768,7 +772,7 @@ def get_kyon_args(robot_options : dict = {}):
                               "footonly_collision" : "true",
                               "feet" : f"{feet}",
                               "varta" : "true"},
-            "xacro_extra_pkg_paths" : {"kyon_urdf" : adarl.utils.utils.pkgutil_get_path("pykyon", "iit-kyon-ros-pkg/kyon_urdf")},
+            "xacro_extra_pkg_paths" : descriptions,
             "homing_joint_position" : homing,
             "homing_joint_position_references" : homing_ref,
             "robot_name" : "kyon",

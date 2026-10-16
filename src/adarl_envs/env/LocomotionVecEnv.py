@@ -981,6 +981,7 @@ class LocomotionVecEnv(RobotVecEnv):
                                                             other=prev_peak_z)
 
             dt = new_internal_state[self.INTERNAL_FIELDS.LAST_STEP_DT].view((nenvs,))
+            dbg_check(lambda: th.all(dt < 0.1), assert_msg=f"Step dt is too large", async_assert=True)
             feet_were_touching_ground = prev_feet_air_durations_vec_foot_t <= 0
             # if foot is just lifting off, mark the time in the state
             # if foot is already up, and stays up, leave the time there

@@ -1526,7 +1526,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 recomputed_pose_randomization = True
                 # The search covers joint space and body xyz together, so a joint configuration is only
                 # accepted if it clears the terrain at that env's actual spawn location.
-                ggLog.info(f"Randomizing initial poses for {num_envs_resetting} envs...")
+                # ggLog.info(f"Randomizing initial poses for {num_envs_resetting} envs...")
                 _rand_jposes, _rand_bposes = find_poses(root_joint = self._configuration.robot_root_joint,
                                             body_frame = self._configuration.main_body_link[1],
                                             default_body_pose_xyzxyzw = self._configuration.homing_body_pose_xyz_xyzw.cpu().numpy(),

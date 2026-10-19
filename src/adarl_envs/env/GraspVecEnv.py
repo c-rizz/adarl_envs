@@ -1023,7 +1023,7 @@ class GraspVecEnv(RobotVecEnv):
         reward_safety_triggered = -1*safety_triggered
 
         # # FAILURE SCALING
-        # failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
+        # failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND] < 0)
         # if self._configuration.fail_on_safety:
         #     failed = th.logical_or(failed, safety_triggered)
         record_time("GraspVecEnv.compute_rewards: safety-triggered reward")
@@ -1076,7 +1076,7 @@ class GraspVecEnv(RobotVecEnv):
         
         # ---- Height ----
         # Height of the body
-        height_err = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]-self._grasping_conf.grasping_init_args.neutral_body_height
+        height_err = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND]-self._grasping_conf.grasping_init_args.neutral_body_height
         reward_height_position = -height_err**2
         record_time("GraspVecEnv.compute_rewards: body posture rewards: height")
         # ---- Pitch and Roll ----

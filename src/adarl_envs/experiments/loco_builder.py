@@ -380,6 +380,7 @@ def loco_runner_builder(seed,
                                     noise_abs_obs_linvel_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_linvel_ep_mustd_step_std"),
                                     noise_abs_obs_posz_ep_mustd_step_std = env_builder_args.pop("noise_abs_obs_posz_ep_mustd_step_std"),
                                     observe_full_robot_state = env_builder_args.pop("observe_full_robot_state"),
+                                    observe_randomizations = env_builder_args.pop("observe_randomizations"),
                                     offset_envs_ep_starts = env_builder_args.pop("offset_envs_ep_starts"),
                                     posref_safety_period = env_builder_args.pop("posref_safety_period"),
                                     quiet=quiet,
@@ -789,7 +790,9 @@ def get_kyon_args(robot_options : dict = {}):
             "randomized_dof_frictionloss_joints" : [JOINT_FILTERS.ALL_REVOLUTE],
             "randomized_mass_links" : [LINK_FILTERS.ALL_ROBOT],
             "randomized_com_links" : [("kyon","pelvis")],
-            "randomized_friction_links" : [LINK_FILTERS.ALL],
+            # Only the contacts that carry the robot: friction on a link that never touches anything
+            # changes nothing in the simulation, and would just pad the randomization state.
+            "randomized_friction_links" : feet_links + [('ground','ground_link')],
             "safety_limits_ratios_minmax_pve" : {k:[[ 0.9, 0.9, 0.9],
                                                     [ 0.9, 0.9, 0.9]] for k,v in homing_ref.items()},
             "control_limits_ratios_minmax_pve" : None,
@@ -941,6 +944,8 @@ def get_kyon_humanoid_args(robot_options : dict = {}):
             "feet_contact_links" : feet_links,
             "feet_bottom_links" : feet_bottom_links,
             "enable_link_collisions" : [(l,[('ground','ground_link'),'world']) for l in feet_links+hand_links],
+            # The hands touch the ground as much as the feet do, so they get randomized friction too
+            "randomized_friction_links" : feet_links + hand_links + [('ground','ground_link')],
             "goal_height_minmax" : [height, height],
             # A biped tips over much more easily than a quadruped, give it some room before calling it a crash
             "terminal_gravity_angle" : 40*pi/180,

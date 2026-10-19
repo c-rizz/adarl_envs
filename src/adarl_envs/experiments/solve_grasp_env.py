@@ -57,7 +57,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_joint_torque_weight" :          0.001, 
         "reward_joint_position_limit_weight" :  0.0,
         "reward_joint_position_weight" :        4.0,
-        "reward_object_pose_weight" :           1.0,
+        "reward_object_pose_weight" :           2.0,
         "reward_gripper_pose_weight" :          1.0,
         "reward_gripper_close_weight" :         0.5, # close the gripper near the object
         "reward_gripper_grasp_weight" :         0.0, # close the gripper *on* the object (contact-gated)

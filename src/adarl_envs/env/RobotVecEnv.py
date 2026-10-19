@@ -13,10 +13,10 @@ from adarl.utils.utils import expand_default_dict, th_compile_ext
 from adarl.utils.vec_state_helper import    JointImpedanceActionHelper, ThBoxStateHelper,\
                                         JointStateHelper, RobotStatsStateHelper,\
                                         StateNoiseGenerator, DictStateHelper, unnormalize, normalize
-from adarl.utils.tensor_trees import space_from_tree
+from adarl.utils.tensor_trees import map_tensor_tree, space_from_tree
 import adarl.utils.utils
 from adarl.utils.utils import (isinstance_noimport, masked_assign, quat_conj_xyzw_np, quat_mul_xyzw_np, quat_mul_xyzw,
-                               DistributionDef, DistributionDefTh, sample_distr, distr_to_tensor, distr_is_constant,
+                               DistributionDef, DistributionDefTh, sample_distr, distr_to_tensor, distr_is_constant, distr_minmax,
                                to_string_tensor, th_quat_rotate_py, th_quat_conj, ros_rpy_to_quaternion_xyzw_th, thtens)
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check,  dbg_check_bounded, dbg_check_finite
 from dataclasses import dataclass
@@ -53,6 +53,22 @@ def _is_joint_revolute(joint_name : str, robot_model : Robot) -> bool:
     # ggLog.info(f"joint_properties = {joint_properties}")
     return joint_properties[joint_name]["type"] == Robot.JOINT_TYPES.REVOLUTE
 
+def check_livel_abspos_aliasing(abslinvel_xy, abspos_xy):
+        abslinvel_x = abslinvel_xy[:,0]
+        dbg_check(lambda: th.logical_or(th.any(th.abs(abslinvel_xy - abspos_xy)>1e-6),
+                                               (abslinvel_x==0).all()),
+                          assert_msg="the compiled state builder returned an absolute linear velocity that is "
+                                     "equal to the position. weird!",
+                          build_msg=lambda: "the compiled state builder returned an absolute linear velocity that is "
+                                            "equal to the position. weird!\n"
+                                            f"abs linvel = {abslinvel_xy}\n"
+                                            f"abs pos = {abspos_xy}\n"
+                                            f"abs linvel - abs pos = {abslinvel_xy - abspos_xy}\n"
+                                            f"check = {th.logical_or(th.any(th.abs(abslinvel_xy - abspos_xy)>1e-6),
+                                               (abslinvel_x==0).all())}",
+                          async_assert=True)
+
+        
 @dataclass
 class RobotVecEnvInitArgs():
     noise_action_delay_mustd_std : tuple[float,float,float]
@@ -135,6 +151,13 @@ class RobotVecEnvInitArgs():
     minimal_infos : bool = False
     no_infos : bool = False
     observe_full_robot_state : bool = False
+    observe_randomizations : bool = False
+    """Whether the privileged observation includes the randomization state: what this env's model and
+    controller were altered by, as a deviation from nominal.
+
+    Only randomizations that are actually active contribute, so turning this on changes the privileged
+    observation size depending on which randomizations are configured. With merge_privileged the
+    privileged observation *is* the actor's, so this also hands the randomizations to the actor."""
     offset_envs_ep_starts : bool = False
     posref_safety_period : float = 0.001
     randomized_com_links : list[tuple[str,str]] = dataclasses.field(default_factory=list)
@@ -183,6 +206,8 @@ class RobotAdapterData:
     vec_body_abs_linvel_xyz : th.Tensor # only used for visualization, can be wrong
     vec_body_abs_angvel_xyz : th.Tensor
     vec_body_ground_dist : th.Tensor
+    vec_body_abs_pos_xy : th.Tensor
+    """Absolute horizontal position of the main body link, shape (envs_num, 2)."""
     vec_body_rel_gravity_dir : th.Tensor
     vec_body_rel_linvel_xyz : th.Tensor
     vec_body_rel_angvel_xyz : th.Tensor
@@ -297,7 +322,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                    "BODY_ABS_ANGVEL_X",
                                                    "BODY_ABS_ANGVEL_Y",
                                                    "BODY_ABS_ANGVEL_Z",
-                                                   "BODY_ABS_POS_Z",
+                                                   "BODY_ABS_POS_X",
+                                                   "BODY_ABS_POS_Y",
+                                                   "BODY_HEIGHT_FROM_GROUND",
                                                    "BODY_REL_GRAVITY_X",
                                                    "BODY_REL_GRAVITY_Y",
                                                    "BODY_REL_GRAVITY_Z",
@@ -939,6 +966,104 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def _build_stats(self):
         self._stats = {}
 
+    @dataclass
+    class RandomizationBlock:
+        """One group of randomized quantities inside the flattened randomization state."""
+        name : str
+        ep_config_field : str
+        """Field of EpisodeConfiguration holding the sampled values, of shape (envs_num, *block_shape)."""
+        labels : list[str]
+        nominal : th.Tensor
+        """Value each quantity takes when it is not randomized, shape (width,)."""
+        half_width : th.Tensor
+        """Half the span each quantity is sampled in, shape (width,). Stored deviations lie in +-half_width."""
+        start : int
+        width : int
+
+    def _build_randomization_blocks(self) -> list["RobotVecEnv.RandomizationBlock"]:
+        """Describe the randomization state: what it holds, where, and over what range.
+
+        Only randomizations that are actually active get a block: an empty link list, or a distribution
+        with no spread, contributes nothing, and a configuration that randomizes nothing ends up with a
+        zero-width state that is observed as nothing at all. Keeping the layout, the labels and the
+        normalization limits in one table is what stops the three from drifting apart.
+        Controller-side randomizations (impedance gains, reference filter, action delay) are included
+        alongside the model alterations: they are just as invisible to the actor."""
+        cfg = self._configuration
+        blocks : list[RobotVecEnv.RandomizationBlock] = []
+        def as_width(value, width : int) -> th.Tensor:
+            t = th.as_tensor(value, device=self._th_device, dtype=self._obs_dtype).flatten()
+            t = t.expand(width) if t.numel() == 1 else t
+            if t.numel() != width:
+                raise RuntimeError(f"randomization block of width {width} got bounds of {t.numel()} elements")
+            return t
+        def add(name : str, ep_config_field : str, labels : list[str], low, high):
+            width = len(labels)
+            low, high = as_width(low, width), as_width(high, width)
+            half_width = (high-low)/2
+            if width == 0 or not th.any(half_width > 0):
+                return # not actually randomized: a constant tells the critic nothing
+            blocks.append(RobotVecEnv.RandomizationBlock(
+                    name = name,
+                    ep_config_field = ep_config_field,
+                    labels = labels,
+                    nominal = (high+low)/2,
+                    # a floor keeps the entries that are constant inside an otherwise randomized block
+                    # from normalizing to nan: their deviation is zero, so they read as zero either way
+                    half_width = half_width.clamp(min=1e-6),
+                    start = sum(b.width for b in blocks),
+                    width = width))
+        name_of = lambda model_and_element: model_and_element[1]
+
+        add("mass_ratio", "link_masses_ratios",
+            [f"mass_ratio.{name_of(l)}" for l in cfg.randomized_mass_links],
+            *distr_minmax(cfg.randomized_mass_ratio_distribution))
+        add("friction_ratio", "link_frictions_ratios",
+            [f"friction_ratio.{name_of(l)}.{axis}" for l in cfg.randomized_friction_links for axis in ("slide","spin","roll")],
+            *distr_minmax(cfg.randomized_friction_slide_spin_roll_ratios))
+        add("com_diff", "link_coms_diffs",
+            [f"com_diff.{name_of(l)}.{axis}" for l in cfg.randomized_com_links for axis in ("x","y","z")],
+            *distr_minmax(cfg.randomized_com_xyz_diff_distribution))
+        add("armature_ratio", "joint_armatures_ratios",
+            [f"armature_ratio.{name_of(j)}" for j in cfg.randomized_dof_armature_joints],
+            *distr_minmax(cfg.randomized_dof_armature_ratios))
+        add("joint_damping_ratio", "joint_dampings_ratios",
+            [f"joint_damping_ratio.{name_of(j)}" for j in cfg.randomized_dof_damping_joints],
+            *distr_minmax(cfg.randomized_dof_damping_ratios))
+        add("frictionloss_ratio", "joint_frictionlosses_ratios",
+            [f"frictionloss_ratio.{name_of(j)}" for j in cfg.randomized_dof_frictionloss_joints],
+            *distr_minmax(cfg.randomized_dof_frictionloss_ratios))
+        # the gains are sampled from a normal truncated at +-3 sigma around 1, see _set_current_ep_config_opt
+        stiffness_epstd = cfg.init_args.randomized_gains_stiffness_ratio_epstd
+        add("gain_stiffness_ratio", "randomized_stiffness_factor",
+            [f"gain_stiffness_ratio.{name_of(j)}" for j in cfg.joints_agent_controlled],
+            1.0-3*stiffness_epstd, 1.0+3*stiffness_epstd)
+        damping_epstd = cfg.init_args.randomized_gains_damping_ratio_epstd
+        add("gain_damping_ratio", "randomized_damping_factor",
+            [f"gain_damping_ratio.{name_of(j)}" for j in cfg.joints_agent_controlled],
+            1.0-3*damping_epstd, 1.0+3*damping_epstd)
+        if self._filters_randomization_enabled:
+            add("ref_filter_freq", "joint_reference_filter_freqs", ["ref_filter_freq"],
+                *distr_minmax(cfg.randomized_reference_filter_distribution))
+        # the delay is sampled from a normal clamped at +-5 sigma, then clamped to be non-negative
+        delay_mu, delay_epstd = (float(v) for v in cfg.action_delay_epmustd_ststd[:2])
+        add("action_delay_mu", "action_delay_mu", ["action_delay_mu"],
+            max(0.0, delay_mu-5*delay_epstd), delay_mu+5*delay_epstd)
+        return blocks
+
+    def _fill_randomization_state(self, vec_mask : th.Tensor):
+        """Refresh the observable randomization state from what the episode config now holds.
+
+        Quantities are stored as deviations from nominal, so an unrandomized env reads as all zeros and
+        a ratio of 1.0 reads as 0.0. The normalized observation is identical either way (normalization
+        is affine), but the raw state, which is what reaches the infos and the logs, then says how far
+        from nominal an env is instead of making the reader remember each quantity's nominal value."""
+        for block in self._randomization_blocks:
+            sampled = getattr(self._current_episode_config, block.ep_config_field).reshape(self.num_envs, -1)
+            masked_assign(self._randomization_state_vec[:,block.start:block.start+block.width],
+                          vec_mask,
+                          sampled - block.nominal)
+
     def _build_state_helper(self, adapter : BaseVecJointImpedanceAdapter):
         """Builds the state helper, which defines how the state is represented and observed."""
 
@@ -1052,7 +1177,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y, self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,
                                     self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_X, self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINVEL_Z,
                                     self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y, self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z,
-                                    self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z
+                                    self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND
                                     ]
         
         if self._configuration.init_args.merge_privileged:
@@ -1085,7 +1210,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : [-1000,1000],
                         self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : [-1000,1000],
                         self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : [-1000,1000],
-                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z : [-1,1],
+                        # the absolute horizontal position: wide enough for any terrain the robot is
+                        # spawned over. Unobserved by both the base and the privileged observation,
+                        # so these limits only matter if someone starts observing them.
+                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_X : [-1000,1000],
+                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Y : [-1000,1000],
+                        self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND : [-1,1],
                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : [-1,1],
                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : [-1,1],
                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : [-1,1]},
@@ -1120,7 +1250,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : self._configuration.noise_linacc_ep_mustdstd[:2],
                         self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : self._configuration.noise_linacc_ep_mustdstd[:2],
                         self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : self._configuration.noise_linacc_ep_mustdstd[:2],
-                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : self._configuration.noise_posz_ep_mustdstd[:2],
+                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_X    : self._thtens([0.0,0.0]),
+                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Y    : self._thtens([0.0,0.0]),
+                        self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND    : self._configuration.noise_posz_ep_mustdstd[:2],
                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : self._configuration.noise_gravity_ep_mustdstd[:2],
                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : self._configuration.noise_gravity_ep_mustdstd[:2],
                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : self._configuration.noise_gravity_ep_mustdstd[:2]},
@@ -1140,7 +1272,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                         self.EXTRINSIC_FIELDS.BODY_REL_LINACC_X : self._configuration.noise_linacc_ep_mustdstd[2],
                         self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Y : self._configuration.noise_linacc_ep_mustdstd[2],
                         self.EXTRINSIC_FIELDS.BODY_REL_LINACC_Z : self._configuration.noise_linacc_ep_mustdstd[2],
-                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : self._configuration.noise_posz_ep_mustdstd[2],
+                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_X    : self._thtens(0.0),
+                        self.EXTRINSIC_FIELDS.BODY_ABS_POS_Y    : self._thtens(0.0),
+                        self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND    : self._configuration.noise_posz_ep_mustdstd[2],
                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : self._configuration.noise_gravity_ep_mustdstd[2],
                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : self._configuration.noise_gravity_ep_mustdstd[2],
                         self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : self._configuration.noise_gravity_ep_mustdstd[2]})
@@ -1223,6 +1357,34 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                         **vsize_dev_type) # type: ignore
         
 
+        # :::::::::::::::::::::::::::::::::::::::: RANDOMIZATION STATE ::::::::::::::::::::::::::::::::::::::::
+
+        # Everything goes in a single field, as the randomized quantities have different dimensionalities:
+        # the subfield names are what makes the layout readable in the observation labels.
+        self._randomization_blocks = self._build_randomization_blocks()
+        randomizations_width = sum(b.width for b in self._randomization_blocks)
+        self._randomization_state_vec = self._thzeros((adapter.vec_size(), randomizations_width))
+        randomizations_half_width = (th.cat([b.half_width for b in self._randomization_blocks])
+                                     if self._randomization_blocks else self._thzeros((0,)))
+        # Gated here, in one place: when it is not observable the substate still exists, and still shows
+        # up in the infos, but contributes nothing to the observation or to its space.
+        randomizations_obsdef = (ThBoxStateHelper.SimpleObsDef.fully_observable(1)
+                                 if self._configuration.init_args.observe_randomizations else
+                                 ThBoxStateHelper.SimpleObsDef.not_observable())
+        randomizations_state_helper = ThBoxStateHelper(
+                field_names=[e for e in self.RANDOMIZATIONS_FIELDS],
+                field_size=(randomizations_width,),
+                subfield_names=[label for b in self._randomization_blocks for label in b.labels],
+                fields_minmax={self.RANDOMIZATIONS_FIELDS.FULL_RANDOMIZATION_STATE :
+                                    th.stack([-randomizations_half_width, randomizations_half_width])},
+                history_length=1, # the randomizations are constant within an episode
+                **vsize_dev_type, # type: ignore
+                observation_definitions={
+                        # with merge_privileged the actor's observation is the privileged one
+                        "base" : randomizations_obsdef if self._configuration.init_args.merge_privileged else
+                                 ThBoxStateHelper.SimpleObsDef.not_observable(),
+                        "privileged" : randomizations_obsdef})
+
         # :::::::::::::::::::::::::::::::::::::::: STATE AGGREGATION ::::::::::::::::::::::::::::::::::::::::
 
         if not self._configuration.init_args.merge_privileged:
@@ -1263,6 +1425,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.STATE_ACT_RAW_HIST,
                                     self.STATE_ACT_PREPROC,
                                     self.STATE_HELD_JOINTS,
+                                    self.STATE_RANDOMIZATIONS, # empty unless observe_randomizations
                                     #  self.STATE_JOINT_STEP_STATS,
                                     ],
                             concatenable_substates=[
@@ -1271,7 +1434,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.STATE_INTERNAL,
                                     self.STATE_ACT_RAW_HIST,
                                     self.STATE_ACT_PREPROC,
-                                    self.STATE_HELD_JOINTS
+                                    self.STATE_HELD_JOINTS,
+                                    self.STATE_RANDOMIZATIONS,
                                     # self.STATE_JOINT_STEP_STATS,
                                     ],
                             concatenated_part_name="vec",
@@ -1284,7 +1448,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.STATE_INTERNAL,
                                     self.STATE_EXTRINSIC,
                                     self.STATE_ACT_RAW_HIST,
-                                    self.STATE_HELD_JOINTS
+                                    self.STATE_HELD_JOINTS,
+                                    self.STATE_RANDOMIZATIONS, # merged privileged: the actor sees these too
                                     # self.STATE_LAST_ACT_RAW,
                                     # self.STATE_ACT_PREPROC,
                                     # self.STATE_JOINT_LONGTERM_STATS,
@@ -1296,6 +1461,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.STATE_EXTRINSIC,
                                     self.STATE_ACT_RAW_HIST,
                                     self.STATE_HELD_JOINTS,
+                                    self.STATE_RANDOMIZATIONS,
                                     # self.STATE_LAST_ACT_RAW,
                                     # self.STATE_ACT_PREPROC,
                                     # self.STATE_JOINT_LONGTERM_STATS,
@@ -1316,7 +1482,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 self.STATE_ACT_PREPROC: act_history_state_helper,
                 self.STATE_ACT_RAW_HIST : raw_act_history_state_helper,
                 self.STATE_JOINT_LONGTERM_STATS : joint_longterm_stats_helper,
-                self.STATE_HELD_JOINTS : held_joints_state_helper},
+                self.STATE_HELD_JOINTS : held_joints_state_helper,
+                self.STATE_RANDOMIZATIONS : randomizations_state_helper},
                 obs_definitions=obs_definitions)
 
     
@@ -1613,7 +1780,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         masked_assign(self._current_episode_config.randomized_stiffness_factor, vec_mask, stiffness_ratios)
         record_time("RobotVecEnv.initialize_episodes: setted gains randomization")
         # ggLog.info(f"_current_episode_config = {self._current_episode_config}")
-        if self._model_randomization_enabled:
+        # Only sample the model alterations if they are going to be applied: when recycling them,
+        # _simulation_initialization skips the alter_model, so resampling here would leave the episode
+        # config, and with it the observed randomization state, describing a model that is not simulated.
+        if self._model_randomization_enabled and not (self._tot_init_counter > 1 and self._configuration.init_args.randomization_recycle_model_alterations):
             # ggLog.info(f"self._mass_randomized_link_ids = {self._mass_randomized_link_ids}")
             link_masses_ratios =            self._sample_distr((self.num_envs, len(self._configuration.randomized_mass_links)), self._configuration.randomized_mass_ratio_distribution)
             link_coms_diffs =               self._sample_distr((self.num_envs, len(self._configuration.randomized_com_links),3), self._configuration.randomized_com_xyz_diff_distribution)
@@ -1635,6 +1805,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         action_delay_mu = th.clamp(self._thrandn_clamp(size=(self.num_envs,), min=-5, max=5)*delay_std+delay_mu, min=0)
         masked_assign(self._current_episode_config.action_delay_mu, vec_mask, action_delay_mu)
         record_time("RobotVecEnv.initialize_episodes: computed action delay randomization")
+        self._fill_randomization_state(vec_mask)
+        record_time("RobotVecEnv.initialize_episodes: filled randomization state")
     
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
         
@@ -2079,7 +2251,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         adapter_data = self._get_adapter_data()
         record_time("RobotVecEnv.post_step get_adapter_data done")
         self._current_state = self._get_new_state_and_stats(adapter_data)
-        # self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # just here out of caution (on 20/11/2025 it was still necessary, maybe...)
+        self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # just here out of caution (on 20/11/2025 it was still necessary, maybe...)
         record_region_end("RobotVecEnv.post_step")
 
 
@@ -2140,15 +2312,27 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_stats_minmaxavgstd_j_pvaeep =   states.joint_stats_pvaeep[:,:,:len(self._configuration.joints_agent_controlled)]
         vec_bodystates_13 = states.link_state[:,0,:]
         vec_body_rel_linacc_xyz = self.body_vecs_to_gait_frame(states.link_linacc[:,0,:])
-        
-        body_abs_quat_xyzw_vec  = vec_bodystates_13[:,3:7]
-        vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
-        vec_body_abs_angvel_xyz = vec_bodystates_13[:,10:13]
-        vec_body_ground_dist    = vec_bodystates_13[:,2]
 
+        # Cloning these proved necessary to avoid a bug in torch 2.10. Aliased view would be interpreted badly by 
+        # cudagraph-compiled functions
+        body_abs_quat_xyzw_vec  = vec_bodystates_13[:,3:7].clone()
+        vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10].clone()
+        vec_body_abs_angvel_xyz = vec_bodystates_13[:,10:13].clone()
+        vec_body_ground_dist    = vec_bodystates_13[:,2].clone()
+        vec_body_abs_pos_xy     = vec_bodystates_13[:,0:2].clone()
         vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz = self._compute_extr_from_bodystate(body_abs_linvel_xyz_vec = vec_body_abs_linvel_xyz,
                                                                                                                         body_abs_angvel_xyz_vec = vec_body_abs_angvel_xyz,
                                                                                                                         body_abs_quat_xyzw_vec = body_abs_quat_xyzw_vec)
+        # The relative velocity is the absolute one rotated into the gait frame, so their lengths must
+        # match: a mismatch means one of the two is not a velocity. Recorded eval infos have shown
+        # body_abs_linvel holding the body position while the relative one stayed correct, which no
+        # replay of this code reproduces, so the check lives where the values are produced.
+        dbg_check(lambda: th.all((vec_body_abs_linvel_xyz.norm(dim=-1) - vec_body_rel_linvel_xyz.norm(dim=-1)).abs()
+                                 <= 1e-3 + 0.02*vec_body_abs_linvel_xyz.norm(dim=-1)),
+                  assert_msg="body abs/rel linear velocity lengths disagree, so one of them is not a "
+                             "velocity: the relative one is the absolute one rotated into the gait frame, "
+                             "so a rotation cannot change its length",
+                  async_assert=True)
 
         vec_time_from_start = self._adapter.getEnvTimeFromStartup() - self._eps_start_stime
 
@@ -2159,6 +2343,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 vec_body_abs_linvel_xyz = vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
                 vec_body_abs_angvel_xyz = vec_body_abs_angvel_xyz,
                 vec_body_ground_dist = vec_body_ground_dist,
+                vec_body_abs_pos_xy = vec_body_abs_pos_xy,
                 vec_body_rel_gravity_dir = vec_body_rel_gravity_dir,
                 vec_body_rel_linvel_xyz = vec_body_rel_linvel_xyz,
                 vec_body_rel_angvel_xyz = vec_body_rel_angvel_xyz,
@@ -2183,9 +2368,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             vec_bodystates_13 = self._adapter.getLinksState(requestedLinks = self._main_body_mon_link_ids, use_com_pose = False)[:,0,:]
             record_time("RobotVecEnv._get_adapter_data_raw: getLinksState done")
-            body_abs_quat_xyzw_vec  = vec_bodystates_13[:,3:7]
-            vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10]
-            vec_body_abs_angvel_xyz = vec_bodystates_13[:,10:13]
+            # cloned for the same reason as in _get_adapter_data_raw_mjx: aliased views of one
+            # tensor collapse onto each other as inputs of the cudagraph-compiled state builder
+            body_abs_quat_xyzw_vec  = vec_bodystates_13[:,3:7].clone()
+            vec_body_abs_linvel_xyz = vec_bodystates_13[:,7:10].clone()
+            vec_body_abs_angvel_xyz = vec_bodystates_13[:,10:13].clone()
             vec_linkstate_stats = self._adapter.get_links_state_step_stats()
             record_time("RobotVecEnv._get_adapter_data_raw: get_links_state_step_stats done")
             vec_body_abs_linvel_xyz = vec_linkstate_stats[:,2,0,0:3]
@@ -2193,7 +2380,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz = self._compute_extr_from_bodystate(body_abs_linvel_xyz_vec = vec_body_abs_linvel_xyz,
                                                                                                                            body_abs_angvel_xyz_vec = vec_body_abs_angvel_xyz,
                                                                                                                            body_abs_quat_xyzw_vec = body_abs_quat_xyzw_vec)
-            vec_body_ground_dist = vec_bodystates_13[:,2]              
+            vec_body_ground_dist = vec_bodystates_13[:,2].clone()
+            vec_body_abs_pos_xy  = vec_bodystates_13[:,0:2].clone()
             vec_body_rel_linacc_xyz = self.body_vecs_to_gait_frame(self._adapter.get_local_link_linear_acceleration(self._main_body_mon_link_ids)[:,0,:])
             if self._configuration.init_args.enable_dbg_checks:
                 dbg_check(lambda: th.all(th.isfinite(vec_bodystates_13)),
@@ -2211,6 +2399,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_body_rel_linvel_xyz = th.zeros_like(example_vec_3d_tens)
             vec_body_rel_linacc_xyz = th.zeros_like(example_vec_3d_tens)
             vec_body_ground_dist    = th.zeros_like(example_vec_3d_tens[:,0])
+            vec_body_abs_pos_xy     = th.zeros_like(example_vec_3d_tens[:,:2])
         # ggLog.info(f"axes pose = {self._adapter.getLinksState(requestedLinks = self._adapter.get_links_ids([('axes','root')]), use_com_pose = False)[:,0,:]}")
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # th.cuda.synchronize()
@@ -2251,6 +2440,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 vec_body_abs_linvel_xyz = vec_body_abs_linvel_xyz, # only used for visualization, can be wrong
                 vec_body_abs_angvel_xyz = vec_body_abs_angvel_xyz,
                 vec_body_ground_dist = vec_body_ground_dist,
+                vec_body_abs_pos_xy = vec_body_abs_pos_xy,
                 vec_body_rel_gravity_dir = vec_body_rel_gravity_dir,
                 vec_body_rel_linvel_xyz = vec_body_rel_linvel_xyz,
                 vec_body_rel_angvel_xyz = vec_body_rel_angvel_xyz,
@@ -2268,7 +2458,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._obs2act_timings.mark_start()
         return r
 
-    @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True)
+    @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune",fullgraph=True, disable=disable_compile)
     def _get_new_instantaneous_state(self, adapter_data) -> dict[str, dict[Any, th.Tensor] | th.Tensor]:
         vec_last_sent_refs_j_pvesd          = self._last_sent_v_j_pvesd
         vec_last_sent_refs_held_j_pvesd     = self._homing_held_joints_vec_pvesd
@@ -2346,7 +2536,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                 self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_X : adapter_data.vec_body_abs_angvel_xyz[:,0].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Y : adapter_data.vec_body_abs_angvel_xyz[:,1].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_ABS_ANGVEL_Z : adapter_data.vec_body_abs_angvel_xyz[:,2].view(self.num_envs,1),
-                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z    : adapter_data.vec_body_ground_dist.view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_X    : adapter_data.vec_body_abs_pos_xy[:,0].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_ABS_POS_Y    : adapter_data.vec_body_abs_pos_xy[:,1].view(self.num_envs,1),
+                                self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND    : adapter_data.vec_body_ground_dist.view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_X : adapter_data.vec_body_rel_gravity_dir[:,0].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Y : adapter_data.vec_body_rel_gravity_dir[:,1].view(self.num_envs,1),
                                 self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z : adapter_data.vec_body_rel_gravity_dir[:,2].view(self.num_envs,1)}
@@ -2369,7 +2561,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 self.STATE_JOINT_LONGTERM_STATS : new_longterm_stats_state,
                 self.STATE_ACT_PREPROC : {self.ACT_FIELDS.ACTION : self._last_preprocessed_actions},
                 self.STATE_ACT_RAW_HIST : {self.ACT_FIELDS.ACTION : self._last_raw_actions},
-                self.STATE_LAST_ACT_RAW : {self.ACT_FIELDS.ACTION : self._last_raw_actions}}
+                self.STATE_LAST_ACT_RAW : {self.ACT_FIELDS.ACTION : self._last_raw_actions},
+                # constant within an episode: refreshed by _fill_randomization_state, not recomputed here
+                self.STATE_RANDOMIZATIONS : self._randomization_state_vec.unsqueeze(1)}
         dbg_check_finite(s, async_assert=True, assert_msg="Nonfinite instantaneous state detected in RobotVecEnv.get_new_instantaneous_state")
         return s
         
@@ -2387,12 +2581,25 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._current_state = self._state_helper.reset_state(instantaneous_state, vec_mask=vec_mask, old_state=self._current_state) # This repeats the instantaneous state across the history dimension
         record_region_end("RobotVecEnv._reinit_state")
 
+    
     # @adarl.utils.utils.th_compile_ext(copy_outs=True, disable=disable_compile, mode="max-autotune",fullgraph=True)
     def _update_state(self, adapter_data):
         # th.cuda.synchronize()
         # t0 = time.monotonic()
         instantaneous_state = self._get_new_instantaneous_state(adapter_data)
         record_time("RobotVecEnv._update_state: get_new_instantaneous_state done")
+                # The builder is cudagraph-compiled (max-autotune, fullgraph). It has returned the body
+        # position for the absolute velocities and the height, from inputs verified correct
+        # immediately before, so what has to be asserted is that its output matches its input.
+        # The norm check in _get_adapter_data_raw_mjx cannot see this: rel is computed before the
+        # dict is built, so it stays correct while abs goes wrong.
+        _ex = instantaneous_state[self.STATE_EXTRINSIC]
+        check_livel_abspos_aliasing(abslinvel_xy = th.cat([ _ex[self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X].reshape(-1,1),
+                                                            _ex[self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y].reshape(-1,1)], dim=1),                         
+                                    abspos_xy = th.cat([_ex[self.EXTRINSIC_FIELDS.BODY_ABS_POS_X].reshape(-1,1),
+                                                        _ex[self.EXTRINSIC_FIELDS.BODY_ABS_POS_Y].reshape(-1,1)], dim=1))
+                
+
         # th.cuda.synchronize()
         # t01 = time.monotonic()
         if not th.compiler.is_compiling():
@@ -2411,6 +2618,14 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                   lambda: f"Negative step_counts {new_state[self.STATE_INTERNAL][0,0,self.INTERNAL_FIELDS.STEP_COUNT]}",
                   async_assert=True,
                   assert_msg="Negative step_counts detected in state")
+
+        # the state is a (envs, history, fields, subfields) tensor here, not the field-keyed dict
+        # _get_new_instantaneous_state returns: index the newest history frame, all envs
+        extr_newest = new_state[self.STATE_EXTRINSIC][:,0]
+        check_livel_abspos_aliasing(abslinvel_xy  = th.cat([extr_newest[:,self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_X].reshape(-1,1),
+                                                            extr_newest[:,self.EXTRINSIC_FIELDS.BODY_ABS_LINVEL_Y].reshape(-1,1)], dim=1),
+                                    abspos_xy = th.cat([extr_newest[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_X].reshape(-1,1),
+                                                        extr_newest[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Y].reshape(-1,1)], dim=1))
         # map_tensor_tree(new_state, lambda t: t.detach().clone())
         # tf = time.monotonic()
         # print(f"newinst = {t01-t0}, check = {t1-t01}, map = {tf-t1}, tot = {tf-t0}")
@@ -2528,7 +2743,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     labels["statenorm_"+substate] = to_string_tensor(self._state_helper.sub_helpers[substate].flat_state_names())
         record_time("RobotVecEnv.get_infos: verbose part done")
         record_region_end("RobotVecEnv.get_infos")
-        return i
+        return {k:v.detach().clone() for k,v in i.items()}
     
     @override
     # @adarl.utils.utils.th_compile_ext(copy_outs=True, mode="max-autotune")

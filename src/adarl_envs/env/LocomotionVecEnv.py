@@ -823,7 +823,7 @@ class LocomotionVecEnv(RobotVecEnv):
         heading_error_vec = (1-quat_mul_xyzw(th_quat_conj(rel_goal_heading_quat), rel_curr_heading_quat)[:,3]).view(nenvs,1)
         
         # compute height error
-        height_err_vec = new_extrinsic_state[self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] - smoothed_goal_height
+        height_err_vec = new_extrinsic_state[self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND] - smoothed_goal_height
 
         # compute pitch and roll error
         # pitchnroll_err_vec = th.linalg.norm(gravity_rel_vec_xyz-self._locomotion_episode_config.goal_abs_gravity_vec_xyz, dim = 1, keepdim=True) # Would be nice to use geodesic distance or somethinglike that
@@ -1064,8 +1064,8 @@ class LocomotionVecEnv(RobotVecEnv):
         return new_inst_state
 
     def _height_velocity_reward(self, curr_state_extr_vec, current_state_locom_vec, current_state_internal, prev_state_extr_vec):
-        curr_pos = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]
-        prev_pos = prev_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]
+        curr_pos = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND]
+        prev_pos = prev_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND]
         goal_pos = current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
         dt = current_state_internal[:,self.INTERNAL_FIELDS.LAST_STEP_DT]
         z_velocity = (curr_pos - prev_pos)/dt
@@ -1320,7 +1320,7 @@ class LocomotionVecEnv(RobotVecEnv):
         # ---- Height ----
         # Height of the pelvis
         reward_height_velocity, _, _, _, _ = self._height_velocity_reward(curr_state_extr_vec, current_state_locom_vec, current_state_internal, prev_state_extr_vec)
-        height_err = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]-current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
+        height_err = curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND]-current_state_locom_vec[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
         reward_height_position = double_bell_reward( error=height_err,
                                             bell_width_a=self._loco_conf.height_reward_settle_point,
                                             bell_width_b=self._loco_conf.height_reward_2_settle_point,
@@ -1440,7 +1440,7 @@ class LocomotionVecEnv(RobotVecEnv):
         reward_safety_triggered = -1*safety_triggered
 
         # FAILURE SCALING
-        failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z] < 0)
+        failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND] < 0)
         if self._configuration.init_args.fail_on_safety:
             failed = th.logical_or(failed, safety_triggered)
 
@@ -1535,7 +1535,7 @@ class LocomotionVecEnv(RobotVecEnv):
             goal_speed = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_LINVEL_SPEED,0].view(self.num_envs,1)
             goal_rel_linvel_vec_xyz = goal_rel_linvel_dir_vec_xyz*goal_speed
             body_speed_vec = th.linalg.norm(body_rel_linvel_xyz[:,:2], dim=-1)
-            body_height_vec = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,0]
+            body_height_vec = state[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND,0]
             goal_height_vec = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.GOAL_BODY_HEIGHT,0]
             smoothed_goal_height_vec = state[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT,0]
             goal_gravity_vec = state[self.STATE_LOCOMOTION][:,0, goal_grav_abs_xyz_idx,0]
@@ -1608,6 +1608,22 @@ class LocomotionVecEnv(RobotVecEnv):
         i["smoothed_linvel_error"] = smoothed_linvel_error
         i["smoothed_yawvel_error"] = th.abs(smoothed_yawvel_error)
         i["goal_abs_xyz_vec"] = goal_abs
+        # Guard on the failure this chased for a day: body_abs_linvel came out holding the body
+        # position, because _get_adapter_data_raw_mjx handed the cudagraph-compiled state builder
+        # several aliased views of one tensor and they collapsed onto its offset-0 view. Async, so the
+        # predicate must be a tensor and the message a fixed string: th._assert_async discards
+        # build_msg. Only envs whose position is non-zero count, as get_infos also runs during
+        # construction on a zeroed example state where every quantity equals every other.
+        if not self._configuration.init_args.minimal_infos:
+            body_pos_xyz = state[self.STATE_EXTRINSIC][:,0][:,self._state_helper.sub_helpers[self.STATE_EXTRINSIC].field_idx(
+                                (self.EXTRINSIC_FIELDS.BODY_ABS_POS_X,
+                                 self.EXTRINSIC_FIELDS.BODY_ABS_POS_Y,
+                                 self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND))] #type: ignore
+            dbg_check(lambda: th.all(th.logical_not(th.logical_and(
+                                (abs_linvel.reshape(self.num_envs,3) - body_pos_xyz.reshape(self.num_envs,3)).abs().amax(dim=-1) < 1e-9,
+                                body_pos_xyz.reshape(self.num_envs,3).abs().amax(dim=-1) > 1e-6))),
+                      assert_msg="body_abs_linvel equals the body position instead of being a velocity",
+                      async_assert=True)
         i["body_abs_linvel"] = abs_linvel
         i["body_abs_linspeed"] = abs_linvel.norm(dim=1)
         i["avg_air_duration"] = avg_air_duration
@@ -1635,7 +1651,7 @@ class LocomotionVecEnv(RobotVecEnv):
         state_stats_v_h_j_minmaxavgstd_pvaeep : th.Tensor = state[self.STATE_JOINT_STEP_STATS].view(self.num_envs, 1, -1, 4, 6)
         avg10_vel_errs_vec = th.mean(self._stats["vel_errs_vec"], dim = 1).view(self.num_envs)
         goal_height = curr_locom_state[:,self.LOCOMOTION_FIELDS.SMOOTHED_GOAL_BODY_HEIGHT]
-        height = curr_extri_state[:,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z]
+        height = curr_extri_state[:,self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND]
         loco_info = {
             "goal_rel_xyz_vec" : goal_dir*goal_speed,
             "goal_height" : goal_height,
@@ -1888,7 +1904,7 @@ class LocomotionVecEnv(RobotVecEnv):
         r = super().are_states_terminal(states)
         if self._loco_conf.init_args.terminate_on_crash:
             r = th.logical_or(r, states[self.STATE_LOCOMOTION][:,0,self.LOCOMOTION_FIELDS.CRASHED,0]).view((self.num_envs,))
-            below_ground = states[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_ABS_POS_Z,0] < 0.0
+            below_ground = states[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND,0] < 0.0
             r = th.logical_or(r, below_ground)
             non_vertical = states[self.STATE_EXTRINSIC][:,0,self.EXTRINSIC_FIELDS.BODY_REL_GRAVITY_Z,0] > -math.cos(self._loco_conf.init_args.terminal_gravity_angle)
             r = th.logical_or(r, non_vertical)

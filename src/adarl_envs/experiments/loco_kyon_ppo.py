@@ -98,6 +98,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "noise_action_mustd" : (0.0,   0.0),
         "observe_actor_safety_state" : True,
         "observe_full_robot_state" : False,
+        "observe_randomizations" : True,
         "offset_envs_ep_starts" : algo=="ppo",
         "pitchnroll_reward_settle_point" : 15*degree2rad, # ~zero reward after this angle
         "playground_style_reward" : False,

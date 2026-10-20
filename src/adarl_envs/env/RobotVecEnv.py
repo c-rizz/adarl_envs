@@ -158,6 +158,12 @@ class RobotVecEnvInitArgs():
     Only randomizations that are actually active contribute, so turning this on changes the privileged
     observation size depending on which randomizations are configured. With merge_privileged the
     privileged observation *is* the actor's, so this also hands the randomizations to the actor."""
+    observe_impulses : bool = False
+    """Whether the privileged observation includes the impulse disturbance on the main body: its
+    force, in the gait frame, and the part of the last step it was acting for, as a start and an end
+    time normalized to [0,1] within that step. All zero when no impulse overlapped the step, so the
+    window is empty. Only meaningful with impulse_probability_per_sec > 0. With merge_privileged the
+    privileged observation is the actor's, so this also hands the impulses to the actor."""
     offset_envs_ep_starts : bool = False
     posref_safety_period : float = 0.001
     randomized_com_links : list[tuple[str,str]] = dataclasses.field(default_factory=list)
@@ -300,6 +306,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     STATE_EXTRINSIC = "extrinsic"
     STATE_INTERNAL = "internal"
     STATE_RANDOMIZATIONS = "randomizations"
+    STATE_IMPULSES = "impulses"
     STATE_POS_REF_ERR = "pos_ref_err"
     
     
@@ -335,6 +342,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     JOINT_LONGTERM_STATS_FIELDS = IntEnum("LONGTERM_STATS_FIELDS", ["AVG_POS"])
 
+    IMPULSE_FIELDS = IntEnum("IMPULSE_FIELDS", ["IMPULSE"], start=0) # a single field, laid out as IMPULSE_SUBFIELDS
+    IMPULSE_SUBFIELDS = IntEnum("IMPULSE_SUBFIELDS", ["FORCE_X", "FORCE_Y", "FORCE_Z", "WINDOW_START", "WINDOW_END"], start=0)
     RANDOMIZATIONS_FIELDS = IntEnum("RANDOMIZATIONS_FIELDS", [  "FULL_RANDOMIZATION_STATE"]) # Right now put everything together as there are randomizations of different dimensionality
 
     POS_REF_ERR_FIELDS = IntEnum("POS_REF_ERRS", ["POS_ERR"], start=0)
@@ -991,15 +1000,20 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         alongside the model alterations: they are just as invisible to the actor."""
         cfg = self._configuration
         blocks : list[RobotVecEnv.RandomizationBlock] = []
-        def as_width(value, width : int) -> th.Tensor:
-            t = th.as_tensor(value, device=self._th_device, dtype=self._obs_dtype).flatten()
-            t = t.expand(width) if t.numel() == 1 else t
-            if t.numel() != width:
-                raise RuntimeError(f"randomization block of width {width} got bounds of {t.numel()} elements")
-            return t
-        def add(name : str, ep_config_field : str, labels : list[str], low, high):
+        def as_width(value, shape : tuple[int,...]) -> th.Tensor:
+            # Broadcast like the sampler does: bounds may be one scalar, one value per component (a
+            # constant friction is often given as just [slide, spin, roll]), or one per element, and a
+            # constant distribution is not expanded by distr_to_tensor at all
+            t = th.as_tensor(value, device=self._th_device, dtype=self._obs_dtype)
+            try:
+                return th.broadcast_to(t, shape).reshape(-1)
+            except RuntimeError:
+                raise RuntimeError(f"randomization block of shape {shape} got bounds of shape {tuple(t.shape)}, "
+                                   f"which do not broadcast to it") from None
+        def add(name : str, ep_config_field : str, labels : list[str], low, high, shape : tuple[int,...] | None = None):
             width = len(labels)
-            low, high = as_width(low, width), as_width(high, width)
+            shape = (width,) if shape is None else shape
+            low, high = as_width(low, shape), as_width(high, shape)
             half_width = (high-low)/2
             if width == 0 or not th.any(half_width > 0):
                 return # not actually randomized: a constant tells the critic nothing
@@ -1020,10 +1034,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             *distr_minmax(cfg.randomized_mass_ratio_distribution))
         add("friction_ratio", "link_frictions_ratios",
             [f"friction_ratio.{name_of(l)}.{axis}" for l in cfg.randomized_friction_links for axis in ("slide","spin","roll")],
-            *distr_minmax(cfg.randomized_friction_slide_spin_roll_ratios))
+            *distr_minmax(cfg.randomized_friction_slide_spin_roll_ratios),
+            shape=(len(cfg.randomized_friction_links), 3))
         add("com_diff", "link_coms_diffs",
             [f"com_diff.{name_of(l)}.{axis}" for l in cfg.randomized_com_links for axis in ("x","y","z")],
-            *distr_minmax(cfg.randomized_com_xyz_diff_distribution))
+            *distr_minmax(cfg.randomized_com_xyz_diff_distribution),
+            shape=(len(cfg.randomized_com_links), 3))
         add("armature_ratio", "joint_armatures_ratios",
             [f"armature_ratio.{name_of(j)}" for j in cfg.randomized_dof_armature_joints],
             *distr_minmax(cfg.randomized_dof_armature_ratios))
@@ -1385,6 +1401,42 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                  ThBoxStateHelper.SimpleObsDef.not_observable(),
                         "privileged" : randomizations_obsdef})
 
+        # :::::::::::::::::::::::::::::::::::::::: IMPULSE STATE ::::::::::::::::::::::::::::::::::::::::
+
+        # The adapter has no getter for the impulse it is applying, so the env keeps its own record of
+        # what it last asked for. Same time base as the adapter: start = adapter clock + delay at the
+        # moment of the request, end = start + duration. A reset does not clear an impulse in the
+        # adapter, so this record is not cleared either.
+        n_envs = adapter.vec_size()
+        self._impulses_tracked = (self._configuration.init_args.observe_impulses and
+                                  self._impulse_disturbances_enabled and
+                                  isinstance(adapter, BaseVecSimulationAdapter))
+        self._impulse_state_vec        = self._thzeros((n_envs, len(self.IMPULSE_SUBFIELDS)))
+        self._impulse_force_world_xyz  = self._thzeros((n_envs, 3))
+        self._impulse_startends_stime  = self._thfull(fill_value=-1.0, size=(n_envs, 2), dtype=th.float32)
+        self._impulse_step_t0          = self._thzeros((n_envs,))
+        self._last_adapter_clock       = self._thzeros((n_envs,))
+        self._last_body_abs_quat_xyzw  = self._thtens([0.0, 0.0, 0.0, 1.0]).expand(n_envs, 4).clone()
+        impulse_mean, impulse_std = self._configuration.init_args.impulse_mean_std
+        # the sampled impulse is tanh-clamped to mean +- 5 std, and divided by a duration >= the minimum
+        max_impulse_force = (abs(impulse_mean) + 5*impulse_std)/max(self._configuration.init_args.impulse_duration_minmax[0], 1e-3)
+        impulses_obsdef = (ThBoxStateHelper.SimpleObsDef.fully_observable(1)
+                           if self._configuration.init_args.observe_impulses else
+                           ThBoxStateHelper.SimpleObsDef.not_observable())
+        impulses_state_helper = ThBoxStateHelper(
+                field_names=[e for e in self.IMPULSE_FIELDS],
+                field_size=(len(self.IMPULSE_SUBFIELDS),),
+                subfield_names=[e.name.lower() for e in self.IMPULSE_SUBFIELDS],
+                fields_minmax={self.IMPULSE_FIELDS.IMPULSE :
+                                    self._thtens([[-max_impulse_force]*3 + [0.0, 0.0],
+                                                  [ max_impulse_force]*3 + [1.0, 1.0]])},
+                history_length=1,
+                **vsize_dev_type, # type: ignore
+                observation_definitions={
+                        "base" : impulses_obsdef if self._configuration.init_args.merge_privileged else
+                                 ThBoxStateHelper.SimpleObsDef.not_observable(),
+                        "privileged" : impulses_obsdef})
+
         # :::::::::::::::::::::::::::::::::::::::: STATE AGGREGATION ::::::::::::::::::::::::::::::::::::::::
 
         if not self._configuration.init_args.merge_privileged:
@@ -1426,6 +1478,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.STATE_ACT_PREPROC,
                                     self.STATE_HELD_JOINTS,
                                     self.STATE_RANDOMIZATIONS, # empty unless observe_randomizations
+                                    self.STATE_IMPULSES, # empty unless observe_impulses
                                     #  self.STATE_JOINT_STEP_STATS,
                                     ],
                             concatenable_substates=[
@@ -1436,6 +1489,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.STATE_ACT_PREPROC,
                                     self.STATE_HELD_JOINTS,
                                     self.STATE_RANDOMIZATIONS,
+                                    self.STATE_IMPULSES,
                                     # self.STATE_JOINT_STEP_STATS,
                                     ],
                             concatenated_part_name="vec",
@@ -1450,6 +1504,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.STATE_ACT_RAW_HIST,
                                     self.STATE_HELD_JOINTS,
                                     self.STATE_RANDOMIZATIONS, # merged privileged: the actor sees these too
+                                    self.STATE_IMPULSES,
                                     # self.STATE_LAST_ACT_RAW,
                                     # self.STATE_ACT_PREPROC,
                                     # self.STATE_JOINT_LONGTERM_STATS,
@@ -1462,6 +1517,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                     self.STATE_ACT_RAW_HIST,
                                     self.STATE_HELD_JOINTS,
                                     self.STATE_RANDOMIZATIONS,
+                                    self.STATE_IMPULSES,
                                     # self.STATE_LAST_ACT_RAW,
                                     # self.STATE_ACT_PREPROC,
                                     # self.STATE_JOINT_LONGTERM_STATS,
@@ -1483,7 +1539,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 self.STATE_ACT_RAW_HIST : raw_act_history_state_helper,
                 self.STATE_JOINT_LONGTERM_STATS : joint_longterm_stats_helper,
                 self.STATE_HELD_JOINTS : held_joints_state_helper,
-                self.STATE_RANDOMIZATIONS : randomizations_state_helper},
+                self.STATE_RANDOMIZATIONS : randomizations_state_helper,
+                self.STATE_IMPULSES : impulses_state_helper},
                 obs_definitions=obs_definitions)
 
     
@@ -2201,14 +2258,49 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
 
     @th.compiler.disable
     def _apply_impulses(self, forcevector: th.Tensor, torque: th.Tensor, duration: th.Tensor, delays: th.Tensor, apply_impulse: th.Tensor):
+        if self._impulses_tracked:
+            # mirror the adapter's own window: start = its clock + delay, end = start + duration
+            now = self._impulse_step_t0 # the clock now, before stepping: set by pre_step just above
+            starts = now + delays.reshape(self.num_envs)
+            ends = starts + duration.reshape(self.num_envs)
+            mask = apply_impulse.reshape(self.num_envs)
+            masked_assign(self._impulse_startends_stime, mask, th.stack([starts, ends], dim=-1))
+            masked_assign(self._impulse_force_world_xyz, mask, forcevector.reshape(self.num_envs, 3))
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             self._adapter.set_link_impulses(self._main_body_ids,
                                             force_torque_xyzxyz=th.cat([forcevector, torque], dim = 1).view((self.num_envs,1,6)),
                                             durations=duration.view((self.num_envs,1)),
                                             delays=delays.view((self.num_envs,1)),
                                             vec_mask=apply_impulse.view((self.num_envs,)))
+    def _fill_impulse_state(self):
+        """Write the impulse acting during the step just taken into _impulse_state_vec.
+
+        The step covered the adapter clock interval (t0, t1], and the adapter applies an impulse while
+        start < t <= end, so the impulse overlapped the step if the two intersect. The window is then
+        given as where start and end fall within the step, normalized to [0,1] and clipped, so an
+        impulse acting throughout reads (0,1) and one that began mid-step reads (fraction, 1). The force
+        is rotated into the gait frame with the orientation at the end of the step. Envs whose impulse
+        did not overlap the step get all zeros."""
+        t0 = self._impulse_step_t0
+        t1 = self._last_adapter_clock.reshape(self.num_envs) # read by this post_step's _get_adapter_data
+        dt = (t1 - t0).clamp(min=1e-9) # frozen envs do not advance; they also fail the overlap test below
+        start, end = self._impulse_startends_stime[:,0], self._impulse_startends_stime[:,1]
+        overlaps = (start >= 0) & (start < t1) & (end > t0) & (t1 > t0)
+        window_start = ((start - t0)/dt).clamp(0.0, 1.0)
+        window_end = ((end - t0)/dt).clamp(0.0, 1.0)
+        body_quat_xyzw = self._last_body_abs_quat_xyzw
+        force_gait_xyz = th_quat_rotate_py(self._impulse_force_world_xyz,
+                                           th_quat_conj(self.to_gait_frame_orientation(body_quat_xyzw)))
+        vec = th.cat([force_gait_xyz, window_start.unsqueeze(1), window_end.unsqueeze(1)], dim=1)
+        # in place: the state builder is cudagraph-compiled and reads this buffer by address
+        self._impulse_state_vec.copy_(th.where(overlaps.unsqueeze(1), vec, th.zeros_like(vec)))
+
     @override
     def pre_step(self):
+        if self._impulses_tracked:
+            # the clock cannot have moved since the last adapter-data read: nothing stepped in between,
+            # and resets do not advance it
+            self._impulse_step_t0.copy_(self._last_adapter_clock.reshape(self.num_envs))
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             if self._impulse_disturbances_enabled:
                 impulse_prob_per_env_dt = 1-(1-self._configuration.init_args.impulse_probability_per_sec)**self._intendedStepLength_sec
@@ -2250,6 +2342,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         record_region_start("RobotVecEnv.post_step")
         adapter_data = self._get_adapter_data()
         record_time("RobotVecEnv.post_step get_adapter_data done")
+        if self._impulses_tracked:
+            self._fill_impulse_state()
         self._current_state = self._get_new_state_and_stats(adapter_data)
         self._current_state = {k:t.detach().clone() for k,t in self._current_state.items()} # just here out of caution (on 20/11/2025 it was still necessary, maybe...)
         record_region_end("RobotVecEnv.post_step")
@@ -2259,7 +2353,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def _get_new_state_and_stats(self, adapter_data):
         record_region_start("RobotVecEnv._update_state_and_stats")
         new_state = self._update_state(adapter_data)
-        dbg_check_finite(new_state, async_assert=True, assert_msg="Nonfinite state detected in RobotVecEnv")
+        dbg_check_finite(new_state, async_assert=False, assert_msg="Nonfinite state detected in RobotVecEnv")
         record_time("RobotVecEnv._update_state_and_stats: update_state done")
         self._update_stats(new_state)
         record_region_end("RobotVecEnv._update_state_and_stats")
@@ -2320,6 +2414,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_body_abs_angvel_xyz = vec_bodystates_13[:,10:13].clone()
         vec_body_ground_dist    = vec_bodystates_13[:,2].clone()
         vec_body_abs_pos_xy     = vec_bodystates_13[:,0:2].clone()
+        self._last_body_abs_quat_xyzw = body_abs_quat_xyzw_vec # reused by _fill_impulse_state
         vec_body_rel_gravity_dir, vec_body_rel_linvel_xyz, vec_body_rel_angvel_xyz = self._compute_extr_from_bodystate(body_abs_linvel_xyz_vec = vec_body_abs_linvel_xyz,
                                                                                                                         body_abs_angvel_xyz_vec = vec_body_abs_angvel_xyz,
                                                                                                                         body_abs_quat_xyzw_vec = body_abs_quat_xyzw_vec)
@@ -2334,7 +2429,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                              "so a rotation cannot change its length",
                   async_assert=True)
 
-        vec_time_from_start = self._adapter.getEnvTimeFromStartup() - self._eps_start_stime
+        # kept for the impulse state, which must not read the adapter again: any extra CUDA call from
+        # this thread while mjx-warp records its step as a CUDA graph invalidates the capture
+        self._last_adapter_clock = self._adapter.getEnvTimeFromStartup()
+        vec_time_from_start = self._last_adapter_clock - self._eps_start_stime
 
         record_region_end("RobotVecEnv._get_adapter_data_raw_mjx")
         return RobotAdapterData(
@@ -2382,6 +2480,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                                                                                            body_abs_quat_xyzw_vec = body_abs_quat_xyzw_vec)
             vec_body_ground_dist = vec_bodystates_13[:,2].clone()
             vec_body_abs_pos_xy  = vec_bodystates_13[:,0:2].clone()
+            self._last_body_abs_quat_xyzw = body_abs_quat_xyzw_vec # reused by _fill_impulse_state
             vec_body_rel_linacc_xyz = self.body_vecs_to_gait_frame(self._adapter.get_local_link_linear_acceleration(self._main_body_mon_link_ids)[:,0,:])
             if self._configuration.init_args.enable_dbg_checks:
                 dbg_check(lambda: th.all(th.isfinite(vec_bodystates_13)),
@@ -2430,7 +2529,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                             build_error_msg, just_warn = True, async_assert=True, assert_msg="diverging sim")
         except NotImplementedError:
             vec_stats_minmaxavgstd_j_pvaeep = self._thfull(float("nan"), (self.num_envs,4,len(self._configuration.joints_agent_controlled),6))
-        vec_time_from_start = self._adapter.getEnvTimeFromStartup() - self._eps_start_stime
+        # kept for the impulse state, which must not read the adapter again: any extra CUDA call from
+        # this thread while mjx-warp records its step as a CUDA graph invalidates the capture
+        self._last_adapter_clock = self._adapter.getEnvTimeFromStartup()
+        vec_time_from_start = self._last_adapter_clock - self._eps_start_stime
 
         record_region_end("RobotVecEnv._get_adapter_data_raw")
         # ggLog.info(f"getJoints={t1-t0:.6f} getlinks={t2-t1:.6f} getstats={t3-t2:.6f} others={t3_1-t3:.6f} tot = {t3_1-t0:.6f}s")
@@ -2563,8 +2665,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 self.STATE_ACT_RAW_HIST : {self.ACT_FIELDS.ACTION : self._last_raw_actions},
                 self.STATE_LAST_ACT_RAW : {self.ACT_FIELDS.ACTION : self._last_raw_actions},
                 # constant within an episode: refreshed by _fill_randomization_state, not recomputed here
-                self.STATE_RANDOMIZATIONS : self._randomization_state_vec.unsqueeze(1)}
-        dbg_check_finite(s, async_assert=True, assert_msg="Nonfinite instantaneous state detected in RobotVecEnv.get_new_instantaneous_state")
+                self.STATE_RANDOMIZATIONS : self._randomization_state_vec.unsqueeze(1),
+                # filled in place by _fill_impulse_state before every state build
+                self.STATE_IMPULSES : self._impulse_state_vec.unsqueeze(1)}
+        if isinstance(self._adapter, BaseVecSimulationAdapter):
+            dbg_check_finite(s, async_assert=True, assert_msg="Nonfinite instantaneous state detected in RobotVecEnv.get_new_instantaneous_state")
         return s
         
     # @adarl.utils.utils.th_compile_ext(copy_outs=False, mode="max-autotune",fullgraph=True)

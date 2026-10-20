@@ -1,0 +1,51 @@
+<launch>
+
+  <let name="xbot_cfg_dir" value="$(dirname)"/>
+  <arg name="simulator" default="mujoco"/>
+
+  <!-- shared by both simulators -->
+  <arg name="arms" default="true"/>
+  <arg name="legs" default="true"/>
+  <arg name="payload" default="false"/>
+  <arg name="wheels" default="false"/>
+  <arg name="velodyne" default="false"/>
+
+  <!-- mujoco only -->
+  <arg name="sensors" default="false"/>
+  <arg name="dagana" default="false"/>
+  <arg name="feet" default="true"/>
+  <arg name="steering_wheels" default="false"/>
+  <arg name="varta" default="true"/>
+  <arg name="ft_sensors" default="true"/>
+
+  <!-- gazebo only -->
+  <arg name="gui" default="true"/>
+  <arg name="paused" default="false"/>
+  <arg name="hesai_jt128" default="false"/>
+  <arg name="camera_front_up" default="false"/>
+  <arg name="camera_front_down" default="false"/>
+
+  <include file="$(find-pkg-share kyon_$(var simulator))/launch/kyon_world.launch">
+    <arg name="arms" value="$(var arms)"/>
+    <arg name="legs" value="$(var legs)"/>
+    <arg name="payload" value="$(var payload)"/>
+    <arg name="wheels" value="$(var wheels)"/>
+    <arg name="velodyne" value="$(var velodyne)"/>
+    <arg name="sensors" value="$(var sensors)"/>
+    <arg name="dagana" value="$(var dagana)"/>
+    <arg name="feet" value="$(var feet)"/>
+    <arg name="steering_wheels" value="$(var steering_wheels)"/>
+    <arg name="varta" value="$(var varta)"/>
+    <arg name="ft_sensors" value="$(var ft_sensors)"/>
+    <arg name="gui" value="$(var gui)"/>
+    <arg name="paused" value="$(var paused)"/>
+    <arg name="hesai_jt128" value="$(var hesai_jt128)"/>
+    <arg name="camera_front_up" value="$(var camera_front_up)"/>
+    <arg name="camera_front_down" value="$(var camera_front_down)"/>
+  </include>
+
+  <set_parameter name="use_sim_time" value="false"/>
+
+  <executable cmd="sleep 5 &amp;&amp; xbot2-core -C $(var xbot_cfg_dir)/xbotcore_kyon_ros2.yaml" shell="true" output="screen"/>
+
+</launch>

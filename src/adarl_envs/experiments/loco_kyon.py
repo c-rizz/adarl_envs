@@ -11,14 +11,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     import math
     
     mode = args["mode"].lower()
-    step_length_sec = 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
+    step_length_sec = 0.02 if args["robot"] == "spot" else 20/1024  # use multiples of 1/1024 to keep it representable in binary (so we can step precisely)
     max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
-    if algo == "sac":
-        train_envs = 4096
-    elif algo == "ppo":
-        train_envs = 4096
+    if algo == "sac" or algo == "ppo":
+        train_envs = 8192
     elif algo == "sac_small" or algo == "ppo_small":
         train_envs = 8
     else:
@@ -28,127 +26,172 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         env_device = th.device("cpu",0)
     else:
         env_device = th.device("cuda",0)
-    
-    eval_freq = 5 if algo=="sac" else 40
+
+
+    world = "flat_ground"
+    # Standing upright on the rear legs the pelvis is much higher off the ground, and the robot tips
+    # over much more easily than the quadruped
+    is_humanoid = args["robot"].lower() == "kyon_humanoid"
+    humanoid_feet = is_humanoid and args["feet"] # the humanoid stands on the contact spheres unless asked for feet
+    humanoid_height = 1.055 if humanoid_feet else 0.955 # it stands taller on the feet, they make the legs longer
+    spawn_clearance_z = humanoid_height if is_humanoid else 0.493 # clearance of the main body link above the local ground at spawn
+    if world == "pyramids":
+        terminal_gravity_angle = 60 * math.pi / 180.0
+    elif is_humanoid:
+        terminal_gravity_angle = 40 * math.pi / 180.0
+    else:
+        terminal_gravity_angle = 30 * math.pi / 180.0
+
+    degree2rad = math.pi/180
+    eval_freq = 10
     r = 1.0 # randomization strength
     n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
-        "noise_action_delay_mustd_std" : (0.0, 0.001*n, 0.005*n),
-        "noise_action_mustd" : (0.0,   0.0),
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
+        "desired_foot_clearance" : 0.1,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
+        "enable_reference_filter" : True,
         "enable_rendering" : False,
-        "enable_reference_filter" : False,
+        "extrinsics_only_privileged" : False,
         "fail_on_safety" : False,
         "frame_stack_length" : 3,
         "goal_err_smoothing_halflife_sec" : 0.05,
-        "goal_height_minmax" : [0.47,0.47] if args["robot"] == "kyon" else [0.30,0.30],
+        "goal_height_minmax" : {"kyon" : [0.493,0.493],
+                                "kyon_humanoid" : [humanoid_height,humanoid_height], # standing upright on the rear legs
+                                "go1" : [0.30,0.30],
+                                "centauro" : [0.79,0.79],
+                                }.get(args["robot"].lower(), [0.5,0.5]),
         "goal_resampling_probability_per_sec" : 0.1,
         "goal_speed_minmax" : (0,1.0),
         "goal_yaw_minmax" : (-math.pi, math.pi),
-        "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
+        "goal_yaw_vel_zero_ratio" : 0.25,
         "held_joints_damping" : 10.0,
         "held_joints_stiffness" : 500.0,
-        "impulse_duration_minmax" : [0.01, 2.5],
+        "history_length_action_raw" : 3,
+        "history_length_action_smoothed" : 1,
+        "impulse_duration_minmax" : [0.1, 2.5],
         "impulse_mean_std" : [20.0,50.0],
-        "impulse_probability_per_sec" : 0.0,
+        "impulse_probability_per_sec" : 0.1,
         "init_on_reset_ratio" : 0.7,
-        "randomized_initial_joint_pose_range" : 0.1,
         "just_health_reward" : False,
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 1.0, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,
         "max_goal_height_speed" : 0.1,
-        "step_max_good_air_duration" : 0.5,
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
-        "step_min_good_air_duration" : 0.1,
+        "minimal_infos" : True,
         "mode" : mode,
-        "noise_abs_obs_angvel_ep_mustd_step_std" :      [0.0, 0.02*n, 0.1*n],
-        "noise_abs_obs_gravity_ep_mustd_step_std" :     [0.0, 0.0*n, 0.0*n],
+        "no_infos" : False,
+        "noise_abs_obs_angvel_ep_mustd_step_std" :      [0.0, 0.02*n,  0.1*n],
+        "noise_abs_obs_gravity_ep_mustd_step_std" :     [0.0, 0.0*n,   0.1*n],
         "noise_abs_obs_joints_pve_ep_mustd_step_std" :  [0.0, 0.001*n, 0.1*n],
-        "noise_abs_obs_linacc_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
-        "noise_abs_obs_linvel_ep_mustd_step_std" :      [0.0, 0.0,    0.0],
-        "noise_abs_obs_posz_ep_mustd_step_std" :        [0.0, 0.0,    0.0],
+        "noise_abs_obs_linacc_ep_mustd_step_std" :      [0.0, 0.0,     0.0],
+        "noise_abs_obs_linvel_ep_mustd_step_std" :      [0.0, 0.0,     0.0],
+        "noise_abs_obs_posz_ep_mustd_step_std" :        [0.0, 0.0,     0.0],
+        "noise_action_delay_mustd_std" : (0.008, 0.005*n, 0.0025*n),
+        "noise_action_mustd" : (0.0,   0.0),
+        "observe_actor_safety_state" : True,
         "observe_full_robot_state" : False,
-        "offset_envs_ep_starts" : True,
+        "observe_randomizations" : True,
+        "observe_impulses" : False,
+        "offset_envs_ep_starts" : algo=="ppo",
+        "pitchnroll_reward_settle_point" : 15*degree2rad, # ~zero reward after this angle
+        "playground_style_reward" : False,
+        "posref_err_history_length" : 5,
         "posref_safety_period" : 0.02,
         "quiet" : False,
-        "randomized_dof_armature_ratios" : 0.1*r,
-        "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
-        "randomized_friction_slide_spin_roll_ratios" : [0.2*r,0.2*r,0.2*r],
-        "randomized_dof_frictionloss_ratios"             : 0.0*r,
-        "randomized_gains_damping_ratio_epstd"       : 0.0*r,
-        "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
-        "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
-        "randomized_reference_filter_distribution" : ("uniform", (50.0, 50.0)),
-        "record_video" : True,
         "randomization_recycle_init_pose" : True,
-        "reward_superweight_joint_penalties" : 1.0,
-        "reward_joint_acceleration_weight" :        eps,
+        "randomized_initial_joint_pose_range" : 0.3,
+        "randomized_homing_body_position_minmax_xyz" : ((-6, -18,spawn_clearance_z),(102, 18,spawn_clearance_z)) , #((-6, -18, 0.48), (102, 18, 0.50)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
+        "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
+        "randomized_dof_armature_ratios" :       ("uniform", [0.9*r,1.1*r]),
+        "randomized_dof_damping_ratios":         ("uniform", [0.9*r,1.1*r]),
+        "randomized_dof_frictionloss_ratios":    ("uniform", [0.9*r,1.1*r]),
+        "randomized_friction_slide_spin_roll_ratios" : ("uniform", ([0.8*r,0.8*r,0.8*r],[1.5*r,1.5*r,1.5*r])),
+        "randomized_gains_damping_ratio_epstd"       : 0.2*r,
+        "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
+        "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
+        "randomization_recycle_model_alterations" : mode=="genesis", # Genesis has an issue with changing the armature, it's super slow
+        "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
+        "record_video" : True,
+        "reward_contacts_weight" :                  eps,
+        "reward_failure_weight" :                   eps,
+        "reward_feet_air_time_weight" :             10.0,
+        "reward_feet_ground_time_weight" :          eps,
+        "reward_feet_on_ground_weight" :            0.5,
+        "reward_feet_step_height_weight" :          0.5,
+        "reward_heading_velocity_weight" :          eps,
+        "reward_heading_weight" :                   eps,
+        "reward_health_weight" :                    eps,
+        "reward_height_position_weight" :           0.5,
+        "reward_height_velocity_weight" :           0.1,
         "reward_joint_acc_on_vel_weight" :          eps,
-        "reward_joint_actacc_weight" :              0.5*p,
-        "reward_joint_actdiff_weight" :             0.5*p,
-        "reward_contacts_weight" :            eps,
+        "reward_joint_acceleration_weight" :        eps,
+        "reward_joint_actacc_weight" :              1.0*p,
+        "reward_joint_actdiff_weight" :             1.0*p,
         "reward_joint_energy_weight" :              eps,
-        "reward_joint_power_weight" :               0.002*p,
-        "reward_failure_weight" :             eps,
-        "reward_feet_air_time_weight" :       10.0,
-        "reward_feet_ground_time_weight" :    eps,
-        "reward_feet_on_ground_weight" :      eps,
-        "reward_heading_velocity_weight" :    eps,
-        "reward_heading_weight" :             eps,
-        "reward_health_weight" :              eps,
-        "reward_height_position_weight" :     0.5,
-        "reward_height_velocity_weight" :     0.1,
-        "reward_pitchnroll_velocity_weight" : 0.05,
-        "reward_pitchnroll_weight" :          0.5,
         "reward_joint_position_limit_weight" :      eps,
         "reward_joint_position_weight" :            eps,
-        "reward_joint_posref_vel_weight" :          eps,
         "reward_joint_posref_acc_weight":           eps,
-        "reward_scale_nolength":              0.01,
+        "reward_joint_posref_vel_weight" :          eps,
+        "reward_joint_power_weight" :               0.002*p,
         "reward_joint_sensed_effort_weight" :       eps,
-        "reward_slip_weight" :                1.0,
-        "reward_joint_stand_position_weight" :      1.0,
+        "reward_joint_stand_position_weight" :      5.0,
+        "reward_joint_stand_velocity_weight" :      1.0,
         "reward_joint_torque_limit_weight" :        eps,
         "reward_joint_torque_weight" :              0.0001*p,
-        "reward_joint_torquediff_weight" :          0.0001*p,
+        "reward_joint_torquediff_weight" :          eps,
         "reward_joint_torqueref_weight" :           eps,
-        "reward_tracking_weight" :            1.0,
         "reward_joint_velocity_limit_weight" :      eps,
         "reward_joint_velocity_weight" :            eps,
         "reward_joint_velref_weight" :              eps,
-        "reward_yaw_vel_tracking_weight" :    1.0,
+        "reward_pitchnroll_velocity_weight" :       0.5,
+        "reward_pitchnroll_weight" :                0.5,
+        "reward_safety_triggered_weight" :          0.5,
+        "reward_scale_nolength":                    0.01,
+        "reward_slip_weight" :                      1.0,
+        "reward_superweight_joint_penalties" :      1.0,
+        "reward_tracking_weight" :                  1.0,
+        "reward_yaw_vel_tracking_weight" :          1.0,
         "robot_model" : args["robot"],
+        "robot_options" : {
+            "enable_arms" : args["arms"],
+            "feet" : humanoid_feet
+        },
         "saturate_jimp_ref_limits" : False,
         "split_rewards" : True if algo=="sac" else False,
+        "step_max_good_air_duration" : 0.5,
+        "step_max_good_ground_duration" : 0.5,
+        "step_min_good_air_duration" : 0.2,
+        "step_min_good_ground_duration" : 0.1,
         "stepLength_sec" : step_length_sec,
-        "terminate_on_safety" : False,
-        "terminate_on_crash" : True,
         "terminate_on_body_contact" : False,
+        "terminate_on_crash" : True,
+        "terminate_on_safety" : False,
         "th_device" : env_device,
         "ui_camera_resolution_hw" : [144,256],
         "use_contacts" : False,
         "verbose_infos" : False,
         "video_save_freq" : 0,
         "walltime_factor" : 1.0,
-        "minimal_infos" : True,
-        "playground_style_reward" : False
+        "world_description_format" : "predefined",
+        "world_description_string" : world,
+        "terminal_gravity_angle" : terminal_gravity_angle
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args.update({        
         "enable_rendering" : True,
         "verbose_infos" : True,
+        "minimal_infos" : False,
         "video_save_freq" : 1,
         "init_on_reset_ratio" : 1.0,
         "offset_envs_ep_starts" : False,
-        "minimal_infos" : False,
         # "randomized_initial_joint_pose_range" : 0.02,
         # "mass_randomization_ratio" : 0.0,
         # "friction_slide_spin_roll_randomization_ratios" : (0.0,0.0,0.0),
@@ -168,22 +211,22 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     highpen_video_eval_env_builder_args.update({
         "reward_superweight_joint_penalties" : 0.5
     })
-    video_stoch_highpen = {
-        "name" : "video_stoch_highpen",
-        "deterministic" : False,
-        "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 100,
-        "env_builder_args" : highpen_video_eval_env_builder_args,
-        "num_envs" : 100,
-        "skip_first_eval": True
-    }
+    # video_stoch_highpen = {
+    #     "name" : "video_stoch_highpen",
+    #     "deterministic" : False,
+    #     "eval_freq_ep" : eval_freq*train_envs,
+    #     "eval_eps" : 10,
+    #     "env_builder_args" : highpen_video_eval_env_builder_args,
+    #     "num_envs" : 10,
+    #     "skip_first_eval": True
+    # }
     eval_conf_video_stoch = {
         "name" : "video_stoch",
         "deterministic" : False,
         "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 10,
+        "eval_eps" : 1,
         "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 10,
+        "num_envs" : 1,
         "skip_first_eval": False
     }
     video_det_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
@@ -191,9 +234,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "name" : "video_det",
         "deterministic" : True,
         "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 10,
+        "eval_eps" : 1,
         "env_builder_args" : video_det_eval_env_builder_args,
-        "num_envs" : 10,
+        "num_envs" : 1,
         "skip_first_eval": False
     }
     # run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
@@ -236,40 +279,49 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     gamma_long = 0.99
     gamma_short = 0.95
     if env_builder_args["split_rewards"]:
+        # One entry per reward this experiment can enable: SAC builds its per-channel gammas
+        # as gammas[name] for every name in the reward space labels, which are the enabled
+        # reward_weight_* fields, so a missing or differently spelled key is a KeyError at
+        # startup. The joint_ prefixes matter: the configuration has both "torque" and
+        # "joint_torque" as separate rewards, and this experiment sets the prefixed ones.
         gammas = {
-            "acceleration" :        gamma_long,
-            "acc_on_vel" :          gamma_short,
-            "actacc" :              gamma_short,
-            "actdiff" :             gamma_short,
-            "contacts" :            gamma_long,
-            "failure" :             gamma_long,
-            "feet_air_time" :       gamma_long,
-            "feet_ground_time" :    gamma_long,
-            "feet_on_ground" :      gamma_long,
-            "heading" :             gamma_long,
-            "heading_velocity" :    gamma_long,
-            "health" :              gamma_long,
-            "height_position" :     gamma_long,
-            "height_velocity" :     gamma_long,
-            "pitchnroll" :          gamma_long,
-            "pitchnroll_velocity" : gamma_long,
-            "position" :            gamma_long,
-            "position_limit" :      gamma_long,
-            "posref_vel" :          gamma_short,
-            "posref_acc" :          gamma_short,
-            "power" :               gamma_short,
-            "sensed_effort" :       gamma_long,
-            "slip" :                gamma_long,
-            "stand_position" :      gamma_long,
-            "torque" :              gamma_long,
-            "torque_limit" :        gamma_long,
-            "torque_refs" :         gamma_short,
-            "torquediff" :          gamma_short,
-            "tracking" :            gamma_long,
-            "velocity" :            gamma_long,
-            "velocity_refs" :       gamma_short,
-            "velocity_limit" :      gamma_long,
-            "yaw_vel_tracking" :    gamma_long
+            "contacts"             : gamma_long,
+            "failure"              : gamma_long,
+            "feet_air_time"        : gamma_long,
+            "feet_ground_time"     : gamma_long,
+            "feet_on_ground"       : gamma_long,
+            "feet_step_height"     : gamma_long,
+            "heading"              : gamma_long,
+            "heading_velocity"     : gamma_long,
+            "health"               : gamma_long,
+            "height_position"      : gamma_long,
+            "height_velocity"      : gamma_long,
+            "joint_acc_on_vel"     : gamma_short,
+            "joint_acceleration"   : gamma_long,
+            "joint_actacc"         : gamma_short,
+            "joint_actdiff"        : gamma_short,
+            "joint_energy"         : gamma_short,
+            "joint_position"       : gamma_long,
+            "joint_position_limit" : gamma_long,
+            "joint_posref_acc"     : gamma_short,
+            "joint_posref_vel"     : gamma_short,
+            "joint_power"          : gamma_short,
+            "joint_sensed_effort"  : gamma_long,
+            "joint_stand_position" : gamma_long,
+            "joint_stand_velocity" : gamma_long,
+            "joint_torque"         : gamma_long,
+            "joint_torque_limit"   : gamma_long,
+            "joint_torquediff"     : gamma_short,
+            "joint_torqueref"      : gamma_short,
+            "joint_velocity"       : gamma_long,
+            "joint_velocity_limit" : gamma_long,
+            "joint_velref"         : gamma_short,
+            "pitchnroll"           : gamma_long,
+            "pitchnroll_velocity"  : gamma_long,
+            "safety_triggered"     : gamma_long,
+            "slip"                 : gamma_long,
+            "tracking"             : gamma_long,
+            "yaw_vel_tracking"     : gamma_long
         }
     else:
         gammas = gamma_long
@@ -342,7 +394,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     alpha_lr_factor = 1.0,
                                                     independent_entropy_q=True,
                                                     max_grad_norm=0.1,
-                                                    log_alpha_grad_clip=0.1
+                                                    log_alpha_grad_clip=0.1,
+                                                    alpha_initial_value=0.001
                                                     ),
                     checkpoint_freq=20,
                     collector_device=env_device,
@@ -397,43 +450,44 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     elif algo.lower() == "ppo":
         from rreal.algorithms.ppo2 import ppo_train, PPO_init_hyperparams
         ppo_train(  seed=seed,
-                folderName=folderName,
-                run_id=run_id,
-                args=args,
-                env_builder=None,
-                vec_env_builder=named_loco_venv_builder,
-                env_builder_args=env_builder_args,
-                agent_hyperparams=PPO_init_hyperparams(  minibatch_size=None,
-                                                    minibatch_num=4,
-                                                    th_device=th.device("cuda"),
-                                                    actor_network_arch=(512,256),
-                                                    critic_network_arch=(512,256),
-                                                    q_lr=None,
-                                                    policy_lr=3e-4,
-                                                    update_epochs=5,
-                                                    total_steps=2_500_000_000,
-                                                    num_envs=train_envs,
-                                                    num_steps=24,
-                                                    gamma=0.99,
-                                                    loss_value_weight=1.0,
-                                                    loss_entropy_coeff=1e-3,
-                                                    log_freq_vstep=int(max_steps_per_episode/10),
-                                                    epsilon_policy_ratio_clip=0.2,
-                                                    epsilon_value_clip_epsilon=0.2,
-                                                    gae_lambda=0.95,
-                                                    max_grad_norm=1.0,
-                                                    init_actor_logstd=-1.0,
-                                                    actor_observation_filter=["base.vec", "base.reward_weights"],
-                                                    critic_observation_filter=["privileged.vec", "base.reward_weights"],
-                                                    ),
-                max_episode_duration=max_steps_per_episode,
-                validation_batch_size=0,
-                validation_buffer_size=0,
-                validation_holdout_ratio=0,
-                checkpoint_freq_vec_ep=-1,
-                collector_device=env_device,
-                eval_configurations=eval_configurations,
-                debug_level=1)
+                    folderName=folderName,
+                    run_id=run_id,
+                    args=args,
+                    env_builder=None,
+                    vec_env_builder=named_loco_venv_builder,
+                    env_builder_args=env_builder_args,
+                    agent_hyperparams=PPO_init_hyperparams(  minibatch_size=train_envs*24//4,
+                                                        minibatch_num=4,
+                                                        th_device=th.device("cuda"),
+                                                        actor_network_arch=(512,256),
+                                                        critic_network_arch=(512,256),
+                                                        q_lr=None,
+                                                        policy_lr=3e-4,
+                                                        update_epochs=5,
+                                                        total_steps=1_500_000_000,
+                                                        num_envs=train_envs,
+                                                        num_steps=24,
+                                                        gamma=0.99,
+                                                        loss_value_weight=1.0,
+                                                        loss_entropy_coeff=1e-3,
+                                                        log_freq_vstep=int(max_steps_per_episode/10),
+                                                        epsilon_policy_ratio_clip=0.2,
+                                                        epsilon_value_clip_epsilon=0.2,
+                                                        gae_lambda=0.95,
+                                                        max_grad_norm=1.0,
+                                                        init_actor_logstd=-1.0,
+                                                        actor_observation_filter=["base.vec"], #, "base.reward_weights"],
+                                                        critic_observation_filter=["privileged.vec", "base.reward_weights"],
+                                                        reference_init_args = {   "env_builder_args" : env_builder_args},
+                                                        ),
+                    max_episode_duration=max_steps_per_episode,
+                    validation_batch_size=0,
+                    validation_buffer_size=0,
+                    validation_holdout_ratio=0,
+                    checkpoint_freq_vec_ep=10,
+                    collector_device=env_device,
+                    eval_configurations=eval_configurations,
+                    debug_level=1)
     else:
         raise RuntimeError(f"Unknown algorithm '{algo}'")
 
@@ -453,6 +507,8 @@ if __name__ == "__main__":
     ap.add_argument("--algorithm", default="sac", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
     ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
+    ap.add_argument("--arms", default=False, action='store_true', help="Enable arms")
+    ap.add_argument("--feet", default=False, action='store_true', help="Stand the humanoid on the flat feet instead of the contact-sphere legs (kyon_humanoid only)")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

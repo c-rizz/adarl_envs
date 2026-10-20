@@ -201,6 +201,8 @@ def adarl_builder_and_args(args):
         "observe_actor_safety_state" : True,
         "observe_full_robot_state" : False,
         "offset_envs_ep_starts" : False,
+        "observe_randomizations" : True,
+        "observe_impulses" : True,
         "pitchnroll_reward_settle_point" : 15*degree2rad, # ~zero reward after this angle
         "playground_style_reward" : False,
         "posref_err_history_length" : 5,

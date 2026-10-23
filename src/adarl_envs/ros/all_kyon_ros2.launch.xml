@@ -4,7 +4,7 @@
   <arg name="simulator" default="mujoco"/>
 
   <!-- shared by both simulators -->
-  <arg name="arms" default="true"/>
+  <arg name="arms" default="false"/>
   <arg name="legs" default="true"/>
   <arg name="payload" default="false"/>
   <arg name="wheels" default="false"/>

@@ -128,7 +128,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_feet_step_height_weight" :          0.5,
         "reward_heading_velocity_weight" :          eps,
         "reward_heading_weight" :                   eps,
-        "reward_health_weight" :                    eps,
+        "reward_health_weight" :                    1.0,
         "reward_height_position_weight" :           0.5,
         "reward_height_velocity_weight" :           0.1,
         "reward_joint_acc_on_vel_weight" :          eps,
@@ -346,7 +346,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     
     annealer = TargetEntropyAnnealer(reference_key="linvel_avg",
                                      start_target=-0.5,
-                                     end_target=-3.0,
+                                     end_target=-2.0,
                                      start_reference_threshold=0.4,
                                      end_reference_threshold=0.05)
     
@@ -395,7 +395,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     independent_entropy_q=True,
                                                     max_grad_norm=0.1,
                                                     log_alpha_grad_clip=0.1,
-                                                    alpha_initial_value=0.001
+                                                    alpha_initial_value=0.01,
+                                                    use_biased_analytic_entropy=False
                                                     ),
                     checkpoint_freq=20,
                     collector_device=env_device,

@@ -113,6 +113,10 @@ class GrapVecEnvInitArgs():
     sim-to-real transfer. False renders exact depth. Invalid pixels come out as 0, a value a real
     measurement can never take; the observation keeps that convention after the resize and the [0,1]
     normalization."""
+    privileged_unaltered_depth : bool = False
+    """Also observe the depth *without* the stereo degradation, in the privileged group only. The base
+    observation keeps the degraded image, so what the actor sees is unchanged. Needs observe_camera,
+    use_depth_cam and depth_stereo_sim, since otherwise there is no alteration to keep apart from."""
     camera_hide_robot : bool = False
     """Hide the robot from the observation camera, so that it cannot occlude the object. The arm
     pose is still observable through proprioception. Only affects the observation camera: the UI
@@ -157,6 +161,9 @@ class GraspAdapterData:
     gripper_touching_object : th.Tensor
     obs_gray_image : th.Tensor | None
     obs_depth_image : th.Tensor | None
+    obs_unaltered_depth_image : th.Tensor | None
+    """The depth before the stereo degradation, processed like obs_depth_image. Only produced when
+    privileged_unaltered_depth is set."""
 
 def _camera_hfov_deg(camera_model : str | None) -> float:
     """Horizontal field of view of the observation camera: the real camera's, or a generic 70 deg."""
@@ -178,6 +185,7 @@ class GraspVecEnv(RobotVecEnv):
     STATE_GRIPPER = "gripper"
     STATE_CAMERA = "camera"
     STATE_DEPTH = "depth"
+    STATE_DEPTH_UNALTERED = "depth_unaltered"
 
     OBJECT_POSE_PLACEHOLDER = (0.0, 0.0, 0.0,   0.0, 0.0, 0.0, 1.0)
     """Stand-in object pose for adapters that cannot report one: on a real robot the object is not
@@ -215,6 +223,7 @@ class GraspVecEnv(RobotVecEnv):
         obs_camera_model : str | None
         depth_stereo_sim : StereoDepthSimParams | None
         """Resolved from GrapVecEnvInitArgs' obs_camera_model and depth_stereo_sim."""
+        privileged_unaltered_depth : bool
 
     @dataclass
     class SubRewards:
@@ -306,6 +315,14 @@ class GraspVecEnv(RobotVecEnv):
             # class defines.
             depth_stereo_sim = stereo_camera_params(grasp_init_args.obs_camera_model,
                                                     obs_cam_render_resolution_hw[1])
+        if grasp_init_args.privileged_unaltered_depth and not (grasp_init_args.observe_camera
+                                                               and grasp_init_args.use_depth_cam
+                                                               and grasp_init_args.depth_stereo_sim):
+            raise ValueError(f"privileged_unaltered_depth needs observe_camera, use_depth_cam and "
+                             f"depth_stereo_sim, got observe_camera={grasp_init_args.observe_camera}, "
+                             f"use_depth_cam={grasp_init_args.use_depth_cam}, "
+                             f"depth_stereo_sim={grasp_init_args.depth_stereo_sim}: without a degraded "
+                             f"depth there is no unaltered one to keep apart")
         # The crop is a fixed window on a fixed render resolution, so resolve it once here.
         self._obs_camera_crop_rows_cols : tuple[slice,slice] | None = None
         if grasp_init_args.obs_camera_crop is not None:
@@ -345,7 +362,8 @@ class GraspVecEnv(RobotVecEnv):
                         use_gray_cam = grasp_init_args.use_gray_cam,
                         obs_camera_crop = grasp_init_args.obs_camera_crop,
                         obs_camera_model = grasp_init_args.obs_camera_model,
-                        depth_stereo_sim = depth_stereo_sim)
+                        depth_stereo_sim = depth_stereo_sim,
+                        privileged_unaltered_depth = grasp_init_args.privileged_unaltered_depth)
 
         self._observation_camera = self._head_camera_name if grasp_init_args.observe_camera else None
         self._ui_camera = self._head_camera_name if self._grasping_conf.use_head_cam_as_ui_camera else self._grasp_ui_camera_name
@@ -665,10 +683,12 @@ class GraspVecEnv(RobotVecEnv):
             # channel by its own range, so grayscale and depth mix without rescaling either.
             camera_substates = []
             if gray_enabled:
-                camera_substates.append((GraspVecEnv.STATE_CAMERA, th.uint8,   [0, 255]))
+                camera_substates.append((GraspVecEnv.STATE_CAMERA, th.uint8,   [0, 255], "base"))
             if depth_enabled:
-                camera_substates.append((GraspVecEnv.STATE_DEPTH,  th.float32, [0.0, 1.0]))
-            for substate_name, camera_dtype, camera_minmax in camera_substates:
+                camera_substates.append((GraspVecEnv.STATE_DEPTH,  th.float32, [0.0, 1.0], "base"))
+            if self._grasping_conf.privileged_unaltered_depth:
+                camera_substates.append((GraspVecEnv.STATE_DEPTH_UNALTERED, th.float32, [0.0, 1.0], "privileged"))
+            for substate_name, camera_dtype, camera_minmax, obs_group in camera_substates:
                 camera_state_helper = ThBoxStateHelper( field_names=[e for e in self.CAMERA_FIELDS],
                                                         dtype=camera_dtype,
                                                         normalization_range=(camera_minmax[0],camera_minmax[1]),
@@ -676,14 +696,14 @@ class GraspVecEnv(RobotVecEnv):
                                                         field_size=self._grasping_conf.obs_camera_resolution_hw,
                                                         fields_minmax={ self.CAMERA_FIELDS.IMAGE : camera_minmax},
                                                         vec_size=adapter.vec_size(),
-                                                        observation_definitions={"base":
+                                                        observation_definitions={obs_group:
                                                                                 ThBoxStateHelper.SimpleObsDef(  obs_history_length=1,
                                                                                                                 observable_fields=None,
                                                                                                                 observable_subfields=None,
                                                                                                                 skip_history_dim=True)})
                 self._state_helper = self._state_helper.add_substate(substate_name,
                                                                     camera_state_helper,
-                                                                    obs_defs={  "base":{
+                                                                    obs_defs={  obs_group:{
                                                                                     "observable":True,
                                                                                     "concatenate":False,
                                                                                     "noise":None}
@@ -797,28 +817,35 @@ class GraspVecEnv(RobotVecEnv):
                 obs_depth_image = renderings.depth[0] # this is in (vec,H,W,C)
                 if not obs_depth_image.dtype.is_floating_point:
                     obs_depth_image = obs_depth_image.to(th.float32)/1000.0 # convert mm->m
-                obs_depth_image = obs_depth_image[...,0].to(th.float32) # (vec, H, W), metric
+                metric_depth = obs_depth_image[...,0].to(th.float32) # (vec, H, W), metric
+                def _depth_to_obs(depth_m : th.Tensor) -> th.Tensor:
+                    """The processing both depth observations share, so they cannot drift apart."""
+                    # Validity-weighted resize: a plain interpolation would average the invalid
+                    # pixels together with the valid ones, dragging the depth around every hole
+                    # towards 0. Cropped after any degradation: the artifacts belong to the whole
+                    # sensor frame, and the occlusion shadows need the neighbours a crop would cut.
+                    depth_m = resize_depth_masked(_crop(depth_m), self._grasping_conf.obs_camera_resolution_hw)
+                    # Normalize to the [0,1] range the float32 substate declares. INVALID_DEPTH is
+                    # 0, so it survives the clamp and stays distinguishable from any real
+                    # measurement (which is always beyond the sensor's strictly positive minimum range).
+                    return th.clamp(depth_m/1.0, 0.0, 1.0) # normalize to 1 meters and clamp
                 if self._grasping_conf.depth_stereo_sim is not None:
                     # Degrade the metric depth at render resolution: the stereo artifacts belong to
                     # the sensor, not to the resolution the policy looks at. Missing measurements
                     # come back as INVALID_DEPTH (0).
-                    obs_depth_image = stereo_depth_degradation(obs_depth_image,
-                                                               self._grasping_conf.depth_stereo_sim)
-                # Validity-weighted resize: a plain interpolation would average the invalid pixels
-                # together with the valid ones, dragging the depth around every hole towards 0.
-                # Cropped after the degradation: the artifacts belong to the whole sensor frame,
-                # and the occlusion shadows need the neighbours a crop would cut away.
-                obs_depth_image = resize_depth_masked(_crop(obs_depth_image),
-                                                      self._grasping_conf.obs_camera_resolution_hw)
-                # Normalize to the [0,1] range the float32 substate declares. INVALID_DEPTH is 0, so
-                # it survives the clamp and stays distinguishable from any real measurement (which is
-                # always beyond the sensor's strictly positive minimum range).
-                obs_depth_image = th.clamp(obs_depth_image/1.0, 0.0, 1.0) # normalize to 1 meters and clamp
+                    obs_depth_image = _depth_to_obs(stereo_depth_degradation(metric_depth,
+                                                                             self._grasping_conf.depth_stereo_sim))
+                else:
+                    obs_depth_image = _depth_to_obs(metric_depth)
+                obs_unaltered_depth_image = (_depth_to_obs(metric_depth)
+                                             if self._grasping_conf.privileged_unaltered_depth else None)
             else:
                 obs_depth_image = None
+                obs_unaltered_depth_image = None
         else:
             obs_gray_image = None
             obs_depth_image = None
+            obs_unaltered_depth_image = None
 
         return GraspAdapterData(robot_data = super_adapter_data,
                                 current_object_pose = current_object_pose,
@@ -829,7 +856,8 @@ class GraspVecEnv(RobotVecEnv):
                                 feet_touching_ground = feet_touching_ground,
                                 gripper_touching_object = gripper_touching_object,
                                 obs_gray_image = obs_gray_image,
-                                obs_depth_image = obs_depth_image)
+                                obs_depth_image = obs_depth_image,
+                                obs_unaltered_depth_image = obs_unaltered_depth_image)
 
     @override
     def _get_new_instantaneous_state(self, adapter_data):
@@ -923,6 +951,8 @@ class GraspVecEnv(RobotVecEnv):
             new_inst_state[self.STATE_CAMERA] = {self.CAMERA_FIELDS.IMAGE: obs_gray_image}
         if obs_depth_image is not None:
             new_inst_state[self.STATE_DEPTH] = {self.CAMERA_FIELDS.IMAGE: obs_depth_image}
+        if adapter_data.obs_unaltered_depth_image is not None:
+            new_inst_state[self.STATE_DEPTH_UNALTERED] = {self.CAMERA_FIELDS.IMAGE: adapter_data.obs_unaltered_depth_image}
         return new_inst_state
 
 

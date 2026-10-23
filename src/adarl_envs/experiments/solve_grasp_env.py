@@ -174,7 +174,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "obs_camera_crop" : 1.0,
         # Degrade the rendered depth into a ZED-X-Mini-like one, for sim-to-real transfer.
         # False renders exact depth.
-        "depth_stereo_sim" : False,
+        "depth_stereo_sim" : True,
+        # With depth_stereo_sim, also put the undegraded depth in the privileged observation
+        # (privileged.depth_unaltered); base.depth stays degraded.
+        "privileged_unaltered_depth" : False,
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
     video_eval_env_builder_args["enable_rendering"] = True
@@ -587,7 +590,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--algorithm", default="sac", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
-    ap.add_argument("--robot", default="centauro", type=str, help="Robot to be used ('centauro'/'franka')")
+    ap.add_argument("--robot", default="kyon", type=str, help="Robot to be used ('centauro'/'franka')")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
     ap.add_argument("--obs-cam", default=False, action='store_true', help="Use observation camera")
 

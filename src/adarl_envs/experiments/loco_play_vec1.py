@@ -202,7 +202,7 @@ def adarl_builder_and_args(args):
         "observe_full_robot_state" : False,
         "offset_envs_ep_starts" : False,
         "observe_randomizations" : True,
-        "observe_impulses" : True,
+        "observe_impulses" : False,
         "pitchnroll_reward_settle_point" : 15*degree2rad, # ~zero reward after this angle
         "playground_style_reward" : False,
         "posref_err_history_length" : 5,
@@ -230,7 +230,7 @@ def adarl_builder_and_args(args):
         "reward_feet_step_height_weight" :          1.0,
         "reward_heading_velocity_weight" :          eps,
         "reward_heading_weight" :                   eps,
-        "reward_health_weight" :                    eps,
+        "reward_health_weight" :                    1.0,
         "reward_height_position_weight" :           0.5,
         "reward_height_velocity_weight" :           0.1,
         "reward_joint_acc_on_vel_weight" :          eps,
@@ -239,7 +239,7 @@ def adarl_builder_and_args(args):
         "reward_joint_actdiff_weight" :             1.0*p,
         "reward_joint_energy_weight" :              eps,
         "reward_joint_position_limit_weight" :      eps,
-        "reward_joint_position_weight" :            50.0*p,
+        "reward_joint_position_weight" :            eps,
         "reward_joint_posref_acc_weight":           eps,
         "reward_joint_posref_vel_weight" :          eps,
         "reward_joint_power_weight" :               0.002*p,
@@ -255,7 +255,7 @@ def adarl_builder_and_args(args):
         "reward_joint_velref_weight" :              eps,
         "reward_pitchnroll_velocity_weight" :       0.5,
         "reward_pitchnroll_weight" :                0.5,
-        "reward_safety_triggered_weight" :          0.0,
+        "reward_safety_triggered_weight" :          1.0,
         "reward_scale_nolength":                    0.01,
         "reward_slip_weight" :                      1.0,
         "reward_superweight_joint_penalties" :      1.0,
@@ -429,6 +429,9 @@ def play(seed, folderName, run_id, args,
     control_mode = args["control"].lower().strip()
     if control_mode=="pretrained":
         model = load_agent(args["model"], device)
+        if isinstance(model, SAC):
+            # only the actor runs here: the critic's observations (e.g. randomizations) may legitimately differ
+            model.check_env_space(env.observation_space, env.action_space, check_critic_observations=False)
         trained_env_builder_args = model.get_reference_init_args()["env_builder_args"]
         try:
             equal, diffs = compare_dicts(env_builder_args, trained_env_builder_args)

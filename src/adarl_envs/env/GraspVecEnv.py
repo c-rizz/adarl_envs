@@ -432,9 +432,9 @@ class GraspVecEnv(RobotVecEnv):
         sim_fovy = _fov_deg(_camera_hfov_deg(self._grasping_conf.obs_camera_model),
                             render_hw[0], render_hw[1])
         if (info.height, info.width) != tuple(render_hw):
-            raise RuntimeError(f"camera '{self._observation_camera}' is published at {info.height}x{info.width}, "
-                               f"but the policy is trained on {render_hw[0]}x{render_hw[1]}: publish at that "
-                               f"resolution, since the crop and the resize are done here")
+            raise RuntimeError(f"camera '{self._observation_camera}' is published at {info.width}x{info.height} "
+                               f"(width x height), but the policy is trained on {render_hw[1]}x{render_hw[0]}: "
+                               f"publish at that resolution, since the crop and the resize are done here")
         if abs(info.fovy_deg - sim_fovy) > self.CAMERA_FOV_TOLERANCE_DEG:
             raise RuntimeError(f"camera '{self._observation_camera}' has a {info.fovy_deg:.2f} deg vertical field "
                                f"of view, but the simulated one has {sim_fovy:.2f} deg (obs_camera_model="

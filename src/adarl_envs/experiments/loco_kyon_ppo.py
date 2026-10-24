@@ -128,7 +128,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_feet_step_height_weight" :          0.5,
         "reward_heading_velocity_weight" :          eps,
         "reward_heading_weight" :                   eps,
-        "reward_health_weight" :                    eps,
+        "reward_health_weight" :                    1.0,
         "reward_height_position_weight" :           0.5,
         "reward_height_velocity_weight" :           0.1,
         "reward_joint_acc_on_vel_weight" :          eps,

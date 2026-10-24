@@ -38,7 +38,7 @@ from adarl.utils.base_utils import record_time, record_region_start, record_regi
 import gc
 
 disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
-unsafe_realworld_init = False
+unsafe_realworld_init = True
 
 
 JOINT_FILTERS = Enum("JOINT_FILTERS",["ALL_REVOLUTE",
@@ -108,6 +108,7 @@ class RobotVecEnvInitArgs():
     noise_abs_obs_linvel_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor
     noise_abs_obs_posz_ep_mustd_step_std : tuple[float,float,float] |  th.Tensor
     observe_actor_safety_state : bool
+    safety_cooldown_halflife_sec : float
     quiet : bool
     robot_description_format : Literal["urdf", "sdf", "mjcf"]
     robot_description_string : str
@@ -259,6 +260,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         noise_posz_ep_mustdstd : th.Tensor
         obs_dtype : th.dtype
         observe_held_joints : bool
+        safety_exp_smoothing_1s : float
         randomized_com_links : tuple[tuple[str,str], ...]
         """Center of mass randomization, randomized links"""
         randomized_com_xyz_diff_distribution : DistributionDefTh
@@ -447,6 +449,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         action_exp_smoothing_1s = 0.5**(1/init_args.action_smoothing_halflife_sec) if init_args.action_smoothing_halflife_sec>0 else 0.0
         goal_err_exp_smoothing_1s = 0.5**(1/init_args.goal_err_smoothing_halflife_sec) if init_args.goal_err_smoothing_halflife_sec>0 else 0.0
         longterm_exp_smoothing_1s = 0.1**(1/init_args.longterm_states_decimation_time) if init_args.longterm_states_decimation_time>0 else 0.0
+        safety_exp_smoothing_1s = 0.5**(1/init_args.safety_cooldown_halflife_sec) if init_args.safety_cooldown_halflife_sec>0 else 1.0
 
         (phys_limits_minmax_pve,
         safe_limits_minmax_pve,
@@ -521,6 +524,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     noise_posz_ep_mustdstd =    self._thtens(init_args.noise_abs_obs_posz_ep_mustd_step_std),
                                                     obs_dtype = self._obs_dtype,
                                                     observe_held_joints = False,
+                                                    safety_exp_smoothing_1s = safety_exp_smoothing_1s,
                                                     randomized_dof_armature_joints =                None, # Will fill up later
                                                     randomized_dof_armature_ratios =                None, # Will fill up later
                                                     randomized_dof_damping_joints =                 None, # Will fill up later
@@ -2566,8 +2570,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_last_sent_refs_held_j_pvesd     = self._homing_held_joints_vec_pvesd
         prev_vec_joint_posrefs              = self._current_state[self.STATE_ROBOT][:,0,:,5]
         vec_step_count                      = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT]
-        prev_lims_safety_triggered          = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED].view((self.num_envs,)) > 0
-        prev_posref_safety_triggered        = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED].view((self.num_envs,)) > 0
+        prev_lims_safety_triggered          = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED].view((self.num_envs,))
+        prev_posref_safety_triggered        = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED].view((self.num_envs,))
         prev_posref_safety_violation_count  = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_VIOLATION_COUNT].view((self.num_envs,))
         prev_vec_time_from_start            = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SIM_TIME]
         prev_step_avg_pos                   = self._current_state[self.STATE_JOINT_LONGTERM_STATS][:,0,0]
@@ -2575,6 +2579,11 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         vec_step_count = vec_step_count.view((self.num_envs,))        
         is_resetting = vec_step_count == -1
         has_settled = vec_step_count >= -10
+
+        last_step_dt = th.where(is_resetting,
+                                self._configuration.init_args.stepLength_sec,
+                                adapter_data.vec_time_from_start - prev_vec_time_from_start.view((self.num_envs,)))
+        safety_decay = self._configuration.safety_exp_smoothing_1s**last_step_dt
         # prev_vec_time_from_start = prev_vec_internal_state[:,self.INTERNAL_FIELDS.SIM_TIME]
         # vec_prev_safety_triggered = vec_internal_state[:,self.INTERNAL_FIELDS.SAFETY_TRIGGERED] > 0
         # ggLog.info(f"stats_minmaxavgstd_j_pvae.device = {stats_minmaxavgstd_j_pvae.device}   self._safe_limits_minmax_j_pve[0].device = {self._safe_limits_minmax_j_pve[0].device}")
@@ -2583,8 +2592,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_triggered_limits = th.logical_or(   adapter_data.vec_stats_minmaxavgstd_j_pvaeep[:, 0, :, pveidx] < self._safe_limits_minmax_j_pve[0],
                                                     adapter_data.vec_stats_minmaxavgstd_j_pvaeep[:, 1, :, pveidx] > self._safe_limits_minmax_j_pve[1])
             vel_limits_safety_violation = th.any(vec_triggered_limits, dim=(1,2))
-            triggered = th.logical_and(vel_limits_safety_violation, has_settled)
-            vec_safety_lims_state = th.logical_or(prev_lims_safety_triggered,triggered)*1.0
+            limits_triggered = th.logical_and(vel_limits_safety_violation, has_settled)
+            vec_safety_lims_state = prev_lims_safety_triggered*safety_decay # decay the safety state
+            vec_safety_lims_state = th.where(limits_triggered, 1, vec_safety_lims_state) # if it got triggered again, set to 1
             vec_safety_lims_state = th.where(is_resetting, self._thzeros((self.num_envs,)), vec_safety_lims_state)
         else:
             vec_safety_lims_state = self._thzeros((self.num_envs,))
@@ -2594,14 +2604,12 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     posref_diff > self._posref_safety_minmmax_diff[1])
             posref_safety_violation = th.any(posref_safety_violation, dim=1)
             posref_triggered = th.logical_and(posref_safety_violation, has_settled)
-            vec_safety_posref_state = (th.logical_or(prev_posref_safety_triggered,posref_triggered)*1.0).view(self.num_envs,)
-            vec_safety_posref_state = th.where(is_resetting, self._thzeros((self.num_envs,)), vec_safety_posref_state)
+            vec_safety_posref_state = prev_posref_safety_triggered*safety_decay # decay the safety state
+            vec_safety_posref_state = th.where(posref_triggered, 1, vec_safety_posref_state) # if it got triggered again, set to 1
+            vec_safety_posref_state = th.where(is_resetting, self._thzeros((self.num_envs,)), vec_safety_posref_state) # if resetting, zero it
         else:
             posref_safety_violation = self._thzeros((self.num_envs,), dtype=th.bool)
             vec_safety_posref_state = self._thzeros((self.num_envs,))
-        last_step_dt = th.where(is_resetting,
-                                self._configuration.init_args.stepLength_sec,
-                                adapter_data.vec_time_from_start - prev_vec_time_from_start.view((self.num_envs,)))
         prev_posref_safety_violation_count = prev_posref_safety_violation_count.view(self.num_envs,)
         prev_posref_safety_violation_count = prev_posref_safety_violation_count * th.logical_not(is_resetting) # reset violation count if resetting
         posref_violation_count = prev_posref_safety_violation_count + posref_safety_violation

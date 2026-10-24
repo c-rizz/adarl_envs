@@ -1435,9 +1435,10 @@ class LocomotionVecEnv(RobotVecEnv):
 
         # ---------------- SAFETY TRIGGERED REWARD ----------------
         # This is a penalty for triggering safety mechanisms
-        safety_triggered = th.logical_or(state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED,0],
-                                         state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,0])
-        reward_safety_triggered = -1*safety_triggered
+        posref_safety_state = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED,0]
+        limits_safety_state = state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED,0]
+        reward_safety_triggered = (-1*posref_safety_state + -1*limits_safety_state)/2
+        safety_triggered = th.logical_or(posref_safety_state>0, limits_safety_state>0)
 
         # FAILURE SCALING
         failed = (curr_state_extr_vec[:,self.EXTRINSIC_FIELDS.BODY_HEIGHT_FROM_GROUND] < 0)
@@ -1964,12 +1965,6 @@ class LocomotionVecEnv(RobotVecEnv):
             self._adapter.setLinksStateDirect(link_names=[self._arrow_yellow, self._arrow_base],
                                                 link_states_pose_vel=th.stack([heading_arrow_state, goalvel_arrow_state], dim = 1),
                                                 vec_mask=vec_mask)
-
-    @override
-    def _simulation_initialization(self, vec_mask : th.Tensor):
-        super()._simulation_initialization(vec_mask = vec_mask)
-        # if self._configuration.show_goal:
-        #     self._set_arrow_pose(vec_mask=self._all_vecs)
             
     @override
     def get_ui_renderings(self, vec_mask : th.Tensor) -> tuple[list[th.Tensor], th.Tensor]:

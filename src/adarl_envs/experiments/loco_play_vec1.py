@@ -112,7 +112,7 @@ def find_recorder_wrapper(env) -> EnvRunnerRecorderWrapper | None:
 
 
 
-robot_heights = {   "kyon" : [0.47,0.47],
+robot_heights = {   "kyon" : [0.493,0.493],
                     "go1" : [0.30,0.30],
                     "centauro" : [0.79,0.79],
                     }
@@ -158,10 +158,7 @@ def adarl_builder_and_args(args):
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
         "goal_yaw_vel_zero_ratio" : 0.25,
-        "goal_height_minmax" : {"kyon" : [0.47,0.47],
-                                "go1" : [0.30,0.30],
-                                "centauro" : [0.79,0.79],
-                                }.get(args["robot"].lower(), [0.5,0.5]),
+        "goal_height_minmax" : robot_heights.get(args["robot"].lower(), [0.5,0.5]),
         "held_joints_damping" :   {("centauro","twisting_pelvis_joint"):5.0,
                                    ("centauro","j_wheel_1"):50.0,
                                    ("centauro","j_wheel_2"):50.0,
@@ -283,11 +280,12 @@ def adarl_builder_and_args(args):
         "walltime_factor" : 1.0,
     }
 
+    enable_rendering = (record or args["publishimg"]) and not realworld
     env_builder_args.update({
         "noise_action_delay_mustd_std" : (0.0, 0.0, 0.0) if realworld else env_builder_args["noise_action_delay_mustd_std"],
         "offset_envs_ep_starts" : False,
-        "enable_rendering" : args["record"] or args["publishimg"],
-        "record_video" : not realworld,
+        "enable_rendering" : enable_rendering,
+        "record_video" : enable_rendering,
         "verbose_infos" : (not skip_optionals) or record,
         "minimal_infos" : skip_optionals or not record,
         "no_infos" : skip_optionals or not record,
@@ -315,7 +313,7 @@ def adarl_builder_and_args(args):
         "randomized_reference_filter_distribution" : ("uniform", (40.0, 40.0)),
         "impulse_probability_per_sec" : 0.0,
         "show_gui" : args["gui"],
-        "just_health_reward" : skip_optionals,
+        "just_health_reward" : True,
         "goal_resampling_probability_per_sec" : 0.0,
         "walltime_factor" : args["rt_factor"],
         "record_whole_joint_trajectories" : False,
@@ -380,7 +378,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 step_length_sec = step_length_sec,
                 render=args["publishimg"],
                 robot = args["robot"],
-                deterministic = args["deterministic"])
+                deterministic = not args["stochastic"])
 
 
 
@@ -523,7 +521,7 @@ def play(seed, folderName, run_id, args,
             ggLog.info(f"env resetted")
             # ggLog.info(f"ep_config = {info['ep_config']}")
             done = False
-            zero_all_commands = True
+            zero_all_commands = interactive
             ep_reward = 0
             step_count = 0
             step_wallduration = float("nan")
@@ -587,7 +585,7 @@ def play(seed, folderName, run_id, args,
 
                         if gamepad.pressed_edge("RS"):
                             zero_all_commands = not zero_all_commands
-                        if pad.age>0.5:
+                        if pad.age()>0.5:
                             zero_all_commands = True
 
                         if zero_all_commands:
@@ -654,7 +652,8 @@ def play(seed, folderName, run_id, args,
                            f" cmd_reldir={np.arctan2(goal_rel_linvel_xys[1], goal_rel_linvel_xys[0])/3.14159*180} \t"
                            f" cmd_speed={goal_rel_linvel_xys[2]} \t"
                            f" cmd_height={goal_height} \t"
-                           f" cmd_yaw_vel={cmd_yawvel}")
+                           f" cmd_yaw_vel={cmd_yawvel} \t"
+                           f" stopped={zero_all_commands}")
                 # print_recorded_times()
             if step_count>0:
                 rewards.append(th.as_tensor(ep_reward,device="cpu").sum().item())
@@ -703,7 +702,7 @@ if __name__ == "__main__":
     ap.add_argument("--record", default=False, action='store_true', help="Record episode videos")
     ap.add_argument("--control", default="sine", type=str, help="Controller to use [sine,fixed,random,pretrained]")
     ap.add_argument("--resolution", default=240, type=int, help="Vertical video resolution")
-    ap.add_argument("--deterministic", default=False, action='store_true', help="Force the policy to be deterministic")
+    ap.add_argument("--stochastic", default=False, action='store_true', help="Force the policy to be stochastic")
     ap.add_argument("--publishimg", default=False, action='store_true', help="publish rendered images to the web dbg server")
     ap.add_argument("--pg", default=False, action='store_true', help="Use playground env")
     ap.add_argument("--verbose-recording", default=False, action='store_true', help="Print detailed infos about the env step timings and outputs")

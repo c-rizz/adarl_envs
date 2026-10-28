@@ -166,7 +166,13 @@ class RobotVecEnvInitArgs():
     window is empty. Only meaningful with impulse_probability_per_sec > 0. With merge_privileged the
     privileged observation is the actor's, so this also hands the impulses to the actor."""
     offset_envs_ep_starts : bool = False
-    posref_safety_period : float = 0.001
+    posref_safety_delta_check_dt : float | None = None
+    """Time window over which the posref safety check measures the posref velocity, as xbot2's
+    /xbot/hal/joint_safety/delta_check_dt. The posref is a staircase updated every stepLength_sec, so the
+    check uses the worst case of ceil(delta_check_dt/stepLength_sec) steps falling within one window, and the
+    posref saturation is scaled so that this worst case stays within the velocity limits. None uses one step."""
+    posref_safety_vel_tolerance : float = 0.1
+    """Tolerance added to the joint velocity limits by the posref safety check, as in xbot2 (0.1 rad/s)."""
     randomized_com_links : list[tuple[str,str]] = dataclasses.field(default_factory=list)
     randomized_com_xyz_diff_distribution : DistributionDef = ("uniform", ([-0.01,-0.01,-0.01],[0.01, 0.01,0.01]))
     randomized_dof_armature_joints : Sequence[tuple[str,str]] = dataclasses.field(default_factory=list)
@@ -491,6 +497,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                  "If specified as a dict, minmax_damping must contain an entry for each joint")
             minmax_damping_thdict = {(init_args.robot_name,k):self._thtens(minmax) for k,minmax in init_args.minmax_damping.items()}
 
+        posref_check_dt = init_args.posref_safety_delta_check_dt if init_args.posref_safety_delta_check_dt is not None else init_args.stepLength_sec
+        # the posref changes once per step, so a window of posref_check_dt can contain up to this many changes
+        self._posref_safety_check_steps = max(1, int(np.ceil(posref_check_dt/init_args.stepLength_sec - 1e-6)))
 
         self._configuration = self.Configuration(   init_args=init_args,
                                                     action_delay_epmustd_ststd = self._thtens(init_args.noise_action_delay_mustd_std),
@@ -499,7 +508,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     joint_ctrl_limits_minmax_pve = control_limits_minmax_pve,
                                                     control_mode = JointImpedanceActionHelper.CONTROL_MODES[init_args.control_mode.upper()],
                                                     goal_err_exp_smoothing_1s = goal_err_exp_smoothing_1s,
-                                                    history_length = max(2,init_args.frame_stack_length),
+                                                    history_length = max(2,init_args.frame_stack_length,self._posref_safety_check_steps),
                                                     homing_body_pose_minmax_xyz = self._thtens(init_args.randomized_homing_body_position_minmax_xyz),
                                                     homing_body_pose_xyz_xyzw = self._thtens(init_args.homing_body_pose_xyz_xyzw),
                                                     homing_ctrl_joints_position = homing_ctrl_joints_position,
@@ -562,8 +571,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(init_args.adapter.vec_size(), 1, 1)
         self._excluded_collision_pairs : set[tuple[str,str]] = set()
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
-        self._posref_safety_minmmax_diff = self._safe_limits_minmax_j_pve[:,:,1]*self._configuration.init_args.stepLength_sec
-        self._posref_saturation_minmmax_diff = self._posref_safety_minmmax_diff*0.999
+        posref_check_vel_tolerance = self._thtens([-init_args.posref_safety_vel_tolerance, init_args.posref_safety_vel_tolerance]).view(2,1)
+        self._posref_safety_minmmax_diff = (self._safe_limits_minmax_j_pve[:,:,1]+posref_check_vel_tolerance)*posref_check_dt
+        self._posref_saturation_minmmax_diff = self._safe_limits_minmax_j_pve[:,:,1]*posref_check_dt/self._posref_safety_check_steps*0.999
         self._impulse_disturbances_enabled = init_args.impulse_probability_per_sec > 0
         self._homing_held_joints_vec_pvesd = homing_held_joints_pvesd.repeat(init_args.adapter.vec_size(), 1, 1)
         # ggLog.info(f"homing_ctrl_joints_pvesd = {homing_ctrl_joints_pvesd}")
@@ -2568,7 +2578,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def _get_new_instantaneous_state(self, adapter_data) -> dict[str, dict[Any, th.Tensor] | th.Tensor]:
         vec_last_sent_refs_j_pvesd          = self._last_sent_v_j_pvesd
         vec_last_sent_refs_held_j_pvesd     = self._homing_held_joints_vec_pvesd
-        prev_vec_joint_posrefs              = self._current_state[self.STATE_ROBOT][:,0,:,5]
+        posref_check_start_vec_j            = self._current_state[self.STATE_ROBOT][:,self._posref_safety_check_steps-1,:,5] # posref sent _posref_safety_check_steps steps ago
         vec_step_count                      = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.STEP_COUNT]
         prev_lims_safety_triggered          = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_LIMITS_TRIGGERED].view((self.num_envs,))
         prev_posref_safety_triggered        = self._current_state[self.STATE_INTERNAL][:,0,self.INTERNAL_FIELDS.SAFETY_POSREF_TRIGGERED].view((self.num_envs,))
@@ -2599,7 +2609,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         else:
             vec_safety_lims_state = self._thzeros((self.num_envs,))
         if self._configuration.init_args.enable_posref_safety:
-            posref_diff = vec_last_sent_refs_j_pvesd[:,:,0] - prev_vec_joint_posrefs
+            posref_diff = vec_last_sent_refs_j_pvesd[:,:,0] - posref_check_start_vec_j
             posref_safety_violation = th.logical_or(posref_diff < self._posref_safety_minmmax_diff[0],
                                                     posref_diff > self._posref_safety_minmmax_diff[1])
             posref_safety_violation = th.any(posref_safety_violation, dim=1)

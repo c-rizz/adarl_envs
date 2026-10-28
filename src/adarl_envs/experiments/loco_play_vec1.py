@@ -203,7 +203,6 @@ def adarl_builder_and_args(args):
         "pitchnroll_reward_settle_point" : 15*degree2rad, # ~zero reward after this angle
         "playground_style_reward" : False,
         "posref_err_history_length" : 5,
-        "posref_safety_period" : 0.02,
         "quiet" : False,
         "randomization_recycle_init_pose" : True,
         "randomized_initial_joint_pose_range" : 0.3,
@@ -262,7 +261,7 @@ def adarl_builder_and_args(args):
         "robot_options" : {
             "add_twisting_pelvis" : False
         },
-        "saturate_jimp_ref_limits" : False,
+        "saturate_jimp_posref_limits" : False,
         "split_rewards" : False,
         "step_max_good_air_duration" : 0.5,
         "step_max_good_ground_duration" : 0.5,

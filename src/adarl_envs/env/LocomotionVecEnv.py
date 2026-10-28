@@ -1628,6 +1628,7 @@ class LocomotionVecEnv(RobotVecEnv):
         i["body_abs_linvel"] = abs_linvel
         i["body_abs_linspeed"] = abs_linvel.norm(dim=1)
         i["avg_air_duration"] = avg_air_duration
+        i["avg_air_duration_tot"] = avg_air_duration.mean(dim=1)
         i["smoothed_is_jumping"] = smoothed_is_jumping
         i["smoothed_num_feet_on_ground"] = smoothed_num_feet_on_ground
         i["smoothed_height_error"] = smoothed_height_error

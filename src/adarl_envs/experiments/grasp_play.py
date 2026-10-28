@@ -234,7 +234,7 @@ def grasp_builder_and_args():
         "noise_abs_obs_posz_ep_mustd_step_std" :        [0.0, 0.0,     0.0],
         "observe_full_robot_state" : False,
         "offset_envs_ep_starts" : False,
-        "posref_safety_period" : 0.02,
+        "posref_safety_delta_check_dt" : 0.05 if args["robot"]=="kyon" else None, # as /xbot/hal/joint_safety/delta_check_dt in xbotcore_kyon_ros2.yaml
         "quiet" : False,
         "randomized_dof_armature_ratios" :      0.05*r,
         "randomized_dof_frictionloss_ratios":   0.1*r,
@@ -248,7 +248,7 @@ def grasp_builder_and_args():
         "record_video" : True,
         "randomization_recycle_init_pose" : True,
         "robot_model" : args["robot"],
-        "saturate_jimp_ref_limits" : False,
+        "saturate_jimp_posref_limits" : False,
         "split_rewards" : False,
         "stepLength_sec" : step_length_sec,
         "terminate_on_safety" : False,

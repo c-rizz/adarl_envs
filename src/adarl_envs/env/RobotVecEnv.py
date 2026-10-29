@@ -38,7 +38,7 @@ from adarl.utils.base_utils import record_time, record_region_start, record_regi
 import gc
 
 disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
-unsafe_realworld_init = True
+unsafe_realworld_init = False
 
 
 JOINT_FILTERS = Enum("JOINT_FILTERS",["ALL_REVOLUTE",

@@ -261,6 +261,7 @@ def adarl_builder_and_args(args):
         "robot_options" : {
             "add_twisting_pelvis" : False
         },
+        "safety_cooldown_halflife_sec" : 1.0,
         "saturate_jimp_posref_limits" : False,
         "split_rewards" : False,
         "step_max_good_air_duration" : 0.5,

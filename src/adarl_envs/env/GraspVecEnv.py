@@ -117,6 +117,9 @@ class GrapVecEnvInitArgs():
     """Also observe the depth *without* the stereo degradation, in the privileged group only. The base
     observation keeps the degraded image, so what the actor sees is unchanged. Needs observe_camera,
     use_depth_cam and depth_stereo_sim, since otherwise there is no alteration to keep apart from."""
+    ignore_camera_fov_mismatch : bool = False
+    """Only warn, instead of refusing to start, when a real camera's field of view differs from the
+    simulated one. The resolution and the published modalities are still enforced."""
     camera_hide_robot : bool = False
     """Hide the robot from the observation camera, so that it cannot occlude the object. The arm
     pose is still observable through proprioception. Only affects the observation camera: the UI
@@ -366,6 +369,7 @@ class GraspVecEnv(RobotVecEnv):
                         privileged_unaltered_depth = grasp_init_args.privileged_unaltered_depth)
 
         self._observation_camera = self._head_camera_name if grasp_init_args.observe_camera else None
+        self._ignore_camera_fov_mismatch = grasp_init_args.ignore_camera_fov_mismatch
         self._ui_camera = self._head_camera_name if self._grasping_conf.use_head_cam_as_ui_camera else self._grasp_ui_camera_name
 
         self._sub_rewards_weights2 = GraspVecEnv.SubRewards(
@@ -436,15 +440,18 @@ class GraspVecEnv(RobotVecEnv):
                                f"(width x height), but the policy is trained on {render_hw[1]}x{render_hw[0]}: "
                                f"publish at that resolution, since the crop and the resize are done here")
         if abs(info.fovy_deg - sim_fovy) > self.CAMERA_FOV_TOLERANCE_DEG:
-            raise RuntimeError(f"camera '{self._observation_camera}' has a {info.fovy_deg:.2f} deg vertical field "
-                               f"of view, but the simulated one has {sim_fovy:.2f} deg (obs_camera_model="
-                               f"{self._grasping_conf.obs_camera_model}): the lens does not match the one trained on")
+            msg = (f"camera '{self._observation_camera}' has a {info.fovy_deg:.2f} deg vertical field "
+                   f"of view, but the simulated one has {sim_fovy:.2f} deg (obs_camera_model="
+                   f"{self._grasping_conf.obs_camera_model}): the lens does not match the one trained on")
+            if not self._ignore_camera_fov_mismatch:
+                raise RuntimeError(msg)
+            ggLog.warn(f"{msg}. Going on anyway, as ignore_camera_fov_mismatch is set")
         if depth_enabled and not info.has_depth:
             raise RuntimeError(f"camera '{self._observation_camera}' publishes no depth, but use_depth_cam is set")
         if gray_enabled and info.rgb_channels == 0:
             raise RuntimeError(f"camera '{self._observation_camera}' publishes no color, but a grayscale "
                                f"observation is requested")
-        ggLog.info(f"camera '{self._observation_camera}' matches the simulated one: {info.height}x{info.width}, "
+        ggLog.info(f"camera '{self._observation_camera}' checked against the simulated one: {info.height}x{info.width}, "
                    f"{info.fovy_deg:.2f} deg vertical fov (simulated {sim_fovy:.2f}), rgb_channels="
                    f"{info.rgb_channels}, has_depth={info.has_depth}")
 

@@ -393,6 +393,13 @@ class GraspVecEnv(RobotVecEnv):
         )
         self._sub_rewards_enabled = {k:v for k,v in dataclasses.asdict(self._sub_rewards_weights2).items() if v!=0.0}
         self._sub_rewards_enabled_weights_th = self._thtens([v for v in self._sub_rewards_enabled.values()])
+        if robot_init_args.just_health_reward:
+            rews_num = len(self._sub_rewards_enabled)
+            self._fixed_sub_rewards = {k:self._thones((num_envs,))/rews_num for k in self._sub_rewards_enabled}
+            if self._grasping_conf.split_rewards:
+                self._fixed_reward = self._thones((num_envs, rews_num))/rews_num
+            else:
+                self._fixed_reward = self._thones((num_envs, 1))
 
         self._grasping_episode_config = GraspVecEnv.EpisodeGraspingConfiguration(
                                                         initial_object_pose = self._thzeros((num_envs, 7)),
@@ -991,6 +998,9 @@ class GraspVecEnv(RobotVecEnv):
                                 sub_rewards_return : dict[str,th.Tensor] | None = None) -> th.Tensor:
         if sub_rewards_return is None:
             sub_rewards_return = {}
+        if self._configuration.init_args.just_health_reward:
+            sub_rewards_return.update(self._fixed_sub_rewards)
+            return self._fixed_reward
         record_region_start("GraspVecEnv.compute_rewards")
         rewards, sub_rewards_dict = self._compute_rewards(state) # Avoid input mutation for compiled function
         sub_rewards_return.update(sub_rewards_dict)

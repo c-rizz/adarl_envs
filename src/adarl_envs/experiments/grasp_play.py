@@ -221,7 +221,7 @@ def grasp_builder_and_args():
         "randomized_homing_body_position_minmax_xyz" : None, # keep the base at its homing spot
         "randomized_initial_joint_pose_range" : {"default" : 0.05, 
                                                     **{("kyon",jn) : 0.9 for jn in ["shoulder_yaw_", "shoulder_pitch_", "elbow_pitch_", "wrist_pitch_", "wrist_yaw_"]}},
-        "just_health_reward" : False,
+        "just_health_reward" : realworld, # the real robot has no object state to compute the task rewards from
         "log_info_stats" : True,
         "longterm_states_decimation_time" : 0.0, # Averaging of the joint pose for the position reward
         "max_goal_height_pos_change_speed" : 0.1,

@@ -6,7 +6,8 @@ from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedan
 from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter, ModelSpawnDef
 from adarl.utils.utils import (LinkState, to_string_tensor, th_quat_rotate, th_quat_conj, vector_projection, isinstance_noimport,
                                quat_xyzw_between_vecs_py, masked_assign, quat_mul_xyzw, quat_angle_xyzw, ros_rpy_to_quaternion_xyzw_th,
-                               average_two_quaternions, dataclass2dict, pure_yaw_quaternion_xyzw_th)
+                               average_two_quaternions, dataclass2dict, pure_yaw_quaternion_xyzw_th, distr_is_constant,
+                               distr_to_tensor, distr_minmax)
 from adarl.utils.dbg.dbg_checks import dbg_check_size, dbg_check, dbg_run
 import adarl.utils.utils
 from adarl.utils.vec_state_helper import ThBoxStateHelper, unnormalize, normalize
@@ -120,6 +121,11 @@ class GrapVecEnvInitArgs():
     ignore_camera_fov_mismatch : bool = False
     """Only warn, instead of refusing to start, when a real camera's field of view differs from the
     simulated one. The resolution and the published modalities are still enforced."""
+    randomized_object_mass_ratios : DistributionDef | None = None
+    """Factor the target object's mass is multiplied by, sampled per episode. None keeps its nominal mass.
+    It rides on the robot's model randomization (randomized_mass_ratios), with its own distribution, so
+    that has to be enabled too. With observe_randomizations it is observed in the mass block, normalized
+    over its own range, which needs the robot's masses to be randomized as well."""
     camera_hide_robot : bool = False
     """Hide the robot from the observation camera, so that it cannot occlude the object. The arm
     pose is still observable through proprioception. Only affects the observation camera: the UI
@@ -418,7 +424,27 @@ class GraspVecEnv(RobotVecEnv):
         _homing_xyz = tuple(robot_init_args.homing_body_pose_xyz_xyzw[:3])
         robot_init_args.randomized_homing_body_position_minmax_xyz=(_homing_xyz, _homing_xyz)
         robot_init_args.noise_abs_obs_linacc_ep_mustd_step_std=(0.0,0.0,0.0)
+        object_link = grasp_init_args.target_object_link
+        object_mass_distr = grasp_init_args.randomized_object_mass_ratios
+        object_mass_randomized = object_mass_distr is not None and not distr_is_constant(object_mass_distr)
+        # Only a simulation has the object as a body whose mass can be altered
+        alter_object_mass = object_mass_distr is not None and isinstance(adapter, BaseVecSimulationAdapter)
+        if object_mass_randomized and not alter_object_mass:
+            raise ValueError(f"randomized_object_mass_ratios needs a simulation adapter, got {type(adapter).__name__}")
+        if alter_object_mass:
+            # The object joins the robot's mass randomization, so the same alter_model call applies it;
+            # _set_current_ep_config then replaces its sampled ratio with one from its own distribution.
+            if object_link not in robot_init_args.randomized_mass_links:
+                robot_init_args.randomized_mass_links = list(robot_init_args.randomized_mass_links) + [object_link]
+        # Set before super().__init__, which already samples the first episode configuration
+        self._object_mass_ratio_distribution : DistributionDefTh | None = (
+            distr_to_tensor(object_mass_distr, device=th_device, dtype=th.float32)
+            if alter_object_mass and object_mass_distr is not None else None)
+        self._object_mass_ratio_col : int | None = None # column in link_masses_ratios, found at the first sampling
         super().__init__(robot_init_args) # starts the adapter up
+        if object_mass_randomized and not self._model_randomization_enabled:
+            raise ValueError("randomized_object_mass_ratios rides on the robot's model randomization, which is "
+                             "disabled: no mass, friction, com or dof randomization is set")
         self._check_published_camera()
 
     CAMERA_FOV_TOLERANCE_DEG = 1.0
@@ -1281,6 +1307,27 @@ class GraspVecEnv(RobotVecEnv):
         return i
 
     @override
+    def _build_randomization_blocks(self) -> list[RobotVecEnv.RandomizationBlock]:
+        """The base class normalizes every mass ratio over the robot's mass distribution: the object's
+        column gets the nominal value and range of its own distribution instead."""
+        blocks = super()._build_randomization_blocks()
+        object_mass_distr = self._grasping_conf.grasping_init_args.randomized_object_mass_ratios
+        if self._object_mass_ratio_distribution is None or distr_is_constant(object_mass_distr):
+            return blocks
+        mass_block = next((b for b in blocks if b.name == "mass_ratio"), None)
+        if mass_block is None:
+            # The block holds the whole link_masses_ratios field, so the object cannot have one of its own
+            raise ValueError("Observing randomized_object_mass_ratios needs randomized_mass_ratios to be randomized too: "
+                             "without it the masses get no randomization block to observe the object's ratio in")
+        col = self._configuration.randomized_mass_links.index(self._grasping_conf.grasping_init_args.target_object_link)
+        low, high = (th.as_tensor(v, device=self._th_device, dtype=self._obs_dtype) for v in distr_minmax(object_mass_distr))
+        mass_block.nominal = mass_block.nominal.clone()
+        mass_block.half_width = mass_block.half_width.clone()
+        mass_block.nominal[col] = (high+low)/2
+        mass_block.half_width[col] = ((high-low)/2).clamp(min=1e-6)
+        return blocks
+
+    @override
     def _set_current_ep_config(self, vec_mask : th.Tensor, reset_options : dict = {}):
         table_height = self._sample_distr((self.num_envs), self._grasping_conf.table_height)
         # record_time("GraspVecEnv._set_current_ep_config: sampled table height")
@@ -1315,6 +1362,16 @@ class GraspVecEnv(RobotVecEnv):
                                    sampled_initial_obj_quat], dim=1).view((self.num_envs,7))
         # record_time("GraspVecEnv._set_current_ep_config: sampled initial object pose")
         super()._set_current_ep_config(vec_mask=vec_mask, reset_options=reset_options)
+        if (self._object_mass_ratio_distribution is not None and self._model_randomization_enabled
+                and not (self._tot_init_counter > 1 and self._configuration.init_args.randomization_recycle_model_alterations)):
+            # Same condition under which the base class sampled the masses, so the alter_model it runs uses this
+            if self._object_mass_ratio_col is None:
+                self._object_mass_ratio_col = self._configuration.randomized_mass_links.index(
+                                                        self._grasping_conf.grasping_init_args.target_object_link)
+            masses_ratios = self._current_episode_config.link_masses_ratios.clone()
+            masses_ratios[:, self._object_mass_ratio_col] = self._sample_distr((self.num_envs,), self._object_mass_ratio_distribution)
+            masked_assign(self._current_episode_config.link_masses_ratios, vec_mask, masses_ratios)
+            self._fill_randomization_state(vec_mask)
         masked_assign(self._grasping_episode_config.table_height, vec_mask, table_height)
         masked_assign(self._grasping_episode_config.initial_object_pose, vec_mask, sampled_initial_obj_pose)
         # masked_assign(self._grasping_episode_config.goal_object_pose, vec_mask, sampled_goal_obj_pose_v_xyzxyzw)

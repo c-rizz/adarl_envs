@@ -289,6 +289,7 @@ def runner_builder(seed,
                                                 depth_stereo_sim = env_builder_args.pop("depth_stereo_sim", False),
                                                 privileged_unaltered_depth = env_builder_args.pop("privileged_unaltered_depth", False),
                                                 ignore_camera_fov_mismatch = env_builder_args.pop("ignore_camera_fov_mismatch", False),
+                                                randomized_object_mass_ratios = env_builder_args.pop("randomized_object_mass_ratios", None),
                                                 gripper_joints = tuple(env_builder_args.pop("gripper_joints", ())),
                                                 gripper_close_distance = env_builder_args.pop("gripper_close_distance", 0.05),
                                                 gripper_closes_at_lower_limit = env_builder_args.pop("gripper_closes_at_lower_limit", True),
@@ -658,6 +659,9 @@ def get_kyon_args(robot_options : dict = {}):
     spawn_legs = robot_options.get("spawn_legs", False)
     ctrl_legs = robot_options.get("ctrl_legs", False)
     spawn_zed_cameras = robot_options.get("spawn_zed_cameras", False)
+    # 500 is what the policies are trained with, but through xbot's explicit impedance loop it makes
+    # the held arm chatter: xbot runs want something like the controlled arm's 20.
+    held_joints_damping = robot_options.get("held_joints_damping", 500.0)
     spawn_legs = spawn_legs or ctrl_legs
 
 
@@ -812,7 +816,7 @@ def get_kyon_args(robot_options : dict = {}):
             "revolute_dof_armature_override" : 0.234,
             "gripper_link_transforms" : [(0.0,   -0.0145,  0.151,     0.0, 0.0, 0.0, 1.0),
                                          (-0.107, 0.0,    -0.0362125, 0.0, 0.0, 0.0, 1.0)],
-            "held_joints_damping" :   {"default": 500.0},
+            "held_joints_damping" :   {"default": held_joints_damping},
             "held_joints_stiffness" : {"default": 500.0},
             "table_height" : ("uniform", (0.001, 0.001))
         }

@@ -47,8 +47,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     use_rnd = True
 
     eval_freq = 5
-    r = 0.0
-    n = 0.0
+    r = 1.0
+    n = 1.0
     env_builder_args = {
         "reward_health_weight" :                0.0,
         "reward_joint_power_weight" :           0.0,
@@ -122,14 +122,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "offset_envs_ep_starts" : False,
         "posref_safety_delta_check_dt" : 0.05 if args["robot"]=="kyon" else None, # as /xbot/hal/joint_safety/delta_check_dt in xbotcore_kyon_ros2.yaml
         "quiet" : False,
-        "randomized_dof_armature_ratios" :      0.05*r,
-        "randomized_dof_frictionloss_ratios":   0.1*r,
-        "randomized_dof_damping_ratios":        0.2*r,
+        "randomized_dof_armature_ratios" :       ("uniform", [0.9*r,1.1*r]),
+        "randomized_dof_frictionloss_ratios":    ("uniform", [0.9*r,1.1*r]),
+        "randomized_dof_damping_ratios":         ("uniform", [0.9*r,1.1*r]),
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_friction_slide_spin_roll_ratios" : ("uniform", ([0.8*r,0.8*r,0.8*r],[1.5*r,1.5*r,1.5*r])),
         "randomized_gains_damping_ratio_epstd"       : 0.2*r,
         "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
-        "randomized_mass_ratios" : ("normal", (0.0, 0.1*r)),
+        "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
+        "randomized_object_mass_ratios" : ("uniform", [0.5*r,2.0*r]), # the cube is 0.1 kg nominal
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "record_video" : True,
         "randomization_recycle_init_pose" : True,

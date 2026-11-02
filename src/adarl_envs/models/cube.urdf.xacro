@@ -34,7 +34,7 @@
         <inertial>
             <origin xyz="${pose_xyz}" rpy="${pose_rpy}"/>
             <mass value="${mass}" />
-            <inertia ixx="${0.083 * mass * (y*y + z*z)}" ixy="0.0" ixz="0.0" iyy="${0.083 * mass * (x*x + z*z)}" iyz="0.0" izz="${0.083 * mass * (x*x + y*y)}"/>
+            <inertia ixx="${mass * (y*y + z*z) / 12}" ixy="0.0" ixz="0.0" iyy="${mass * (x*x + z*z) / 12}" iyz="0.0" izz="${mass * (x*x + y*y) / 12}"/>
         </inertial>
     </xacro:macro>
 
@@ -54,7 +54,7 @@
                 </geometry>
             </collision>
         </xacro:if>
-        <xacro:box_inertial mass="${mass}" x="0.06" y="0.06" z="0.06" pose_xyz="0 0 0" pose_rpy="0 0 0"/>
+        <xacro:box_inertial mass="${mass}" x="${size}" y="${size}" z="${size}" pose_xyz="0 0 0" pose_rpy="0 0 0"/>
         <contact> <!-- for pybullet -->
             <!-- 
             Defaults maybe are these (from bullet3/examples/Importers/ImportURDFDemo/URDFJointTypes.h line 33)

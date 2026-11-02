@@ -74,7 +74,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_dof_frictionloss_ratios" : 0.2,
         "randomized_gains_damping_ratio_epstd" : 0.3,
         "randomized_gains_stiffness_ratio_epstd" : 0.3,
-        "randomized_mass_ratios" : ("normal", (0.0, 0.1)),
+        "randomized_mass_ratios" : ("normal", (1.0, 0.1)),
         "randomized_reference_filter_distribution" : ("uniform", (5.0, 40.0)),
         "record_video" : True,
         "randomization_recycle_init_pose" : True,

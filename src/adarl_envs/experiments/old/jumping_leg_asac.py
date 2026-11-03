@@ -230,7 +230,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                 asac_running_avg_rew_alpha = 0.9999,
                 max_episode_duration=max_steps_per_episode,
                 min_episode_duration=max_steps_per_episode,
-                allow_tf32=True,
+                allow_tf32_conv=True,
                 purely_numpy_env = False
                 )
 

@@ -131,6 +131,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_gains_stiffness_ratio_epstd"     : 0.2*r,
         "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
         "randomized_object_mass_ratios" : ("uniform", [0.5*r,2.0*r]), # the cube is 0.1 kg nominal
+        "randomized_object_scale_ratios" : ("uniform", [0.75*r,1.75*r]), # the cube is 4 cm nominal: 3 to 7 cm
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "record_video" : True,
         "randomization_recycle_init_pose" : True,
@@ -435,7 +436,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
 
         asac3_train(run_args = args,
-                    allow_tf32=True,
+                    allow_tf32_conv=True,
                     allow_tf32_matmul=False,
                     buffer_storage_torch_device="cuda",                            
                     check_infs_nans=False,
@@ -459,6 +460,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     use_privileged_critic=True,
                     use_rnd_exploration=use_rnd,
                     buffer_min_residual_vram = 5*1024**3,
+                    buffer_float32_storage_dtype = "float16", # halves the buffer, mostly depth images
                     train_iterations_per_collection=train_iterations,
                     le_args=LatentExtractorInitArgs(
                         always_deterministic=False,

@@ -35,7 +35,8 @@ from adarl.utils.dbg.dbg_checks import dbg_check_finite
 from adarl_envs.env.env_utils import double_bell_reward
 from adarl.utils.base_utils import record_time, print_recorded_times, record_region_start, record_region_end, clear_recorded_times, trace_malloc_diffs
 
-disable_compile = False
+import os
+disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
 
 @th.jit.script
 def bell_reward(error : th.Tensor, zero_rew_dist : th.Tensor):
@@ -133,6 +134,34 @@ class GrapVecEnvInitArgs():
     None keeps its nominal size. It is applied through the model randomization (randomized_scale_links),
     so it needs a simulation adapter that supports link scaling."""
     randomized_object_scale_uniform : bool = True
+    blind_episodes_ratio : float = 0.0
+    """Fraction of the episodes in which the observed images are black, both grayscale and depth, and
+    the object-derived rewards are zero, as the object cannot be seen. The privileged group observes
+    which episodes are blind, so the critic can tell them apart. Needs observe_camera."""
+    randomized_ground_tint : DistributionDef | None = None
+    """Factors the r, g, b of the ground's material are multiplied by, each sampled on its own per episode."""
+    randomized_object_color : DistributionDef | None = None
+    """The r, g, b of the target object, each sampled on its own per episode."""
+    randomized_light_tilt_deg : DistributionDef | None = None
+    """Roll and pitch the light direction is rotated by, in degrees, each sampled on its own per episode."""
+    randomized_camera_pos_m : DistributionDef | None = None
+    """Offset of the observation camera along x, y and z, in meters, each sampled on its own per episode."""
+    randomized_camera_rot_deg : DistributionDef | None = None
+    """Roll, pitch and yaw of the observation camera, in degrees, each sampled on its own per episode."""
+    image_brightness : DistributionDef | None = None
+    """Added to the grayscale image, which is in [0,1], sampled per episode."""
+    image_contrast : DistributionDef | None = None
+    """Factor the grayscale image is scaled by around 0.5, sampled per episode."""
+    image_gamma : DistributionDef | None = None
+    """Exponent the grayscale image is raised to, sampled per episode."""
+    image_noise_std : DistributionDef | None = None
+    """Standard deviation of the per-pixel gaussian noise on the grayscale image, sampled per episode. The
+    noise itself is drawn at every step."""
+    observe_visual_randomizations : bool = False
+    """Observe the sampled visual randomizations above, in the privileged group. They have their own state,
+    observe_randomizations is about the physical ones. Constant distributions are not randomized and are not
+    part of the state, a real robot ignores them all. All of them need observe_camera, the appearance
+    ones the warp renderer."""
     camera_hide_robot : bool = False
     """Hide the robot from the observation camera, so that it cannot occlude the object. The arm
     pose is still observable through proprioception. Only affects the observation camera: the UI
@@ -202,6 +231,8 @@ class GraspVecEnv(RobotVecEnv):
     STATE_CAMERA = "camera"
     STATE_DEPTH = "depth"
     STATE_DEPTH_UNALTERED = "depth_unaltered"
+    STATE_BLIND = "blind"
+    STATE_VISUAL_RANDOMIZATIONS = "visual_randomizations"
 
     OBJECT_POSE_PLACEHOLDER = (0.0, 0.0, 0.0,   0.0, 0.0, 0.0, 1.0)
     """Stand-in object pose for adapters that cannot report one: on a real robot the object is not
@@ -263,10 +294,21 @@ class GraspVecEnv(RobotVecEnv):
 
 
     @dataclass
+    class VisualRandomization:
+        """One group of quantities inside the visual randomization state, which holds deviations from nominal."""
+        labels : list[str]
+        distribution : DistributionDefTh
+        nominal : th.Tensor
+        half_width : th.Tensor
+        start : int
+
+    @dataclass
     class EpisodeGraspingConfiguration:
         initial_object_pose : th.Tensor
         goal_object_pose : th.Tensor
         table_height : th.Tensor
+        blind : th.Tensor
+        """1 in the blind episodes, 0 in the others, see blind_episodes_ratio."""
 
     GRASPING_POSES = IntEnum(       "GRASPING_POSES", [
                                     "GOAL_POSE",
@@ -286,6 +328,8 @@ class GraspVecEnv(RobotVecEnv):
                                     "FEET_ON_GROUND"], start=0)
 
     GRIPPER = IntEnum("GRIPPER", [  "OBJECT_CONTACT"], start=0)
+
+    BLIND = IntEnum("BLIND", [      "BLIND"], start=0)
 
     CAMERA_FIELDS = IntEnum("CAMERA_FIELDS",   ["IMAGE"], start=0)
 
@@ -414,10 +458,14 @@ class GraspVecEnv(RobotVecEnv):
             else:
                 self._fixed_reward = self._thones((num_envs, 1))
 
+        if grasp_init_args.blind_episodes_ratio > 0 and not grasp_init_args.observe_camera:
+            raise ValueError(f"blind_episodes_ratio={grasp_init_args.blind_episodes_ratio} needs observe_camera: "
+                             f"there are no images to black out.")
         self._grasping_episode_config = GraspVecEnv.EpisodeGraspingConfiguration(
                                                         initial_object_pose = self._thzeros((num_envs, 7)),
                                                         goal_object_pose = self._thzeros((num_envs, 7)),
-                                                        table_height = self._thzeros((num_envs,)))
+                                                        table_height = self._thzeros((num_envs,)),
+                                                        blind = self._thzeros((num_envs,)))
         if robot_init_args.enable_link_collisions is None:
             robot_init_args.enable_link_collisions = []
         cube_colliding_links = [self._grasping_conf.table_link]
@@ -738,6 +786,53 @@ class GraspVecEnv(RobotVecEnv):
 
 
 
+        if self._grasping_conf.grasping_init_args.blind_episodes_ratio > 0:
+            blind_state_helper = ThBoxStateHelper(field_names=[e for e in self.BLIND],
+                                                  dtype=self._obs_dtype,
+                                                  th_device=self._th_device,
+                                                  field_size=(1,),
+                                                  fields_minmax={self.BLIND.BLIND: [0, 1]},
+                                                  vec_size=adapter.vec_size(),
+                                                  history_length=1,
+                                                  observation_definitions={
+                                                    "privileged": ThBoxStateHelper.SimpleObsDef(
+                                                            obs_history_length=1,
+                                                            observable_fields=None,
+                                                            observable_subfields=None)})
+            # The actor gets this from the black image, the critic does not see the images.
+            self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_BLIND,
+                                                                 blind_state_helper,
+                                                                 obs_defs={"privileged":{"observable":True,"concatenate":True,"noise":None}})
+
+        self._build_visual_randomizations()
+        if len(self._visual_randomizations) > 0:
+            observe_visual = self._grasping_conf.grasping_init_args.observe_visual_randomizations
+            merge_privileged = self._configuration.init_args.merge_privileged
+            visual_obsdef = (ThBoxStateHelper.SimpleObsDef.fully_observable(1) if observe_visual else
+                             ThBoxStateHelper.SimpleObsDef.not_observable())
+            half_widths = th.cat([v.half_width for v in self._visual_randomizations.values()])
+            visual_state_helper = ThBoxStateHelper(
+                    field_names=[e for e in self.RANDOMIZATIONS_FIELDS],
+                    field_size=(half_widths.numel(),),
+                    subfield_names=[label for v in self._visual_randomizations.values() for label in v.labels],
+                    fields_minmax={self.RANDOMIZATIONS_FIELDS.FULL_RANDOMIZATION_STATE : th.stack([-half_widths, half_widths])},
+                    history_length=1, # constant within an episode
+                    dtype=th.float32,
+                    th_device=self._th_device,
+                    vec_size=adapter.vec_size(),
+                    observation_definitions={
+                        # with merge_privileged the actor's observation is the privileged one
+                        "base" : visual_obsdef if merge_privileged else ThBoxStateHelper.SimpleObsDef.not_observable(),
+                        "privileged" : visual_obsdef})
+            self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_VISUAL_RANDOMIZATIONS,
+                                                                 visual_state_helper,
+                                                                 obs_defs={"base":{"observable":observe_visual and merge_privileged,
+                                                                                   "concatenate":observe_visual and merge_privileged,
+                                                                                   "noise":None},
+                                                                           "privileged":{"observable":observe_visual,
+                                                                                         "concatenate":observe_visual,
+                                                                                         "noise":None}})
+
         if self._grasping_conf.grasping_init_args.observe_camera:
             gray_enabled, depth_enabled = self._camera_modalities()
             # One substate per modality, each with its natural dtype and value range. ObsConverter
@@ -780,6 +875,89 @@ class GraspVecEnv(RobotVecEnv):
         
         ggLog.info(f"Built state/obs/action helpers")
 
+
+    def _build_visual_randomizations(self):
+        """Describe the visual randomization state: only what is actually randomized is part of it."""
+        args = self._grasping_conf.grasping_init_args
+        components = {"ground_tint" :       (args.randomized_ground_tint, ["r","g","b"]),
+                      "object_color" :      (args.randomized_object_color, ["r","g","b"]),
+                      "light_tilt_deg" :    (args.randomized_light_tilt_deg, ["roll","pitch"]),
+                      "camera_pos_m" :      (args.randomized_camera_pos_m, ["x","y","z"]),
+                      "camera_rot_deg" :    (args.randomized_camera_rot_deg, ["roll","pitch","yaw"]),
+                      "image_brightness" :  (args.image_brightness, [""]),
+                      "image_contrast" :    (args.image_contrast, [""]),
+                      "image_gamma" :       (args.image_gamma, [""]),
+                      "image_noise_std" :   (args.image_noise_std, [""])}
+        self._visual_randomizations : dict[str, GraspVecEnv.VisualRandomization] = {}
+        start = 0
+        for name, (distribution, axes) in components.items():
+            if distribution is None or distr_is_constant(distribution) or not self._has_object_state:
+                continue
+            if not args.observe_camera:
+                raise ValueError(f"The {name} randomization needs observe_camera: there are no images to alter.")
+            low, high = (th.broadcast_to(th.as_tensor(v, device=self._th_device, dtype=th.float32), (len(axes),))
+                         for v in distr_minmax(distribution))
+            self._visual_randomizations[name] = GraspVecEnv.VisualRandomization(
+                    labels = [f"{name}.{axis}" if axis else name for axis in axes],
+                    distribution = self._distr_to_tensor(distribution, size=(len(axes),)),
+                    nominal = (high+low)/2,
+                    half_width = ((high-low)/2).clamp(min=1e-6),
+                    start = start)
+            start += len(axes)
+        self._visual_randomization_state_vec = self._thzeros((self.num_envs, start))
+        self._scene_visuals_outdated = False
+
+    def _visual_randomization(self, name : str) -> th.Tensor:
+        """The values of a visual randomization in the current episodes, of shape (envs_num, components)."""
+        randomization = self._visual_randomizations[name]
+        return (self._visual_randomization_state_vec[:, randomization.start:randomization.start+len(randomization.labels)]
+                + randomization.nominal)
+
+    def _apply_scene_visuals(self):
+        """Send the scene's visual randomizations to the simulator, if they changed since the last time.
+
+        This is done when rendering rather than at reset: the first episode is sampled before the adapter starts up."""
+        if not self._scene_visuals_outdated:
+            return
+        self._scene_visuals_outdated = False
+        randomized = self._visual_randomizations
+        if not any(name in randomized for name in ("ground_tint","object_color","light_tilt_deg","camera_pos_m","camera_rot_deg")):
+            return
+        def rpy_deg_to_quat(rpy_deg : th.Tensor) -> th.Tensor:
+            return ros_rpy_to_quaternion_xyzw_th(rpy_deg*(math.pi/180))
+        link_ids = lambda link: self._adapter.get_links_ids([link])
+        camera_offset = None
+        if "camera_pos_m" in randomized or "camera_rot_deg" in randomized:
+            camera_offset = (self._observation_camera,
+                             self._visual_randomization("camera_pos_m") if "camera_pos_m" in randomized
+                                else self._thzeros((self.num_envs,3)),
+                             rpy_deg_to_quat(self._visual_randomization("camera_rot_deg") if "camera_rot_deg" in randomized
+                                             else self._thzeros((self.num_envs,3))))
+        self._adapter.alter_visuals(
+            link_colors = ((link_ids(self._grasping_conf.grasping_init_args.target_object_link),
+                            self._visual_randomization("object_color").unsqueeze(1))
+                           if "object_color" in randomized else None),
+            link_material_tints = ((link_ids(self._configuration.init_args.ground_link),
+                                    self._visual_randomization("ground_tint").unsqueeze(1))
+                                   if "ground_tint" in randomized else None),
+            lights_rotation_quatxyzw = (rpy_deg_to_quat(th.cat([self._visual_randomization("light_tilt_deg"),
+                                                                self._thzeros((self.num_envs,1))], dim=1))
+                                        if "light_tilt_deg" in randomized else None),
+            camera_offset = camera_offset)
+
+    def _augment_gray_image(self, gray : th.Tensor) -> th.Tensor:
+        """Apply the image augmentations to a grayscale image in [0,1], of shape (envs_num, H, W)."""
+        randomized = self._visual_randomizations
+        per_env = lambda name: self._visual_randomization(name).view(self.num_envs,1,1)
+        if "image_gamma" in randomized:
+            gray = gray.clamp(min=0.0).pow(per_env("image_gamma"))
+        if "image_contrast" in randomized:
+            gray = (gray-0.5)*per_env("image_contrast")+0.5
+        if "image_brightness" in randomized:
+            gray = gray+per_env("image_brightness")
+        if "image_noise_std" in randomized:
+            gray = gray+self._thrandn(size=gray.shape)*per_env("image_noise_std")
+        return gray.clamp(0.0, 1.0)
 
     def _camera_modalities(self) -> tuple[bool,bool]:
         """Which (grayscale, depth) camera channels are observed.
@@ -860,6 +1038,7 @@ class GraspVecEnv(RobotVecEnv):
                     return img
                 rows, cols = self._obs_camera_crop_rows_cols
                 return img[:, rows, cols]
+            self._apply_scene_visuals()
             # One call renders both modalities in a single pass when both are enabled: mjx.render()
             # produces the color and the depth buffer together.
             renderings = self._adapter.get_camera_images([self._observation_camera],
@@ -872,7 +1051,7 @@ class GraspVecEnv(RobotVecEnv):
                 obs_gray_image = _resize_to_obs(_crop(obs_gray_image))
                 # getRenderings gives HWC RGB (vec, H, W, 3); the CAMERA field is a single plane, so
                 # collapse RGB -> one grayscale channel back in [0,255], matching the uint8 substate.
-                obs_gray_image = ((obs_gray_image[..., :3] @ self._rgb_to_gray_w)*255).to(self._obs_dtype) # (vec, H, W)
+                obs_gray_image = (self._augment_gray_image(obs_gray_image[..., :3] @ self._rgb_to_gray_w)*255).to(self._obs_dtype) # (vec, H, W)
             else:
                 obs_gray_image = None
             if depth_enabled:
@@ -908,6 +1087,13 @@ class GraspVecEnv(RobotVecEnv):
             obs_gray_image = None
             obs_depth_image = None
             obs_unaltered_depth_image = None
+
+        if self._grasping_conf.grasping_init_args.blind_episodes_ratio > 0:
+            sighted = (1-self._grasping_episode_config.blind).view(self.num_envs,1,1)
+            if obs_gray_image is not None:
+                obs_gray_image = obs_gray_image*sighted
+            if obs_depth_image is not None:
+                obs_depth_image = obs_depth_image*sighted
 
         return GraspAdapterData(robot_data = super_adapter_data,
                                 current_object_pose = current_object_pose,
@@ -1015,6 +1201,11 @@ class GraspVecEnv(RobotVecEnv):
             new_inst_state[self.STATE_DEPTH] = {self.CAMERA_FIELDS.IMAGE: obs_depth_image}
         if adapter_data.obs_unaltered_depth_image is not None:
             new_inst_state[self.STATE_DEPTH_UNALTERED] = {self.CAMERA_FIELDS.IMAGE: adapter_data.obs_unaltered_depth_image}
+        if self._grasping_conf.grasping_init_args.blind_episodes_ratio > 0:
+            new_inst_state[self.STATE_BLIND] = {self.BLIND.BLIND: self._grasping_episode_config.blind.view(self.num_envs,1).to(self._obs_dtype)}
+        if len(self._visual_randomizations) > 0:
+            # constant within an episode: refreshed by _set_current_ep_config, not recomputed here
+            new_inst_state[self.STATE_VISUAL_RANDOMIZATIONS] = self._visual_randomization_state_vec.unsqueeze(1)
         return new_inst_state
 
 
@@ -1213,6 +1404,13 @@ class GraspVecEnv(RobotVecEnv):
             reward_gripper_pose = th.zeros_like(reward_gripper_pose)
             reward_gripper_close = th.zeros_like(reward_gripper_close)
             reward_gripper_grasp = th.zeros_like(reward_gripper_grasp)
+        if self._grasping_conf.grasping_init_args.blind_episodes_ratio > 0:
+            # Read from the state: at the end of an episode the configuration may already be the next one's
+            sighted = 1-state[self.STATE_BLIND][:,0,self.BLIND.BLIND,0]
+            reward_object_pose = reward_object_pose*sighted
+            reward_gripper_pose = reward_gripper_pose*sighted
+            reward_gripper_close = reward_gripper_close*sighted
+            reward_gripper_grasp = reward_gripper_grasp*sighted
 
         raw_rewards = GraspVecEnv.SubRewards(
             health = th.ones_like(reward_position),
@@ -1370,6 +1568,17 @@ class GraspVecEnv(RobotVecEnv):
             masses_ratios[:, self._object_mass_ratio_col] = self._sample_distr((self.num_envs,), self._object_mass_ratio_distribution)
             masked_assign(self._current_episode_config.link_masses_ratios, vec_mask, masses_ratios)
             self._fill_randomization_state(vec_mask)
+        blind_episodes_ratio = self._grasping_conf.grasping_init_args.blind_episodes_ratio
+        if blind_episodes_ratio > 0:
+            blind = (self._thrand((self.num_envs,)) < blind_episodes_ratio).to(self._grasping_episode_config.blind.dtype)
+            masked_assign(self._grasping_episode_config.blind, vec_mask, blind)
+        for randomization in self._visual_randomizations.values():
+            width = len(randomization.labels)
+            sampled = self._sample_distr((self.num_envs, width), randomization.distribution)
+            masked_assign(self._visual_randomization_state_vec[:, randomization.start:randomization.start+width],
+                          vec_mask,
+                          sampled - randomization.nominal)
+            self._scene_visuals_outdated = True
         table_height = self._sample_distr((self.num_envs), self._grasping_conf.table_height)
         # record_time("GraspVecEnv._set_current_ep_config: sampled table height")
         min_obj_z = table_height + self._cube_size*self._object_height_scale()/2 + 0.005

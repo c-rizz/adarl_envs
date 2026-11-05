@@ -48,7 +48,9 @@ def runner_builder(seed,
     stepLength_sec = env_builder_args.pop("stepLength_sec")
     th_device = env_builder_args["th_device"]
     show_gui = env_builder_args.pop("show_gui",False)
-    env_builder_args.update(robot_args_registry[env_builder_args["robot_model"].lower()](robot_options=env_builder_args.get("robot_options", {})))
+    robot_args = robot_args_registry[env_builder_args["robot_model"].lower()](robot_options=env_builder_args.get("robot_options", {}))
+    robot_args.update(env_builder_args)
+    env_builder_args = robot_args
     robot_name = env_builder_args["robot_name"]
     max_steps = env_builder_args.pop("max_steps_per_episode")
 
@@ -97,6 +99,7 @@ def runner_builder(seed,
                                             reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none",
                                             mjx_impl="warp",
                                             render_backend="warp",
+                                            render_shadows=env_builder_args.pop("render_shadows", False),
                                             render_znear=0.1,
                                             warp_nccdmax=env_builder_args.pop("mjx_warp_nccdmax", 10),
                                             warp_nconmax=env_builder_args.pop("mjx_warp_nconmax", 20))
@@ -292,6 +295,17 @@ def runner_builder(seed,
                                                 randomized_object_mass_ratios = env_builder_args.pop("randomized_object_mass_ratios", None),
                                                 randomized_object_scale_ratios = env_builder_args.pop("randomized_object_scale_ratios", None),
                                                 randomized_object_scale_uniform = env_builder_args.pop("randomized_object_scale_uniform", True),
+                                                blind_episodes_ratio = env_builder_args.pop("blind_episodes_ratio", 0.0),
+                                                randomized_ground_tint = env_builder_args.pop("randomized_ground_tint", None),
+                                                randomized_object_color = env_builder_args.pop("randomized_object_color", None),
+                                                randomized_light_tilt_deg = env_builder_args.pop("randomized_light_tilt_deg", None),
+                                                randomized_camera_pos_m = env_builder_args.pop("randomized_camera_pos_m", None),
+                                                randomized_camera_rot_deg = env_builder_args.pop("randomized_camera_rot_deg", None),
+                                                image_brightness = env_builder_args.pop("image_brightness", None),
+                                                image_contrast = env_builder_args.pop("image_contrast", None),
+                                                image_gamma = env_builder_args.pop("image_gamma", None),
+                                                image_noise_std = env_builder_args.pop("image_noise_std", None),
+                                                observe_visual_randomizations = env_builder_args.pop("observe_visual_randomizations", False),
                                                 gripper_joints = tuple(env_builder_args.pop("gripper_joints", ())),
                                                 gripper_close_distance = env_builder_args.pop("gripper_close_distance", 0.05),
                                                 gripper_closes_at_lower_limit = env_builder_args.pop("gripper_closes_at_lower_limit", True),
@@ -663,7 +677,6 @@ def get_kyon_args(robot_options : dict = {}):
     spawn_zed_cameras = robot_options.get("spawn_zed_cameras", False)
     # 500 is what the policies are trained with, but through xbot's explicit impedance loop it makes
     # the held arm chatter: xbot runs want something like the controlled arm's 20.
-    held_joints_damping = robot_options.get("held_joints_damping", 500.0)
     spawn_legs = spawn_legs or ctrl_legs
 
 
@@ -818,7 +831,7 @@ def get_kyon_args(robot_options : dict = {}):
             "revolute_dof_armature_override" : 0.234,
             "gripper_link_transforms" : [(0.0,   -0.0145,  0.151,     0.0, 0.0, 0.0, 1.0),
                                          (-0.107, 0.0,    -0.0362125, 0.0, 0.0, 0.0, 1.0)],
-            "held_joints_damping" :   {"default": held_joints_damping},
+            "held_joints_damping" :   {"default": 50.0},
             "held_joints_stiffness" : {"default": 500.0},
             "table_height" : ("uniform", (0.001, 0.001))
         }

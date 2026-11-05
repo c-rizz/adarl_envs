@@ -144,6 +144,7 @@ def adarl_builder_and_args(args):
     env_builder_args = {
         "action_smoothing_halflife_sec" : 0.0,
         "control_mode" : "position",
+        "control_mode_position_delta_max" : None, # only used with control_mode "position_delta"
         "desired_foot_clearance" : 0.1,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,

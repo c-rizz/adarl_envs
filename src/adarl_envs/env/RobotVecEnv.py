@@ -305,6 +305,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         robot_is_floating : bool
         robot_root_joint : str
         robot_root_link : tuple[str,str]
+        show_axes : bool
         show_goal : bool
         spawn_root_pose_xyz_xyzw : tuple[float,float,float,float,float,float,float]
         ui_camera_link : tuple[str,str]
@@ -570,6 +571,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                     robot_root_joint = root_joint_name,
                                                     robot_root_link=(init_args.robot_name,init_args.robot_root_link),
                                                     show_goal = True,
+                                                    show_axes = False,
                                                     spawn_root_pose_xyz_xyzw = (0,0,0,0,0,0,1),
                                                     ui_camera_link = ("simple_camera", "simple_camera_link"),
                                                     ui_camera_name="simple_camera",
@@ -1724,7 +1726,8 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if self._configuration.show_goal:
                 self._spawn_defs.append(arrow_spawn_def)
                 self._spawn_defs.append(arrow_yellow_spawn_def)
-            self._spawn_defs.append(axes_spawn_def)
+            if self._configuration.show_axes:
+                self._spawn_defs.append(axes_spawn_def)
         return self._spawn_defs
 
 
@@ -2549,7 +2552,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             vec_body_rel_linacc_xyz = th.zeros_like(example_vec_3d_tens)
             vec_body_ground_dist    = th.zeros_like(example_vec_3d_tens[:,0])
             vec_body_abs_pos_xy     = th.zeros_like(example_vec_3d_tens[:,:2])
-        # ggLog.info(f"axes pose = {self._adapter.getLinksState(requestedLinks = self._adapter.get_links_ids([('axes','root')]), use_com_pose = False)[:,0,:]}")
         # ggLog.info(f"bstates_v_13 = {bstates_v_13}")
         # th.cuda.synchronize()
         try:

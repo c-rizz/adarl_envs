@@ -15,8 +15,10 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     max_steps_per_episode=500 #int(ep_duration_sec/step_length_sec)
 
     algo = args["algorithm"]                                
-    if algo == "sac" or algo == "ppo":
+    if algo == "ppo":
         train_envs = 8192
+    elif algo == "sac":
+        train_envs = 2048
     elif algo == "sac_small" or algo == "ppo_small":
         train_envs = 8
     else:
@@ -27,6 +29,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     else:
         env_device = th.device("cuda",0)
 
+    position_delta = args["position_delta"]
 
     world = "flat_ground"
     # Standing upright on the rear legs the pelvis is much higher off the ground, and the robot tips
@@ -50,7 +53,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
         "action_smoothing_halflife_sec" : 0.0,
-        "control_mode" : "position",
+        "control_mode" : "position_delta" if position_delta else "position",
+        # rad per step: 0.12 at 20/1024s is ~6.1 rad/s, under the 0.9*7.6 rad/s safe velocity of the kyon legs
+        "control_mode_position_delta_max" : {"default": 0.12},
         "desired_foot_clearance" : 0.1,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
@@ -133,8 +138,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_height_velocity_weight" :           0.1,
         "reward_joint_acc_on_vel_weight" :          eps,
         "reward_joint_acceleration_weight" :        eps,
-        "reward_joint_actacc_weight" :              1.0*p,
-        "reward_joint_actdiff_weight" :             1.0*p,
+        "reward_joint_actacc_weight" :              1.0*p if not position_delta else 0.1,
+        "reward_joint_actdiff_weight" :             1.0*p if not position_delta else 0.1,
         "reward_joint_energy_weight" :              eps,
         "reward_joint_position_limit_weight" :      eps,
         "reward_joint_position_weight" :            eps,
@@ -164,6 +169,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
             "enable_arms" : args["arms"],
             "feet" : humanoid_feet
         },
+        "safety_cooldown_halflife_sec" : 1.0,
         "saturate_jimp_posref_limits" : False,
         "split_rewards" : True if algo=="sac" else False,
         "step_max_good_air_duration" : 0.5,
@@ -374,7 +380,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     buffer_size=(5*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
                                                     total_steps=2_000_000_000,
                                                     train_freq_vstep=5,
-                                                    grad_steps=50,
+                                                    grad_steps=10,
                                                     learning_starts=max_steps_per_episode*max(train_envs*1, 100),
                                                     parallel_envs=train_envs,
                                                     log_freq_vstep=max_steps_per_episode,
@@ -510,6 +516,7 @@ if __name__ == "__main__":
     ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
     ap.add_argument("--arms", default=False, action='store_true', help="Enable arms")
     ap.add_argument("--feet", default=False, action='store_true', help="Stand the humanoid on the flat feet instead of the contact-sphere legs (kyon_humanoid only)")
+    ap.add_argument("--position_delta", default=False, action='store_true', help="Actions are joint position deltas from the last reference, as in solve_grasp_env")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

@@ -326,7 +326,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                 "YAW_VEL_TRACKING"
                                                 ], start=0)
 
-    FEET_FIELDS = IntEnum("FEET_FIELDS" , [     "FEET_AIR_DURATIONS",
+    FEET_FIELDS = IntEnum("FEET_FIELDS" , [     "FEET_CONTACT",
+                                                "FEET_AIR_DURATIONS",
                                                 "FEET_GROUND_DURATIONS",
                                                 "FEET_VEL_X",
                                                 "FEET_VEL_Y",
@@ -616,11 +617,12 @@ class LocomotionVecEnv(RobotVecEnv):
         feet_num = len(self._loco_conf.init_args.feet_contact_links)
         self._feet_state_helper = ThBoxStateHelper( field_names=[e for e in self.FEET_FIELDS],
                                                     fields_minmax={ 
-                                                        self.FEET_FIELDS.FEET_AIR_DURATIONS     : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.FEET_GROUND_DURATIONS  : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.FEET_VEL_X : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.FEET_VEL_Y : th.as_tensor([[-10.0],[10.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_CONTACT           : th.as_tensor([[0.0],[1.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_AIR_DURATIONS     : th.as_tensor([[0.0],[2.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_GROUND_DURATIONS  : th.as_tensor([[0.0],[0.5]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS : th.as_tensor([[0.0],[2.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_VEL_X : th.as_tensor([[-3.0],[3.0]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_VEL_Y : th.as_tensor([[-3.0],[3.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_REL_POS_X : th.as_tensor([[-1.0],[1.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_REL_POS_Y : th.as_tensor([[-1.0],[1.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_REL_POS_Z : th.as_tensor([[-1.0],[1.0]]).expand(2,feet_num),
@@ -632,7 +634,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                     vec_size=adapter.vec_size(),
                                                     history_length=1,
                                                     observation_definitions=
-                                                        {   "privileged" : ThBoxStateHelper.SimpleObsDef(observable_fields=[self.FEET_FIELDS.FEET_AIR_DURATIONS,
+                                                        {   "privileged" : ThBoxStateHelper.SimpleObsDef(observable_fields=[self.FEET_FIELDS.FEET_CONTACT,
+                                                                                                                            self.FEET_FIELDS.FEET_AIR_DURATIONS,
                                                                                                                             self.FEET_FIELDS.FEET_GROUND_DURATIONS,
                                                                                                                             self.FEET_FIELDS.FEET_VEL_X,
                                                                                                                             self.FEET_FIELDS.FEET_VEL_Y,
@@ -961,13 +964,18 @@ class LocomotionVecEnv(RobotVecEnv):
         
         nenv_nfeet = (nenvs,len(self._loco_conf.init_args.feet_contact_links))
         if isinstance(self._adapter, BaseVecSimulationAdapter):
+            prev_feet_contact = prev_feet_state[:,self.FEET_FIELDS.FEET_CONTACT] > 0.5
             prev_feet_air_durations_vec_foot_t = prev_feet_state[:,self.FEET_FIELDS.FEET_AIR_DURATIONS]
             prev_feet_ground_durations_vec_foot_t = prev_feet_state[:,self.FEET_FIELDS.FEET_GROUND_DURATIONS]
             prev_avg_feet_step_durations = prev_feet_state[:,self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS]
             prev_peak_z = prev_feet_state[:,self.FEET_FIELDS.PEAK_POS_Z]
 
             eps_resetting_ext = eps_resetting.unsqueeze(1).expand(nenv_nfeet)
-            prev_feet_air_durations_vec_foot_t    = th.where(condition=eps_resetting_ext, 
+            # on reset the previous contact is taken to be the current one, so no touchdown or liftoff is detected
+            prev_feet_contact                     = th.where(condition=eps_resetting_ext,
+                                                            input=feet_are_touching_ground,
+                                                            other=prev_feet_contact)
+            prev_feet_air_durations_vec_foot_t    = th.where(condition=eps_resetting_ext,
                                                           input=self._thzeros(nenv_nfeet), 
                                                           other=prev_feet_air_durations_vec_foot_t)
             prev_feet_ground_durations_vec_foot_t = th.where(condition=eps_resetting_ext,
@@ -982,52 +990,34 @@ class LocomotionVecEnv(RobotVecEnv):
 
             dt = new_internal_state[self.INTERNAL_FIELDS.LAST_STEP_DT].view((nenvs,))
             dbg_check(lambda: th.all(dt < 0.1), assert_msg=f"Step dt is too large", async_assert=True)
-            feet_were_touching_ground = prev_feet_air_durations_vec_foot_t <= 0
-            # if foot is just lifting off, mark the time in the state
-            # if foot is already up, and stays up, leave the time there
-            # if it is just now touching down, flip the time to negative and add the current time (so it becomes the negative step duration)
-            # if it was already down, and stays down, write zero to it
-            # lifting_off = th.logical_and(th.logical_not(feet_are_touching_ground), feet_were_touching_ground)
-            just_touching_down = th.logical_and(th.logical_not(feet_were_touching_ground), feet_are_touching_ground)
-            # new_feet_liftoffs_vec_foot_t = th.zeros_like(prev_feet_state)
-            # ggLog.info(f"dt = {dt}")
-            # ggLog.info(f"feet_were_touching_ground = \n{feet_were_touching_ground}")
-            # ggLog.info(f"feet_are_touching_ground = \n{feet_are_touching_ground}")
-            new_feet_air_durations_vec_foot_t  = prev_feet_air_durations_vec_foot_t.clone()
-            th.where(condition=just_touching_down, #.expand(nenv_nfeet),
-                     input = -prev_feet_air_durations_vec_foot_t, # if touching down, write negative step duration
-                     other = new_feet_air_durations_vec_foot_t,
-                     out   = new_feet_air_durations_vec_foot_t)
-            th.where(condition=feet_were_touching_ground, #.expand(nenv_nfeet),
-                     input = self._thtens(0.0), # if was touching ground already in the previous step, write zero
-                     other = new_feet_air_durations_vec_foot_t,
-                     out   = new_feet_air_durations_vec_foot_t)
-            th.where(condition=th.logical_not(feet_are_touching_ground), #.expand(nenv_nfeet),
-                     input = new_feet_air_durations_vec_foot_t+dt.unsqueeze(1).expand(nenv_nfeet), # if is up, increase time
-                     other = new_feet_air_durations_vec_foot_t,
-                     out   = new_feet_air_durations_vec_foot_t)
-            
-            feet_were_in_air = th.logical_not(feet_were_touching_ground)
+            dt_ext = dt.unsqueeze(1).expand(nenv_nfeet)
             feet_are_in_air = th.logical_not(feet_are_touching_ground)
-            just_lifting_up =    th.logical_and(feet_were_touching_ground, feet_are_in_air)
-            new_feet_ground_durations_vec_foot_t  = prev_feet_ground_durations_vec_foot_t.clone()
-            th.where(condition=just_lifting_up.expand(nenv_nfeet),
-                     input = -prev_feet_ground_durations_vec_foot_t, # if touching down, write negative step duration
-                     other = new_feet_ground_durations_vec_foot_t,
-                     out   = new_feet_ground_durations_vec_foot_t)
-            th.where(condition=feet_were_in_air.expand(nenv_nfeet),
-                     input = self._thtens(0.0), # if was in the air already in the previous step, write zero
-                     other = new_feet_ground_durations_vec_foot_t,
-                     out   = new_feet_ground_durations_vec_foot_t)
-            th.where(condition=feet_are_touching_ground.expand(nenv_nfeet),
-                     input = new_feet_ground_durations_vec_foot_t+dt.unsqueeze(1).expand(nenv_nfeet), # if is on ground, increase time
-                     other = new_feet_ground_durations_vec_foot_t,
-                     out   = new_feet_ground_durations_vec_foot_t)
+            just_touching_down = th.logical_and(th.logical_not(prev_feet_contact), feet_are_touching_ground)
+            just_lifting_up =    th.logical_and(prev_feet_contact, feet_are_in_air)
+            # Each duration counts up during its own phase, keeps its final value for the one step after
+            # the phase ends, and is zero for the rest of the other phase: so a foot on the ground with a
+            # nonzero air duration has just touched down, and that is the duration of the swing just
+            # completed (and the same for liftoffs and the ground duration).
+            new_feet_air_durations_vec_foot_t = th.where(condition=feet_are_in_air,
+                                                         input = th.where(condition=just_lifting_up,
+                                                                          input = self._thtens(0.0),
+                                                                          other = prev_feet_air_durations_vec_foot_t) + dt_ext,
+                                                         other = th.where(condition=just_touching_down,
+                                                                          input = prev_feet_air_durations_vec_foot_t,
+                                                                          other = self._thtens(0.0)))
+            max_air_time_sec = 2.0
+            new_feet_air_durations_vec_foot_t = th.clamp(new_feet_air_durations_vec_foot_t, max=max_air_time_sec) # to avoid unbounded growth and limit state space
+            new_feet_ground_durations_vec_foot_t = th.where(condition=feet_are_touching_ground,
+                                                            input = th.where(condition=just_touching_down,
+                                                                             input = self._thtens(0.0),
+                                                                             other = prev_feet_ground_durations_vec_foot_t) + dt_ext,
+                                                            other = th.where(condition=just_lifting_up,
+                                                                             input = prev_feet_ground_durations_vec_foot_t,
+                                                                             other = self._thtens(0.0)))
             max_ground_time_sec = 0.5
             new_feet_ground_durations_vec_foot_t = th.clamp(new_feet_ground_durations_vec_foot_t, max=max_ground_time_sec) # to avoid unbounded growth and limit state space
+            new_feet_contact = feet_are_touching_ground.to(self._obs_dtype)
 
-            # ggLog.info(f"prev_feet_step_durations_vec_foot_t = \n{prev_feet_step_durations_vec_foot_t}")
-            # ggLog.info(f"new_feet_step_durations_vec_foot_t = \n{new_feet_step_durations_vec_foot_t}")
             new_avg_feet_step_durations = prev_avg_feet_step_durations.clone()
             a = self._loco_conf.init_args.feet_air_time_avg_alpha
             th.where(condition=just_touching_down.expand(nenv_nfeet),
@@ -1042,11 +1032,13 @@ class LocomotionVecEnv(RobotVecEnv):
                                     input = th.maximum(feet_z, peak_feet_z), # if just lifted up, record the foot height as the peak height of the step
                                     other = peak_feet_z) # otherwise keep the previous value (which is either the
         else:
+            new_feet_contact = self._thtens([0.0]).expand(nenv_nfeet)
             new_feet_air_durations_vec_foot_t = self._thtens([0.0]).expand(nenv_nfeet)
             new_feet_ground_durations_vec_foot_t = self._thtens([0.0]).expand(nenv_nfeet)
             new_avg_feet_step_durations = self._thtens([0.0]).expand(nenv_nfeet)
             peak_feet_z = self._thtens([0.0]).expand(nenv_nfeet)
-        new_feet_state = {  self.FEET_FIELDS.FEET_AIR_DURATIONS : new_feet_air_durations_vec_foot_t,
+        new_feet_state = {  self.FEET_FIELDS.FEET_CONTACT : new_feet_contact,
+                            self.FEET_FIELDS.FEET_AIR_DURATIONS : new_feet_air_durations_vec_foot_t,
                             self.FEET_FIELDS.FEET_GROUND_DURATIONS : new_feet_ground_durations_vec_foot_t,
                             self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS : new_avg_feet_step_durations,
                             self.FEET_FIELDS.FEET_VEL_X : feet_linvels_vec_foot_xyz[:,:,0],
@@ -1366,8 +1358,9 @@ class LocomotionVecEnv(RobotVecEnv):
         # This reward tries to encourage good durations of feet being in the air
         feet_state = state[self.STATE_FEET][:,0] # vec_size*history*fields*nfeet -> vec_size*fields*nfeet
         feet_air_durations_secs = feet_state[:,self.FEET_FIELDS.FEET_AIR_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
-        steps_finishing = feet_air_durations_secs < 0
-        feet_air_durations_secs = -feet_air_durations_secs # When the value is positive then it is the duration of a currently ongoing step, which we dont consider
+        feet_touching_ground = feet_state[:,self.FEET_FIELDS.FEET_CONTACT] > 0.5
+        # the air duration is nonzero on the ground only at touchdown, where it is the one of the step just completed
+        steps_finishing = feet_touching_ground & (feet_air_durations_secs > 0)
         # subtracting 0.1 from the durations makes it so that very short steps are actually penalized with a negative reward
         # this makes doing small steps worse than doing nothing
         # squash the durations to max_good step, and offset it o that steps shorter than min_good_step are negative
@@ -1389,9 +1382,9 @@ class LocomotionVecEnv(RobotVecEnv):
 
         # ---------------- FEET GROUND TIME REWARD ----------------
         # Similar to feet air time, but rewarding good durations of ground contact
-        feet_ground_durations_secs = feet_state[:,self.FEET_FIELDS.FEET_GROUND_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
-        steps_starting = feet_ground_durations_secs < 0
-        feet_ground_durations = -feet_ground_durations_secs # When the value is positive then it is the duration of a currently ongoing step, which we dont consider
+        feet_ground_durations = feet_state[:,self.FEET_FIELDS.FEET_GROUND_DURATIONS] # vec_size*fields*nfeet -> vec_size*nfeet
+        # the ground duration is nonzero in the air only at liftoff, where it is the one of the stance just completed
+        steps_starting = th.logical_not(feet_touching_ground) & (feet_ground_durations > 0)
         corrected_ground_durations = th.tanh((feet_ground_durations - self._loco_conf.init_args.step_min_good_ground_duration)/self._loco_conf.init_args.step_max_good_ground_duration)*self._loco_conf.init_args.step_max_good_ground_duration
         feet_ground_rewards = steps_starting*(th.sign(corrected_ground_durations)*(corrected_ground_durations)**2+corrected_ground_durations)
         step_ground_time_is_bad  = (feet_ground_rewards<=0)
@@ -1407,15 +1400,13 @@ class LocomotionVecEnv(RobotVecEnv):
         
         # ---------------- FEET SLIP REWARD ----------------
         # This reward tries to encourage the robot to not slide its feet when they are in contact with the ground
-        feet_linvels_xy = feet_state[:,1:3] # vec_size*fields*nfeet -> vec_size*2*nfeet
+        feet_linvels_xy = feet_state[:,[self.FEET_FIELDS.FEET_VEL_X, self.FEET_FIELDS.FEET_VEL_Y]] # vec_size*fields*nfeet -> vec_size*2*nfeet
         feet_linvels = th.linalg.norm(feet_linvels_xy, dim=1) # vec_size*fields*nfeet -> vec_size*nfeet
-        feet_touching_ground = feet_state[:,self.FEET_FIELDS.FEET_AIR_DURATIONS] <= 0
         feet_sliding_linvel = feet_linvels*feet_touching_ground
         reward_slip = joint_penalty_reward(feet_sliding_linvel, max_rew=1, exponent=2)
 
         # ---------------- FEET ON GROUND REWARD ----------------
         # Reward for having feet on the ground, to encourage the robot to stand still when it should
-        feet_touching_ground = feet_state[:,0] <= 0
         reward_feet_on_ground = th.mean(feet_touching_ground.to(th.float32), dim=1) * th.logical_not(should_be_moving.view((self.num_envs,)))
 
         # ---------------- FEET STEP HEIGHT REWARD ----------------

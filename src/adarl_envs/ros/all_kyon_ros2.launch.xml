@@ -34,71 +34,104 @@
   <arg name="scene_camera_pitch" default="0.785"/>
   <arg name="scene_camera_yaw" default="0.0"/>
 
-  <include file="$(find-pkg-share kyon_$(var simulator))/launch/kyon_world.launch">
-    <arg name="arms" value="$(var arms)"/>
-    <arg name="legs" value="$(var legs)"/>
-    <arg name="payload" value="$(var payload)"/>
-    <arg name="wheels" value="$(var wheels)"/>
-    <arg name="velodyne" value="$(var velodyne)"/>
-    <arg name="sensors" value="$(var sensors)"/>
-    <arg name="dagana" value="$(var dagana)"/>
-    <arg name="feet" value="$(var feet)"/>
-    <arg name="steering_wheels" value="$(var steering_wheels)"/>
-    <arg name="varta" value="$(var varta)"/>
-    <arg name="ft_sensors" value="$(var ft_sensors)"/>
-    <arg name="gui" value="$(var gui)"/>
-    <arg name="paused" value="$(var paused)"/>
-    <arg name="hesai_jt128" value="$(var hesai_jt128)"/>
-    <arg name="camera_front_up" value="$(var camera_front_up)"/>
-    <arg name="camera_front_down" value="$(var camera_front_down)"/>
-  </include>
-
-  <!-- scene camera, gazebo only -->
-  <group if="$(eval '&quot;$(var simulator)&quot; == &quot;gazebo&quot;')">
-    <group if="$(var scene_camera)">
-      <node pkg="ros_gz_sim" exec="create" name="scene_camera_spawner">
-        <param name="string" type="str" value="&lt;sdf version='1.9'&gt;
-          &lt;model name='scene_camera'&gt;
-            &lt;static&gt;true&lt;/static&gt;
-            &lt;link name='link'&gt;
-              &lt;sensor name='scene_camera' type='camera'&gt;
-                &lt;topic&gt;scene_camera/image&lt;/topic&gt;
-                &lt;update_rate&gt;30&lt;/update_rate&gt;
-                &lt;always_on&gt;true&lt;/always_on&gt;
-                &lt;camera&gt;
-                  &lt;horizontal_fov&gt;1.047&lt;/horizontal_fov&gt;
-                  &lt;image&gt;
-                    &lt;width&gt;640&lt;/width&gt;
-                    &lt;height&gt;480&lt;/height&gt;
-                    &lt;format&gt;R8G8B8&lt;/format&gt;
-                  &lt;/image&gt;
-                  &lt;clip&gt;
-                    &lt;near&gt;0.05&lt;/near&gt;
-                    &lt;far&gt;100&lt;/far&gt;
-                  &lt;/clip&gt;
-                &lt;/camera&gt;
-              &lt;/sensor&gt;
-            &lt;/link&gt;
-          &lt;/model&gt;
-        &lt;/sdf&gt;"/>
-        <param name="x" value="$(var scene_camera_x)"/>
-        <param name="y" value="$(var scene_camera_y)"/>
-        <param name="z" value="$(var scene_camera_z)"/>
-        <param name="roll" value="$(var scene_camera_roll)"/>
-        <param name="pitch" value="$(var scene_camera_pitch)"/>
-        <param name="yaw" value="$(var scene_camera_yaw)"/>
-      </node>
-
-      <node pkg="ros_gz_bridge" exec="parameter_bridge" name="scene_camera_bridge"
-            args="
-             /scene_camera/image@sensor_msgs/msg/Image[gz.msgs.Image
-             /scene_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo
-             "/>
-    </group>
-  </group>
 
   <set_parameter name="use_sim_time" value="false"/>
 
-  <executable cmd="sleep 5 &amp;&amp; xbot2-core -C $(var xbot_cfg_dir)/xbotcore_kyon_ros2.yaml" shell="true" output="screen"/>
+  <group if="$(eval '&quot;$(var simulator)&quot; == &quot;mujoco&quot;')">
+
+    <include file="$(dirname)/kyon_mujoco_world.launch">
+      <arg name="arms" value="$(var arms)"/>
+      <arg name="legs" value="$(var legs)"/>
+      <arg name="payload" value="$(var payload)"/>
+      <arg name="wheels" value="$(var wheels)"/>
+      <arg name="velodyne" value="$(var velodyne)"/>
+      <arg name="sensors" value="$(var sensors)"/>
+      <arg name="dagana" value="$(var dagana)"/>
+      <arg name="feet" value="$(var feet)"/>
+      <arg name="steering_wheels" value="$(var steering_wheels)"/>
+      <arg name="varta" value="$(var varta)"/>
+      <arg name="ft_sensors" value="$(var ft_sensors)"/>
+      <arg name="gui" value="$(var gui)"/>
+      <arg name="paused" value="$(var paused)"/>
+      <arg name="hesai_jt128" value="$(var hesai_jt128)"/>
+      <arg name="camera_front_up" value="$(var camera_front_up)"/>
+      <arg name="camera_front_down" value="$(var camera_front_down)"/>
+      <arg name="extra_xml_cmd" value="xacro $(dirname)/../models/cube.mjcf.xacro"/>
+    </include>
+
+    <executable cmd="sleep 5 &amp;&amp; xbot2-core -C $(var xbot_cfg_dir)/xbotcore_kyon_ros2.yaml --hw mj" shell="true" output="screen"/>
+    <executable cmd="sleep 5 &amp;&amp; $(dirname)/launch_kyon_grasp_camzmq_mujoco.sh"                     shell="true" output="screen"/>
+  </group>
+
+
+
+
+  <group if="$(eval '&quot;$(var simulator)&quot; == &quot;gazebo&quot;')">
+
+    <include file="$(find-pkg-share kyon_$(var simulator))/launch/kyon_world.launch">
+      <arg name="arms" value="$(var arms)"/>
+      <arg name="legs" value="$(var legs)"/>
+      <arg name="payload" value="$(var payload)"/>
+      <arg name="wheels" value="$(var wheels)"/>
+      <arg name="velodyne" value="$(var velodyne)"/>
+      <arg name="sensors" value="$(var sensors)"/>
+      <arg name="dagana" value="$(var dagana)"/>
+      <arg name="feet" value="$(var feet)"/>
+      <arg name="steering_wheels" value="$(var steering_wheels)"/>
+      <arg name="varta" value="$(var varta)"/>
+      <arg name="ft_sensors" value="$(var ft_sensors)"/>
+      <arg name="gui" value="$(var gui)"/>
+      <arg name="paused" value="$(var paused)"/>
+      <arg name="hesai_jt128" value="$(var hesai_jt128)"/>
+      <arg name="camera_front_up" value="$(var camera_front_up)"/>
+      <arg name="camera_front_down" value="$(var camera_front_down)"/>
+    </include>
+
+    <!-- scene camera, gazebo only -->
+    <group if="$(eval '&quot;$(var simulator)&quot; == &quot;gazebo&quot;')">
+      <group if="$(var scene_camera)">
+        <node pkg="ros_gz_sim" exec="create" name="scene_camera_spawner">
+          <param name="string" type="str" value="&lt;sdf version='1.9'&gt;
+            &lt;model name='scene_camera'&gt;
+              &lt;static&gt;true&lt;/static&gt;
+              &lt;link name='link'&gt;
+                &lt;sensor name='scene_camera' type='camera'&gt;
+                  &lt;topic&gt;scene_camera/image&lt;/topic&gt;
+                  &lt;update_rate&gt;30&lt;/update_rate&gt;
+                  &lt;always_on&gt;true&lt;/always_on&gt;
+                  &lt;camera&gt;
+                    &lt;horizontal_fov&gt;1.047&lt;/horizontal_fov&gt;
+                    &lt;image&gt;
+                      &lt;width&gt;640&lt;/width&gt;
+                      &lt;height&gt;480&lt;/height&gt;
+                      &lt;format&gt;R8G8B8&lt;/format&gt;
+                    &lt;/image&gt;
+                    &lt;clip&gt;
+                      &lt;near&gt;0.05&lt;/near&gt;
+                      &lt;far&gt;100&lt;/far&gt;
+                    &lt;/clip&gt;
+                  &lt;/camera&gt;
+                &lt;/sensor&gt;
+              &lt;/link&gt;
+            &lt;/model&gt;
+          &lt;/sdf&gt;"/>
+          <param name="x" value="$(var scene_camera_x)"/>
+          <param name="y" value="$(var scene_camera_y)"/>
+          <param name="z" value="$(var scene_camera_z)"/>
+          <param name="roll" value="$(var scene_camera_roll)"/>
+          <param name="pitch" value="$(var scene_camera_pitch)"/>
+          <param name="yaw" value="$(var scene_camera_yaw)"/>
+        </node>
+
+        <node pkg="ros_gz_bridge" exec="parameter_bridge" name="scene_camera_bridge"
+              args="
+              /scene_camera/image@sensor_msgs/msg/Image[gz.msgs.Image
+              /scene_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo
+              "/>
+      </group>
+    </group>
+    
+    <executable cmd="sleep 5 &amp;&amp; xbot2-core -C $(var xbot_cfg_dir)/xbotcore_kyon_ros2.yaml" shell="true" output="screen"/>
+  </group>
 
 </launch>

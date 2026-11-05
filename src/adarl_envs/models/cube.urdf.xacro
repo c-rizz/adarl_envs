@@ -8,7 +8,7 @@
   <xacro:arg name="green" default="0.0" />
   <xacro:arg name="blue" default="0.0" />
   <xacro:arg name="alpha" default="1.0" />
-  <xacro:arg name="gazebo" default="true" />
+  <xacro:arg name="gazebo" default="false" />
   <xacro:arg name="add_floating_joint" default="true" />
   <xacro:arg name="add_fixed_joint" default="false" />
   <xacro:arg name="fixed_joint_xyz" default="0 0 0" />
@@ -100,15 +100,17 @@
         </joint>
     </xacro:if>
 
-    <gazebo reference="cube"> <!-- reference to a existing "link" -->
-        <visual>
-        <material>
-            <ambient>${red} ${green} ${blue} ${alpha}</ambient>
-            <diffuse>${red} ${green} ${blue} ${alpha}</diffuse>
-            <specular>${red} ${green} ${blue} ${alpha}</specular>
-            <emissive>0 0 0 1</emissive>
-        </material>
-        </visual>
-    </gazebo>
+    <xacro:if value="${gazebo}">
+        <gazebo reference="cube"> <!-- reference to a existing "link" -->
+            <visual>
+            <material>
+                <ambient>${red} ${green} ${blue} ${alpha}</ambient>
+                <diffuse>${red} ${green} ${blue} ${alpha}</diffuse>
+                <specular>${red} ${green} ${blue} ${alpha}</specular>
+                <emissive>0 0 0 1</emissive>
+            </material>
+            </visual>
+        </gazebo>
+    </xacro:if>
 </robot>
 

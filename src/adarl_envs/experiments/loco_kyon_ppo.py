@@ -50,7 +50,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
         "action_smoothing_halflife_sec" : 0.0,
-        "control_mode" : "position",
+        "control_mode" : "position_delta" if args["position_delta"] else "position",
+        # rad per step: 0.12 at 20/1024s is ~6.1 rad/s, under the 0.9*7.6 rad/s safe velocity of the kyon legs
+        "control_mode_position_delta_max" : {"default": 0.12},
         "desired_foot_clearance" : 0.1,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
@@ -353,6 +355,7 @@ if __name__ == "__main__":
     ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
     ap.add_argument("--arms", default=False, action='store_true', help="Enable arms")
     ap.add_argument("--feet", default=False, action='store_true', help="Stand the humanoid on the flat feet instead of the contact-sphere legs (kyon_humanoid only)")
+    ap.add_argument("--position_delta", default=False, action='store_true', help="Actions are joint position deltas from the last reference, as in solve_grasp_env")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

@@ -1,0 +1,66 @@
+<launch>
+
+    <arg name="world" default="$(find-pkg-share kyon_mujoco)/world/world.xml" />
+    <arg name="urdf" default="$(find-pkg-share kyon_urdf)/urdf/kyon.urdf.xacro" />
+    <arg name="srdf" default="$(find-pkg-share kyon_srdf)/srdf/kyon.srdf.xacro" />
+
+    <!-- kyon configuration parameters -->
+    <arg name="arms" default="true" />
+    <arg name="legs" default="true" />
+    <arg name="sensors" default="false" />
+    <arg name="payload" default="false" />
+    <arg name="dagana" default="false" />
+    <arg name="feet" default="true" />
+    <arg name="wheels" default="false" />
+    <arg name="steering_wheels" default="false" />
+    <arg name="varta" default="true" />
+    <arg name="ft_sensors" default="true" />
+    <arg name="velodyne" default="false" />
+    <arg name="camera_front_up" default="false" />
+    <arg name="camera_front_down" default="false" />
+    <arg name="extra_xml_cmd" default=""/>
+
+    <!-- Simulator wrapper parameters -->
+    <arg name="enable_mjctl" default="false"/>
+    <arg name="enable_heightscan" default="false"/>
+    <arg name="headless" default="false"/>
+
+    <!-- Load the URDF/SRDF into the ROS Parameter Server -->
+    <let name="urdf_command"
+        value="xacro $(find-pkg-share kyon_urdf)/urdf/kyon_robot.urdf.xacro floating_joint:=true upper_body:=$(var arms) legs:=$(var legs) sensors:=$(var sensors) payload:=$(var payload) varta:=$(var varta) dagana:=$(var dagana) feet:=$(var feet) wheels:=$(var wheels) steering_wheels:=$(var steering_wheels) ft_sensors:=$(var ft_sensors) velodyne:=$(var velodyne)" />
+
+    <let name="srdf_command"
+        value="xacro $(find-pkg-share kyon_srdf)/srdf/kyon.srdf.xacro floating_joint:=true upper_body:=$(var arms) legs:=$(var legs) sensors:=$(var sensors) payload:=$(var payload) dagana:=$(var dagana) feet:=$(var feet) wheels:=$(var wheels) steering_wheels:=$(var steering_wheels) ft_sensors:=$(var ft_sensors) velodyne:=$(var velodyne)" />
+
+    <let name="cfg_xml_command"
+        value="xacro $(find-pkg-share kyon_mujoco)/mjcf/kyon_mujoco.xml.xacro floating_joint:=true upper_body:=$(var arms) legs:=$(var legs) sensors:=$(var sensors) payload:=$(var payload) varta:=$(var varta) dagana:=$(var dagana) feet:=$(var feet) wheels:=$(var wheels) steering_wheels:=$(var steering_wheels) ft_sensors:=$(var ft_sensors) velodyne:=$(var velodyne) camera_front_up:=$(var camera_front_up) camera_front_down:=$(var camera_front_down)" />
+
+    <let name="mjctl_flag" value="--remote-control-endpoint=tcp://127.0.0.1:5555" if="$(var enable_mjctl)"/>
+    <let name="mjctl_flag" value="" unless="$(var enable_mjctl)"/>
+
+    <let name="terrain_scan_body_flag" value="--terrain-scan-body=pelvis" if="$(var enable_heightscan)"/>
+    <let name="terrain_scan_body_flag" value="" unless="$(var enable_heightscan)"/>
+
+    <let name="headless_flag" value="--headless" if="$(var headless)"/>
+    <let name="headless_flag" value="" unless="$(var headless)"/>
+
+    <let name="extra_xml_flag" value="--xml-cmd=$(var extra_xml_cmd)" if="$(eval '&quot;$(var extra_xml_cmd)&quot; != &quot;&quot;')"/>
+    <let name="extra_xml_flag" value="" unless="$(eval '&quot;$(var extra_xml_cmd)&quot; != &quot;&quot;')"/>
+
+    <executable name="xbot2_mujoco" output="screen" cmd="$(find-pkg-prefix kyon_mujoco)/lib/kyon_mujoco/launch_simulator.bash
+        --name kyon
+        --urdf-cmd $(var urdf_command)
+        --srdf-cmd $(var srdf_command)
+        --xml-cmd $(var cfg_xml_command)
+        --xml $(var world)
+        --detect-spawn-locations
+        $(var extra_xml_flag)
+        $(var mjctl_flag)
+        $(var terrain_scan_body_flag)
+        $(var headless_flag)
+        " >
+        <env name="PYTHONUNBUFFERED" value="1" />
+    </executable>
+
+
+</launch>

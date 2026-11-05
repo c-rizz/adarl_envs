@@ -49,6 +49,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     eval_freq = 5
     r = 1.0
     n = 1.0
+    v = 0.0 # visual randomization strength
     env_builder_args = {
         "reward_health_weight" :                0.0,
         "reward_joint_power_weight" :           0.0,
@@ -91,8 +92,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
-        "held_joints_damping" : 20.0,
-        "held_joints_stiffness" : 2000.0,
+        "held_joints_damping" : 50.0,
+        "held_joints_stiffness" : 50.0,
         "history_length_action_smoothed" : 0,
         "history_length_action_raw" : 1,
         "impulse_duration_minmax" : [0.01, 2.5],
@@ -132,6 +133,18 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
         "randomized_object_mass_ratios" : ("uniform", [0.5*r,2.0*r]), # the cube is 0.1 kg nominal
         "randomized_object_scale_ratios" : ("uniform", [0.75*r,1.75*r]), # the cube is 4 cm nominal: 3 to 7 cm
+        "blind_episodes_ratio" : 0.1*r,
+        "randomized_ground_tint" : ("uniform", [0.4*v,1.4*v]),
+        "randomized_object_color" : ("uniform", [0.2*v,1.0*v]),
+        "randomized_light_tilt_deg" : ("uniform", [-30.0*v,30.0*v]),
+        "randomized_camera_pos_m" : ("uniform", [-0.005*v,0.005*v]),
+        "randomized_camera_rot_deg" : ("uniform", [-2.0*v,2.0*v]),
+        "image_brightness" : ("uniform", [-0.15*v,0.15*v]),
+        "image_contrast" : ("uniform", [0.7*v,1.3*v]),
+        "image_gamma" : ("uniform", [0.7*v,1.4*v]),
+        "image_noise_std" : ("uniform", [0.0,0.02*v]),
+        "observe_visual_randomizations" : False,
+        "render_shadows" : False,
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "record_video" : True,
         "randomization_recycle_init_pose" : True,
@@ -155,7 +168,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # "mjx_geom_overrides" : {
         #     "cube" : {"friction" : [2.0,0.001,0.0005]}
         # },
-        "mjx_opt_preset" : "slow",
+        "mjx_opt_preset" : "faster",
         "mjx_opt_override" : {"impratio" : 1.0,
                             #   "ccd_iterations" : 50
                               },

@@ -210,6 +210,8 @@ def grasp_builder_and_args():
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
+        "held_joints_damping" : 10.0,
+        "held_joints_stiffness" : 200.0,
         "history_length_action_smoothed" : 0,
         "history_length_action_raw" : 1,
         "impulse_duration_minmax" : [0.01, 2.5],
@@ -326,6 +328,18 @@ def grasp_builder_and_args():
         "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
         "randomized_object_mass_ratios" : ("uniform", [0.5*r,2.0*r]),
+        "blind_episodes_ratio" : 0.1*r,
+        "randomized_ground_tint" : ("uniform", [0.4*r,1.4*r]),
+        "randomized_object_color" : ("uniform", [0.2*r,1.0*r]),
+        "randomized_light_tilt_deg" : ("uniform", [-30.0*r,30.0*r]),
+        "randomized_camera_pos_m" : ("uniform", [-0.005*r,0.005*r]),
+        "randomized_camera_rot_deg" : ("uniform", [-2.0*r,2.0*r]),
+        "image_brightness" : ("uniform", [-0.15*r,0.15*r]),
+        "image_contrast" : ("uniform", [0.7*r,1.3*r]),
+        "image_gamma" : ("uniform", [0.7*r,1.4*r]),
+        "image_noise_std" : ("uniform", [0.0,0.02*r]),
+        "observe_visual_randomizations" : False,
+        "render_shadows" : False,
         "randomized_dof_armature_ratios" : ("uniform", [0.9*r,1.1*r]),
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
         "impulse_probability_per_sec" : 0.0,
@@ -644,7 +658,7 @@ if __name__ == "__main__":
     ap.add_argument("--comment", required = True, type=str, help="Comment explaining what this run is about")
     ap.add_argument("--model", required = False, default=None, type=str, help="Model to load")
     ap.add_argument("--mode", default="mjx", type=str, help="Adapter to use ('mjx'/'mujoco'/'pybullet'/'xbot-zmq')")
-    ap.add_argument("--robot", default="centauro", type=str, help="Robot to be used ('centauro'/'franka')")
+    ap.add_argument("--robot", default="kyon", type=str, help="Robot to be used ('kyon'/'centauro'/'franka')")
     ap.add_argument("--rt-factor", default=1.0, type=float, help="Tentative realtime factor")
     ap.add_argument("--evaluate", default=None, type=int, help="Evaluate the policy with this number of episodes")
     ap.add_argument("--gui", default=False, action='store_true', help="Start the gui, instead of streaming renderings")

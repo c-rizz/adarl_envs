@@ -16,3 +16,14 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "slow: slow to run (builds a simulator and/or runs many steps)",
+    "mujoco: exercises the MuJoCo (CPU) backend",
+]

@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<mujoco xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:arg name="name" default="cube"/>
+  <xacro:arg name="mass" default="0.1"/>
+  <xacro:arg name="size" default="0.04"/>
+  <xacro:arg name="xyz" default="0.6 0 0"/>
+  <xacro:arg name="rgba" default="1 0 0 1"/>
+  <xacro:property name="half_size" value="${$(arg size)/2}"/>
+
+  <worldbody>
+    <body name="$(arg name)" pos="$(arg xyz)">
+      <freejoint name="$(arg name)_joint"/>
+      <geom name="$(arg name)_geom" type="box" size="${half_size} ${half_size} ${half_size}" mass="$(arg mass)" rgba="$(arg rgba)"/>
+    </body>
+  </worldbody>
+
+</mujoco>

@@ -332,6 +332,8 @@ def grasp_builder_and_args():
         "randomized_ground_tint" : ("uniform", [0.4*r,1.4*r]),
         "randomized_object_color" : ("uniform", [0.2*r,1.0*r]),
         "randomized_light_tilt_deg" : ("uniform", [-30.0*r,30.0*r]),
+        "randomized_light_intensity" : ("uniform", [0.5*r,1.5*r]), # needs mujoco 3.17
+        "randomized_light_ambient" : ("uniform", [0.5*r,2.0*r]), # needs mujoco 3.17
         "randomized_camera_pos_m" : ("uniform", [-0.005*r,0.005*r]),
         "randomized_camera_rot_deg" : ("uniform", [-2.0*r,2.0*r]),
         "image_brightness" : ("uniform", [-0.15*r,0.15*r]),

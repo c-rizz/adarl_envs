@@ -118,7 +118,13 @@ class GrapVecEnvInitArgs():
     privileged_unaltered_depth : bool = False
     """Also observe the depth *without* the stereo degradation, in the privileged group only. The base
     observation keeps the degraded image, so what the actor sees is unchanged. Needs observe_camera,
-    use_depth_cam and depth_stereo_sim, since otherwise there is no alteration to keep apart from."""
+    use_depth_cam and depth_stereo_sim, since otherwise there is no alteration to keep apart from. It is
+    rendered like privileged_unaltered_camera, and black in the blind episodes."""
+    privileged_unaltered_camera : bool = False
+    """Also observe the grayscale image without the visual randomizations and the image augmentations, in
+    the privileged group only: the scene as it is with the nominal colors, light and camera pose. What is
+    part of the physics, as the object's size, stays. It is black in the blind episodes. When the scene is
+    randomized this takes a second render. Needs the grayscale image to be observed."""
     ignore_camera_fov_mismatch : bool = False
     """Only warn, instead of refusing to start, when a real camera's field of view differs from the
     simulated one. The resolution and the published modalities are still enforced."""
@@ -144,6 +150,13 @@ class GrapVecEnvInitArgs():
     """The r, g, b of the target object, each sampled on its own per episode."""
     randomized_light_tilt_deg : DistributionDef | None = None
     """Roll and pitch the light direction is rotated by, in degrees, each sampled on its own per episode."""
+    randomized_light_intensity : DistributionDef | None = None
+    """Factor the diffuse and specular color of the lights are multiplied by, sampled per episode."""
+    randomized_light_ambient : DistributionDef | None = None
+    """Factor the ambient color of the lights is multiplied by, sampled per episode."""
+    randomized_light_per_channel : bool = False
+    """Sample randomized_light_intensity and randomized_light_ambient on their own for r, g and b, tinting the
+    light. Otherwise one factor is used for all the channels."""
     randomized_camera_pos_m : DistributionDef | None = None
     """Offset of the observation camera along x, y and z, in meters, each sampled on its own per episode."""
     randomized_camera_rot_deg : DistributionDef | None = None
@@ -209,6 +222,8 @@ class GraspAdapterData:
     obs_unaltered_depth_image : th.Tensor | None
     """The depth before the stereo degradation, processed like obs_depth_image. Only produced when
     privileged_unaltered_depth is set."""
+    obs_unaltered_gray_image : th.Tensor | None
+    """The grayscale image without visual randomizations. Only produced when privileged_unaltered_camera is set."""
 
 def _camera_hfov_deg(camera_model : str | None) -> float:
     """Horizontal field of view of the observation camera: the real camera's, or a generic 70 deg."""
@@ -231,8 +246,13 @@ class GraspVecEnv(RobotVecEnv):
     STATE_CAMERA = "camera"
     STATE_DEPTH = "depth"
     STATE_DEPTH_UNALTERED = "depth_unaltered"
+    STATE_CAMERA_UNALTERED = "camera_unaltered"
     STATE_BLIND = "blind"
     STATE_VISUAL_RANDOMIZATIONS = "visual_randomizations"
+
+    SCENE_VISUAL_RANDOMIZATIONS = ("ground_tint","object_color","light_tilt_deg","light_intensity","light_ambient",
+                                   "camera_pos_m","camera_rot_deg")
+    """The visual randomizations that change what gets rendered, the others alter the rendered image."""
 
     OBJECT_POSE_PLACEHOLDER = (0.0, 0.0, 0.0,   0.0, 0.0, 0.0, 1.0)
     """Stand-in object pose for adapters that cannot report one: on a real robot the object is not
@@ -383,6 +403,11 @@ class GraspVecEnv(RobotVecEnv):
                              f"use_depth_cam={grasp_init_args.use_depth_cam}, "
                              f"depth_stereo_sim={grasp_init_args.depth_stereo_sim}: without a degraded "
                              f"depth there is no unaltered one to keep apart")
+        if grasp_init_args.privileged_unaltered_camera and not (grasp_init_args.observe_camera
+                                                                and (grasp_init_args.use_gray_cam or not grasp_init_args.use_depth_cam)):
+            raise ValueError(f"privileged_unaltered_camera needs the grayscale image to be observed, got "
+                             f"observe_camera={grasp_init_args.observe_camera}, use_gray_cam={grasp_init_args.use_gray_cam}, "
+                             f"use_depth_cam={grasp_init_args.use_depth_cam}")
         # The crop is a fixed window on a fixed render resolution, so resolve it once here.
         self._obs_camera_crop_rows_cols : tuple[slice,slice] | None = None
         if grasp_init_args.obs_camera_crop is not None:
@@ -699,8 +724,9 @@ class GraspVecEnv(RobotVecEnv):
                                                         obs_defs={"base":{"observable":True,"concatenate":True,"noise":None},
                                                                   "privileged":{"observable":True,"concatenate":True,"noise":None}})
 
-        vel_base_observable_fields=[self.GRASPING_VELOCITIES.GRIPPER_LINVEL,
-                                    self.GRASPING_VELOCITIES.GRIPPER_ANGVEL]
+        # The gripper velocities are not in the base group: only a simulation can report them, on a real
+        # robot they are zero, as _get_adapter_data_raw does not have them.
+        vel_base_observable_fields = []
         if self._grasping_conf.grasping_init_args.observe_object_pose:
             vel_base_observable_fields += [self.GRASPING_VELOCITIES.OBJECT_LINVEL,
                                            self.GRASPING_VELOCITIES.OBJECT_ANGVEL]
@@ -731,7 +757,9 @@ class GraspVecEnv(RobotVecEnv):
         self._state_helper = self._state_helper.add_substate(GraspVecEnv.STATE_GRASPING_VELOCITIES,
                                                              velocities_state_helper,
                                                              obs_defs={
-                                                                "base":{"observable":True,"concatenate":True,"noise":None},
+                                                                "base":{"observable":len(vel_base_observable_fields)>0,
+                                                                        "concatenate":len(vel_base_observable_fields)>0,
+                                                                        "noise":None},
                                                                 "privileged":{"observable":True,"concatenate":True,"noise":None}})
 
         num_feet = len(self._grasping_conf.grasping_init_args.feet_bottom_links)
@@ -845,6 +873,8 @@ class GraspVecEnv(RobotVecEnv):
                 camera_substates.append((GraspVecEnv.STATE_DEPTH,  th.float32, [0.0, 1.0], "base"))
             if self._grasping_conf.privileged_unaltered_depth:
                 camera_substates.append((GraspVecEnv.STATE_DEPTH_UNALTERED, th.float32, [0.0, 1.0], "privileged"))
+            if self._grasping_conf.grasping_init_args.privileged_unaltered_camera:
+                camera_substates.append((GraspVecEnv.STATE_CAMERA_UNALTERED, th.uint8, [0, 255], "privileged"))
             for substate_name, camera_dtype, camera_minmax, obs_group in camera_substates:
                 camera_state_helper = ThBoxStateHelper( field_names=[e for e in self.CAMERA_FIELDS],
                                                         dtype=camera_dtype,
@@ -879,9 +909,12 @@ class GraspVecEnv(RobotVecEnv):
     def _build_visual_randomizations(self):
         """Describe the visual randomization state: only what is actually randomized is part of it."""
         args = self._grasping_conf.grasping_init_args
+        light_axes = ["r","g","b"] if args.randomized_light_per_channel else [""]
         components = {"ground_tint" :       (args.randomized_ground_tint, ["r","g","b"]),
                       "object_color" :      (args.randomized_object_color, ["r","g","b"]),
                       "light_tilt_deg" :    (args.randomized_light_tilt_deg, ["roll","pitch"]),
+                      "light_intensity" :   (args.randomized_light_intensity, light_axes),
+                      "light_ambient" :     (args.randomized_light_ambient, light_axes),
                       "camera_pos_m" :      (args.randomized_camera_pos_m, ["x","y","z"]),
                       "camera_rot_deg" :    (args.randomized_camera_rot_deg, ["roll","pitch","yaw"]),
                       "image_brightness" :  (args.image_brightness, [""]),
@@ -921,11 +954,13 @@ class GraspVecEnv(RobotVecEnv):
             return
         self._scene_visuals_outdated = False
         randomized = self._visual_randomizations
-        if not any(name in randomized for name in ("ground_tint","object_color","light_tilt_deg","camera_pos_m","camera_rot_deg")):
+        if not any(name in randomized for name in self.SCENE_VISUAL_RANDOMIZATIONS):
             return
         def rpy_deg_to_quat(rpy_deg : th.Tensor) -> th.Tensor:
             return ros_rpy_to_quaternion_xyzw_th(rpy_deg*(math.pi/180))
         link_ids = lambda link: self._adapter.get_links_ids([link])
+        def light_ratios(name : str) -> th.Tensor | None:
+            return self._visual_randomization(name).expand(self.num_envs,3) if name in randomized else None
         camera_offset = None
         if "camera_pos_m" in randomized or "camera_rot_deg" in randomized:
             camera_offset = (self._observation_camera,
@@ -943,6 +978,8 @@ class GraspVecEnv(RobotVecEnv):
             lights_rotation_quatxyzw = (rpy_deg_to_quat(th.cat([self._visual_randomization("light_tilt_deg"),
                                                                 self._thzeros((self.num_envs,1))], dim=1))
                                         if "light_tilt_deg" in randomized else None),
+            lights_intensity_ratios = light_ratios("light_intensity"),
+            lights_ambient_ratios = light_ratios("light_ambient"),
             camera_offset = camera_offset)
 
     def _augment_gray_image(self, gray : th.Tensor) -> th.Tensor:
@@ -1044,21 +1081,39 @@ class GraspVecEnv(RobotVecEnv):
             renderings = self._adapter.get_camera_images([self._observation_camera],
                                                          rgb = gray_enabled,
                                                          depth = depth_enabled)
-            if gray_enabled:
-                obs_gray_image = renderings.rgb[0] # this is in (vec,H,W,C)
-                if not obs_gray_image.dtype.is_floating_point:
-                    obs_gray_image = obs_gray_image.to(th.float32) / 255.0
-                obs_gray_image = _resize_to_obs(_crop(obs_gray_image))
+            want_unaltered_gray = self._grasping_conf.grasping_init_args.privileged_unaltered_camera
+            want_unaltered_depth = self._grasping_conf.privileged_unaltered_depth
+            unaltered_renderings = renderings
+            if ((want_unaltered_gray or want_unaltered_depth)
+                    and any(name in self._visual_randomizations for name in self.SCENE_VISUAL_RANDOMIZATIONS)):
+                unaltered_renderings = self._adapter.get_original_visuals_camera_images([self._observation_camera],
+                                                                                        rgb = want_unaltered_gray,
+                                                                                        depth = want_unaltered_depth)
+            def _rendering_to_gray(rgb_vhwc : th.Tensor) -> th.Tensor:
+                """Grayscale in [0,1] of shape (vec, H, W) from a rendering of shape (vec, H, W, C)."""
+                if not rgb_vhwc.dtype.is_floating_point:
+                    rgb_vhwc = rgb_vhwc.to(th.float32) / 255.0
                 # getRenderings gives HWC RGB (vec, H, W, 3); the CAMERA field is a single plane, so
-                # collapse RGB -> one grayscale channel back in [0,255], matching the uint8 substate.
-                obs_gray_image = (self._augment_gray_image(obs_gray_image[..., :3] @ self._rgb_to_gray_w)*255).to(self._obs_dtype) # (vec, H, W)
+                # collapse RGB -> one grayscale channel.
+                return _resize_to_obs(_crop(rgb_vhwc))[..., :3] @ self._rgb_to_gray_w
+            if gray_enabled:
+                gray_image = _rendering_to_gray(renderings.rgb[0])
+                # Back in [0,255], matching the uint8 substate
+                obs_gray_image = (self._augment_gray_image(gray_image)*255).to(self._obs_dtype)
+                obs_unaltered_gray_image = None
+                if want_unaltered_gray:
+                    if unaltered_renderings is not renderings:
+                        gray_image = _rendering_to_gray(unaltered_renderings.rgb[0])
+                    obs_unaltered_gray_image = (gray_image*255).to(self._obs_dtype)
             else:
                 obs_gray_image = None
+                obs_unaltered_gray_image = None
             if depth_enabled:
-                obs_depth_image = renderings.depth[0] # this is in (vec,H,W,C)
-                if not obs_depth_image.dtype.is_floating_point:
-                    obs_depth_image = obs_depth_image.to(th.float32)/1000.0 # convert mm->m
-                metric_depth = obs_depth_image[...,0].to(th.float32) # (vec, H, W), metric
+                def _rendering_to_metric_depth(depth_vhwc : th.Tensor) -> th.Tensor:
+                    if not depth_vhwc.dtype.is_floating_point:
+                        depth_vhwc = depth_vhwc.to(th.float32)/1000.0 # convert mm->m
+                    return depth_vhwc[...,0].to(th.float32) # (vec, H, W), metric
+                metric_depth = _rendering_to_metric_depth(renderings.depth[0]) # this is in (vec,H,W,C)
                 def _depth_to_obs(depth_m : th.Tensor) -> th.Tensor:
                     """The processing both depth observations share, so they cannot drift apart."""
                     # Validity-weighted resize: a plain interpolation would average the invalid
@@ -1078,8 +1133,11 @@ class GraspVecEnv(RobotVecEnv):
                                                                              self._grasping_conf.depth_stereo_sim))
                 else:
                     obs_depth_image = _depth_to_obs(metric_depth)
-                obs_unaltered_depth_image = (_depth_to_obs(metric_depth)
-                                             if self._grasping_conf.privileged_unaltered_depth else None)
+                obs_unaltered_depth_image = None
+                if want_unaltered_depth:
+                    if unaltered_renderings is not renderings:
+                        metric_depth = _rendering_to_metric_depth(unaltered_renderings.depth[0])
+                    obs_unaltered_depth_image = _depth_to_obs(metric_depth)
             else:
                 obs_depth_image = None
                 obs_unaltered_depth_image = None
@@ -1087,6 +1145,7 @@ class GraspVecEnv(RobotVecEnv):
             obs_gray_image = None
             obs_depth_image = None
             obs_unaltered_depth_image = None
+            obs_unaltered_gray_image = None
 
         if self._grasping_conf.grasping_init_args.blind_episodes_ratio > 0:
             sighted = (1-self._grasping_episode_config.blind).view(self.num_envs,1,1)
@@ -1094,6 +1153,10 @@ class GraspVecEnv(RobotVecEnv):
                 obs_gray_image = obs_gray_image*sighted
             if obs_depth_image is not None:
                 obs_depth_image = obs_depth_image*sighted
+            if obs_unaltered_gray_image is not None:
+                obs_unaltered_gray_image = obs_unaltered_gray_image*sighted
+            if obs_unaltered_depth_image is not None:
+                obs_unaltered_depth_image = obs_unaltered_depth_image*sighted
 
         return GraspAdapterData(robot_data = super_adapter_data,
                                 current_object_pose = current_object_pose,
@@ -1105,7 +1168,8 @@ class GraspVecEnv(RobotVecEnv):
                                 gripper_touching_object = gripper_touching_object,
                                 obs_gray_image = obs_gray_image,
                                 obs_depth_image = obs_depth_image,
-                                obs_unaltered_depth_image = obs_unaltered_depth_image)
+                                obs_unaltered_depth_image = obs_unaltered_depth_image,
+                                obs_unaltered_gray_image = obs_unaltered_gray_image)
 
     @override
     def _get_new_instantaneous_state(self, adapter_data):
@@ -1201,6 +1265,8 @@ class GraspVecEnv(RobotVecEnv):
             new_inst_state[self.STATE_DEPTH] = {self.CAMERA_FIELDS.IMAGE: obs_depth_image}
         if adapter_data.obs_unaltered_depth_image is not None:
             new_inst_state[self.STATE_DEPTH_UNALTERED] = {self.CAMERA_FIELDS.IMAGE: adapter_data.obs_unaltered_depth_image}
+        if adapter_data.obs_unaltered_gray_image is not None:
+            new_inst_state[self.STATE_CAMERA_UNALTERED] = {self.CAMERA_FIELDS.IMAGE: adapter_data.obs_unaltered_gray_image}
         if self._grasping_conf.grasping_init_args.blind_episodes_ratio > 0:
             new_inst_state[self.STATE_BLIND] = {self.BLIND.BLIND: self._grasping_episode_config.blind.view(self.num_envs,1).to(self._obs_dtype)}
         if len(self._visual_randomizations) > 0:

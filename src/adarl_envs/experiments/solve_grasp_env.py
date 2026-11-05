@@ -133,10 +133,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
         "randomized_object_mass_ratios" : ("uniform", [0.5*r,2.0*r]), # the cube is 0.1 kg nominal
         "randomized_object_scale_ratios" : ("uniform", [0.75*r,1.75*r]), # the cube is 4 cm nominal: 3 to 7 cm
-        "blind_episodes_ratio" : 0.1*r,
+        "blind_episodes_ratio" : 0.01*r,
         "randomized_ground_tint" : ("uniform", [0.4*v,1.4*v]),
         "randomized_object_color" : ("uniform", [0.2*v,1.0*v]),
         "randomized_light_tilt_deg" : ("uniform", [-30.0*v,30.0*v]),
+        "randomized_light_intensity" : ("uniform", [0.5*v,1.5*v]), # needs mujoco 3.17
+        "randomized_light_ambient" : ("uniform", [0.5*v,2.0*v]), # needs mujoco 3.17
         "randomized_camera_pos_m" : ("uniform", [-0.005*v,0.005*v]),
         "randomized_camera_rot_deg" : ("uniform", [-2.0*v,2.0*v]),
         "image_brightness" : ("uniform", [-0.15*v,0.15*v]),
@@ -168,7 +170,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # "mjx_geom_overrides" : {
         #     "cube" : {"friction" : [2.0,0.001,0.0005]}
         # },
-        "mjx_opt_preset" : "faster",
+        "mjx_opt_preset" : "medium",
         "mjx_opt_override" : {"impratio" : 1.0,
                             #   "ccd_iterations" : 50
                               },
@@ -195,6 +197,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # With depth_stereo_sim, also put the undegraded depth in the privileged observation
         # (privileged.depth_unaltered); base.depth stays degraded.
         "privileged_unaltered_depth" : False,
+        # Also put in the privileged observation the grayscale image without the visual randomizations
+        # (privileged.camera_unaltered); base.camera stays randomized.
+        "privileged_unaltered_camera" : False,
         "safety_cooldown_halflife_sec" : 1.0
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
@@ -549,7 +554,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         retrain_period = -1,
                         reward_scaling = 10.0,
                         tau=1.0,
-                        train_trajectories_length = 2,
+                        train_trajectories_length = 1,
                         traj_eval_batch_size = 1,
                         use_log_reward = False,
                         validation_batch_size = 256,

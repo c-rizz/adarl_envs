@@ -102,7 +102,8 @@ def runner_builder(seed,
                                             render_shadows=env_builder_args.pop("render_shadows", False),
                                             render_znear=0.1,
                                             warp_nccdmax=env_builder_args.pop("mjx_warp_nccdmax", 10),
-                                            warp_nconmax=env_builder_args.pop("mjx_warp_nconmax", 20))
+                                            warp_nconmax=env_builder_args.pop("mjx_warp_nconmax", 20),
+                                            warp_graph_mode=env_builder_args.pop("mjx_warp_graph_mode", "WARP"))
     elif mode == "xbot-zmq":
         from adarl.adapters.VecZmqXbotAdapter import VecZmqXbotAdapter
         from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter
@@ -291,6 +292,7 @@ def runner_builder(seed,
                                                 obs_camera_crop = env_builder_args.pop("obs_camera_crop", None),
                                                 depth_stereo_sim = env_builder_args.pop("depth_stereo_sim", False),
                                                 privileged_unaltered_depth = env_builder_args.pop("privileged_unaltered_depth", False),
+                                                privileged_unaltered_camera = env_builder_args.pop("privileged_unaltered_camera", False),
                                                 ignore_camera_fov_mismatch = env_builder_args.pop("ignore_camera_fov_mismatch", False),
                                                 randomized_object_mass_ratios = env_builder_args.pop("randomized_object_mass_ratios", None),
                                                 randomized_object_scale_ratios = env_builder_args.pop("randomized_object_scale_ratios", None),
@@ -299,6 +301,9 @@ def runner_builder(seed,
                                                 randomized_ground_tint = env_builder_args.pop("randomized_ground_tint", None),
                                                 randomized_object_color = env_builder_args.pop("randomized_object_color", None),
                                                 randomized_light_tilt_deg = env_builder_args.pop("randomized_light_tilt_deg", None),
+                                                randomized_light_intensity = env_builder_args.pop("randomized_light_intensity", None),
+                                                randomized_light_ambient = env_builder_args.pop("randomized_light_ambient", None),
+                                                randomized_light_per_channel = env_builder_args.pop("randomized_light_per_channel", False),
                                                 randomized_camera_pos_m = env_builder_args.pop("randomized_camera_pos_m", None),
                                                 randomized_camera_rot_deg = env_builder_args.pop("randomized_camera_rot_deg", None),
                                                 image_brightness = env_builder_args.pop("image_brightness", None),

@@ -28,7 +28,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         env_device = th.device("cuda",0)
 
 
-    world = "flat_ground"
+    world = args["world"]
     # Standing upright on the rear legs the pelvis is much higher off the ground, and the robot tips
     # over much more easily than the quadruped
     is_humanoid = args["robot"].lower() == "kyon_humanoid"
@@ -88,6 +88,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
         "minimal_infos" : True,
+        "mjx_warp_disabled_overflow_warnings" : 1 << 10,
+        "mjx_opt_preset" : "slow" if mode=="mjx" else "fast", # mjx is more stable with slow, pybullet is faster with medium
         "mode" : mode,
         "no_infos" : False,
         "noise_abs_obs_angvel_ep_mustd_step_std" :      [0.0, 0.02*n,  0.1*n],
@@ -353,6 +355,7 @@ if __name__ == "__main__":
     ap.add_argument("--algorithm", default="ppo", type=str, help="Algorithm to use ('sac'/'ppo')")
     ap.add_argument("--mode", default="mjx", type=str, help="Simulator to use ('mjx'/'pybullet')")
     ap.add_argument("--robot", default="kyon", type=str, help="Which robot to use")
+    ap.add_argument("--world", default="flat_ground", type=str, help="Which world to use")
     ap.add_argument("--arms", default=False, action='store_true', help="Enable arms")
     ap.add_argument("--feet", default=False, action='store_true', help="Stand the humanoid on the flat feet instead of the contact-sphere legs (kyon_humanoid only)")
     ap.add_argument("--position_delta", default=False, action='store_true', help="Actions are joint position deltas from the last reference, as in solve_grasp_env")

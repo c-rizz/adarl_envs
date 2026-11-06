@@ -1665,7 +1665,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
     def _get_spawn_defs(self):
         if not hasattr(self, "_spawn_defs"):
             robot_pose = None #build_pose(*self._configuration.spawn_root_pose_xyz_xyzw)
-            arrow_pose = robot_pose
             camera_pose = None #build_pose(0,0.0,0.0,    0.0, 0.0, 0.0,   1.0)
             robot_spawn_def = ModelSpawnDef(definition_string=self._configuration.init_args.robot_description_string,
                                             name=self._configuration.init_args.robot_name,
@@ -1696,17 +1695,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                 kwargs={"camera_width":self._configuration.init_args.ui_camera_resolution_hw[1],
                                                         "camera_height":self._configuration.init_args.ui_camera_resolution_hw[0],
                                                         "frame_rate":1/self._intendedStepLength_sec})
-            arrow_spawn_def = ModelSpawnDef(definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","models/red_arrow.urdf.xacro")).read_text(),
-                                            name="arrow",
-                                            pose=arrow_pose,
-                                            format="urdf.xacro",
-                                            kwargs={"add_world_link":str(is_pybullet)})
-            arrow_yellow_spawn_def = ModelSpawnDef(definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","models/red_arrow.urdf.xacro")).read_text(),
-                                            name="arrow_yellow",
-                                            pose=arrow_pose,
-                                            format="urdf.xacro",
-                                            kwargs={"add_world_link":str(is_pybullet),
-                                                    "color_rgba":"1 1 0 1"})
             axes_spawn_def = ModelSpawnDef( definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","models/axes.urdf.xacro")).read_text(),
                                             name="axes",
                                             pose=None,
@@ -1723,9 +1711,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                                                       kwargs={}))
             self._spawn_defs += [robot_spawn_def,
                                     camera_spawn_def]
-            if self._configuration.show_goal:
-                self._spawn_defs.append(arrow_spawn_def)
-                self._spawn_defs.append(arrow_yellow_spawn_def)
             if self._configuration.show_axes:
                 self._spawn_defs.append(axes_spawn_def)
         return self._spawn_defs
@@ -2122,8 +2107,6 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             self._adapter.build_scenario(models = self._get_spawn_defs(),
                                          default_link_group_collisions = self._configuration.init_args.enable_link_collisions,
                                          add_ground = self._use_simple_flat_ground)
-            self._arrow_base = ("arrow","arrow_link")
-            self._arrow_yellow = ("arrow_yellow","arrow_link")
         elif isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper):
             subadapters = self._adapter.sub_adapters()
             if len(subadapters) != 1:
@@ -2131,14 +2114,10 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             subadapter = subadapters[0]
             if adarl.utils.utils.isinstance_noimport(subadapter, ("PyBulletJointImpedanceAdapter")):
                 self._adapter.build_scenario(models = self._get_spawn_defs())
-                self._arrow_base = ("arrow","world")
-                self._arrow_yellow = ("arrow_yellow","world")
             elif adarl.utils.utils.isinstance_noimport(subadapter, ("RosXbotGazeboAdapter")):
                 self._adapter.build_scenario(launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path( "adarl_envs",
                                                                                                             "gazebo/all_gazebo_xbot.launch"),
                                             launch_file_args={"gui":"false"})
-                self._arrow_base = ("arrow","arrow_link")
-                self._arrow_yellow = ("arrow_yellow","arrow_link")
             else:
                 raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         elif isinstance_noimport(self._adapter, "VecRosXBotAdapterWrapper"):
@@ -2150,8 +2129,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     #                                 launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path(  "adarl_envs",
                     #                                                                                                 "ros/all_kyon_mujoco.launch"),
                     #                                 launch_file_args={"gui":"false"})
-                    self._arrow_base = ("arrow","arrow_link")
-                    self._arrow_yellow = ("arrow_yellow","arrow_link")
+                    pass
         elif isinstance_noimport(self._adapter, "VecZmqXbotAdapter"):
             if adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapter(), ("ZmqXbotAdapter")):
                 if self._configuration.real:
@@ -2161,25 +2139,20 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                     #                                 launch_file_pkg_and_path = adarl.utils.utils.pkgutil_get_path(  "adarl_envs",
                     #                                                                                                 "ros/all_kyon_mujoco.launch"),
                     #                                 launch_file_args={"gui":"false"})
-                    self._arrow_base = ("arrow","arrow_link")
-                    self._arrow_yellow = ("arrow_yellow","arrow_link")
+                    pass
             else:
                 raise NotImplementedError("Unexpected sub adapter "+self._adapter.sub_adapter())
         elif isinstance_noimport(self._adapter, "MujocoAdapter"):
             self._adapter.build_scenario(models = self._get_spawn_defs(), add_ground = self._use_simple_flat_ground)
-            self._arrow_base = ("arrow","arrow_link")
-            self._arrow_yellow = ("arrow_yellow","arrow_link")
         elif isinstance_noimport(self._adapter, "GenesisAdapter"):
             spawn_defs = self._get_spawn_defs()
             for sd in spawn_defs:
                 # The visual marker models have no fixed joint in genesis (they are moved around with
                 # setLinksStateDirect), so compensate gravity to keep them in place like mujoco mocap bodies.
-                if sd.name in ("arrow", "arrow_yellow", "axes"):
+                if sd.name == "axes":
                     sd.kwargs["genesis_gravity_compensation"] = 1.0
             # the ui camera is parsed automatically by the adapter from the camera mjcf model
             self._adapter.build_scenario(models = spawn_defs, add_ground = self._use_simple_flat_ground)
-            self._arrow_base = ("arrow","arrow_link")
-            self._arrow_yellow = ("arrow_yellow","arrow_link")
         else:
             raise NotImplementedError("Adapter "+envCtrlName+" is not supported")
         

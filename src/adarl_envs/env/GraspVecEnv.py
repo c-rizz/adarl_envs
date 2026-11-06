@@ -642,7 +642,7 @@ class GraspVecEnv(RobotVecEnv):
                 and hasattr(self._adapter, "set_link_camera_visibility")):
             detected_links = list(self._adapter.get_detected_links())
             detected_models = {l[0] for l in detected_links}
-            hidden_models = {"goal_axes", "goal_marker_cube", "axes", "grippper_marker", "arrow", "arrow_yellow"}
+            hidden_models = {"goal_axes", "goal_marker_cube", "axes", "grippper_marker"}
             hidden_links : set[tuple[str,str]] = set()
             if self._grasping_conf.grasping_init_args.camera_hide_robot:
                 # Ablation for how much the arm occluding the object hurts: the observation camera

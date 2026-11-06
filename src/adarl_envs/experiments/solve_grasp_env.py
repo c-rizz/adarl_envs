@@ -133,7 +133,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
         "randomized_object_mass_ratios" : ("uniform", [0.5*r,2.0*r]), # the cube is 0.1 kg nominal
         "randomized_object_scale_ratios" : ("uniform", [0.75*r,1.75*r]), # the cube is 4 cm nominal: 3 to 7 cm
-        "blind_episodes_ratio" : 0.01*r,
+        "blind_episodes_ratio" : 0.01*r if obs_cam else 0.0,
         "randomized_ground_tint" : ("uniform", [0.4*v,1.4*v]),
         "randomized_object_color" : ("uniform", [0.2*v,1.0*v]),
         "randomized_light_tilt_deg" : ("uniform", [-30.0*v,30.0*v]),
@@ -171,6 +171,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         #     "cube" : {"friction" : [2.0,0.001,0.0005]}
         # },
         "mjx_opt_preset" : "medium",
+        # Overflow warnings not to print, as a bitwise or of mujoco_warp's OverflowType values, e.g. ITERATIONS
+        # is 1<<9 and LS_ITERATIONS 1<<10. Do not import it here: mujoco must load after adarl sets MUJOCO_GL
+        "mjx_warp_disabled_overflow_warnings" : 0,
         "mjx_opt_override" : {"impratio" : 1.0,
                             #   "ccd_iterations" : 50
                               },

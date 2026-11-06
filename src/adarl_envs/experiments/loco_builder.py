@@ -253,7 +253,8 @@ def loco_runner_builder(seed,
                                             geom_overrides=env_builder_args.get("mjx_geom_overrides", None),
                                             reference_filter_cutoff_frequency=20.0,
                                             reference_filter_mode="second_order" if env_builder_args["enable_reference_filter"] else "none",
-                                            mjx_impl="warp")
+                                            mjx_impl="warp",
+                                            warp_disabled_overflow_warnings=env_builder_args.pop("mjx_warp_disabled_overflow_warnings", 0))
     elif mode == "mjx-act":
         from adarl.adapters.MjxActuatedAdapter import MjxActuatedAdapter
         import jax

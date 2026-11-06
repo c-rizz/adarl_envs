@@ -31,7 +31,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
 
     position_delta = args["position_delta"]
 
-    world = "flat_ground"
+    world = "pyramids"
     # Standing upright on the rear legs the pelvis is much higher off the ground, and the robot tips
     # over much more easily than the quadruped
     is_humanoid = args["robot"].lower() == "kyon_humanoid"

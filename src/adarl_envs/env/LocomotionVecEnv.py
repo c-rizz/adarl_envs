@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from adarl_envs.env.env_utils import bell_reward, double_bell_reward, flattened_joint_penalty_reward, joint_penalty_reward, norm_penalty, penalty_reward, planar_tracking_error_vec, set_column, smooth_clip, smoothclip_flattener
 from adarl.adapters.BaseVecJointImpedanceAdapter import BaseVecJointImpedanceAdapter
-from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter
+from adarl.adapters.BaseVecSimulationAdapter import BaseVecSimulationAdapter, ModelSpawnDef
+from adarl.adapters.VecSimJointImpedanceAdapterWrapper import VecSimJointImpedanceAdapterWrapper
 from adarl.utils.dbg.dbg_checks import dbg_check_finite, dbg_check_size, dbg_check
 from adarl.utils.spaces import ThBox
 from adarl.utils.utils import (to_string_tensor, th_quat_rotate, th_quat_conj, isinstance_noimport,
@@ -26,6 +27,7 @@ import dataclasses
 import adarl.utils.async_cuda2cpu_queue as async_cuda2cpu_queue
 from adarl.utils.base_utils import record_time, record_region_start, record_region_end
 import math
+from pathlib import Path
 
 disable_compile = bool(os.environ.get("DISABLE_ENV_TH_COMPILE", False))
 
@@ -530,6 +532,34 @@ class LocomotionVecEnv(RobotVecEnv):
         self._stats["ep_max_peak_sensed_effort"] = self._thzeros((self._configuration.vec_size,))
 
 
+    def _uses_pybullet(self) -> bool:
+        return (isinstance(self._adapter, VecSimJointImpedanceAdapterWrapper)
+                and adarl.utils.utils.isinstance_noimport(self._adapter.sub_adapters()[0], ("PyBulletJointImpedanceAdapter")))
+
+    @override
+    def _get_spawn_defs(self):
+        spawn_defs = super()._get_spawn_defs()
+        if self._configuration.show_goal and not hasattr(self, "_arrow_spawn_defs"):
+            is_pybullet = self._uses_pybullet()
+            # The arrows have no fixed joint in genesis (they are moved around with setLinksStateDirect),
+            # so compensate gravity to keep them in place like mujoco mocap bodies.
+            marker_kwargs = ({"genesis_gravity_compensation":1.0}
+                             if adarl.utils.utils.isinstance_noimport(self._adapter, "GenesisAdapter") else {})
+            arrow_spawn_def = ModelSpawnDef(definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","models/red_arrow.urdf.xacro")).read_text(),
+                                            name="arrow",
+                                            pose=None,
+                                            format="urdf.xacro",
+                                            kwargs={"add_world_link":str(is_pybullet), **marker_kwargs})
+            arrow_yellow_spawn_def = ModelSpawnDef(definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","models/red_arrow.urdf.xacro")).read_text(),
+                                            name="arrow_yellow",
+                                            pose=None,
+                                            format="urdf.xacro",
+                                            kwargs={"add_world_link":str(is_pybullet), **marker_kwargs,
+                                                    "color_rgba":"1 1 0 1"})
+            self._arrow_spawn_defs = [arrow_spawn_def, arrow_yellow_spawn_def]
+            spawn_defs += self._arrow_spawn_defs
+        return spawn_defs
+
     @override
     def _build(self):
         # Set up monitored collision pairs for MjxAdapter
@@ -537,6 +567,9 @@ class LocomotionVecEnv(RobotVecEnv):
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             self._adapter.set_monitored_collision_pairs(feet_ground_collision_pairs)
         super()._build()
+        arrow_link = "world" if self._uses_pybullet() else "arrow_link"
+        self._arrow_base = ("arrow",arrow_link)
+        self._arrow_yellow = ("arrow_yellow",arrow_link)
         self._adapter.set_monitored_links(self._adapter.get_monitored_links() + self._loco_conf.init_args.feet_bottom_links)
         self._feet_and_body_link_ids = self._adapter.get_monitored_links_ids(self._loco_conf.init_args.feet_bottom_links + [self._configuration.main_body_link])
 

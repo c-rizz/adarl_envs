@@ -70,7 +70,8 @@ def build_loco_env(folder : str, reward_weights : dict[str, float]) -> BuiltEnv:
     from adarl_envs.experiments.loco_builder import robot_args_registry, loco_runner_builder
     args = _capture_env_builder_args(loco_kyon_ppo.runFunction, ppo2, "ppo_train",
                                      {"mode": "mujoco", "robot": "kyon", "algorithm": "ppo_small",
-                                      "position_delta": False, "feet": False, "arms": False},
+                                      "position_delta": False, "feet": False, "arms": False,
+                                      "world": "flat_ground"},
                                      folder)
     full_args = robot_args_registry[args["robot_model"]](robot_options=args["robot_options"])
     full_args.update(args)

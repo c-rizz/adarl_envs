@@ -103,7 +103,8 @@ def runner_builder(seed,
                                             render_znear=0.1,
                                             warp_nccdmax=env_builder_args.pop("mjx_warp_nccdmax", 10),
                                             warp_nconmax=env_builder_args.pop("mjx_warp_nconmax", 20),
-                                            warp_graph_mode=env_builder_args.pop("mjx_warp_graph_mode", "WARP"))
+                                            warp_graph_mode=env_builder_args.pop("mjx_warp_graph_mode", "WARP"),
+                                            warp_disabled_overflow_warnings=env_builder_args.pop("mjx_warp_disabled_overflow_warnings", 0))
     elif mode == "xbot-zmq":
         from adarl.adapters.VecZmqXbotAdapter import VecZmqXbotAdapter
         from adarl.adapters.ZmqXbotAdapter import ZmqXbotAdapter

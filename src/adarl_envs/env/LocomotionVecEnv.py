@@ -1149,9 +1149,13 @@ class LocomotionVecEnv(RobotVecEnv):
             peak_feet_z = th.where(condition=just_lifting_up.expand(nenv_nfeet),
                                     input = self._thtens(0.0), # if just lifted up, a new step starts
                                     other = prev_peak_z)
+            # like the durations: on the ground the peak of the swing just completed is kept only for the
+            # touchdown step, where the step height reward reads it, and is zero for the rest of the stance
             peak_feet_z = th.where(condition=feet_are_in_air.expand(nenv_nfeet),
                                     input = th.maximum(feet_z - liftoff_feet_z, peak_feet_z),
-                                    other = peak_feet_z) # on the ground, keep the peak of the last step
+                                    other = th.where(condition=just_touching_down.expand(nenv_nfeet),
+                                                     input = peak_feet_z,
+                                                     other = self._thtens(0.0)))
         else:
             liftoff_feet_z = self._thtens([0.0]).expand(nenv_nfeet)
             new_feet_contact = self._thtens([0.0]).expand(nenv_nfeet)

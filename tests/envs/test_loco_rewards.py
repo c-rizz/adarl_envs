@@ -271,6 +271,11 @@ def test_feet_state_follows_the_contacts_over_a_rollout(loco):
         assert th.equal(on_ground & (air > 0), touchdown)
         assert th.equal(~on_ground & (ground > 0), liftoff)
 
+        # the peak of a swing is measured from where the foot lifted off
+        feet_z, liftoff_z = cur[fi(F.FEET_ABS_POS_Z)], cur[fi(F.FEET_LIFTOFF_POS_Z)]
+        th.testing.assert_close(liftoff_z[liftoff], feet_z[liftoff])
+        assert th.all(cur[fi(F.PEAK_POS_Z)][~on_ground] >= (feet_z - liftoff_z)[~on_ground] - 1e-5)
+
         touchdowns += int(touchdown.sum())
         liftoffs += int(liftoff.sum())
         prev = cur

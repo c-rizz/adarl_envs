@@ -63,22 +63,25 @@ def _reset_and_wrap(runner) -> BuiltEnv:
     return BuiltEnv(runner=runner, env=env, reset_state={k: v.clone() for k, v in env.get_states().items()})
 
 
-def build_loco_env(folder : str, reward_weights : dict[str, float]) -> BuiltEnv:
-    """The kyon LocomotionVecEnv of loco_kyon_ppo, single env, on the CPU."""
+def build_loco_env(folder : str, reward_weights : dict[str, float], mode : str = "mujoco", world : str = "flat_ground",
+                   num_envs : int = 1) -> BuiltEnv:
+    """The kyon LocomotionVecEnv of loco_kyon_ppo: on the CPU with mode "mujoco", which is single env,
+    or as it trains on the GPU with mode "mjx". reward_weights can set any other env builder arg."""
     import rreal.algorithms.ppo2 as ppo2
     from adarl_envs.experiments import loco_kyon_ppo
     from adarl_envs.experiments.loco_builder import robot_args_registry, loco_runner_builder
     args = _capture_env_builder_args(loco_kyon_ppo.runFunction, ppo2, "ppo_train",
-                                     {"mode": "mujoco", "robot": "kyon", "algorithm": "ppo_small",
+                                     {"mode": mode, "robot": "kyon", "algorithm": "ppo_small",
                                       "position_delta": False, "feet": False, "arms": False,
-                                      "world": "flat_ground"},
+                                      "world": world, "heightmap": False},
                                      folder)
     full_args = robot_args_registry[args["robot_model"]](robot_options=args["robot_options"])
     full_args.update(args)
-    full_args["th_device"] = th.device("cpu")
-    _disable_mujoco_cpu_unsupported(full_args)
+    if mode == "mujoco":
+        full_args["th_device"] = th.device("cpu")
+        _disable_mujoco_cpu_unsupported(full_args)
     full_args.update(reward_weights)
-    return _reset_and_wrap(loco_runner_builder(seed=0, run_folder=folder, num_envs=1,
+    return _reset_and_wrap(loco_runner_builder(seed=0, run_folder=folder, num_envs=num_envs,
                                                env_builder_args=full_args, quiet=True))
 
 

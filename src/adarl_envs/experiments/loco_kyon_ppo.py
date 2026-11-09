@@ -48,8 +48,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
+    heightmap_obs = ["privileged.heightmap"] if args["heightmap"] else []
     env_builder_args = {
         "action_smoothing_halflife_sec" : 0.0,
+        # Longer along the body: 14cm cells, reaching past the feet on all sides
+        "heightmap_resolution_xy" : (15,10),
+        "observe_heightmap" : args["heightmap"],
+        "heightmap_size_xy" : (2.1,1.4),
         "control_mode" : "position_delta" if args["position_delta"] else "position",
         # rad per step: 0.12 at 20/1024s is ~6.1 rad/s, under the 0.9*7.6 rad/s safe velocity of the kyon legs
         "control_mode_position_delta_max" : {"default": 0.12},
@@ -88,7 +93,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "max_steps_per_episode" : max_steps_per_episode,
         "merge_privileged" : False,
         "minimal_infos" : True,
-        "mjx_warp_disabled_overflow_warnings" : 1 << 10,
+        "mjx_warp_disabled_overflow_warnings" : 1 << 9 | 1 << 10, # solver and linesearch iterations, printed at every step on the pyramids
         "mjx_opt_preset" : "slow" if mode=="mjx" else "fast", # mjx is more stable with slow, pybullet is faster with medium
         "mode" : mode,
         "no_infos" : False,
@@ -112,7 +117,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "randomization_recycle_init_pose" : True,
         "randomized_initial_joint_pose_range" : 0.3,
-        "randomized_homing_body_position_minmax_xyz" : ((-6, -18,spawn_clearance_z),(102, 18,spawn_clearance_z)) , #((-6, -18, 0.48), (102, 18, 0.50)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
+        "randomized_homing_body_position_minmax_xyz" : ((-50, -18,spawn_clearance_z),(102, 18,spawn_clearance_z)) , #((-6, -18, 0.48), (102, 18, 0.50)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground. The pyramids start at x=-11: x<-11.5 is plain floor, 1/4 of the box
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_dof_armature_ratios" :       ("uniform", [0.9*r,1.1*r]),
         "randomized_dof_damping_ratios":         ("uniform", [0.9*r,1.1*r]),
@@ -129,7 +134,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_feet_air_time_weight" :             10.0,
         "reward_feet_ground_time_weight" :          eps,
         "reward_feet_on_ground_weight" :            0.5,
-        "reward_feet_step_height_weight" :          0.5,
+        "reward_feet_step_height_weight" :          2.0,
         "reward_heading_velocity_weight" :          eps,
         "reward_heading_weight" :                   eps,
         "reward_health_weight" :                    0.0,
@@ -229,9 +234,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "name" : "video_stoch",
         "deterministic" : False,
         "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 10,
+        "eval_eps" : 1,
         "env_builder_args" : video_eval_env_builder_args,
-        "num_envs" : 10,
+        "num_envs" : 1,
         "skip_first_eval": False
     }
     video_det_eval_env_builder_args = copy.deepcopy(video_eval_env_builder_args)
@@ -239,9 +244,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "name" : "video_det",
         "deterministic" : True,
         "eval_freq_ep" : eval_freq*train_envs,
-        "eval_eps" : 10,
+        "eval_eps" : 1,
         "env_builder_args" : video_det_eval_env_builder_args,
-        "num_envs" : 10,
+        "num_envs" : 1,
         "skip_first_eval": False
     }
     # run_1ms_env_builder_args = copy.deepcopy(env_builder_args)
@@ -325,7 +330,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                         max_grad_norm=1.0,
                                                         init_actor_logstd=-1.0,
                                                         actor_observation_filter=["base.vec"], #, "base.reward_weights"],
-                                                        critic_observation_filter=["privileged.vec", "base.reward_weights"],
+                                                        critic_observation_filter=["privileged.vec", "base.reward_weights"]+heightmap_obs,
                                                         reference_init_args = {   "env_builder_args" : env_builder_args},
                                                         ),
                     max_episode_duration=max_steps_per_episode,
@@ -359,6 +364,7 @@ if __name__ == "__main__":
     ap.add_argument("--arms", default=False, action='store_true', help="Enable arms")
     ap.add_argument("--feet", default=False, action='store_true', help="Stand the humanoid on the flat feet instead of the contact-sphere legs (kyon_humanoid only)")
     ap.add_argument("--position_delta", default=False, action='store_true', help="Actions are joint position deltas from the last reference, as in solve_grasp_env")
+    ap.add_argument("--heightmap", default=False, action='store_true', help="Give the critic a map of the terrain around the robot")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

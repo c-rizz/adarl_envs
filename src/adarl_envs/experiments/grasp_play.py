@@ -292,6 +292,8 @@ def grasp_builder_and_args():
         "safety_cooldown_halflife_sec" : 1.0,
         "reward_gripper_close_weight" : 0.5,
         "reward_gripper_grasp_weight" : 0.0,
+        "reward_joint_stand_position_weight" : 5.0, # only in the blind episodes
+        "reward_joint_stand_velocity_weight" : 1.0, # only in the blind episodes
         "gripper_close_distance" : 0.05,
         "use_depth_cam" : True,
         "use_gray_cam" : True,
@@ -328,7 +330,7 @@ def grasp_builder_and_args():
         "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
         "randomized_object_mass_ratios" : ("uniform", [0.5*r,2.0*r]),
-        "blind_episodes_ratio" : 0.1*r,
+        "blind_episodes_ratio" : 1,
         "randomized_ground_tint" : ("uniform", [0.4*r,1.4*r]),
         "randomized_object_color" : ("uniform", [0.2*r,1.0*r]),
         "randomized_light_tilt_deg" : ("uniform", [-30.0*r,30.0*r]),
@@ -340,6 +342,7 @@ def grasp_builder_and_args():
         "image_contrast" : ("uniform", [0.7*r,1.3*r]),
         "image_gamma" : ("uniform", [0.7*r,1.4*r]),
         "image_noise_std" : ("uniform", [0.0,0.02*r]),
+        "randomized_depth_scale" : ("uniform", [1.0-0.004*r,1.0+0.004*r]), # +-3 mm at 0.75 m
         "observe_visual_randomizations" : False,
         "render_shadows" : False,
         "randomized_dof_armature_ratios" : ("uniform", [0.9*r,1.1*r]),

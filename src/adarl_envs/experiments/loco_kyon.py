@@ -51,8 +51,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     n = 1.0 # noise strength
     p = 1.0 # penalties strength
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
+    heightmap_obs = ["privileged.heightmap"] if args["heightmap"] else []
     env_builder_args = {
         "action_smoothing_halflife_sec" : 0.0,
+        # Longer along the body: 14cm cells, reaching past the feet on all sides
+        "heightmap_resolution_xy" : (15,10),
+        "observe_heightmap" : args["heightmap"],
+        "heightmap_size_xy" : (2.1,1.4),
+        "mjx_warp_disabled_overflow_warnings" : 1 << 9 | 1 << 10, # solver and linesearch iterations, printed at every step on the pyramids
         "control_mode" : "position_delta" if position_delta else "position",
         # rad per step: 0.12 at 20/1024s is ~6.1 rad/s, under the 0.9*7.6 rad/s safe velocity of the kyon legs
         "control_mode_position_delta_max" : {"default": 0.12},
@@ -113,7 +119,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "quiet" : False,
         "randomization_recycle_init_pose" : True,
         "randomized_initial_joint_pose_range" : 0.3,
-        "randomized_homing_body_position_minmax_xyz" : ((-6, -18,spawn_clearance_z),(102, 18,spawn_clearance_z)) , #((-6, -18, 0.48), (102, 18, 0.50)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground
+        "randomized_homing_body_position_minmax_xyz" : ((-50, -18,spawn_clearance_z),(102, 18,spawn_clearance_z)) , #((-6, -18, 0.48), (102, 18, 0.50)), # per-env spawn: x,y over the pyramid field, z is clearance above the local ground. The pyramids start at x=-11: x<-11.5 is plain floor, 1/4 of the box
         "randomized_com_xyz_diff_distribution" : ("normal",([0.,0.,0.],[0.10*r,0.02*r,0.02*r])),
         "randomized_dof_armature_ratios" :       ("uniform", [0.9*r,1.1*r]),
         "randomized_dof_damping_ratios":         ("uniform", [0.9*r,1.1*r]),
@@ -377,7 +383,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     gamma=gammas,
                                                     target_tau = 0.001,
                                                     batch_size=16384,
-                                                    buffer_size=(5*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
+                                                    # The heightmap adds 150 floats to each observation
+                                                    buffer_size=(3*1024)*1_000 if args["heightmap"] else (5*1024)*1_000, # 10_240_000 Should fit in 16Gb of VRAM
                                                     total_steps=2_000_000_000,
                                                     train_freq_vstep=5,
                                                     grad_steps=10,
@@ -389,7 +396,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     target_entropy_factor = None,
                                                     actor_log_std_init = -2.0,
                                                     actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
-                                                    critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"],
+                                                    critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"]+heightmap_obs,
                                                     target_entropy_factor_annealing=annealer.anneal,
                                                     action_reference_obs_key=None, #"base.last_action_raw",
                                                     actor_weight_decay=1e-5,
@@ -444,7 +451,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                     target_entropy_factor = -0.5,
                                                     actor_log_std_init = -3.0,
                                                     actor_observation_filter=["base.vec"],
-                                                    critic_observation_filter=["base.vec","privileged.vec"]
+                                                    critic_observation_filter=["base.vec","privileged.vec"]+heightmap_obs
                                                     ),
                     checkpoint_freq=5,
                     collector_device=env_device,
@@ -484,7 +491,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                         max_grad_norm=1.0,
                                                         init_actor_logstd=-1.0,
                                                         actor_observation_filter=["base.vec"], #, "base.reward_weights"],
-                                                        critic_observation_filter=["privileged.vec", "base.reward_weights"],
+                                                        critic_observation_filter=["privileged.vec", "base.reward_weights"]+heightmap_obs,
                                                         reference_init_args = {   "env_builder_args" : env_builder_args},
                                                         ),
                     max_episode_duration=max_steps_per_episode,
@@ -517,6 +524,7 @@ if __name__ == "__main__":
     ap.add_argument("--arms", default=False, action='store_true', help="Enable arms")
     ap.add_argument("--feet", default=False, action='store_true', help="Stand the humanoid on the flat feet instead of the contact-sphere legs (kyon_humanoid only)")
     ap.add_argument("--position_delta", default=False, action='store_true', help="Actions are joint position deltas from the last reference, as in solve_grasp_env")
+    ap.add_argument("--heightmap", default=False, action='store_true', help="Give the critic a map of the terrain around the robot")
     ap.add_argument("--no-wandb", default=False, action='store_true', help="Disable Weight&Biases")
 
     ap.set_defaults(feature=True)

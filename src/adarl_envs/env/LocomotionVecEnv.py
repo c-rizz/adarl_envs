@@ -23,6 +23,7 @@ import numpy as np
 import pprint
 import torch as th
 import os
+import xml.etree.ElementTree as ET
 import dataclasses
 import adarl.utils.async_cuda2cpu_queue as async_cuda2cpu_queue
 from adarl.utils.base_utils import record_time, record_region_start, record_region_end
@@ -91,7 +92,18 @@ class LocomotionVecEnvInitArgs():
     min_good_step_air_duration : float
     step_min_good_ground_duration : float
     step_max_good_ground_duration : float
-    heightmap_resolution : int = -1
+    heightmap_resolution_xy : tuple[int,int] = (15,10)
+    """Cells of the terrain map around the body, along its heading and across it."""
+    heightmap_size_xy : tuple[float,float] = (2.1,1.4)
+    """Side lengths of the terrain map, in meters. The cells must come out square."""
+    observe_heightmap : bool = False
+    """Whether to observe the map, as privileged.heightmap. On worlds with terrain it is read anyway,
+    to measure the height of the body from the ground."""
+    ground_patch_size_xy : tuple[float,float] = (0.78,0.69)
+    """Area under the body whose mean terrain height is the ground level, in meters. It should stay
+    within the feet, or at the edge of a step it would reach the ground beyond the one they stand on."""
+    heightmap_sensor_options : dict[str,Any] = dataclasses.field(default_factory=lambda: {"mode":"warp_camera"})
+    """Options for the adapter's setup_heightfield_sensor."""
     goal_resampling_probability_per_sec : float = 0.0
     max_goal_height_pos_change_speed : float = 0.25
     """ Max speed at which the goal height can change, in m/s. Used to prevent too sudden changes."""
@@ -115,11 +127,13 @@ class LocomotionAdapterData:
     feet_abs_pos_vec_foot_xyz : th.Tensor
     feet_are_touching_ground : th.Tensor
     borient_quat_vec_xyzw : th.Tensor
+    heightmap_vec_xy : th.Tensor | None # None if it is not observed
 
 class LocomotionVecEnv(RobotVecEnv):
     STATE_LOCOMOTION = "loco"
     STATE_FEET = "feet"
     STATE_HEIGHTMAP = "heightmap"
+    HEIGHTMAP_MINMAX = (-1.5, 0.5) # meters from the main body, which walks about 0.5m above the terrain
     STATE_REWARDS = "reward_weights"
 
     @dataclass
@@ -337,7 +351,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                 "FEET_REL_POS_Y",
                                                 "FEET_REL_POS_Z",
                                                 "FEET_ABS_POS_Z",
-                                                "PEAK_POS_Z",
+                                                "PEAK_POS_Z", # height of the last swing, from where the foot lifted off
+                                                "FEET_LIFTOFF_POS_Z",
                                                 "AVG_FEET_STEP_DURATIONS"
                                                 ], start=0)
 
@@ -406,7 +421,7 @@ class LocomotionVecEnv(RobotVecEnv):
                         reward_vel_goal_relative_width = self._thtens(1.5),
                         reward_vel_goal_absolute_width = self._thtens(0.5),
                         reward_vel_goal_relative_width_offset = self._thtens(0.1),
-                        heightmap_resolution_xy = (init_args.heightmap_resolution,init_args.heightmap_resolution),
+                        heightmap_resolution_xy = tuple(init_args.heightmap_resolution_xy),
                         goal_resampling_probability_per_sec = self._thtens(init_args.goal_resampling_probability_per_sec),
                         goal_resampling_enabled = init_args.goal_resampling_probability_per_sec > 0.0,
                         heading_kp=self._thtens(1.0),
@@ -560,12 +575,52 @@ class LocomotionVecEnv(RobotVecEnv):
             spawn_defs += self._arrow_spawn_defs
         return spawn_defs
 
+    def _get_terrain_links(self) -> list[tuple[str,str]]:
+        """The links the feet can stand on: the ground link, or all the links of the world model if
+        there is one, as the terrain of a world can be split over many links."""
+        if self._use_simple_flat_ground:
+            return [self._configuration.init_args.ground_link]
+        link_tag = "body" if self._world_format == "mjcf" else "link"
+        return [(self._world_name, link.attrib["name"]) for link in ET.fromstring(self._world_string).iter(link_tag)]
+
+    def _setup_heightmap_sensor(self) -> bool:
+        """Sets up the terrain map if it is needed and available, returns whether it is. Without a world
+        model the ground is at z=0, so the map is only needed if it is observed."""
+        observed = self._loco_conf.init_args.observe_heightmap
+        if self._use_simple_flat_ground and not observed:
+            return False
+        try:
+            # Everything but the world is ignored: the robot and the visual markers are not terrain
+            self._adapter.setup_heightfield_sensor(size_xy=self._loco_conf.init_args.heightmap_size_xy,
+                                                   resolution_xy=self._loco_conf.heightmap_resolution_xy,
+                                                   ignored_links=[sd.name for sd in self._get_spawn_defs()
+                                                                  if self._use_simple_flat_ground or sd.name != self._world_name],
+                                                   options=self._loco_conf.init_args.heightmap_sensor_options)
+        except NotImplementedError:
+            if observed:
+                raise
+            ggLog.warn(f"{type(self._adapter).__name__} has no heightfield sensor: the height of the body from "
+                       f"the ground will be its world z, which is wrong on the terrain of '{self._world_name}'")
+            return False
+        def centered_cells(cells : int, size : float, patch_size : float):
+            margin = min(max(math.ceil((cells - patch_size*cells/size)/2), 0), (cells-1)//2)
+            return slice(margin, cells-margin)
+        self._ground_patch_cells_xy = tuple(centered_cells(*args) for args in zip(self._loco_conf.heightmap_resolution_xy,
+                                                                                  self._loco_conf.init_args.heightmap_size_xy,
+                                                                                  self._loco_conf.init_args.ground_patch_size_xy))
+        return True
+
     @override
     def _build(self):
         # Set up monitored collision pairs for MjxAdapter
-        feet_ground_collision_pairs = [(foot, self._configuration.init_args.ground_link) for foot in self._loco_conf.init_args.feet_contact_links]
+        terrain_links = self._get_terrain_links()
+        self._terrain_links_num = len(terrain_links)
+        feet_ground_collision_pairs = [(foot, terrain_link) for foot in self._loco_conf.init_args.feet_contact_links
+                                                            for terrain_link in terrain_links]
+        self._heightmap_sensor_enabled = False
         if isinstance(self._adapter, BaseVecSimulationAdapter):
             self._adapter.set_monitored_collision_pairs(feet_ground_collision_pairs)
+            self._heightmap_sensor_enabled = self._setup_heightmap_sensor()
         super()._build()
         arrow_link = "world" if self._uses_pybullet() else "arrow_link"
         self._arrow_base = ("arrow",arrow_link)
@@ -660,7 +715,8 @@ class LocomotionVecEnv(RobotVecEnv):
                                                         self.FEET_FIELDS.FEET_REL_POS_Y : th.as_tensor([[-1.0],[1.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_REL_POS_Z : th.as_tensor([[-1.0],[1.0]]).expand(2,feet_num),
                                                         self.FEET_FIELDS.FEET_ABS_POS_Z : th.as_tensor([[-1.0],[1.0]]).expand(2,feet_num),
-                                                        self.FEET_FIELDS.PEAK_POS_Z : th.as_tensor([[-2.0],[2.0]]).expand(2,feet_num)},
+                                                        self.FEET_FIELDS.PEAK_POS_Z : th.as_tensor([[-0.01],[0.3]]).expand(2,feet_num),
+                                                        self.FEET_FIELDS.FEET_LIFTOFF_POS_Z : th.as_tensor([[-5.0],[5.0]]).expand(2,feet_num)},
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=(len(self._loco_conf.init_args.feet_contact_links),),
@@ -685,16 +741,19 @@ class LocomotionVecEnv(RobotVecEnv):
                                                             self._feet_state_helper,
                                                             obs_defs={"privileged":{"observable":True,"concatenate":True,"noise":None},
                                                                       "base":{"observable":True,"concatenate":True,"noise":feet_noise}})
-        if self._loco_conf.heightmap_resolution_xy[0] > 0:
+        if self._loco_conf.init_args.observe_heightmap:
             heightmap_state_helper = ThBoxStateHelper( field_names=["map"],
-                                                    fields_minmax={"map" : self._thtens([-10.0, 10.0])},
+                                                    fields_minmax={"map" : self._thtens(self.HEIGHTMAP_MINMAX)},
                                                     dtype=self._obs_dtype,
                                                     th_device=self._th_device,
                                                     field_size=self._loco_conf.heightmap_resolution_xy,
+                                                    history_length=1,
+                                                    observation_definitions={"privileged" : ThBoxStateHelper.SimpleObsDef.fully_observable()},
+                                                    flatten_observation=True,
                                                     vec_size=adapter.vec_size())
             self._state_helper = self._state_helper.add_substate(LocomotionVecEnv.STATE_HEIGHTMAP,
                                                                  heightmap_state_helper,
-                                                                 obs_defs={"base":{"observable":True,"concatenate":False,"noise":None}})
+                                                                 obs_defs={"privileged":{"observable":True,"concatenate":False,"noise":None}})
         ggLog.info(f"Built state/obs/action helpers")
 
 
@@ -731,10 +790,28 @@ class LocomotionVecEnv(RobotVecEnv):
             feet_abs_pos_vec_foot_xyz = self._thzeros((self.num_envs,nfeet,3))
             borient_quat_vec_xyzw = self.to_gait_frame_orientation(self._unit_quaternion.expand((self.num_envs,4)))
         if isinstance(self._adapter, BaseVecSimulationAdapter):
-            feet_are_touching_ground = self._adapter.check_colliding_links()  # Returns all monitored pairs (feet vs ground)
+            # Returns all monitored pairs: each foot against each terrain link
+            feet_are_touching_ground = self._adapter.check_colliding_links().view(self.num_envs, nfeet, self._terrain_links_num).any(dim=2)
         else:
             feet_are_touching_ground = self._thzeros((self.num_envs,nfeet))
-        return feet_linvels_vec_foot_xyz, feet_rel_pos_vec_foot_xyz, feet_abs_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw
+        heightmap_vec_xy = None
+        ground_z_vec = None
+        if self._heightmap_sensor_enabled:
+            heightmap_vec_xy, ground_z_vec = self._get_heightmap(bstate[:,0:3].clone(), borient_quat_vec_xyzw)
+        elif self._loco_conf.init_args.observe_heightmap:
+            heightmap_vec_xy = self._thzeros((self.num_envs,)+self._loco_conf.heightmap_resolution_xy)
+        if not self._loco_conf.init_args.observe_heightmap:
+            heightmap_vec_xy = None
+        return feet_linvels_vec_foot_xyz, feet_rel_pos_vec_foot_xyz, feet_abs_pos_vec_foot_xyz, feet_are_touching_ground, borient_quat_vec_xyzw, heightmap_vec_xy, ground_z_vec
+
+    def _get_heightmap(self, body_pos_vec_xyz : th.Tensor, borient_quat_vec_xyzw : th.Tensor):
+        """Terrain around the body, aligned with its heading, as heights relative to the body, and
+        the world z of the ground under the body."""
+        x, y, z, w = borient_quat_vec_xyzw.unbind(dim=-1)
+        yaw_vec = th.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
+        heights_vec_xy = self._adapter.get_heightfield(body_pos_vec_xyz[:,0:2].contiguous(), yaw_vec)
+        ground_z_vec = heights_vec_xy[:, self._ground_patch_cells_xy[0], self._ground_patch_cells_xy[1]].mean(dim=(1,2))
+        return (heights_vec_xy - body_pos_vec_xyz[:,2].view(-1,1,1)).clamp(*self.HEIGHTMAP_MINMAX), ground_z_vec
 
 
     @override
@@ -742,14 +819,17 @@ class LocomotionVecEnv(RobotVecEnv):
         record_region_start("LocomotionVecEnv._get_adapter_data_raw")
         super_adapter_data = super()._get_adapter_data_raw()
         (feet_linvels_vec_foot_xyz, feet_rel_pos_vec_foot_xyz, feet_abs_pos_vec_foot_xyz,
-         feet_are_touching_ground, borient_quat_vec_xyzw) = self._get_loco_adapter_data(super_adapter_data)
+         feet_are_touching_ground, borient_quat_vec_xyzw, heightmap_vec_xy, ground_z_vec) = self._get_loco_adapter_data(super_adapter_data)
+        if ground_z_vec is not None:
+            super_adapter_data.vec_body_ground_dist = super_adapter_data.vec_body_ground_dist - ground_z_vec
         record_region_end("LocomotionVecEnv._get_adapter_data_raw")
         return LocomotionAdapterData(robot_data = super_adapter_data,
                                      feet_linvels_vec_foot_xyz = feet_linvels_vec_foot_xyz,
                                      feet_rel_pos_vec_foot_xyz = feet_rel_pos_vec_foot_xyz,
                                      feet_abs_pos_vec_foot_xyz = feet_abs_pos_vec_foot_xyz,
                                      feet_are_touching_ground = feet_are_touching_ground,
-                                     borient_quat_vec_xyzw = borient_quat_vec_xyzw)
+                                     borient_quat_vec_xyzw = borient_quat_vec_xyzw,
+                                     heightmap_vec_xy = heightmap_vec_xy)
 
 
     @override
@@ -1002,6 +1082,8 @@ class LocomotionVecEnv(RobotVecEnv):
             prev_feet_ground_durations_vec_foot_t = prev_feet_state[:,self.FEET_FIELDS.FEET_GROUND_DURATIONS]
             prev_avg_feet_step_durations = prev_feet_state[:,self.FEET_FIELDS.AVG_FEET_STEP_DURATIONS]
             prev_peak_z = prev_feet_state[:,self.FEET_FIELDS.PEAK_POS_Z]
+            prev_liftoff_z = prev_feet_state[:,self.FEET_FIELDS.FEET_LIFTOFF_POS_Z]
+            feet_z = feet_abs_pos_vec_foot_xyz[:,:,2]
 
             eps_resetting_ext = eps_resetting.unsqueeze(1).expand(nenv_nfeet)
             # on reset the previous contact is taken to be the current one, so no touchdown or liftoff is detected
@@ -1020,6 +1102,9 @@ class LocomotionVecEnv(RobotVecEnv):
             prev_peak_z                           = th.where(condition=eps_resetting_ext,
                                                             input=self._thzeros(nenv_nfeet),
                                                             other=prev_peak_z)
+            prev_liftoff_z                        = th.where(condition=eps_resetting_ext,
+                                                            input=feet_z,
+                                                            other=prev_liftoff_z)
 
             dt = new_internal_state[self.INTERNAL_FIELDS.LAST_STEP_DT].view((nenvs,))
             dbg_check(lambda: th.all(dt < 0.1), assert_msg=f"Step dt is too large", async_assert=True)
@@ -1057,14 +1142,18 @@ class LocomotionVecEnv(RobotVecEnv):
                      input = prev_feet_air_durations_vec_foot_t*(1-a) + prev_avg_feet_step_durations*a,
                      other = new_avg_feet_step_durations,
                      out   = new_avg_feet_step_durations)
-            feet_z = feet_abs_pos_vec_foot_xyz[:,:,2]
+            # The peak is measured from where the foot lifted off, so it does not depend on the terrain height
+            liftoff_feet_z = th.where(condition=just_lifting_up.expand(nenv_nfeet),
+                                      input = feet_z,
+                                      other = prev_liftoff_z)
             peak_feet_z = th.where(condition=just_lifting_up.expand(nenv_nfeet),
-                                    input = feet_z, # if just lifted up, record the foot height as the peak height of the step
+                                    input = self._thtens(0.0), # if just lifted up, a new step starts
                                     other = prev_peak_z)
             peak_feet_z = th.where(condition=feet_are_in_air.expand(nenv_nfeet),
-                                    input = th.maximum(feet_z, peak_feet_z), # if just lifted up, record the foot height as the peak height of the step
-                                    other = peak_feet_z) # otherwise keep the previous value (which is either the
+                                    input = th.maximum(feet_z - liftoff_feet_z, peak_feet_z),
+                                    other = peak_feet_z) # on the ground, keep the peak of the last step
         else:
+            liftoff_feet_z = self._thtens([0.0]).expand(nenv_nfeet)
             new_feet_contact = self._thtens([0.0]).expand(nenv_nfeet)
             new_feet_air_durations_vec_foot_t = self._thtens([0.0]).expand(nenv_nfeet)
             new_feet_ground_durations_vec_foot_t = self._thtens([0.0]).expand(nenv_nfeet)
@@ -1080,12 +1169,15 @@ class LocomotionVecEnv(RobotVecEnv):
                             self.FEET_FIELDS.FEET_REL_POS_Y : feet_rel_pos_vec_foot_xyz[:,:,1],
                             self.FEET_FIELDS.FEET_REL_POS_Z : feet_rel_pos_vec_foot_xyz[:,:,2],
                             self.FEET_FIELDS.FEET_ABS_POS_Z : feet_abs_pos_vec_foot_xyz[:,:,2],
-                            self.FEET_FIELDS.PEAK_POS_Z : peak_feet_z
+                            self.FEET_FIELDS.PEAK_POS_Z : peak_feet_z,
+                            self.FEET_FIELDS.FEET_LIFTOFF_POS_Z : liftoff_feet_z
                             }
 
         new_inst_state[self.STATE_LOCOMOTION] = new_locom_state
         new_inst_state[self.STATE_REWARDS] = new_reward_state
         new_inst_state[self.STATE_FEET] = new_feet_state
+        if adapter_data.heightmap_vec_xy is not None:
+            new_inst_state[self.STATE_HEIGHTMAP] = {"map" : adapter_data.heightmap_vec_xy}
         return new_inst_state
 
     def _height_velocity_reward(self, curr_state_extr_vec, current_state_locom_vec, current_state_internal, prev_state_extr_vec):
@@ -1336,8 +1428,9 @@ class LocomotionVecEnv(RobotVecEnv):
 
         # ---------------- STAND REWARDS -------------------
         
-        reward_stand_position   = joint_penalty_reward(norm_poshomingdiff,    max_rew=max_rew, exponent=1.0)*(th.logical_not(should_be_moving.view((self.num_envs,))))
-        reward_stand_joint_velocity = joint_penalty_reward(norm_velocities,   max_rew=max_rew, exponent=2.0)*(th.logical_not(should_be_moving.view((self.num_envs,))))
+        stand = th.logical_not(should_be_moving.view((self.num_envs,)))
+        reward_stand_position   = stand*joint_penalty_reward(norm_poshomingdiff,    max_rew=max_rew, exponent=1.0)
+        reward_stand_joint_velocity = stand*joint_penalty_reward(norm_velocities,   max_rew=max_rew, exponent=2.0)
 
 
         # ---------------- TRACKING REWARDS ----------------
@@ -1447,7 +1540,7 @@ class LocomotionVecEnv(RobotVecEnv):
         feet_swing_top_height = feet_state[:,self.FEET_FIELDS.PEAK_POS_Z]
         did_good_step = th.logical_not(step_air_time_is_bad) & should_be_moving & steps_finishing
         peak_error = feet_swing_top_height - self._loco_conf.init_args.desired_foot_clearance
-        max_error = 0.05
+        max_error = self._loco_conf.init_args.desired_foot_clearance
         peak_error = smooth_clip(peak_error, max_error, softness=4.0)
         feet_rews = did_good_step*(1 - (peak_error/max_error)**2) # reward is 1 for perfect height, and goes down to 0 as the error approaches max_error, and is 0 for errors larger than max_error
         reward_feet_step_height = th.mean(feet_rews, dim=1)

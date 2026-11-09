@@ -116,7 +116,7 @@ class GrapVecEnvInitArgs():
     measurement can never take; the observation keeps that convention after the resize and the [0,1]
     normalization."""
     privileged_unaltered_depth : bool = False
-    """Also observe the depth *without* the stereo degradation, in the privileged group only. The base
+    """Also observe the depth *without* the stereo degradation and randomized_depth_scale, in the privileged group only. The base
     observation keeps the degraded image, so what the actor sees is unchanged. Needs observe_camera,
     use_depth_cam and depth_stereo_sim, since otherwise there is no alteration to keep apart from. It is
     rendered like privileged_unaltered_camera, and black in the blind episodes."""
@@ -144,6 +144,8 @@ class GrapVecEnvInitArgs():
     """Fraction of the episodes in which the observed images are black, both grayscale and depth, and
     the object-derived rewards are zero, as the object cannot be seen. The privileged group observes
     which episodes are blind, so the critic can tell them apart. Needs observe_camera."""
+    spawn_table : bool = True
+    """Spawn the table the object lies on. Without it the object lies on the ground, so table_height should be ~0."""
     randomized_ground_tint : DistributionDef | None = None
     """Factors the r, g, b of the ground's material are multiplied by, each sampled on its own per episode."""
     randomized_object_color : DistributionDef | None = None
@@ -170,6 +172,10 @@ class GrapVecEnvInitArgs():
     image_noise_std : DistributionDef | None = None
     """Standard deviation of the per-pixel gaussian noise on the grayscale image, sampled per episode. The
     noise itself is drawn at every step."""
+    randomized_depth_scale : DistributionDef | None = None
+    """Factor the measured depth is multiplied by, sampled per episode: a calibration error of the stereo
+    camera's focal length or baseline, which scales every depth alike. 1.004 is 3 mm at 0.75 m. It is applied
+    before depth_stereo_sim, so the sensor's range gate works on the scaled depth. Needs use_depth_cam."""
     observe_visual_randomizations : bool = False
     """Observe the sampled visual randomizations above, in the privileged group. They have their own state,
     observe_randomizations is about the physical ones. Constant distributions are not randomized and are not
@@ -189,6 +195,12 @@ class GrapVecEnvInitArgs():
     """Reward for closing the gripper while it is touching the object (gated on gripper-object
     contact). 0.0 disables it. Differently from reward_gripper_close_weight this does not reward
     closing next to the object, and it does not drop when the object blocks the claw."""
+    reward_joint_stand_position_weight : float = 0.0
+    """Reward for the controlled joints being at their homing position, only in the blind episodes (see
+    blind_episodes_ratio): without seeing the object, the arm should stay at home. It is exp(-m/0.05), with m
+    the mean distance of the normalized joint positions from homing, so 1 at homing."""
+    reward_joint_stand_velocity_weight : float = 0.0
+    """Penalty on the velocity of the controlled joints, as LocomotionVecEnv's, only in the blind episodes."""
     gripper_close_distance : float = 0.025
     """Distance scale, in meters, of the smooth gate used by reward_gripper_close_weight."""
     gripper_closes_at_lower_limit : bool = True
@@ -204,6 +216,8 @@ class GrapVecEnvInitArgs():
     instead of the link origin reported by the robot description.
     If ``None``, an identity transform is used for every gripper link.
     """
+    obs_camera_resolution : int = 64
+    obs_camera_render_resolution : int = 64
     
 
 @dataclass
@@ -311,6 +325,8 @@ class GraspVecEnv(RobotVecEnv):
         feet_linvel : th.Tensor
         gripper_close : th.Tensor
         gripper_grasp : th.Tensor
+        joint_stand_position : th.Tensor
+        joint_stand_velocity : th.Tensor
 
 
     @dataclass
@@ -370,7 +386,7 @@ class GraspVecEnv(RobotVecEnv):
         self._rgb_to_gray_w = self._thtens([0.299, 0.587, 0.114])
         self._head_camera_name = "head_camera"
         self._grasp_ui_camera_name = "ui_camera"
-        self._cube_size = 0.04
+        self._cube_base_size = 0.04
         manipulation_area_minmax_xy = [[ 0.45,  -0.15],
                                         [ 0.65,   0.15]]
 
@@ -384,8 +400,8 @@ class GraspVecEnv(RobotVecEnv):
                 raise ValueError(f"gripper_link_transforms must have shape ({num_gripper_links}, 7) "
                                  f"(one (x,y,z,qx,qy,qz,qw) transform per gripper link), "
                                  f"got {tuple(gripper_link_transforms.shape)}")
-        obs_cam_render_height = 64
-        obs_cam_render_resolution_hw = (obs_cam_render_height, int(obs_cam_render_height*16/10))
+        obs_cam_render_resolution_hw = (grasp_init_args.obs_camera_render_resolution,
+                                        int(grasp_init_args.obs_camera_render_resolution*16/10))
         depth_stereo_sim = None
         if grasp_init_args.depth_stereo_sim:
             if grasp_init_args.obs_camera_model is None:
@@ -430,7 +446,7 @@ class GraspVecEnv(RobotVecEnv):
                        + ". The real images must be cropped to the same field of view.")
         self._grasping_conf = GraspVecEnv.GraspingConfiguration(
                         obs_camera_render_resolution_hw = obs_cam_render_resolution_hw,
-                        obs_camera_resolution_hw = (64,64),
+                        obs_camera_resolution_hw = (grasp_init_args.obs_camera_resolution, grasp_init_args.obs_camera_resolution),
                         ui_camera_resolution_hw = (480,480),
                         init_obj_area_minmax_xy = self._thtens(manipulation_area_minmax_xy),
                         goal_obj_area_minmax_xy = self._thtens(manipulation_area_minmax_xy),
@@ -471,7 +487,9 @@ class GraspVecEnv(RobotVecEnv):
                 yaw_vel_track = self._thtens(grasp_init_args.reward_yaw_vel_track_weight),
                 feet_linvel = self._thtens(grasp_init_args.reward_feet_linvel_weight),
                 gripper_close = self._thtens(grasp_init_args.reward_gripper_close_weight),
-                gripper_grasp = self._thtens(grasp_init_args.reward_gripper_grasp_weight)
+                gripper_grasp = self._thtens(grasp_init_args.reward_gripper_grasp_weight),
+                joint_stand_position = self._thtens(grasp_init_args.reward_joint_stand_position_weight),
+                joint_stand_velocity = self._thtens(grasp_init_args.reward_joint_stand_velocity_weight)
         )
         self._sub_rewards_enabled = {k:v for k,v in dataclasses.asdict(self._sub_rewards_weights2).items() if v!=0.0}
         self._sub_rewards_enabled_weights_th = self._thtens([v for v in self._sub_rewards_enabled.values()])
@@ -493,7 +511,8 @@ class GraspVecEnv(RobotVecEnv):
                                                         blind = self._thzeros((num_envs,)))
         if robot_init_args.enable_link_collisions is None:
             robot_init_args.enable_link_collisions = []
-        cube_colliding_links = [self._grasping_conf.table_link]
+        cube_colliding_links = ([self._grasping_conf.table_link] if grasp_init_args.spawn_table
+                                else [robot_init_args.ground_link])
         cube_colliding_links += self._grasping_conf.grasping_init_args.manipulator_all_links
         robot_init_args.enable_link_collisions.append((self._grasping_conf.grasping_init_args.target_object_link, cube_colliding_links))
         # Enable physical collisions between each foot and the ground so the feet (e.g. the legs,
@@ -642,7 +661,7 @@ class GraspVecEnv(RobotVecEnv):
                 and hasattr(self._adapter, "set_link_camera_visibility")):
             detected_links = list(self._adapter.get_detected_links())
             detected_models = {l[0] for l in detected_links}
-            hidden_models = {"goal_axes", "goal_marker_cube", "axes", "grippper_marker"}
+            hidden_models = {"goal_axes", "goal_marker_cube", "axes", "gripper_marker"}
             hidden_links : set[tuple[str,str]] = set()
             if self._grasping_conf.grasping_init_args.camera_hide_robot:
                 # Ablation for how much the arm occluding the object hurts: the observation camera
@@ -920,7 +939,8 @@ class GraspVecEnv(RobotVecEnv):
                       "image_brightness" :  (args.image_brightness, [""]),
                       "image_contrast" :    (args.image_contrast, [""]),
                       "image_gamma" :       (args.image_gamma, [""]),
-                      "image_noise_std" :   (args.image_noise_std, [""])}
+                      "image_noise_std" :   (args.image_noise_std, [""]),
+                      "depth_scale" :       (args.randomized_depth_scale, [""])}
         self._visual_randomizations : dict[str, GraspVecEnv.VisualRandomization] = {}
         start = 0
         for name, (distribution, axes) in components.items():
@@ -928,6 +948,8 @@ class GraspVecEnv(RobotVecEnv):
                 continue
             if not args.observe_camera:
                 raise ValueError(f"The {name} randomization needs observe_camera: there are no images to alter.")
+            if name == "depth_scale" and not args.use_depth_cam:
+                raise ValueError(f"The {name} randomization needs use_depth_cam: there is no depth image to alter.")
             low, high = (th.broadcast_to(th.as_tensor(v, device=self._th_device, dtype=th.float32), (len(axes),))
                          for v in distr_minmax(distribution))
             self._visual_randomizations[name] = GraspVecEnv.VisualRandomization(
@@ -1125,14 +1147,19 @@ class GraspVecEnv(RobotVecEnv):
                     # 0, so it survives the clamp and stays distinguishable from any real
                     # measurement (which is always beyond the sensor's strictly positive minimum range).
                     return th.clamp(depth_m/1.0, 0.0, 1.0) # normalize to 1 meters and clamp
+                measured_depth = metric_depth
+                if "depth_scale" in self._visual_randomizations:
+                    # The calibration error scales the depth the camera reports, so it comes before the
+                    # degradation's range gate. Pixels with no hit are 0 and stay 0.
+                    measured_depth = metric_depth*self._visual_randomization("depth_scale").view(self.num_envs,1,1)
                 if self._grasping_conf.depth_stereo_sim is not None:
                     # Degrade the metric depth at render resolution: the stereo artifacts belong to
                     # the sensor, not to the resolution the policy looks at. Missing measurements
                     # come back as INVALID_DEPTH (0).
-                    obs_depth_image = _depth_to_obs(stereo_depth_degradation(metric_depth,
+                    obs_depth_image = _depth_to_obs(stereo_depth_degradation(measured_depth,
                                                                              self._grasping_conf.depth_stereo_sim))
                 else:
-                    obs_depth_image = _depth_to_obs(metric_depth)
+                    obs_depth_image = _depth_to_obs(measured_depth)
                 obs_unaltered_depth_image = None
                 if want_unaltered_depth:
                     if unaltered_renderings is not renderings:
@@ -1478,6 +1505,15 @@ class GraspVecEnv(RobotVecEnv):
             reward_gripper_close = reward_gripper_close*sighted
             reward_gripper_grasp = reward_gripper_grasp*sighted
 
+        # ---- Standing still, in the blind episodes ----
+        if self._grasping_conf.grasping_init_args.blind_episodes_ratio > 0:
+            blind = state[self.STATE_BLIND][:,0,self.BLIND.BLIND,0]
+        else:
+            blind = th.zeros_like(reward_position)
+        stand_scale = 0.05
+        reward_stand_position = blind*th.exp(-th.mean(th.abs(state_robot_norm[:,0,:,0] - normhoming), dim=1)/stand_scale)
+        reward_stand_velocity = blind*joint_penalty_reward(state_robot_norm[:,0,:,1], max_rew=max_rew, exponent=2.0)
+
         raw_rewards = GraspVecEnv.SubRewards(
             health = th.ones_like(reward_position),
             joint_actacc = reward_actacc,
@@ -1495,7 +1531,9 @@ class GraspVecEnv(RobotVecEnv):
             yaw_vel_track = reward_yaw_vel_track,
             feet_linvel = reward_feet_linvel,
             gripper_close = reward_gripper_close,
-            gripper_grasp = reward_gripper_grasp
+            gripper_grasp = reward_gripper_grasp,
+            joint_stand_position = reward_stand_position,
+            joint_stand_velocity = reward_stand_velocity
         )
         sub_rew_unscaled = th.stack([dataclass2dict(raw_rewards)[k] for k in self._sub_rewards_enabled], dim=1)
         sub_rew_scaled = sub_rew_unscaled*self._sub_rewards_enabled_weights_th.unsqueeze(0)*self._grasping_conf.grasping_init_args.reward_scale
@@ -1647,7 +1685,7 @@ class GraspVecEnv(RobotVecEnv):
             self._scene_visuals_outdated = True
         table_height = self._sample_distr((self.num_envs), self._grasping_conf.table_height)
         # record_time("GraspVecEnv._set_current_ep_config: sampled table height")
-        min_obj_z = table_height + self._cube_size*self._object_height_scale()/2 + 0.005
+        min_obj_z = table_height + self._cube_base_size*self._object_height_scale()/2 + 0.005
         init_obj_minmax_z = min_obj_z.view(self.num_envs,1,1).expand(self.num_envs,2,1)
         init_obj_area_minmax_xyz = th.cat([self._grasping_conf.init_obj_area_minmax_xy.expand(self.num_envs,2,2),
                                            init_obj_minmax_z], dim=2)
@@ -1725,14 +1763,15 @@ class GraspVecEnv(RobotVecEnv):
     def _simulation_initialization(self, vec_mask : th.Tensor):
         super()._simulation_initialization(vec_mask = vec_mask)
         if isinstance(self._adapter, BaseVecSimulationAdapter):
-            table_state = self._thzeros((self.num_envs,1,13))
-            table_state[:,0,0] = 0.8
-            table_state[:,0,1] = 0.0
-            table_state[:,0,2] = self._grasping_episode_config.table_height-0.5
-            table_state[:,0,6] = 1.0
-            self._adapter.setLinksStateDirect(link_names=[self._grasping_conf.table_link],
-                                              link_states_pose_vel=table_state,
-                                              vec_mask=vec_mask)
+            if self._grasping_conf.grasping_init_args.spawn_table:
+                table_state = self._thzeros((self.num_envs,1,13))
+                table_state[:,0,0] = 0.8
+                table_state[:,0,1] = 0.0
+                table_state[:,0,2] = self._grasping_episode_config.table_height-0.5
+                table_state[:,0,6] = 1.0
+                self._adapter.setLinksStateDirect(link_names=[self._grasping_conf.table_link],
+                                                  link_states_pose_vel=table_state,
+                                                  vec_mask=vec_mask)
             
             obj_state = self._thzeros((self.num_envs,1,13))
             obj_state[:,0,:7] = self._grasping_episode_config.initial_object_pose[:]
@@ -1775,7 +1814,7 @@ class GraspVecEnv(RobotVecEnv):
                                             pose=None,
                                             format="urdf.xacro",
                                             kwargs={"add_world_link":str(is_pybullet),
-                                                    "size" : self._cube_size})
+                                                    "size" : self._cube_base_size})
         spawn_defs.append(self._cube_spawn_def)
         # if not hasattr(self,"_axes_spawn_def"):
         #     self._axes_spawn_def = ModelSpawnDef(   definition_string=Path(adarl.utils.utils.pkgutil_get_path("adarl_envs","models/axes.urdf.xacro")).read_text(),
@@ -1810,7 +1849,7 @@ class GraspVecEnv(RobotVecEnv):
                                                 pose=None,
                                                 format="urdf.xacro",
                                                 kwargs={"add_world_link":str(is_pybullet),
-                                                        "size" :  self._cube_size,
+                                                        "size" :  self._cube_base_size,
                                                         "red" :   0.0,
                                                         "green" : 1.0,
                                                         "blue" :  0.0,
@@ -1831,7 +1870,8 @@ class GraspVecEnv(RobotVecEnv):
                                                     "add_fixed_joint" : True,
                                                     "fixed_joint_xyz" : f"0.0 0.0 0.0",
                                                     "fixed_joint_rpy" : "0 0 0"},)
-        spawn_defs.append(self._table_spawn_def)
+        if self._grasping_conf.grasping_init_args.spawn_table:
+            spawn_defs.append(self._table_spawn_def)
         if adarl.utils.utils.isinstance_noimport(self._adapter, ("MjxAdapter", "MujocoAdapter")):
             cam_file = "models/simple_camera.mjcf.xacro"
         else:

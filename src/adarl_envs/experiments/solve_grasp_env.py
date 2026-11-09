@@ -44,12 +44,15 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # the latent extractor never sees them.
     cam_obs_keys = ((["base.camera"] if (use_gray_cam or not use_depth_cam) else []) +
                     (["base.depth"] if use_depth_cam else [])) if obs_cam else []
+    # The latent extractor encodes the grayscale with the visual randomizations (base.camera) and
+    # reconstructs it without them (privileged.camera_unaltered). The depth is encoded and decoded as is.
+    decode_unaltered_camera = "base.camera" in cam_obs_keys
     use_rnd = True
 
     eval_freq = 5
     r = 1.0
     n = 1.0
-    v = 0.0 # visual randomization strength
+    v = 1.0 # visual randomization strength
     env_builder_args = {
         "reward_health_weight" :                0.0,
         "reward_joint_power_weight" :           0.0,
@@ -62,6 +65,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "reward_gripper_pose_weight" :          1.0,
         "reward_gripper_close_weight" :         0.5, # close the gripper near the object
         "reward_gripper_grasp_weight" :         0.0, # close the gripper *on* the object (contact-gated)
+        "reward_joint_stand_position_weight" :  1.0, # only in the blind episodes
+        "reward_joint_stand_velocity_weight" :  1.0, # only in the blind episodes
         "gripper_close_distance" :              0.05,
         "reward_height_position_weight" :       2.0,
         "reward_pitchnroll_weight" :            1.0,
@@ -145,6 +150,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "image_contrast" : ("uniform", [0.7*v,1.3*v]),
         "image_gamma" : ("uniform", [0.7*v,1.4*v]),
         "image_noise_std" : ("uniform", [0.0,0.02*v]),
+        "randomized_depth_scale" : ("uniform", [1.0-0.004*v,1.0+0.004*v]), # +-3 mm at 0.75 m
         "observe_visual_randomizations" : False,
         "render_shadows" : False,
         "randomized_reference_filter_distribution" : ("uniform", (20.0, 50.0)),
@@ -170,7 +176,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # "mjx_geom_overrides" : {
         #     "cube" : {"friction" : [2.0,0.001,0.0005]}
         # },
-        "mjx_opt_preset" : "medium",
+        "mjx_opt_preset" : "slow",
         # Overflow warnings not to print, as a bitwise or of mujoco_warp's OverflowType values, e.g. ITERATIONS
         # is 1<<9 and LS_ITERATIONS 1<<10. Do not import it here: mujoco must load after adarl sets MUJOCO_GL
         "mjx_warp_disabled_overflow_warnings" : 0,
@@ -202,7 +208,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "privileged_unaltered_depth" : False,
         # Also put in the privileged observation the grayscale image without the visual randomizations
         # (privileged.camera_unaltered); base.camera stays randomized.
-        "privileged_unaltered_camera" : False,
+        "privileged_unaltered_camera" : decode_unaltered_camera,
         "safety_cooldown_halflife_sec" : 1.0
     }
     video_eval_env_builder_args = copy.deepcopy(env_builder_args)
@@ -323,7 +329,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         total_steps=300_000_000,
                         train_freq_vstep=5
                         ),
-                    checkpoint_freq=5,
+                    checkpoint_freq=10,
                     collector_device=env_device,
                     max_episode_duration=max_steps_per_episode,
                     validation_buffer_size=0,
@@ -433,7 +439,11 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
             combiner = []
             decombiner = []
             latent_passthrough_keys = ("base.vec",)
-            actor_observation_filter=["base.vec"]+cam_obs_keys
+            encoded_keys = cam_obs_keys
+            decoded_keys = ["privileged.camera_unaltered" if k == "base.camera" else k for k in cam_obs_keys]
+            # The decoded camera has to be in the extractor's observation space, which this filter
+            # defines. Only the extractor reads it: the actor gets the latent.
+            actor_observation_filter=["base.vec"]+cam_obs_keys+(["privileged.camera_unaltered"] if decode_unaltered_camera else [])
 
             sac_train_freq_vstep = 5
             train_iterations = 10
@@ -447,6 +457,8 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
             combiner = "identity"
             decombiner = "identity"
             latent_passthrough_keys = tuple()
+            encoded_keys = None
+            decoded_keys = None
             actor_observation_filter=["base.vec"]
 
             sac_train_freq_vstep = 5
@@ -568,7 +580,9 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                         rnd_imbalance_estimator_learning_rate = 0.0005,
                         use_rnd_loss_scaler=False,
                         latent_passthrough_keys = latent_passthrough_keys,
-                        passthrough_in_encoder = False),
+                        passthrough_in_encoder = False,
+                        encoded_keys = encoded_keys,
+                        decoded_keys = decoded_keys),
                     sac_init_hparams=SAC_init_hparams(
                                         actor_log_std_init=-2.0,
                                         actor_mean_bounds_ratio = 0.9,

@@ -586,6 +586,7 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
         has_body_randomization = bool(th.any(body_minmax[1] > body_minmax[0]).item())
         self._initial_pose_randomization_enabled = has_joint_randomization or has_body_randomization
         self._last_pose_randomization : th.Tensor | None = None
+        self._last_body_pose_randomization : th.Tensor | None = None
         self._last_sent_v_j_pvesd = homing_ctrl_joints_pvesd.repeat(init_args.adapter.vec_size(), 1, 1)
         self._excluded_collision_pairs : set[tuple[str,str]] = set()
         self._safe_limits_minmax_j_pve = th.stack([safe_limits_minmax_pve[jn] for jn in controlled_joints_rn], dim=1)
@@ -1809,9 +1810,13 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
                 jpose_jposeref = th.stack([_rand_jposes, _rand_jposes], dim=2)
                 self._last_pose_randomization_steps = self._tot_step_counter
                 self._last_pose_randomization = jpose_jposeref
+                self._last_body_pose_randomization = bpose
             else:
                 jpose_jposeref = self._last_pose_randomization
                 bpose = self._current_episode_config.vec_body_pose_xyzxyzw.clone()
+        elif self._initial_pose_randomization_enabled: # recycling the poses sampled the first time
+            jpose_jposeref = self._last_pose_randomization
+            bpose = self._last_body_pose_randomization.clone()
         else:
             homing_ref = self._configuration.homing_ctrl_joints_pvesd[:,0]
             jpose_jposeref = th.stack([homing_pos, homing_ref], dim=-1).unsqueeze(0).expand(self.num_envs, -1, -1)
@@ -2061,9 +2066,9 @@ class RobotVecEnv(ControlledVecEnv[BaseVecJointImpedanceAdapter, Observation]):
             if self._configuration.homing_body_pose_xyz_xyzw is not None and self._configuration.robot_is_floating:
                 # ggLog.info(f"setting body pose ({self._current_episode_config.vec_init_on_reset})")
                 self._adapter.setLinksStateDirect(link_names=[self._configuration.main_body_link],
-                                                  link_states_pose_vel=th.cat([self._configuration.homing_body_pose_xyz_xyzw,
-                                                                               th.zeros((6,), device=self._configuration.init_args.th_device, dtype=th.float32)])
-                                                                               .expand(self._adapter.vec_size(), 1, 13),
+                                                  link_states_pose_vel=th.cat([self._current_episode_config.vec_body_pose_xyzxyzw,
+                                                                               th.zeros((self._adapter.vec_size(),6), device=self._configuration.init_args.th_device, dtype=th.float32)],
+                                                                              dim=1).view(self._adapter.vec_size(), 1, 13),
                                                   vec_mask=reinit_vecs)
             record_time(f"RobotVecEnv._simulation_initialization: setted main body pose")
             self._adapter.set_current_joint_impedance_command(self._precomputed_sim_init.full_cmd_vec_j_pvesd, vec_mask=reinit_vecs)

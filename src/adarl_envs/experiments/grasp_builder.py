@@ -100,9 +100,11 @@ def runner_builder(seed,
                                             mjx_impl="warp",
                                             render_backend="warp",
                                             render_shadows=env_builder_args.pop("render_shadows", False),
+                                            ground_rgba=env_builder_args.pop("ground_rgba", (0.5,0.5,0.5,1.0)), # flat gray, no checker
                                             render_znear=0.1,
                                             warp_nccdmax=env_builder_args.pop("mjx_warp_nccdmax", 10),
                                             warp_nconmax=env_builder_args.pop("mjx_warp_nconmax", 20),
+                                            warp_njmax=env_builder_args.pop("mjx_warp_njmax", 150),
                                             warp_graph_mode=env_builder_args.pop("mjx_warp_graph_mode", "WARP"),
                                             warp_disabled_overflow_warnings=env_builder_args.pop("mjx_warp_disabled_overflow_warnings", 0))
     elif mode == "xbot-zmq":
@@ -287,6 +289,8 @@ def runner_builder(seed,
                                                     world_description_string="flat_ground"),
                                                 reward_gripper_pose_weight = env_builder_args.pop("reward_gripper_pose_weight"),
                                                 reward_gripper_close_weight = env_builder_args.pop("reward_gripper_close_weight", 0.0),
+                                                reward_joint_stand_position_weight = env_builder_args.pop("reward_joint_stand_position_weight", 0.0),
+                                                reward_joint_stand_velocity_weight = env_builder_args.pop("reward_joint_stand_velocity_weight", 0.0),
                                                 reward_gripper_grasp_weight = env_builder_args.pop("reward_gripper_grasp_weight", 0.0),
                                                 camera_hide_robot = env_builder_args.pop("camera_hide_robot", False),
                                                 obs_camera_model = env_builder_args.pop("obs_camera_model", None),
@@ -311,6 +315,7 @@ def runner_builder(seed,
                                                 image_contrast = env_builder_args.pop("image_contrast", None),
                                                 image_gamma = env_builder_args.pop("image_gamma", None),
                                                 image_noise_std = env_builder_args.pop("image_noise_std", None),
+                                                randomized_depth_scale = env_builder_args.pop("randomized_depth_scale", None),
                                                 observe_visual_randomizations = env_builder_args.pop("observe_visual_randomizations", False),
                                                 gripper_joints = tuple(env_builder_args.pop("gripper_joints", ())),
                                                 gripper_close_distance = env_builder_args.pop("gripper_close_distance", 0.05),
@@ -339,6 +344,7 @@ def runner_builder(seed,
                                                 manipulator_all_links=env_builder_args.pop("manipulator_links"),
                                                 gripper_link_transforms=env_builder_args.pop("gripper_link_transforms"),
                                                 table_height=env_builder_args.pop("table_height"),
+                                                spawn_table=env_builder_args.pop("spawn_table", True),
                                                 feet_contact_links=env_builder_args.pop("feet_contact_links"),
                                                 feet_bottom_links=env_builder_args.pop("feet_bottom_links"),
                                                 max_reach_height=env_builder_args.pop("max_reach_height"),
@@ -359,7 +365,8 @@ def runner_builder(seed,
                                         overlay_text_xy=(0.025,0.025),
                                         overlay_text_height=0.035,
                                         overlay_text_color_rgb=(255,150,0),
-                                        overlay_text_func=overlay_text_func)
+                                        overlay_text_func=overlay_text_func,
+                                        record_video=env_builder_args.pop("record_video", True))
     return vrunner
 
 from adarl_envs.experiments.loco_builder import union
@@ -839,7 +846,8 @@ def get_kyon_args(robot_options : dict = {}):
                                          (-0.107, 0.0,    -0.0362125, 0.0, 0.0, 0.0, 1.0)],
             "held_joints_damping" :   {"default": 50.0},
             "held_joints_stiffness" : {"default": 500.0},
-            "table_height" : ("uniform", (0.001, 0.001))
+            "table_height" : ("uniform", (0.001, 0.001)),
+            "spawn_table" : False, # the object lies on the floor
         }
 
 # Every entry is called as entry(robot_options=...), and the variants only change a default, so an

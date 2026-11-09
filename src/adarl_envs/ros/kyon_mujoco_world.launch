@@ -19,6 +19,7 @@
     <arg name="camera_front_up" default="false" />
     <arg name="camera_front_down" default="false" />
     <arg name="extra_xml_cmd" default=""/>
+    <arg name="target_rtf" default=""/>
 
     <!-- Simulator wrapper parameters -->
     <arg name="enable_mjctl" default="false"/>
@@ -44,6 +45,9 @@
     <let name="headless_flag" value="--headless" if="$(var headless)"/>
     <let name="headless_flag" value="" unless="$(var headless)"/>
 
+    <let name="target_rtf_flag" value="--target-rtf=$(var target_rtf)" if="$(eval '&quot;$(var target_rtf)&quot; != &quot;&quot;')"/>
+    <let name="target_rtf_flag" value="" unless="$(eval '&quot;$(var target_rtf)&quot; != &quot;&quot;')"/>
+
     <let name="extra_xml_flag" value="--xml-cmd=$(var extra_xml_cmd)" if="$(eval '&quot;$(var extra_xml_cmd)&quot; != &quot;&quot;')"/>
     <let name="extra_xml_flag" value="" unless="$(eval '&quot;$(var extra_xml_cmd)&quot; != &quot;&quot;')"/>
 
@@ -58,6 +62,7 @@
         $(var mjctl_flag)
         $(var terrain_scan_body_flag)
         $(var headless_flag)
+        $(var target_rtf_flag)
         " >
         <env name="PYTHONUNBUFFERED" value="1" />
     </executable>

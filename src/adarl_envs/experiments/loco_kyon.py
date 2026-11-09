@@ -395,7 +395,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                                                                                 "eval_configuration" : eval_configurations},
                                                     target_entropy_factor = None,
                                                     actor_log_std_init = -2.0,
-                                                    actor_observation_filter=["base.vec","base.last_action_raw", "base.reward_weights"],
+                                                    actor_observation_filter=["base.vec","base.last_action_raw"],
                                                     critic_observation_filter=["base.vec","base.last_action_raw","privileged.vec", "base.reward_weights"]+heightmap_obs,
                                                     target_entropy_factor_annealing=annealer.anneal,
                                                     action_reference_obs_key=None, #"base.last_action_raw",

@@ -1,2 +1,2 @@
 #!/bin/bash
-camzmq-ros2 --name zed --port 5700 --size 102x64  --info-topic /zed_front_down/color/camera_info --rgb-topic /zed_front_down/color/image_raw --depth-topic /zed_front_down/depth/image_raw --use-sim-time
+exec camzmq-ros2 --name zed --port 5700 --size 102x64  --info-topic /zed_front_down/color/camera_info --rgb-topic /zed_front_down/color/image_raw --depth-topic /zed_front_down/depth/image_raw --use-sim-time

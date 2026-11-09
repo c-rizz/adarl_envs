@@ -44,9 +44,13 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
     # the latent extractor never sees them.
     cam_obs_keys = ((["base.camera"] if (use_gray_cam or not use_depth_cam) else []) +
                     (["base.depth"] if use_depth_cam else [])) if obs_cam else []
-    # The latent extractor encodes the grayscale with the visual randomizations (base.camera) and
-    # reconstructs it without them (privileged.camera_unaltered). The depth is encoded and decoded as is.
+    # Fraction of the episodes whose depth is degraded into a ZED-X-Mini-like one, the others see it exact.
+    stereo_degradation_ratio = 0.5
+    # The latent extractor encodes the images as observed and reconstructs them unaltered: the grayscale
+    # without the visual randomizations (privileged.camera_unaltered), the depth without the stereo
+    # degradation and the depth scale (privileged.depth_unaltered).
     decode_unaltered_camera = "base.camera" in cam_obs_keys
+    decode_unaltered_depth = "base.depth" in cam_obs_keys and stereo_degradation_ratio > 0
     use_rnd = True
 
     eval_freq = 5
@@ -138,7 +142,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
         "randomized_object_mass_ratios" : ("uniform", [0.5*r,2.0*r]), # the cube is 0.1 kg nominal
         "randomized_object_scale_ratios" : ("uniform", [0.75*r,1.75*r]), # the cube is 4 cm nominal: 3 to 7 cm
-        "blind_episodes_ratio" : 0.01*r if obs_cam else 0.0,
+        "blind_episodes_ratio" : 0.05, #0.01*r if obs_cam else 0.0,
         "randomized_ground_tint" : ("uniform", [0.4*v,1.4*v]),
         "randomized_object_color" : ("uniform", [0.2*v,1.0*v]),
         "randomized_light_tilt_deg" : ("uniform", [-30.0*v,30.0*v]),
@@ -200,12 +204,14 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # Crop the camera rendering to a square sized to this propotion of the original height
         # So if render size is 160x100: crop=1.0->100x100, crop=0.5->50x50, 1.25->125x100
         "obs_camera_crop" : 1.0,
-        # Degrade the rendered depth into a ZED-X-Mini-like one, for sim-to-real transfer.
-        # False renders exact depth.
-        "depth_stereo_sim" : True,
-        # With depth_stereo_sim, also put the undegraded depth in the privileged observation
-        # (privileged.depth_unaltered); base.depth stays degraded.
-        "privileged_unaltered_depth" : False,
+        # Fraction of the episodes whose depth is degraded into a ZED-X-Mini-like one, for
+        # sim-to-real transfer. 0 renders exact depth everywhere.
+        "stereo_degradation_ratio" : stereo_degradation_ratio,
+        # Depth outside this range is invalid (0), as the ZED's depth_minimum/maximum_distance make it.
+        "depth_range_m" : (0.2, 1.0),
+        # With stereo_degradation_ratio > 0, also put the undegraded depth in the privileged observation
+        # (privileged.depth_unaltered); base.depth stays degraded in the degraded episodes.
+        "privileged_unaltered_depth" : decode_unaltered_depth,
         # Also put in the privileged observation the grayscale image without the visual randomizations
         # (privileged.camera_unaltered); base.camera stays randomized.
         "privileged_unaltered_camera" : decode_unaltered_camera,
@@ -440,10 +446,12 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
             decombiner = []
             latent_passthrough_keys = ("base.vec",)
             encoded_keys = cam_obs_keys
-            decoded_keys = ["privileged.camera_unaltered" if k == "base.camera" else k for k in cam_obs_keys]
-            # The decoded camera has to be in the extractor's observation space, which this filter
-            # defines. Only the extractor reads it: the actor gets the latent.
-            actor_observation_filter=["base.vec"]+cam_obs_keys+(["privileged.camera_unaltered"] if decode_unaltered_camera else [])
+            unaltered_targets = (({"base.camera" : "privileged.camera_unaltered"} if decode_unaltered_camera else {}) |
+                                 ({"base.depth" : "privileged.depth_unaltered"} if decode_unaltered_depth else {}))
+            decoded_keys = [unaltered_targets.get(k, k) for k in cam_obs_keys]
+            # The decoded images have to be in the extractor's observation space, which this filter
+            # defines. Only the extractor reads them: the actor gets the latent.
+            actor_observation_filter=["base.vec"]+cam_obs_keys+list(unaltered_targets.values())
 
             sac_train_freq_vstep = 5
             train_iterations = 10

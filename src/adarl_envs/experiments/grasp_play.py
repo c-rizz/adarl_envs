@@ -210,8 +210,8 @@ def grasp_builder_and_args():
         "goal_yaw_minmax" : (-math.pi, math.pi),
         "goal_yaw_vel_zero_ratio" : 0.25,
         "goal_yaw_vel_minmax" : (-1.0, 1.0),
-        "held_joints_damping" : 10.0,
-        "held_joints_stiffness" : 200.0,
+        "held_joints_damping" : 50.0,
+        "held_joints_stiffness" : 50.0,
         "history_length_action_smoothed" : 0,
         "history_length_action_raw" : 1,
         "impulse_duration_minmax" : [0.01, 2.5],
@@ -281,10 +281,7 @@ def grasp_builder_and_args():
             "ctrl_legs" : True,
             # The observation camera attaches to the front-down ZED's left imager frame, which only
             # exists when the head cameras are part of the model.
-            "spawn_zed_cameras" : True,
-            # The robot args set the held joints' gains. The trained damping makes the held arm chatter
-            # under xbot, while the policy does not observe it.
-            "held_joints_damping" : 20.0 if realworld else 500.0,
+            "spawn_zed_cameras" : True
         },
         "mjx_warp_nccdmax" : 20,
         "observe_impulses" : False,
@@ -300,7 +297,9 @@ def grasp_builder_and_args():
         "obs_camera_crop" : 1.0,
         "camera_hide_robot" : False,
         # The real camera produces the stereo artifacts itself: only the simulation adds them.
-        "depth_stereo_sim" : not realworld,
+        "stereo_degradation_ratio" : 0.0 if realworld else 1.0,
+        # As in training: depth outside it is invalid (0), the real camera's too.
+        "depth_range_m" : (0.2, 1.0),
         "privileged_unaltered_depth" : False,
     }
 
@@ -330,7 +329,7 @@ def grasp_builder_and_args():
         "randomized_gains_stiffness_ratio_epstd"     : 0.0*r,
         "randomized_mass_ratios" : ("normal", (1.0, 0.1*r)),
         "randomized_object_mass_ratios" : ("uniform", [0.5*r,2.0*r]),
-        "blind_episodes_ratio" : 1,
+        "blind_episodes_ratio" : 0,
         "randomized_ground_tint" : ("uniform", [0.4*r,1.4*r]),
         "randomized_object_color" : ("uniform", [0.2*r,1.0*r]),
         "randomized_light_tilt_deg" : ("uniform", [-30.0*r,30.0*r]),

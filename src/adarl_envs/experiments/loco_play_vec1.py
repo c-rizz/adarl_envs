@@ -143,8 +143,8 @@ def adarl_builder_and_args(args):
     eps = 0 #1e-6 # For disabled things (but no zero, so I can still see how they would behave)
     env_builder_args = {
         "action_smoothing_halflife_sec" : 0.0,
-        "control_mode" : "position",
-        "control_mode_position_delta_max" : None, # only used with control_mode "position_delta"
+        "control_mode" : "position_delta" if args["position_delta"] else "position",
+        "control_mode_position_delta_max" : {"default": 0.12} if args["position_delta"] else None, # only used with control_mode "position_delta", as in loco_kyon
         "desired_foot_clearance" : 0.1,
         "enable_limits_safety" : True,
         "enable_posref_safety" : True,
@@ -223,8 +223,8 @@ def adarl_builder_and_args(args):
         "reward_failure_weight" :                   eps,
         "reward_feet_air_time_weight" :             10.0,
         "reward_feet_ground_time_weight" :          eps,
-        "reward_feet_on_ground_weight" :            1.0,
-        "reward_feet_step_height_weight" :          1.0,
+        "reward_feet_on_ground_weight" :            0.5,
+        "reward_feet_step_height_weight" :          0.5,
         "reward_heading_velocity_weight" :          eps,
         "reward_heading_weight" :                   eps,
         "reward_health_weight" :                    1.0,
@@ -232,7 +232,7 @@ def adarl_builder_and_args(args):
         "reward_height_velocity_weight" :           0.1,
         "reward_joint_acc_on_vel_weight" :          eps,
         "reward_joint_acceleration_weight" :        eps,
-        "reward_joint_actacc_weight" :              0.5*p,
+        "reward_joint_actacc_weight" :              1.0*p,
         "reward_joint_actdiff_weight" :             1.0*p,
         "reward_joint_energy_weight" :              eps,
         "reward_joint_position_limit_weight" :      eps,
@@ -244,7 +244,7 @@ def adarl_builder_and_args(args):
         "reward_joint_stand_position_weight" :      5.0,
         "reward_joint_stand_velocity_weight" :      1.0,
         "reward_joint_torque_limit_weight" :        eps,
-        "reward_joint_torque_weight" :              0.0004*p,
+        "reward_joint_torque_weight" :              0.0001*p,
         "reward_joint_torquediff_weight" :          eps,
         "reward_joint_torqueref_weight" :           eps,
         "reward_joint_velocity_limit_weight" :      eps,
@@ -252,7 +252,7 @@ def adarl_builder_and_args(args):
         "reward_joint_velref_weight" :              eps,
         "reward_pitchnroll_velocity_weight" :       0.5,
         "reward_pitchnroll_weight" :                0.5,
-        "reward_safety_triggered_weight" :          1.0,
+        "reward_safety_triggered_weight" :          0.5,
         "reward_scale_nolength":                    0.01,
         "reward_slip_weight" :                      1.0,
         "reward_superweight_joint_penalties" :      1.0,
@@ -260,7 +260,6 @@ def adarl_builder_and_args(args):
         "reward_yaw_vel_tracking_weight" :          1.0,
         "robot_model" : args["robot"],
         "robot_options" : {
-            "add_twisting_pelvis" : False
         },
         "safety_cooldown_halflife_sec" : 1.0,
         "saturate_jimp_posref_limits" : False,
@@ -506,9 +505,9 @@ def play(seed, folderName, run_id, args,
                 cmd_height = h
             else:
                 direction = np.random.rand()*2*3.14159
-                speed = 0.0 #np.random.rand()
+                speed = 1.0*np.random.rand()
                 cmd_xys = [np.cos(direction), np.sin(direction), speed]
-                cmd_yawvel = 0 #(np.random.rand()*2-1)*0.5*(np.random.rand()>0.5)
+                cmd_yawvel = (np.random.rand()*2-1)*0.5*(np.random.rand()>0.5)
                 cmd_height = h
             cmd_xys[2] = cmd_xys[2]*args["speed_scale"]
             if cmd_xys[2] == 0.0:
@@ -714,6 +713,7 @@ if __name__ == "__main__":
     ap.add_argument("-zmqsta", "--xbotzmq-tcp-state-port", default=5559, type=int, help="If in xbot-zmq mode, the TCP state port (for receiving observations)")
     ap.add_argument("--gamepad-addr", default="tcp://localhost:5666", type=str, help="joyzmq gamepad publisher address to connect to for interactive teleop")
     ap.add_argument("--speed-scale", default=0.5, type=float, help="Scale the linvel speed command by this factor")
+    ap.add_argument("--position-delta", default=False, action='store_true', help="Actions are joint position deltas from the last reference, as in loco_kyon --position_delta")
 
     ap.set_defaults(feature=True)
     args = vars(ap.parse_args())

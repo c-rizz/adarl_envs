@@ -97,8 +97,8 @@ class GrapVecEnvInitArgs():
     observe_initial_object_pose : bool = False
     obs_camera_model : str | None = None
     """Which real camera the observation camera stands for, as a name known to adarl.utils.depth_sim
-    (e.g. "zedxmini4mm"). It sets the rendered field of view, and the sensor depth_stereo_sim
-    degrades towards. None keeps a generic camera, and then depth_stereo_sim cannot be used."""
+    (e.g. "zedxmini4mm"). It sets the rendered field of view, and the sensor the stereo degradation
+    imitates. None keeps a generic camera, and then stereo_degradation_ratio must be 0."""
     obs_camera_crop : float | None = None
     """Size of the centered window kept from the render, in units of the render's height, before
     resizing to the observation resolution.
@@ -110,15 +110,21 @@ class GrapVecEnvInitArgs():
 
     Cropping narrows the field of view, which makes a distant object cover more observation pixels.
     To transfer, the real images must be cropped to the same field of view."""
-    depth_stereo_sim : bool = False
-    """Degrade the rendered depth to look like obs_camera_model's passive stereo output, for
-    sim-to-real transfer. False renders exact depth. Invalid pixels come out as 0, a value a real
-    measurement can never take; the observation keeps that convention after the resize and the [0,1]
-    normalization."""
+    stereo_degradation_ratio : float = 0.0
+    """Fraction of the episodes whose depth is degraded to look like obs_camera_model's passive stereo
+    output, for sim-to-real transfer; each env draws it again at every episode. 0 renders exact depth
+    everywhere, 1 degrades every episode. Invalid pixels come out as 0, a value a real measurement can
+    never take; the observation keeps that convention after the resize and the [0,1] normalization."""
+    depth_range_m : tuple[float,float] | None = None
+    """(min, max) metric depth kept in the depth observations, degraded or not, privileged_unaltered_depth
+    included. Anything outside becomes invalid (0), as the ZED SDK's depth_minimum_distance and
+    depth_maximum_distance make it. It applies to a real camera's depth as well, so the range does not
+    depend on the camera's settings. Applied after the stereo degradation, which sees the whole scene as
+    the real matcher does. None keeps everything, up to the 1 m normalization clamp."""
     privileged_unaltered_depth : bool = False
     """Also observe the depth *without* the stereo degradation and randomized_depth_scale, in the privileged group only. The base
     observation keeps the degraded image, so what the actor sees is unchanged. Needs observe_camera,
-    use_depth_cam and depth_stereo_sim, since otherwise there is no alteration to keep apart from. It is
+    use_depth_cam and stereo_degradation_ratio > 0, since otherwise there is no alteration to keep apart from. It is
     rendered like privileged_unaltered_camera, and black in the blind episodes."""
     privileged_unaltered_camera : bool = False
     """Also observe the grayscale image without the visual randomizations and the image augmentations, in
@@ -175,7 +181,7 @@ class GrapVecEnvInitArgs():
     randomized_depth_scale : DistributionDef | None = None
     """Factor the measured depth is multiplied by, sampled per episode: a calibration error of the stereo
     camera's focal length or baseline, which scales every depth alike. 1.004 is 3 mm at 0.75 m. It is applied
-    before depth_stereo_sim, so the sensor's range gate works on the scaled depth. Needs use_depth_cam."""
+    before the stereo degradation and depth_range_m, so both range gates work on the scaled depth. Needs use_depth_cam."""
     observe_visual_randomizations : bool = False
     """Observe the sampled visual randomizations above, in the privileged group. They have their own state,
     observe_randomizations is about the physical ones. Constant distributions are not randomized and are not
@@ -303,7 +309,7 @@ class GraspVecEnv(RobotVecEnv):
         obs_camera_crop : float | None
         obs_camera_model : str | None
         depth_stereo_sim : StereoDepthSimParams | None
-        """Resolved from GrapVecEnvInitArgs' obs_camera_model and depth_stereo_sim."""
+        """Resolved from GrapVecEnvInitArgs' obs_camera_model when stereo_degradation_ratio > 0."""
         privileged_unaltered_depth : bool
 
     @dataclass
@@ -345,6 +351,8 @@ class GraspVecEnv(RobotVecEnv):
         table_height : th.Tensor
         blind : th.Tensor
         """1 in the blind episodes, 0 in the others, see blind_episodes_ratio."""
+        depth_degraded : th.Tensor
+        """1 in the episodes whose depth is degraded, 0 in the others, see stereo_degradation_ratio."""
 
     GRASPING_POSES = IntEnum(       "GRASPING_POSES", [
                                     "GOAL_POSE",
@@ -402,10 +410,15 @@ class GraspVecEnv(RobotVecEnv):
                                  f"got {tuple(gripper_link_transforms.shape)}")
         obs_cam_render_resolution_hw = (grasp_init_args.obs_camera_render_resolution,
                                         int(grasp_init_args.obs_camera_render_resolution*16/10))
+        if not 0.0 <= grasp_init_args.stereo_degradation_ratio <= 1.0:
+            raise ValueError(f"stereo_degradation_ratio must be in [0,1], got {grasp_init_args.stereo_degradation_ratio}")
+        if grasp_init_args.depth_range_m is not None and not (0.0 < grasp_init_args.depth_range_m[0]
+                                                              < grasp_init_args.depth_range_m[1]):
+            raise ValueError(f"depth_range_m must be (min, max) with 0 < min < max, got {grasp_init_args.depth_range_m}")
         depth_stereo_sim = None
-        if grasp_init_args.depth_stereo_sim:
+        if grasp_init_args.stereo_degradation_ratio > 0:
             if grasp_init_args.obs_camera_model is None:
-                raise ValueError("depth_stereo_sim needs obs_camera_model: the degradation is defined by "
+                raise ValueError("stereo_degradation_ratio > 0 needs obs_camera_model: the degradation is defined by "
                                  "the camera it imitates")
             # Resolved here because the sensor parameters depend on the render resolution, which this
             # class defines.
@@ -413,11 +426,11 @@ class GraspVecEnv(RobotVecEnv):
                                                     obs_cam_render_resolution_hw[1])
         if grasp_init_args.privileged_unaltered_depth and not (grasp_init_args.observe_camera
                                                                and grasp_init_args.use_depth_cam
-                                                               and grasp_init_args.depth_stereo_sim):
+                                                               and grasp_init_args.stereo_degradation_ratio > 0):
             raise ValueError(f"privileged_unaltered_depth needs observe_camera, use_depth_cam and "
-                             f"depth_stereo_sim, got observe_camera={grasp_init_args.observe_camera}, "
+                             f"stereo_degradation_ratio > 0, got observe_camera={grasp_init_args.observe_camera}, "
                              f"use_depth_cam={grasp_init_args.use_depth_cam}, "
-                             f"depth_stereo_sim={grasp_init_args.depth_stereo_sim}: without a degraded "
+                             f"stereo_degradation_ratio={grasp_init_args.stereo_degradation_ratio}: without a degraded "
                              f"depth there is no unaltered one to keep apart")
         if grasp_init_args.privileged_unaltered_camera and not (grasp_init_args.observe_camera
                                                                 and (grasp_init_args.use_gray_cam or not grasp_init_args.use_depth_cam)):
@@ -508,7 +521,8 @@ class GraspVecEnv(RobotVecEnv):
                                                         initial_object_pose = self._thzeros((num_envs, 7)),
                                                         goal_object_pose = self._thzeros((num_envs, 7)),
                                                         table_height = self._thzeros((num_envs,)),
-                                                        blind = self._thzeros((num_envs,)))
+                                                        blind = self._thzeros((num_envs,)),
+                                                        depth_degraded = self._thzeros((num_envs,)))
         if robot_init_args.enable_link_collisions is None:
             robot_init_args.enable_link_collisions = []
         cube_colliding_links = ([self._grasping_conf.table_link] if grasp_init_args.spawn_table
@@ -1152,19 +1166,29 @@ class GraspVecEnv(RobotVecEnv):
                     # The calibration error scales the depth the camera reports, so it comes before the
                     # degradation's range gate. Pixels with no hit are 0 and stay 0.
                     measured_depth = metric_depth*self._visual_randomization("depth_scale").view(self.num_envs,1,1)
+                def _range_gate(depth_m : th.Tensor) -> th.Tensor:
+                    """Drop the measurements outside depth_range_m, as the camera's own range setting would."""
+                    depth_range_m = self._grasping_conf.grasping_init_args.depth_range_m
+                    if depth_range_m is None:
+                        return depth_m
+                    in_range = (depth_m >= depth_range_m[0]) & (depth_m <= depth_range_m[1])
+                    return th.where(in_range, depth_m, th.full_like(depth_m, INVALID_DEPTH))
                 if self._grasping_conf.depth_stereo_sim is not None:
                     # Degrade the metric depth at render resolution: the stereo artifacts belong to
                     # the sensor, not to the resolution the policy looks at. Missing measurements
-                    # come back as INVALID_DEPTH (0).
-                    obs_depth_image = _depth_to_obs(stereo_depth_degradation(measured_depth,
-                                                                             self._grasping_conf.depth_stereo_sim))
-                else:
-                    obs_depth_image = _depth_to_obs(measured_depth)
+                    # come back as INVALID_DEPTH (0). Computed for all the envs, kept only in the
+                    # episodes stereo_degradation_ratio picked.
+                    degraded_depth = stereo_depth_degradation(measured_depth, self._grasping_conf.depth_stereo_sim)
+                    measured_depth = th.where(self._grasping_episode_config.depth_degraded.view(self.num_envs,1,1) > 0,
+                                              degraded_depth, measured_depth)
+                # The range gate comes after the degradation, which has to see the whole scene as the
+                # real matcher does: a surface nearer than the range still casts its occlusion shadow.
+                obs_depth_image = _depth_to_obs(_range_gate(measured_depth))
                 obs_unaltered_depth_image = None
                 if want_unaltered_depth:
                     if unaltered_renderings is not renderings:
                         metric_depth = _rendering_to_metric_depth(unaltered_renderings.depth[0])
-                    obs_unaltered_depth_image = _depth_to_obs(metric_depth)
+                    obs_unaltered_depth_image = _depth_to_obs(_range_gate(metric_depth))
             else:
                 obs_depth_image = None
                 obs_unaltered_depth_image = None
@@ -1676,6 +1700,10 @@ class GraspVecEnv(RobotVecEnv):
         if blind_episodes_ratio > 0:
             blind = (self._thrand((self.num_envs,)) < blind_episodes_ratio).to(self._grasping_episode_config.blind.dtype)
             masked_assign(self._grasping_episode_config.blind, vec_mask, blind)
+        stereo_degradation_ratio = self._grasping_conf.grasping_init_args.stereo_degradation_ratio
+        if stereo_degradation_ratio > 0:
+            depth_degraded = (self._thrand((self.num_envs,)) < stereo_degradation_ratio).to(self._grasping_episode_config.depth_degraded.dtype)
+            masked_assign(self._grasping_episode_config.depth_degraded, vec_mask, depth_degraded)
         for randomization in self._visual_randomizations.values():
             width = len(randomization.labels)
             sampled = self._sample_distr((self.num_envs, width), randomization.distribution)

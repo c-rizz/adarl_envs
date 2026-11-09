@@ -1,0 +1,51 @@
+<!-- kyon_mujoco's default world (kyon_mujoco/config/world.xml), with its checker floor, plus a scene camera that
+     follows the robot, published by xbot2_mujoco under /scene_camera (color/image_raw, depth/image_raw, camera_info).
+
+     The camera is attached to the pelvis in mode "trackcom": it keeps the offset it has at the start from the
+     robot's center of mass, and its orientation in the world. So it follows the robot around without turning with
+     it: 3 m behind and 1.5 m above, looking forward at the center of mass, in the robot's starting heading.
+     Resolution and field of view are those of the gazebo scene camera (640x480, 60 deg horizontal). -->
+<mujoco>
+    <extension>
+        <plugin plugin="mujoco.sdf.torus">
+            <instance name="torus">
+                <config key="radius1" value="0.077103"/>
+                <config key="radius2" value="0.03"/>
+            </instance>
+        </plugin>
+    </extension>
+
+    <default>
+        <default class="kyon_all">
+            <joint armature="0.234" frictionloss="4.68" damping="1.7"/>
+        </default>
+    </default>
+
+    <asset>
+        <mesh name="torus">
+            <plugin instance="torus"/>
+        </mesh>
+
+        <texture type="skybox" builtin="gradient" rgb1=".3 .5 .7" rgb2="0 0 0" width="512" height="512"/>
+        <texture name="body" type="cube" builtin="flat" mark="cross" width="127" height="1278" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" markrgb="1 1 1" random="0.01"/>
+        <material name="body" texture="body" texuniform="true" rgba="0.8 0.6 .4 1"/>
+        <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1=".1 .2 .3" rgb2=".2 .3 .4"/>
+        <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance=".2"/>
+    </asset>
+    <worldbody>
+        <geom name="floor_0" size="0 0 .05" pos="0 0 -1.0" type="plane" material="grid" condim="3" group="0" friction="0.6"/>
+        <geom name="floor_1" size="0 0 .05" pos="0 0 -1.0" type="plane" material="grid" condim="3" group="1" friction="0.6"/>
+    </worldbody>
+
+    <reference element="body" name="pelvis">
+        <!-- Looking along the pelvis +x, pitched down by atan(1.5/3) = 26.6 deg: image right is -y, image up is
+             (sin, 0, cos) of the pitch. -->
+        <camera name="scene_camera" mode="trackcom" resolution="640 480" fovy="46.8"
+                pos="-3 0 1.5" xyaxes="0 -1 0 0.447 0 0.894"/>
+    </reference>
+    <rgbd camera="scene_camera" rate="30" topic="/scene_camera" frame_id="scene_camera_optical_frame"/>
+
+    <visual>
+        <headlight ambient="0.5 0.5 0.5"/>
+    </visual>
+</mujoco>

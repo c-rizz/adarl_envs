@@ -33,9 +33,13 @@
   <arg name="scene_camera_roll" default="0.0"/>
   <arg name="scene_camera_pitch" default="0.785"/>
   <arg name="scene_camera_yaw" default="0.0"/>
+  <arg name="world" default=""/>
 
 
   <set_parameter name="use_sim_time" value="false"/>
+
+  <!-- The executables below run through a shell; `exec` makes the shell replace itself with the program, so
+       that the signals launch sends on shutdown reach the program and not just the shell. -->
 
   <group if="$(eval '&quot;$(var simulator)&quot; == &quot;mujoco&quot;')">
 
@@ -57,10 +61,11 @@
       <arg name="camera_front_up" value="$(var camera_front_up)"/>
       <arg name="camera_front_down" value="$(var camera_front_down)"/>
       <arg name="extra_xml_cmd" value="xacro $(dirname)/../models/cube.mjcf.xacro"/>
+      <arg name="world" value="$(var world)"/>
     </include>
 
-    <executable cmd="sleep 5 &amp;&amp; xbot2-core -C $(var xbot_cfg_dir)/xbotcore_kyon_ros2.yaml --hw mj" shell="true" output="screen"/>
-    <executable cmd="sleep 5 &amp;&amp; $(dirname)/launch_kyon_grasp_camzmq_mujoco.sh"                     shell="true" output="screen"/>
+    <executable cmd="sleep 5 &amp;&amp; exec xbot2-core -C $(var xbot_cfg_dir)/xbotcore_kyon_ros2.yaml --hw mj" shell="true" output="screen"/>
+    <executable cmd="sleep 5 &amp;&amp; exec $(dirname)/launch_kyon_grasp_camzmq_mujoco.sh"                     shell="true" output="screen"/>
   </group>
 
 
@@ -130,8 +135,8 @@
               "/>
       </group>
     </group>
-    
-    <executable cmd="sleep 5 &amp;&amp; xbot2-core -C $(var xbot_cfg_dir)/xbotcore_kyon_ros2.yaml" shell="true" output="screen"/>
+
+    <executable cmd="sleep 5 &amp;&amp; exec xbot2-core -C $(var xbot_cfg_dir)/xbotcore_kyon_ros2.yaml" shell="true" output="screen"/>
   </group>
 
 </launch>

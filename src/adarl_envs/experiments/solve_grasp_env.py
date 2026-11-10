@@ -438,7 +438,7 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
                     eval_configurations=eval_configurations,
                     debug_level=debug_level)
     elif algo.lower() == "asac":
-        from autoencoding_rl.asac3_train import LatentExtractorInitArgs, asac3_train, SAC_RND_reward_hyperparams
+        from lateral_rl.asac3_train import LatentExtractorInitArgs, asac3_train, SAC_RND_reward_hyperparams
         pretrain_collection_steps = max_steps_per_episode*train_envs*10
         pretrain_grad_steps = 10_000
         model_device=th.device("cuda")

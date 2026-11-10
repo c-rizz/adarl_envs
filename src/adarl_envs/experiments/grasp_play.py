@@ -429,7 +429,7 @@ def play(seed, folderName, run_id, args,
     if control_mode=="pretrained":
         # Registers the ASAC feature extractors (e.g. DecoupledExtractor): the camera-based grasp
         # policies are ASAC, and their checkpoints cannot be rebuilt without them.
-        import autoencoding_rl.ASAC3 # noqa: F401
+        import lateral_rl.ASAC3 # noqa: F401
         model = load_agent(args["model"], device)
         if isinstance(model, SAC):
             # Only the actor runs here, so only its observations must match: the critic's (the

@@ -110,17 +110,34 @@ class GrapVecEnvInitArgs():
 
     Cropping narrows the field of view, which makes a distant object cover more observation pixels.
     To transfer, the real images must be cropped to the same field of view."""
+    obs_camera_fps : float | None = None
+    """Frame rate of the observation camera. With it the camera behaves as a real one: it captures a frame
+    every 1/fps seconds, at a phase of its own in each env, each frame arrives after a latency, and the
+    images observed are the newest frame that has arrived instead of the current state.
+    privileged_unaltered_camera and privileged_unaltered_depth show that same frame. None observes the
+    current state. Needs a simulation adapter with camera timings (MjxAdapter with the warp renderer)."""
+    obs_camera_latency_mean_sec : DistributionDef = 0.0
+    """Mean time from the capture of a frame to its arrival, sampled per episode. Needs obs_camera_fps."""
+    obs_camera_latency_std_sec : float = 0.0
+    """Standard deviation of the latency of each frame around its episode's obs_camera_latency_mean_sec.
+    The latency is normally distributed and never less than zero. Needs obs_camera_fps."""
     stereo_degradation_ratio : float = 0.0
     """Fraction of the episodes whose depth is degraded to look like obs_camera_model's passive stereo
     output, for sim-to-real transfer; each env draws it again at every episode. 0 renders exact depth
     everywhere, 1 degrades every episode. Invalid pixels come out as 0, a value a real measurement can
-    never take; the observation keeps that convention after the resize and the [0,1] normalization."""
-    depth_range_m : tuple[float,float] | None = None
-    """(min, max) metric depth kept in the depth observations, degraded or not, privileged_unaltered_depth
-    included. Anything outside becomes invalid (0), as the ZED SDK's depth_minimum_distance and
-    depth_maximum_distance make it. It applies to a real camera's depth as well, so the range does not
-    depend on the camera's settings. Applied after the stereo degradation, which sees the whole scene as
-    the real matcher does. None keeps everything, up to the 1 m normalization clamp."""
+    never take; the observation keeps that convention after the resize and the normalization."""
+    depth_range_m : tuple[float,float] = (0.0, 1.0)
+    """(min, max) metric depth of the depth observations, degraded or not, privileged_unaltered_depth
+    included. Nearer depths become invalid (0), as the ZED SDK's depth_minimum_distance makes them; farther
+    ones are kept at max, so far background reads as far and not as missing. A real camera's missing (NaN)
+    and too close (-inf) measurements are invalid, its too far ones (+inf) max. It applies to a real camera's
+    depth as well, so the range does not depend on the camera's settings. Applied after the stereo
+    degradation, which sees the whole scene as the real matcher does. The observation is the depth
+    normalized over this range, 0 for invalid pixels; (0, 1) gives the metric depth clamped at 1 m."""
+    obs_depth_uint8 : bool = False
+    """Observe the depth as uint8 instead of float32, quartering its memory: invalid pixels are 0, valid ones
+    take the codes 1 to 255 spread linearly over depth_range_m, so (0.2, 0.7) has 2 mm steps. Needs
+    use_depth_cam."""
     privileged_unaltered_depth : bool = False
     """Also observe the depth *without* the stereo degradation and randomized_depth_scale, in the privileged group only. The base
     observation keeps the degraded image, so what the actor sees is unchanged. Needs observe_camera,
@@ -412,9 +429,21 @@ class GraspVecEnv(RobotVecEnv):
                                         int(grasp_init_args.obs_camera_render_resolution*16/10))
         if not 0.0 <= grasp_init_args.stereo_degradation_ratio <= 1.0:
             raise ValueError(f"stereo_degradation_ratio must be in [0,1], got {grasp_init_args.stereo_degradation_ratio}")
-        if grasp_init_args.depth_range_m is not None and not (0.0 < grasp_init_args.depth_range_m[0]
-                                                              < grasp_init_args.depth_range_m[1]):
-            raise ValueError(f"depth_range_m must be (min, max) with 0 < min < max, got {grasp_init_args.depth_range_m}")
+        if not 0.0 <= grasp_init_args.depth_range_m[0] < grasp_init_args.depth_range_m[1]:
+            raise ValueError(f"depth_range_m must be (min, max) with 0 <= min < max, got {grasp_init_args.depth_range_m}")
+        if grasp_init_args.obs_depth_uint8 and not grasp_init_args.use_depth_cam:
+            raise ValueError(f"obs_depth_uint8 needs use_depth_cam")
+        if grasp_init_args.obs_camera_fps is None:
+            if grasp_init_args.obs_camera_latency_mean_sec != 0.0 or grasp_init_args.obs_camera_latency_std_sec != 0.0:
+                raise ValueError(f"obs_camera_latency_mean_sec={grasp_init_args.obs_camera_latency_mean_sec} and "
+                                 f"obs_camera_latency_std_sec={grasp_init_args.obs_camera_latency_std_sec} need "
+                                 f"obs_camera_fps: without a frame rate the camera has no frames to delay")
+        elif (not grasp_init_args.observe_camera or grasp_init_args.obs_camera_fps <= 0
+              or grasp_init_args.obs_camera_latency_std_sec < 0):
+            raise ValueError(f"obs_camera_fps needs observe_camera, a positive frame rate and a non-negative "
+                             f"obs_camera_latency_std_sec, got observe_camera={grasp_init_args.observe_camera}, "
+                             f"obs_camera_fps={grasp_init_args.obs_camera_fps}, "
+                             f"obs_camera_latency_std_sec={grasp_init_args.obs_camera_latency_std_sec}")
         depth_stereo_sim = None
         if grasp_init_args.stereo_degradation_ratio > 0:
             if grasp_init_args.obs_camera_model is None:
@@ -670,6 +699,17 @@ class GraspVecEnv(RobotVecEnv):
             monitored_cameras.append(self._grasp_ui_camera_name)
         ggLog.info(f"setting monitored_cameras to {monitored_cameras}")
         self._adapter.set_monitored_cameras(monitored_cameras)
+        if self._grasping_conf.grasping_init_args.obs_camera_fps is not None:
+            if not isinstance(self._adapter, BaseVecSimulationAdapter):
+                raise RuntimeError(f"obs_camera_fps needs a simulation adapter, a real camera has a timing of its own. "
+                                   f"Got a {type(self._adapter).__name__}")
+            latency_std_sec = self._grasping_conf.grasping_init_args.obs_camera_latency_std_sec
+            # Each episode draws its mean latency, each frame its own latency around it
+            self._adapter.set_camera_timing(self._observation_camera,
+                                            fps = self._grasping_conf.grasping_init_args.obs_camera_fps,
+                                            latency = ("normal", (0.0, latency_std_sec)) if latency_std_sec > 0 else 0.0,
+                                            latency_offset = self._grasping_conf.grasping_init_args.obs_camera_latency_mean_sec,
+                                            seed = self._configuration.init_args.seed)
 
         if (self._grasping_conf.grasping_init_args.observe_camera
                 and hasattr(self._adapter, "set_link_camera_visibility")):
@@ -902,10 +942,12 @@ class GraspVecEnv(RobotVecEnv):
             camera_substates = []
             if gray_enabled:
                 camera_substates.append((GraspVecEnv.STATE_CAMERA, th.uint8,   [0, 255], "base"))
+            depth_dtype, depth_minmax = ((th.uint8, [0, 255]) if self._grasping_conf.grasping_init_args.obs_depth_uint8
+                                         else (th.float32, [0.0, 1.0]))
             if depth_enabled:
-                camera_substates.append((GraspVecEnv.STATE_DEPTH,  th.float32, [0.0, 1.0], "base"))
+                camera_substates.append((GraspVecEnv.STATE_DEPTH, depth_dtype, depth_minmax, "base"))
             if self._grasping_conf.privileged_unaltered_depth:
-                camera_substates.append((GraspVecEnv.STATE_DEPTH_UNALTERED, th.float32, [0.0, 1.0], "privileged"))
+                camera_substates.append((GraspVecEnv.STATE_DEPTH_UNALTERED, depth_dtype, depth_minmax, "privileged"))
             if self._grasping_conf.grasping_init_args.privileged_unaltered_camera:
                 camera_substates.append((GraspVecEnv.STATE_CAMERA_UNALTERED, th.uint8, [0, 255], "privileged"))
             for substate_name, camera_dtype, camera_minmax, obs_group in camera_substates:
@@ -1060,6 +1102,63 @@ class GraspVecEnv(RobotVecEnv):
                                                              [l[1] for l in tip_links])
         return self._thtens([fk_poses[l[1]] for l in tip_links]).unsqueeze(0) # (1, ntips, 7)
 
+    def _crop_to_obs(self, img : th.Tensor) -> th.Tensor:
+        """Centered crop of a (vec, H, W, ...) image, as obs_camera_crop asks for."""
+        if self._obs_camera_crop_rows_cols is None:
+            return img
+        rows, cols = self._obs_camera_crop_rows_cols
+        return img[:, rows, cols]
+
+    def _resize_to_obs(self, img_vhwc : th.Tensor) -> th.Tensor:
+        """Resize a (vec, H, W, C) image to obs_camera_resolution_hw."""
+        img = img_vhwc.permute(0, 3, 1, 2) # to (vec, C, H, W)
+        img = th.nn.functional.interpolate(img,
+                                            size=self._grasping_conf.obs_camera_resolution_hw,
+                                            mode="bilinear",
+                                            align_corners=False,
+                                            antialias=True)
+        return img.permute(0, 2, 3, 1) # back to (vec, H, W, C)
+
+    def _rendering_to_gray(self, rgb_vhwc : th.Tensor) -> th.Tensor:
+        """Grayscale in [0,1] of shape (vec, H, W) from a rendering of shape (vec, H, W, C)."""
+        if not rgb_vhwc.dtype.is_floating_point:
+            rgb_vhwc = rgb_vhwc.to(th.float32) / 255.0
+        # getRenderings gives HWC RGB (vec, H, W, 3); the CAMERA field is a single plane, so
+        # collapse RGB -> one grayscale channel.
+        return self._resize_to_obs(self._crop_to_obs(rgb_vhwc))[..., :3] @ self._rgb_to_gray_w
+
+    @staticmethod
+    def _rendering_to_metric_depth(depth_vhwc : th.Tensor) -> th.Tensor:
+        """Metric depth of shape (vec, H, W) from a depth rendering of shape (vec, H, W, C)."""
+        if not depth_vhwc.dtype.is_floating_point:
+            depth_vhwc = depth_vhwc.to(th.float32)/1000.0 # convert mm->m
+        return depth_vhwc[...,0].to(th.float32)
+
+    def _range_gate(self, depth_m : th.Tensor) -> th.Tensor:
+        """Drop the measurements nearer than depth_range_m, as the camera's minimum distance would,
+        and keep the farther ones at its maximum. NaN and -inf, a real camera's missing and too close
+        measurements, become invalid as INVALID_DEPTH does; +inf, too far, becomes the maximum."""
+        depth_min, depth_max = self._grasping_conf.grasping_init_args.depth_range_m
+        measured = (depth_m >= depth_min) & (depth_m > INVALID_DEPTH) # False for NaN
+        return th.where(measured, th.clamp(depth_m, max=depth_max), th.full_like(depth_m, INVALID_DEPTH))
+
+    def _depth_to_obs(self, depth_m : th.Tensor) -> th.Tensor:
+        """The processing both depth observations share, so they cannot drift apart."""
+        # Validity-weighted resize: a plain interpolation would average the invalid
+        # pixels together with the valid ones, dragging the depth around every hole
+        # towards 0. Cropped after any degradation: the artifacts belong to the whole
+        # sensor frame, and the occlusion shadows need the neighbours a crop would cut.
+        depth_m = resize_depth_masked(self._crop_to_obs(depth_m), self._grasping_conf.obs_camera_resolution_hw)
+        # Normalized over depth_range_m. The range gate leaves every measurement strictly
+        # positive, so a 0 is always INVALID_DEPTH. As float32 the range minimum also maps to
+        # 0, as uint8 the measurements take the codes 1 to 255 and stay apart from invalid.
+        depth_min, depth_max = self._grasping_conf.grasping_init_args.depth_range_m
+        measured = depth_m > INVALID_DEPTH
+        normalized = th.clamp((depth_m - depth_min)/(depth_max - depth_min), 0.0, 1.0)
+        if self._grasping_conf.grasping_init_args.obs_depth_uint8:
+            return th.where(measured, th.round(normalized*254) + 1, 0.0).to(th.uint8)
+        return th.where(measured, normalized, 0.0)
+
     def _get_adapter_data_raw(self):
         super_adapter_data =  super()._get_adapter_data_raw()
         num_gripper_links = len(self._grasping_conf.grasping_init_args.manipulator_tip_links)
@@ -1097,20 +1196,6 @@ class GraspVecEnv(RobotVecEnv):
 
         if self._grasping_conf.grasping_init_args.observe_camera:
             gray_enabled, depth_enabled = self._camera_modalities()
-            def _resize_to_obs(img_vhwc : th.Tensor) -> th.Tensor:
-                img = img_vhwc.permute(0, 3, 1, 2) # to (vec, C, H, W)
-                img = th.nn.functional.interpolate(img,
-                                                    size=self._grasping_conf.obs_camera_resolution_hw,
-                                                    mode="bilinear",
-                                                    align_corners=False,
-                                                    antialias=True)
-                return img.permute(0, 2, 3, 1) # back to (vec, H, W, C)
-            def _crop(img : th.Tensor) -> th.Tensor:
-                """Centered crop of a (vec, H, W, ...) image, as obs_camera_crop asks for."""
-                if self._obs_camera_crop_rows_cols is None:
-                    return img
-                rows, cols = self._obs_camera_crop_rows_cols
-                return img[:, rows, cols]
             self._apply_scene_visuals()
             # One call renders both modalities in a single pass when both are enabled: mjx.render()
             # produces the color and the depth buffer together.
@@ -1122,73 +1207,40 @@ class GraspVecEnv(RobotVecEnv):
             unaltered_renderings = renderings
             if ((want_unaltered_gray or want_unaltered_depth)
                     and any(name in self._visual_randomizations for name in self.SCENE_VISUAL_RANDOMIZATIONS)):
+                # With obs_camera_fps, the same frame the observed images show and not the current state
                 unaltered_renderings = self._adapter.get_original_visuals_camera_images([self._observation_camera],
                                                                                         rgb = want_unaltered_gray,
-                                                                                        depth = want_unaltered_depth)
-            def _rendering_to_gray(rgb_vhwc : th.Tensor) -> th.Tensor:
-                """Grayscale in [0,1] of shape (vec, H, W) from a rendering of shape (vec, H, W, C)."""
-                if not rgb_vhwc.dtype.is_floating_point:
-                    rgb_vhwc = rgb_vhwc.to(th.float32) / 255.0
-                # getRenderings gives HWC RGB (vec, H, W, 3); the CAMERA field is a single plane, so
-                # collapse RGB -> one grayscale channel.
-                return _resize_to_obs(_crop(rgb_vhwc))[..., :3] @ self._rgb_to_gray_w
+                                                                                        depth = want_unaltered_depth,
+                                                                                        apply_camera_timing = True)
             if gray_enabled:
-                gray_image = _rendering_to_gray(renderings.rgb[0])
+                gray_image = self._rendering_to_gray(renderings.rgb[0])
                 # Back in [0,255], matching the uint8 substate
                 obs_gray_image = (self._augment_gray_image(gray_image)*255).to(self._obs_dtype)
                 obs_unaltered_gray_image = None
                 if want_unaltered_gray:
                     if unaltered_renderings is not renderings:
-                        gray_image = _rendering_to_gray(unaltered_renderings.rgb[0])
+                        gray_image = self._rendering_to_gray(unaltered_renderings.rgb[0])
                     obs_unaltered_gray_image = (gray_image*255).to(self._obs_dtype)
             else:
                 obs_gray_image = None
                 obs_unaltered_gray_image = None
             if depth_enabled:
-                def _rendering_to_metric_depth(depth_vhwc : th.Tensor) -> th.Tensor:
-                    if not depth_vhwc.dtype.is_floating_point:
-                        depth_vhwc = depth_vhwc.to(th.float32)/1000.0 # convert mm->m
-                    return depth_vhwc[...,0].to(th.float32) # (vec, H, W), metric
-                metric_depth = _rendering_to_metric_depth(renderings.depth[0]) # this is in (vec,H,W,C)
-                def _depth_to_obs(depth_m : th.Tensor) -> th.Tensor:
-                    """The processing both depth observations share, so they cannot drift apart."""
-                    # Validity-weighted resize: a plain interpolation would average the invalid
-                    # pixels together with the valid ones, dragging the depth around every hole
-                    # towards 0. Cropped after any degradation: the artifacts belong to the whole
-                    # sensor frame, and the occlusion shadows need the neighbours a crop would cut.
-                    depth_m = resize_depth_masked(_crop(depth_m), self._grasping_conf.obs_camera_resolution_hw)
-                    # Normalize to the [0,1] range the float32 substate declares. INVALID_DEPTH is
-                    # 0, so it survives the clamp and stays distinguishable from any real
-                    # measurement (which is always beyond the sensor's strictly positive minimum range).
-                    return th.clamp(depth_m/1.0, 0.0, 1.0) # normalize to 1 meters and clamp
+                metric_depth = self._rendering_to_metric_depth(renderings.depth[0])
                 measured_depth = metric_depth
                 if "depth_scale" in self._visual_randomizations:
-                    # The calibration error scales the depth the camera reports, so it comes before the
-                    # degradation's range gate. Pixels with no hit are 0 and stay 0.
                     measured_depth = metric_depth*self._visual_randomization("depth_scale").view(self.num_envs,1,1)
-                def _range_gate(depth_m : th.Tensor) -> th.Tensor:
-                    """Drop the measurements outside depth_range_m, as the camera's own range setting would."""
-                    depth_range_m = self._grasping_conf.grasping_init_args.depth_range_m
-                    if depth_range_m is None:
-                        return depth_m
-                    in_range = (depth_m >= depth_range_m[0]) & (depth_m <= depth_range_m[1])
-                    return th.where(in_range, depth_m, th.full_like(depth_m, INVALID_DEPTH))
                 if self._grasping_conf.depth_stereo_sim is not None:
-                    # Degrade the metric depth at render resolution: the stereo artifacts belong to
-                    # the sensor, not to the resolution the policy looks at. Missing measurements
-                    # come back as INVALID_DEPTH (0). Computed for all the envs, kept only in the
-                    # episodes stereo_degradation_ratio picked.
                     degraded_depth = stereo_depth_degradation(measured_depth, self._grasping_conf.depth_stereo_sim)
                     measured_depth = th.where(self._grasping_episode_config.depth_degraded.view(self.num_envs,1,1) > 0,
                                               degraded_depth, measured_depth)
                 # The range gate comes after the degradation, which has to see the whole scene as the
                 # real matcher does: a surface nearer than the range still casts its occlusion shadow.
-                obs_depth_image = _depth_to_obs(_range_gate(measured_depth))
+                obs_depth_image = self._depth_to_obs(self._range_gate(measured_depth))
                 obs_unaltered_depth_image = None
                 if want_unaltered_depth:
                     if unaltered_renderings is not renderings:
-                        metric_depth = _rendering_to_metric_depth(unaltered_renderings.depth[0])
-                    obs_unaltered_depth_image = _depth_to_obs(_range_gate(metric_depth))
+                        metric_depth = self._rendering_to_metric_depth(unaltered_renderings.depth[0])
+                    obs_unaltered_depth_image = self._depth_to_obs(self._range_gate(metric_depth))
             else:
                 obs_depth_image = None
                 obs_unaltered_depth_image = None
@@ -1806,6 +1858,8 @@ class GraspVecEnv(RobotVecEnv):
             self._adapter.setLinksStateDirect(link_names=[self._grasping_conf.grasping_init_args.target_object_link],
                                               link_states_pose_vel=obj_state,
                                               vec_mask=vec_mask)
+            # With obs_camera_fps the episode starts from a frame of its initial state, and draws its mean latency
+            self._adapter.reset_camera_frames(vec_mask)
         else:
             raise RuntimeError(f"Cannot run simulation initialization on non-simulated adapter")
 

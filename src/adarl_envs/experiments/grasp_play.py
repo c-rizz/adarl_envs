@@ -298,8 +298,15 @@ def grasp_builder_and_args():
         "camera_hide_robot" : False,
         # The real camera produces the stereo artifacts itself: only the simulation adds them.
         "stereo_degradation_ratio" : 0.0 if realworld else 1.0,
-        # As in training: depth outside it is invalid (0), the real camera's too.
-        "depth_range_m" : (0.2, 1.0),
+        # As in training: depth nearer than it is invalid (0), farther depth is kept at the maximum,
+        # the real camera's too.
+        "depth_range_m" : (0.2, 0.7),
+        "obs_depth_uint8" : True,
+        # As in training, where the simulation has camera timings. The real camera has a frame rate and a
+        # latency of its own.
+        "obs_camera_fps" : 60.0 if mode == "mjx" else None,
+        "obs_camera_latency_mean_sec" : ("uniform", (0.020, 0.050)) if mode == "mjx" else 0.0,
+        "obs_camera_latency_std_sec" : 0.005 if mode == "mjx" else 0.0,
         "privileged_unaltered_depth" : False,
     }
 

@@ -207,8 +207,16 @@ def runFunction(seed, folderName, resumeModelFile, run_id, args):
         # Fraction of the episodes whose depth is degraded into a ZED-X-Mini-like one, for
         # sim-to-real transfer. 0 renders exact depth everywhere.
         "stereo_degradation_ratio" : stereo_degradation_ratio,
-        # Depth outside this range is invalid (0), as the ZED's depth_minimum/maximum_distance make it.
-        "depth_range_m" : (0.2, 1.0),
+        # Depth nearer than this range is invalid (0), as the ZED's depth_minimum_distance makes it,
+        # farther depth is kept at the maximum. The depth is observed normalized over the range.
+        "depth_range_m" : (0.2, 0.7),
+        # uint8 depth, 2 mm steps over depth_range_m: a quarter of the memory, which the replay buffer needs
+        "obs_depth_uint8" : True,
+        # The camera captures at this rate and its frames arrive late, as the real camera's do: each episode
+        # draws a mean latency, each frame its own latency around it. The unaltered images show the same frame.
+        "obs_camera_fps" : 60.0,
+        "obs_camera_latency_mean_sec" : ("uniform", (0.020, 0.050)),
+        "obs_camera_latency_std_sec" : 0.005,
         # With stereo_degradation_ratio > 0, also put the undegraded depth in the privileged observation
         # (privileged.depth_unaltered); base.depth stays degraded in the degraded episodes.
         "privileged_unaltered_depth" : decode_unaltered_depth,
